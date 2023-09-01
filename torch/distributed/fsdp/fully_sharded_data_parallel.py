@@ -2043,9 +2043,9 @@ def _get_param_to_fqn(
     """
     param_to_param_names = _get_param_to_fqns(model)
     for param_names in param_to_param_names.values():
-        assert len(param_names) > 0, (
-            "`_get_param_to_fqns()` " "should not construct empty lists"
-        )
+        assert (
+            len(param_names) > 0
+        ), "`_get_param_to_fqns()` should not construct empty lists"
         if len(param_names) > 1:
             raise RuntimeError(
                 "Each parameter should only map to one parameter name but got "
