@@ -82,7 +82,10 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                             requires_grad=t.requires_grad,
                         )
                     else:
-                        return t.clone()
+                        # clone of a functional tensor produces a functional tensor
+                        # but we want to avoid it so we clone a non-functional version
+                        maybe_unfunc_t = torch._functorch.aot_autograd.from_fun(t)
+                        return maybe_unfunc_t.clone()
                 return t
 
             example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]

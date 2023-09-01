@@ -259,25 +259,25 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-py3_8-clang8-xla-build:
-    name: linux-focal-py3_8-clang8-xla
+  linux-focal-py3_8-clang9-xla-build:
+    name: linux-focal-py3_8-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3_8-clang8-xla
+      build-environment: linux-focal-py3_8-clang9-xla
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.0
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
 
-  linux-focal-py3_8-clang8-xla-test:
-    name: linux-focal-py3_8-clang8-xla
+  linux-focal-py3_8-clang9-xla-test:
+    name: linux-focal-py3_8-clang9-xla
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_8-clang8-xla-build
+    needs: linux-focal-py3_8-clang9-xla-build
     with:
-      build-environment: linux-focal-py3_8-clang8-xla
-      docker-image: ${{ needs.linux-focal-py3_8-clang8-xla-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_8-clang8-xla-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3_8-clang9-xla
+      docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
