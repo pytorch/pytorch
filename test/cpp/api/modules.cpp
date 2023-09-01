@@ -67,6 +67,12 @@ TEST_F(ModulesTest, Conv1dSameStrided) {
       "padding='same' is not supported for strided convolutions");
 }
 
+TEST_F(ModulesTest, Conv1dIvalidArg) {
+  auto options = Conv1dOptions(3, 2, 3);
+  ASSERT_THROWS_WITH(
+      options.groups(-1), "groups should be positive, and the dtype");
+}
+
 TEST_F(ModulesTest, Conv2dEven) {
   Conv2d model(Conv2dOptions(3, 2, 3).stride(1).bias(false));
   model->weight.set_data(
