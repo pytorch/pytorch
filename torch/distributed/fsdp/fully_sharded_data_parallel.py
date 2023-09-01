@@ -23,7 +23,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -423,7 +422,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
-        device_mesh: Optional[DeviceMesh] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -438,13 +436,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
-        self.device_mesh = device_mesh
         _init_process_group_state(
-            self,
-            process_group,
-            sharding_strategy,
-            auto_wrap_policy,
-            device_mesh,
+            self, process_group, sharding_strategy, auto_wrap_policy
         )
         if auto_wrap_policy is not None:
             root_kwargs = {
@@ -770,17 +763,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     "All FSDP modules must have the same state dict settings."
                     f"Got {submodule_settings} and {state_dict_settings}."
                 )
-
-            # If device_mesh is passed in when initalizing FSDP, we automatically turn the
-            # _use_dtensor flag to be true for ShardedStateDictConfig() and ShardedOptimStateDictConfig().
-            if getattr(module, "device_mesh", None) and isinstance(
-                state_dict_settings.state_dict_config, ShardedStateDictConfig
-            ):
-                state_dict_settings.state_dict_config._use_dtensor = True
-            if getattr(module, "device_mesh", None) and isinstance(
-                state_dict_settings.optim_state_dict_config, ShardedOptimStateDictConfig
-            ):
-                state_dict_settings.optim_state_dict_config._use_dtensor = True
         return state_dict_settings
 
     @staticmethod
