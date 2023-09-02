@@ -3638,7 +3638,6 @@ class TestMPS(TestCaseMPS):
             return B
 
         def helper_2D(dtype, upper=False):
-            print("2d")
             cpu_x = generate_positive_definite_matrix(3).to(dtype).to('cpu')
 
             cpu_L = torch.linalg.cholesky(cpu_x, upper=upper)
@@ -3647,7 +3646,6 @@ class TestMPS(TestCaseMPS):
             self.assertTrue(torch.allclose(cpu_L, mps_L.to('cpu')), msg=f"cpu_L: {cpu_L}\nmps_L: {mps_L}")
 
         def helper_3D(dtype, upper=False):
-            print("3d")
             cpu_x = generate_positive_definite_matrix(3).to(dtype).to('cpu').unsqueeze(0)
             # repeat the matrix 2 times
             cpu_x = cpu_x.repeat(2, 1, 1)
@@ -3661,8 +3659,11 @@ class TestMPS(TestCaseMPS):
             self.assertTrue(torch.allclose(cpu_L, mps_L.to('cpu')), msg=f"cpu_L: {cpu_L}\nmps_L: {mps_L}")
 
 
-        [helper_2D(dtype) for dtype in [torch.float32]]
-        [helper_3D(dtype) for dtype in [torch.float32]]
+        [helper_2D(dtype, False) for dtype in [torch.float32]]
+        [helper_3D(dtype, False) for dtype in [torch.float32]]
+
+        [helper_2D(dtype, True) for dtype in [torch.float32]]
+        [helper_3D(dtype, True) for dtype in [torch.float32]]
 
     def test_nansum(self):
         def helper(dtype, noncontiguous, dim):

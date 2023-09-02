@@ -575,8 +575,15 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
 
 static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
                                                 bool lower,
-                                                Tensor& out) {
+                                                Tensor& out,
+                                                const Tensor& info) {
   using namespace mps;
+
+  // Initialize info tensor
+  // TODO: implement info tensor information
+  int64_t batchSize = A.sizes().size() > 2 ? A.size(0) : 1;
+  info.resize_({batchSize});
+  info.fill_(0);
 
   //TODO perform checks
   Tensor A_t = A.clone();
@@ -608,16 +615,10 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
       uint64_t aCols = A_.size(-1);
       uint64_t aElemSize = A_.element_size();
 
-          std::cout << "Tensor Info:" << std::endl;
-    std::cout << "  Batch size: " << batchSize << std::endl;
-    std::cout << "  Number of rows: " << aRows << std::endl;
-    std::cout << "  Number of columns: " << aCols << std::endl;
-    std::cout << "  Element size: " << aElemSize << std::endl;
-
 
       MPSMatrixDecompositionCholesky* filter = [[[MPSMatrixDecompositionCholesky alloc] initWithDevice:device
                                                                                      lower:lower
-                                                                                     order:aCols] // could also be aRows
+                                                                                     order:aCols] // could also be aRows (as it is square)
                                                                                      autorelease];
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(filter, " cholesky_mps", {A_});
@@ -640,23 +641,9 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
 
-        std::cout << "i:" << i << std::endl;
-        std:cout << "batch offset:" << aBatchOffset << std::endl;
-
-        std::cout << "A_t storage offset:" << A_t.storage_offset() << std::endl;
-        std::cout << "A_t storage offset + batch offset:" << A_t.storage_offset() + aBatchOffset << std::endl;
-        std::cout << "A_t storage offset + batch offset * elem size:" << (A_t.storage_offset() + aBatchOffset) * aElemSize << std::endl;
-
-        std::cout << "out storage offset:" << out.storage_offset() << std::endl;
-        std::cout << "out storage offset + batch offset:" << out.storage_offset() + aBatchOffset << std::endl;
-        std::cout << "out storage offset + batch offset * elem size:" << (out.storage_offset() + aBatchOffset) * aElemSize << std::endl;
-
-
         MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
                                                               offset:(A_t.storage_offset() + aBatchOffset) * aElemSize
                                                           descriptor:sourceMatrixDesc] autorelease];
-
-
 
         MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
                                                                 offset:(out.storage_offset() + aBatchOffset) * aElemSize
@@ -671,7 +658,12 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
       getMPSProfiler().endProfileKernel(filter);
     }
   });
-  out.tril_(0);
+  if (lower) {
+    out.tril_(0);
+  }
+  else {
+    out.triu_(0);
+  }
   return out;
 }
 
@@ -891,7 +883,7 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
 static void cholesky_kernel_mps(const Tensor& input, const Tensor& info, bool upper) {
   // out = copy input
   Tensor out = at::empty({0}, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
-  mps::linalg_cholesky_ex_mps_impl(input, !upper, out);
+  mps::linalg_cholesky_ex_mps_impl(input, !upper, out, info);
   // copy into input
   input.copy_(out);
 }
