@@ -13369,7 +13369,7 @@
   python_module: linalg
   structured: True
   dispatch:
-    CPU, CUDA: linalg_cholesky_ex_out
+    CPU, CUDA, MPS: linalg_cholesky_ex_out
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg

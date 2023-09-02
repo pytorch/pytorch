@@ -428,7 +428,7 @@ def mps_ops_modifier(ops):
         'kthvalue': None,
         'lcm': None,
         'lgamma': None,
-        'linalg.cholesky': None,
+        #'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.detsingular': None,
@@ -3630,6 +3630,39 @@ class TestMPS(TestCaseMPS):
                            (torch.full(full_shape, val2, dtype=dtype2, device='mps')),
                     getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
                            (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
+                
+    def test_cholesky(self):
+        def generate_positive_definite_matrix(n):
+            A = torch.rand(n, n)
+            B = torch.mm(A, A.t())  # Make it symmetric and positive-definite
+            return B
+
+        def helper_2D(dtype, upper=False):
+            print("2d")
+            cpu_x = generate_positive_definite_matrix(3).to(dtype).to('cpu')
+
+            cpu_L = torch.linalg.cholesky(cpu_x, upper=upper)
+            mps_x = cpu_x.to('mps')
+            mps_L = torch.linalg.cholesky(mps_x, upper=upper)
+            self.assertTrue(torch.allclose(cpu_L, mps_L.to('cpu')), msg=f"cpu_L: {cpu_L}\nmps_L: {mps_L}")
+
+        def helper_3D(dtype, upper=False):
+            print("3d")
+            cpu_x = generate_positive_definite_matrix(3).to(dtype).to('cpu').unsqueeze(0)
+            # repeat the matrix 2 times
+            cpu_x = cpu_x.repeat(2, 1, 1)
+            
+
+            cpu_L = torch.linalg.cholesky(cpu_x, upper=upper)
+
+            mps_x = cpu_x.to('mps')
+            mps_L = torch.linalg.cholesky(mps_x, upper=upper)
+
+            self.assertTrue(torch.allclose(cpu_L, mps_L.to('cpu')), msg=f"cpu_L: {cpu_L}\nmps_L: {mps_L}")
+
+
+        [helper_2D(dtype) for dtype in [torch.float32]]
+        [helper_3D(dtype) for dtype in [torch.float32]]
 
     def test_nansum(self):
         def helper(dtype, noncontiguous, dim):

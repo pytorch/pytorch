@@ -5,6 +5,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/BatchLinearAlgebra.h> // cholesky stub
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -572,6 +573,108 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
+static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
+                                                bool lower,
+                                                Tensor& out) {
+  using namespace mps;
+
+  //TODO perform checks
+  Tensor A_t = A.clone();
+
+  at::native::resize_output(out, A.sizes());
+
+  out.zero_();
+  
+  if (A.numel() == 0 || out.numel() == 0) {
+    return out;
+  }
+
+  Tensor A_ = A_t;
+  if (!A_t.is_contiguous()) {
+    A_ = A_t.clone(at::MemoryFormat::Contiguous);
+  }
+
+  id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
+  id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+      uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
+      uint64_t aRows = A_.size(-2);
+      uint64_t aCols = A_.size(-1);
+      uint64_t aElemSize = A_.element_size();
+
+          std::cout << "Tensor Info:" << std::endl;
+    std::cout << "  Batch size: " << batchSize << std::endl;
+    std::cout << "  Number of rows: " << aRows << std::endl;
+    std::cout << "  Number of columns: " << aCols << std::endl;
+    std::cout << "  Element size: " << aElemSize << std::endl;
+
+
+      MPSMatrixDecompositionCholesky* filter = [[[MPSMatrixDecompositionCholesky alloc] initWithDevice:device
+                                                                                     lower:lower
+                                                                                     order:aCols] // could also be aRows
+                                                                                     autorelease];
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(filter, " cholesky_mps", {A_});
+
+      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                    columns:aCols
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:aCols * aElemSize
+                                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                                   dataType:getMPSDataType(A_)];
+
+      MPSMatrixDescriptor* solutionMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+                                                                                    columns:aCols
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:aCols * aElemSize
+                                                                                matrixBytes:aRows * aCols * aElemSize
+                                                                                   dataType:getMPSDataType(out)];
+      
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t aBatchOffset = i * aRows * aCols;
+
+        std::cout << "i:" << i << std::endl;
+        std:cout << "batch offset:" << aBatchOffset << std::endl;
+
+        std::cout << "A_t storage offset:" << A_t.storage_offset() << std::endl;
+        std::cout << "A_t storage offset + batch offset:" << A_t.storage_offset() + aBatchOffset << std::endl;
+        std::cout << "A_t storage offset + batch offset * elem size:" << (A_t.storage_offset() + aBatchOffset) * aElemSize << std::endl;
+
+        std::cout << "out storage offset:" << out.storage_offset() << std::endl;
+        std::cout << "out storage offset + batch offset:" << out.storage_offset() + aBatchOffset << std::endl;
+        std::cout << "out storage offset + batch offset * elem size:" << (out.storage_offset() + aBatchOffset) * aElemSize << std::endl;
+
+
+        MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
+                                                              offset:(A_t.storage_offset() + aBatchOffset) * aElemSize
+                                                          descriptor:sourceMatrixDesc] autorelease];
+
+
+
+        MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
+                                                                offset:(out.storage_offset() + aBatchOffset) * aElemSize
+                                                            descriptor:solutionMatrixDesc] autorelease];
+
+        [filter encodeToCommandBuffer:commandBuffer
+                        sourceMatrix:sourceMatrix
+                        resultMatrix:solutionMatrix
+                        status:nil];
+
+      }
+      getMPSProfiler().endProfileKernel(filter);
+    }
+  });
+  out.tril_(0);
+  return out;
+}
+
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -784,5 +887,16 @@ TORCH_IMPL_FUNC(triangular_solve_mps_out)
   result.resize_(out.sizes());
   result.copy_(out);
 }
+
+static void cholesky_kernel_mps(const Tensor& input, const Tensor& info, bool upper) {
+  // out = copy input
+  Tensor out = at::empty({0}, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  mps::linalg_cholesky_ex_mps_impl(input, !upper, out);
+  // copy into input
+  input.copy_(out);
+}
+
+REGISTER_MPS_DISPATCH(cholesky_stub, &cholesky_kernel_mps);
+
 
 } // namespace at::native
