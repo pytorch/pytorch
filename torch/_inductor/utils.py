@@ -1040,11 +1040,15 @@ def is_dynamic(*args):
 
     for t in args:
         if isinstance(t, ir.TensorBox):
-            if any(s.free_symbols for s in t.data.get_size()):
+            if any(s.free_symbols for s in t.data.get_size()) or any(
+                s.free_symbols for s in t.data.get_stride()
+            ):
                 return True
         elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size")
-            if any(s.free_symbols for s in t.get_size()):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if any(s.free_symbols for s in t.get_size()) or any(
+                s.free_symbols for s in t.get_stride()
+            ):
                 return True
         elif not isinstance(t, ir.IRNode):
             continue
