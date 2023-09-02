@@ -462,7 +462,7 @@ def _compile(
             raise
         except Exception:
             if translation_validation_enabled():
-                bisect(tracer.output.shape_env, tracer.output.tracked_fakes)
+                bisect(tracer.output.shape_env)
             raise
 
         output = tracer.output
