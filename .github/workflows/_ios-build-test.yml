@@ -171,7 +171,7 @@ jobs:
           popd
 
       - name: Dump simulator tests on failure
-        if: failure() && inputs.ios-platform == 'SIMULATOR'
+        if: failure() && matrix.ios_platform == 'SIMULATOR'
         run: |
           echo "Simulator Tests Logs:"
           cat /Users/runner/Library/Logs/scan/*.log
@@ -187,20 +187,20 @@ jobs:
           # └── IOS_ARCH/
           #     ├── LICENSE
           #     ├── install
-          #     │   ├── include
-          #     │   │   └── headers
-          #     │   └── lib
-          #     │       ├── libXNNPACK.a
-          #     │       ├── libc10.a
-          #     │       ├── libclog.a
-          #     │       ├── libcpuinfo.a
-          #     │       ├── libeigen_blas.a
-          #     │       ├── libpthreadpool.a
-          #     │       ├── libpytorch_qnnpack.a
-          #     │       ├── libtorch.a
-          #     │       └── libtorch_cpu.a
+          #     │   ├── include
+          #     │   │   └── headers
+          #     │   └── lib
+          #     │       ├── libXNNPACK.a
+          #     │       ├── libc10.a
+          #     │       ├── libclog.a
+          #     │       ├── libcpuinfo.a
+          #     │       ├── libeigen_blas.a
+          #     │       ├── libpthreadpool.a
+          #     │       ├── libpytorch_qnnpack.a
+          #     │       ├── libtorch.a
+          #     │       └── libtorch_cpu.a
           #     ├── src
-          #     │   └── LibTorch-Lite.h
+          #     │   └── LibTorch-Lite.h
           #     └── version.txt
           SETUP_DIR="${RUNNER_TEMP}/${IOS_ARCH}"
           mkdir -p "${SETUP_DIR}/src"
