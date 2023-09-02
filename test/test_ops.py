@@ -1098,10 +1098,8 @@ class TestCommon(TestCase):
                             RuntimeError,
                             msg=(
                                 "inplace variant either incorrectly allowed "
-                                "resizing or you have marked the sample {}"
-                                " incorrectly with `broadcasts_self=True".format(
-                                    sample.summary()
-                                )
+                                f"resizing or you have marked the sample {sample.summary()}"
+                                " incorrectly with `broadcasts_self=True"
                             ),
                         ):
                             variant_forward = variant(
@@ -1880,7 +1878,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
-        '_refs.view_as_complex' # TorchInductor does not support complex at the moment.
+        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
     }
 
     @parametrize("op", ref_ops_names)

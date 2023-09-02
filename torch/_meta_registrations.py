@@ -2608,23 +2608,37 @@ def meta_complex(real, imag):
 def view_dtype(self, dtype):
     if self.dtype == dtype:
         return self
-    torch._check(not self.is_conj(),
-                 lambda: "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.")
-    torch._check(not self.is_neg(),
-                 lambda: "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.")
-    torch._check(self.dim() == 0,
-                 lambda: f"self.dim() cannot be 0 to view {self.dtype} as {dtype} (different element sizes)")
+    torch._check(
+        not self.is_conj(),
+        lambda: "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.",
+    )
+    torch._check(
+        not self.is_neg(),
+        lambda: "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.",
+    )
+    torch._check(
+        self.dim() == 0,
+        lambda: f"self.dim() cannot be 0 to view {self.dtype} as {dtype} (different element sizes)",
+    )
     self_elem_size = self.element_size()
     new_elem_size = dtype.itemsize()
 
     if self_elem_size == new_elem_size:
         new_storage_offset = self.storage_offset()
         new_size = self.size()
-        new_stride = self.stride()
+        new_strides = self.stride()
     elif self_elem_size > new_elem_size:
         # Downsizing element size
         size_ratio = self_elem_size // new_elem_size
-        new_stride = compute_strides_for_view_dtype_downsize(self.stride(), size_ratio, self.dtype, dtype)
+        old_strides = self.stride()
+
+        torch._check(
+            old_strides[-1] == 1,
+            f"self.stride(-1) must be 1 to view {self.dtype()} as {dtype}"
+            f" (different element sizes), but got {old_strides[-1]}",
+        )
+        new_strides = [stride * size_ratio for stride in old_strides]
+        new_strides[-1] = 1
 
         new_size = list(self.size())
         new_size[self.dim() - 1] *= size_ratio
@@ -2635,24 +2649,39 @@ def view_dtype(self, dtype):
         size_ratio = new_elem_size // self_elem_size
 
         torch._check(
-        (self.size(-1) % size_ratio) == 0,
-        lambda: f"self.size(-1) must be divisible by {size_ratio} to view ",
-        f"{self.dtype} as {dtype} (different element sizes), ",
-        f"but got {self.size(-1)}")
+            (self.size(-1) % size_ratio) == 0,
+            lambda: f"self.size(-1) must be divisible by {size_ratio} to view "
+            f"{self.dtype} as {dtype} (different element sizes), "
+            f"but got {self.size(-1)}",
+        )
 
         torch._check(
-        (self.storage_offset() % size_ratio) == 0,
-        lambda: f"self.storage_offset() must be divisible by {size_ratio} to view ",
-        f"{self.dtype} as {dtype} (different element sizes), ",
-        f"but got {self.storage_offset()}")
-        new_stride = compute_strides_for_view_dtype_upsize(self.stride(), size_ratio, self.dtype, dtype)
+            (self.storage_offset() % size_ratio) == 0,
+            lambda: f"self.storage_offset() must be divisible by {size_ratio} to view "
+            f"{self.dtype} as {dtype} (different element sizes), "
+            f"but got {self.storage_offset()}",
+        )
+        old_strides = self.stride()
+
+        torch._check(
+            old_strides[-1] == 1,
+            f"self.stride(-1) must be 1 to view {self.dtype()} as {dtype}"
+            f" (different element sizes), but got {old_strides[-1]}",
+        )
+        torch._check(
+            all(old_stride % size_ratio == 0 for old_stride in old_strides),
+            f"all self.stride must be divisible by {size_ratio}"
+            f" to view {self.dtype()} as {dtype} (different element sizes)",
+        )
+        new_strides = [stride // size_ratio for stride in old_strides]
+        new_strides[-1] = 1
 
         new_size = list(self.size())
-        new_size[self.dim() - 1] /= size_ratio
+        new_size[self.dim() - 1] //= size_ratio
 
-        new_storage_offset = size_ratio / self.storage_offset()
+        new_storage_offset = size_ratio // self.storage_offset()
     result = torch.empty((), dtype=dtype)
-    result.set_(self, storage_offset=new_storage_offset, size=new_size, stride=new_stride)
+    result.set_(self, offset=new_storage_offset, size=new_size, stride=new_strides)
     return result
 
 
