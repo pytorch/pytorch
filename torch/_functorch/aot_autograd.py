@@ -2917,9 +2917,21 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
             with TracingContext.report_output_strides() as fwd_output_strides:
+                kept_flat_args = []
+                kept_input_pos = []
+                for i, node in enumerate(fw_module.graph.nodes):
+                    if node.op == "placeholder":
+                        # This int check is weird, removing it fails
+                        if (len(node.users) == 0
+                                and not isinstance(adjusted_flat_args[i], (int, float))):
+                            fw_module.graph.erase_node(node)
+                        else:
+                            kept_flat_args.append(adjusted_flat_args[i])
+                            kept_input_pos.append(i)
                 compiled_fw_func = aot_config.fw_compiler(
-                    fw_module, adjusted_flat_args
+                    fw_module, kept_flat_args
                 )
+                compiled_fw_func.kept_input_pos = kept_input_pos
 
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
@@ -3010,9 +3022,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
+
+
+            # Trim unused args
+            kept_args = []
+            for kept_pos in CompiledFunction.compiled_fw.kept_input_pos:
+                kept_args.append(args[kept_pos])
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw,
-                args,
+                kept_args,
                 disable_amp=disable_amp,
             )
 
