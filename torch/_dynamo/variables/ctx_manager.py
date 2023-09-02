@@ -6,7 +6,7 @@ from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented, Unsupported
+from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, DummyGlobalSource
 from .base import VariableTracker
@@ -78,41 +78,30 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__enter__")
         )
-        try:
-            return variables.UserMethodVariable(
-                self.cm_obj.__enter__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
-                **options,
-            ).call_function(tx, [], {})
-        except Unsupported as e:
-            raise unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __enter__ function"
-            ) from e
+        return variables.UserMethodVariable(
+            self.cm_obj.__enter__.__func__,
+            variables.UserDefinedObjectVariable(self.cm_obj, **options),
+            **options,
+        ).call_function(tx, [], {})
 
     def exit(self, tx, *args):
         options = VariableTracker.propagate(self)
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        try:
-            x = variables.UserMethodVariable(
-                self.cm_obj.__exit__.__func__,
-                variables.UserDefinedObjectVariable(self.cm_obj, **options),
-                **options,
-            ).call_function(
-                tx,
-                [
-                    variables.ConstantVariable(None),
-                    variables.ConstantVariable(None),
-                    variables.ConstantVariable(None),
-                ],
-                {},
-            )
-        except Unsupported as e:
-            raise unimplemented(
-                f"Unsupported context manager {self.cm_obj}'s __exit__ function"
-            ) from e
-
+        x = variables.UserMethodVariable(
+            self.cm_obj.__exit__.__func__,
+            variables.UserDefinedObjectVariable(self.cm_obj, **options),
+            **options,
+        ).call_function(
+            tx,
+            [
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+                variables.ConstantVariable(None),
+            ],
+            {},
+        )
         # Remove the checkpoint if there is no graph break
         # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
