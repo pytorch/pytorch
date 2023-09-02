@@ -184,18 +184,10 @@ struct BlockPool {
         unmapped(BlockComparatorAddress),
         is_small(small),
         owner_PrivatePool(private_pool) {}
-
-  // Do not insert a Block to blocks directly; use insert_into_blocks(),
-  // instead.
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> unmapped;
   const bool is_small;
   PrivatePool* owner_PrivatePool;
-  int64_t get_free_blocks_call_count{0};
-
-  // Add a Block into blocks set with updating gc counter.
-  std::pair<std::set<Block*, Comparison>::iterator, bool> insert_into_blocks(
-      Block* block);
 };
 
 struct ExpandableSegment;
@@ -217,7 +209,8 @@ struct Block {
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding CUDA events
-  int64_t gc_count_base{0}; // get_free_blocks_call_count when Block is inserted
+  int gc_count{0}; // counter for prioritizing older / less useful blocks for
+                   // garbage collection
   std::shared_ptr<GatheredContext> context_when_allocated;
   // only set for the first block in the segment (when prev == null)
   // this records the frame information when cudaMalloc was called
@@ -239,8 +232,7 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr),
-        gc_count_base(pool->get_free_blocks_call_count) {}
+        ptr(ptr) {}
 
   // constructor for search key
   Block(int device, cudaStream_t stream, size_t size)
@@ -249,10 +241,6 @@ struct Block {
         stream_uses(),
         size(size),
         requested_size(0) {}
-
-  size_t gc_count() {
-    return static_cast<int>(pool->get_free_blocks_call_count - gc_count_base);
-  }
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -270,12 +258,6 @@ struct Block {
     next = after;
   }
 };
-
-std::pair<std::set<Block*, Comparison>::iterator, bool> BlockPool::
-    insert_into_blocks(Block* block) {
-  block->gc_count_base = get_free_blocks_call_count;
-  return blocks.insert(block);
-}
 
 struct SegmentRange {
   char* ptr;
@@ -588,7 +570,7 @@ struct BlockState {
   size_t size = 0;
   void* ptr = nullptr;
   bool allocated = false;
-  int gc_count_base = 0;
+  int gc_count = 0;
   // maintain invariant that event_count == 0 ;
   // history will be left alone in checkpoint
 
@@ -751,7 +733,7 @@ BlockState::BlockState(Block* block)
       size(block->size),
       ptr(block->ptr),
       allocated(block->allocated),
-      gc_count_base(block->gc_count_base) {
+      gc_count(block->gc_count) {
   TORCH_CHECK(
       block->event_count == 0,
       "Events should have synchronized when checkpointing block");
@@ -1512,7 +1494,7 @@ class DeviceCachingAllocator {
       remaining->prev = block;
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
-      bool inserted = pool->insert_into_blocks(remaining).second;
+      bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
       if (already_split && !block->expandable_segment_) {
@@ -2313,7 +2295,7 @@ class DeviceCachingAllocator {
     try_merge_blocks(to_map, to_map->prev, pool);
     try_merge_blocks(to_map, to_map->next, pool);
 
-    pool.insert_into_blocks(to_map);
+    pool.blocks.insert(to_map);
 
     // update statistics
     total_allocated_memory += mapped_range.size;
@@ -2405,7 +2387,7 @@ class DeviceCachingAllocator {
     active_blocks.erase(block);
     // Makes sure the Block* isn't already present in the pool we're freeing it
     // back into.
-    bool inserted = pool.insert_into_blocks(block).second;
+    bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT(inserted);
 
     if (block->is_split()) {
@@ -2535,7 +2517,9 @@ class DeviceCachingAllocator {
             set_fraction &&
             CachingAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
-      ++pool.get_free_blocks_call_count;
+      for (auto& b : pool.blocks) {
+        ++b->gc_count;
+      }
     }
     auto it = pool.blocks.lower_bound(&p.search_key);
     if (it == pool.blocks.end() || (*it)->stream != p.stream())
@@ -2583,6 +2567,7 @@ class DeviceCachingAllocator {
         ((*it)->size >= p.size() + kLargeBuffer))
       return false;
     p.block = *it;
+    (*it)->gc_count = 0; // Denote this block has been used
     pool.blocks.erase(it);
     return true;
   }
@@ -2617,7 +2602,7 @@ class DeviceCachingAllocator {
     int freeable_block_count = 0;
     for (auto& b : large_blocks.blocks) {
       if (!b->is_split()) {
-        total_age += b->gc_count();
+        total_age += b->gc_count;
         ++freeable_block_count;
       }
     }
@@ -2641,10 +2626,10 @@ class DeviceCachingAllocator {
       while (it != large_blocks.blocks.end()) {
         Block* block = *it;
         ++it;
-        if (!block->is_split() && block->gc_count() >= age_threshold) {
+        if (!block->is_split() && block->gc_count >= age_threshold) {
           block_freed = true;
           gc_reclaimed += block->size;
-          total_age -= block->gc_count(); // Decrement the age
+          total_age -= block->gc_count; // Decrement the age
           freeable_block_count--; // One less block that can be freed
           release_block(block);
         }
@@ -2875,7 +2860,7 @@ class DeviceCachingAllocator {
           block->device, block->stream, before_size, block->pool, block->ptr);
       before_free->expandable_segment_ = block->expandable_segment_;
       before_free->splice(block->prev, block);
-      block->pool->insert_into_blocks(before_free);
+      block->pool->blocks.insert(before_free);
     }
 
     auto after_size = block->size - (before_size + unmapped.size);
@@ -2889,7 +2874,7 @@ class DeviceCachingAllocator {
           static_cast<char*>(unmapped.ptr) + unmapped.size);
       after_free->expandable_segment_ = block->expandable_segment_;
       after_free->splice(block, block->next);
-      block->pool->insert_into_blocks(after_free);
+      block->pool->blocks.insert(after_free);
     }
 
     block->ptr = unmapped.ptr;
