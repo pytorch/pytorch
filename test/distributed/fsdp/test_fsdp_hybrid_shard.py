@@ -244,9 +244,9 @@ class TestFSDPHybridShard(FSDPTest):
         model = fsdp_ctor(model)
 
         with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT):
-            assert (model.lin1.weight == 0).all()
-            assert (model.lin2.weight == 0).all()
-            assert (model.lin3.weight == 0).all()
+            self.assertTrue((model.lin1.weight == 0).all())
+            self.assertTrue((model.lin2.weight == 0).all())
+            self.assertTrue((model.lin3.weight == 0).all())
 
     @skip_if_lt_x_gpu(2)
     def test_invalid_pg_specification_raises(self):

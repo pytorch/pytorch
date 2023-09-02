@@ -572,7 +572,7 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             fully_sharded_module, managed_params, state.process_group
         )
-        if hasattr(state, '_inter_node_pg'):
+        if getattr(state, '_inter_node_pg', None) is not None:
             _sync_module_params_and_buffers(
                 fully_sharded_module, managed_params, state._inter_node_pg
             )
