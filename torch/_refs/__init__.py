@@ -955,7 +955,7 @@ def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     )
     new_storage_offset = self.storage_offset() // 2
     if not utils.is_complex_dtype(input_dtype):
-        self = prims.view_of_dtype(self, utils.corresponding_complex_dtype(input_dtype))
+        self = prims.view_element_type(self, utils.corresponding_complex_dtype(input_dtype))
 
     return self.as_strided(new_sizes, new_strides, new_storage_offset)
 

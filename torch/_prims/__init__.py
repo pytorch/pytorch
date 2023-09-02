@@ -148,7 +148,7 @@ __all__ = [
     "squeeze",
     "transpose",
     "view_of",
-    "view_of_dtype",
+    "view_element_type",
     #
     # Functionalized view mutations
     #
