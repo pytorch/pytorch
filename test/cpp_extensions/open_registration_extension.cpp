@@ -14,6 +14,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/UnaryOps.h>
+#include <ATen/native/CPUFallback.h>
 #include <ATen/ops/abs_native.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/core/GeneratorForPrivateuseone.h>
@@ -232,6 +233,10 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   return dst;
 }
 
+at::Tensor custom__copy_from_and_resize(const at::Tensor& self, const at::Tensor& dst) {
+  return custom__copy_from(self, dst, false);
+}
+
 at::Tensor custom_empty_strided(c10::IntArrayRef size,
                                 c10::IntArrayRef stride,
                                 c10::optional<at::ScalarType> dtype_opt,
@@ -330,12 +335,22 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("empty.memory_format", &custom_empty_symint);
   m.impl("fill_.Scalar", &custom_fill__scalar);
   m.impl("_copy_from", &custom__copy_from);
+  m.impl("_copy_from_and_resize", &custom__copy_from_and_resize);
   m.impl("empty_strided", &custom_empty_strided);
   m.impl("set_.source_Storage", &custom_set_source_Storage);
   m.impl("set_.source_Storage_storage_offset",&custom_set_source_Storage_storage_offset);
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
+}
+
+void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  at::native::cpu_fallback(op, stack);
+}
+
+TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
+  m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -380,7 +395,11 @@ at::Generator make_generator_privateuse1(c10::DeviceIndex device_index) {
   return at::make_generator<PrivateGeneratorImpl>(device_index);
 }
 
-void register_generator() {
+void register_generator_first() {
+  REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
+}
+
+void register_generator_second() {
   REGISTER_GENERATOR_PRIVATEUSE1(make_generator_privateuse1)
 }
 
@@ -462,7 +481,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
     m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
-    m.def("register_generator", &register_generator, "register generator for custom device");
+    m.def("register_generator_first", &register_generator_first, "register generator for custom device firstly");
+    m.def("register_generator_second", &register_generator_second, "register generator for custom device secondly");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");
     m.def("custom_storage_registry", &custom_storage_registry, "set custom storageImpl creat method");
     m.def("custom_storageImpl_called", &custom_storageImpl_called, "check if our custom abs function was called");

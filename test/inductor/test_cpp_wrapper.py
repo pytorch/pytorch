@@ -68,8 +68,8 @@ class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
     device = "cuda"
 
 
-# conv2d will fallback for dynamic shapes; the fallback path is not yet supported
 test_failures_cpp_wrapper = {
+    # conv2d will fallback for dynamic shapes; the fallback path is not yet supported
     "test_conv2d_unary_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
@@ -77,6 +77,10 @@ test_failures_cpp_wrapper = {
         ("cpp_wrapper",), is_skip=True
     ),
     "test_conv2d_binary_inplace_fusion_pass_cpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("cpp_wrapper",), is_skip=True
+    ),
+    # aten._native_multi_head_attention.default is not yet supported for dynamic shapes
+    "test_multihead_attention_cpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("cpp_wrapper",), is_skip=True
     ),
 }
@@ -168,6 +172,7 @@ if RUN_CPU:
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
@@ -180,6 +185,7 @@ if RUN_CPU:
         ),
         BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_mm_views"),
+        BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest("test_randint"),
         BaseTest("test_randn_with_dtype_and_device"),
@@ -248,6 +254,7 @@ if RUN_CUDA:
         BaseTest("test_custom_op"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
+        BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),

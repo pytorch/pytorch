@@ -71,8 +71,8 @@ def parallel_apply(
             if t is None:
                 with lock:
                     results[i] = ExceptionWrapper(
-                        where="in replica {}, no device was provided and no tensor input was found; "
-                        "device cannot be resolved".format(i))
+                        where=f"in replica {i}, no device was provided and no tensor input was found; "
+                        "device cannot be resolved")
                 return
             device = t.get_device()
         if stream is None:

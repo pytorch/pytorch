@@ -23,6 +23,7 @@ static_weight_shapes = True
 
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
+nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 
 # enable loop reordering based on input orders
 pick_loop_orders = True
@@ -52,10 +53,21 @@ split_cat_fx_passes = True
 group_fusion = False
 
 # enable pattern match with batch fusion (using torch op)
-batch_fusion = False
+batch_fusion = True
 
 # enable reordering pass
 reordering = True
+
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
+# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
+# Autotune will compare perf with normal cast->then->mm option
+use_mixed_mm = False
+
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
+# torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
+# Autotune will not compare with normal cast->then->mm option.
+# (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
+force_mixed_mm = False
 
 # AOTInductor output path
 # If an absolute path is specified, the generated lib files will be stored under the directory;
@@ -82,6 +94,8 @@ max_autotune_gemm_backends = os.environ.get(
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
+save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
@@ -124,6 +138,11 @@ implicit_fallbacks = True
 
 # fuse even in cases without common reads
 aggressive_fusion = False
+
+# For each fused kernel in the wrapper, comment with the nodes that get fused.
+# Useful for debugging fusion.
+debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -175,19 +194,20 @@ def decide_compile_threads():
     elif sys.platform == "win32" or is_fbcode():
         return 1
     else:
-        return min(
-            32,
+        cpu_count = (
             len(os.sched_getaffinity(0))
             if hasattr(os, "sched_getaffinity")
-            else os.cpu_count(),
+            else os.cpu_count()
         )
+        assert cpu_count
+        return min(32, cpu_count)
 
 
 compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
+    from libfb.py import parutil  # type: ignore[import]
 
     try:
         if __package__:
@@ -291,6 +311,10 @@ class cpp:
 
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
+
+    # Make scatter_reduce fallback when reduce is sum to avoid performance regression
+    # using atomic_add.
+    fallback_scatter_reduce_sum = True
 
 
 # config specific to codegen/triton.py

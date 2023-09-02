@@ -1527,6 +1527,26 @@ class TestTorchFunctionMode(TestCase):
         s.add(a)
         s.add(DiagTensor(d))
 
+    def test_custom_device_type(self):
+        class CustomDeviceContext(TorchFunctionMode):
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                kwargs = kwargs or {}
+                if func == torch.device:
+                    if args and isinstance(args[0], int):
+                        args = ("xla", args[0])
+                    elif isinstance(kwargs.get('device'), int):
+                        kwargs['device'] = f"xla:{kwargs.get('device')}"
+                return func(*args, **kwargs)
+
+        with CustomDeviceContext():
+            d_args = torch.device(0)
+            self.assertEqual(d_args.type, "xla")
+            self.assertEqual(d_args.index, 0)
+            d_kwargs = torch.device(device=0)
+            self.assertEqual(d_kwargs.type, "xla")
+            self.assertEqual(d_kwargs.index, 0)
+
 
 if __name__ == '__main__':
     run_tests()

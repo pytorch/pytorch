@@ -14,6 +14,7 @@ The following constraints are implemented:
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
 - ``constraints.multinomial``
+- ``constraints.nonnegative``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
 - ``constraints.positive_integer``
@@ -50,7 +51,9 @@ __all__ = [
     "lower_cholesky",
     "lower_triangular",
     "multinomial",
+    "nonnegative",
     "nonnegative_integer",
+    "one_hot",
     "positive",
     "positive_semidefinite",
     "positive_definite",

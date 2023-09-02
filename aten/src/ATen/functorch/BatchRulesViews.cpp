@@ -123,7 +123,7 @@ std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     c10::SymIntArrayRef size) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   SymDimVector view_size(size);
-  view_size.insert(view_size.begin(), self_.size(0));
+  view_size.insert(view_size.begin(), self_.sym_size(0));
 
   // See if the view is valid. If it's not, then we copy.
   // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
@@ -198,8 +198,8 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   // Manually calculate the output shape by eliding all dimensions of
   // size 1 keeping track of where the batch index started and where it
   // ended up moving to. We also ensure we do not drop the batch index.
-  auto shape = self.sizes();
-  DimVector squeezed_sizes;
+  auto shape = self.sym_sizes();
+  SymDimVector squeezed_sizes;
   bool before_batch_idx = true;
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
@@ -219,7 +219,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
     ++original_idx;
   }
 
-  auto result = self.view(squeezed_sizes);
+  auto result = self.view_symint(squeezed_sizes);
   return std::make_tuple(std::move(result), c10::optional<int64_t>(new_batch_idx));
 }
 
@@ -425,7 +425,7 @@ std::tuple<Tensor, optional<int64_t>> view_batching_rule(
   auto self_ = moveBatchDimToFront(self, self_bdim);
   c10::SmallVector<c10::SymInt> size_(sym_size.size() + 1);
   // copy batch size
-  size_[0] = self_.size(0);
+  size_[0] = self_.sym_size(0);
   std::copy(sym_size.cbegin(), sym_size.cend(), size_.begin() + 1);
   return std::make_tuple(self_.view_symint(size_), 0);
 }
@@ -453,7 +453,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
               "must be greater or equal to the number of dimensions in the tensor (", static_cast<uint64_t>(self_dim - 1), ")");
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto self_sizes = self_.sizes();
+  auto self_sizes = self_.sym_sizes();
   auto batch_size = self_sizes[0];
 
   c10::SmallVector<c10::SymInt> size_(size.size() + 1);

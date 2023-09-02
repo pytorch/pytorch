@@ -358,7 +358,7 @@ class _SingleLevelFunction(
         if they are intended to be used for in ``jvp``.
         """
         raise NotImplementedError(
-            "You must implement the forward function for custom" " autograd.Function."
+            "You must implement the forward function for custom autograd.Function."
         )
 
     @staticmethod
