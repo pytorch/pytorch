@@ -122,7 +122,7 @@ class TORCH_API SGD {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<SGDParamGroup> param_groups_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  ska::flat_hash_map<std::string, std::unique_ptr<SGDParamState>> state_;
+  ska::flat_hash_map<void*, std::unique_ptr<SGDParamState>> state_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<SGDOptions> defaults_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

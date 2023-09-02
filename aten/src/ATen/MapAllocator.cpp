@@ -39,14 +39,14 @@ TORCH_API std::string NewProcessWideShmHandle()
   static std::random_device rd;
   std::string handle = "/torch_";
 #ifdef _MSC_VER
-  handle += c10::guts::to_string(GetCurrentProcessId());
+  handle += std::to_string(GetCurrentProcessId());
 #else
-  handle += c10::guts::to_string(getpid());
+  handle += std::to_string(getpid());
 #endif
   handle += "_";
-  handle += c10::guts::to_string(rd());
+  handle += std::to_string(rd());
   handle += "_";
-  handle += c10::guts::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+  handle += std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
   return handle;
 }
 
