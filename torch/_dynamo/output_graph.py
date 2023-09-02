@@ -10,17 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Dict,
-    Iterator,
-    List,
-    NamedTuple,
-    Optional,
-    OrderedDict,
-    Set,
-    Union,
-)
+from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
 import sympy
 
@@ -220,36 +210,6 @@ class WrapperBackend:
 Scope = Dict[str, object]
 
 
-# Wrapper over a plain list for storing a list of TrackedFake.
-# This assumes that the list only monotonically increases in size.
-# It is used so we tell ShapeEnv that the list has increased.
-class TrackedFakeList:
-    def __init__(
-        self, shape_env: ShapeEnv, initial: Optional[List[TrackedFake]] = None
-    ) -> None:
-        self.shape_env = shape_env
-
-        # Set the inner list.
-        if initial is None:
-            self.inner = []
-        else:
-            self.inner = initial
-            self.shape_env.set_tracked_fakes_length(len(initial))
-
-    # Keep track of append calls.
-    def append(self, fake: TrackedFake) -> None:
-        self.shape_env.inc_tracked_fakes_length()
-        self.inner.append(fake)
-
-    # Allow it to be iterable, by returning the inner list.
-    def __iter__(self) -> Iterator[TrackedFake]:
-        return iter(self.inner)
-
-    # Allow it to be slice-able, by forwarding it to the inner list.
-    def __getitem__(self, *args, **kwargs):
-        return self.inner.__getitem__(*args, **kwargs)
-
-
 class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -295,12 +255,28 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
+        # tracked_fakes says where any tensor that was wrapped to fake came
+        # from.  It is similar to GraphArg, in that all GraphArgs will get
+        # will get added to TrackedFakes, but TrackedFakes also contains
+        # GraphArgs that got pruned, and things like Tensor attributes which
+        # aren't explicit graph inputs.  Used by shape guard
+        self.tracked_fakes: List[TrackedFake] = []
+
         shape_env = ShapeEnv(
+            # Reference Cycle!
+            # Share a reference to the list of TrackedFake.
+            #
+            # ShapeEnv needs this in order to be able to reproduce the call
+            # to produce_guards at an arbitrary time point. That is because
+            # TrackedFake instances may have its metadata changed throughout
+            # the program execution.
+            tracked_fakes=self.tracked_fakes,
+            check_recorded_events=config.check_shape_env_recorded_events,
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-            check_recorded_events=config.check_shape_env_recorded_events,
             co_fields=self.co_fields,
         )
+
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -311,12 +287,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
 
-        # tracked_fakes says where any tensor that was wrapped to fake came
-        # from.  It is similar to GraphArg, in that all GraphArgs will get
-        # will get added to TrackedFakes, but TrackedFakes also contains
-        # GraphArgs that got pruned, and things like Tensor attributes which
-        # aren't explicit graph inputs.  Used by shape guard
-        self.tracked_fakes = TrackedFakeList(shape_env)
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
@@ -531,7 +501,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """Restore a checkpoint created by self.copy_graphstate()"""
         (
             self.input_source_to_var,
-            tracked_fakes,
+            self.tracked_fakes,
             guards_state,
             module_state,
             global_state,
@@ -540,7 +510,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.timestamp,
             self.tensor_weakref_to_sizes_strides,
         ) = state
-        self.tracked_fakes = TrackedFakeList(self.shape_env, initial=tracked_fakes)
         self.tracing_context.guards_context.restore_graphstate(guards_state)
         self.tracing_context.module_context.restore_graphstate(module_state)
         self.tracing_context.global_context.restore_graphstate(global_state)
