@@ -580,10 +580,12 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
   using namespace mps;
 
   // Initialize info tensor
-  // TODO: implement info tensor information
   int64_t batchSize = A.sizes().size() > 2 ? A.size(0) : 1;
   info.resize_({batchSize});
   info.fill_(0);
+  //info is on mps device
+  // info has shape : [batch_size]
+
 
   //TODO perform checks
   Tensor A_t = A.clone();
@@ -603,8 +605,12 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
 
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
+  id<MTLBuffer> infoBuffer = getMTLBufferStorage(info);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+
+
 
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
@@ -614,7 +620,6 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
       uint64_t aRows = A_.size(-2);
       uint64_t aCols = A_.size(-1);
       uint64_t aElemSize = A_.element_size();
-
 
       MPSMatrixDecompositionCholesky* filter = [[[MPSMatrixDecompositionCholesky alloc] initWithDevice:device
                                                                                      lower:lower
@@ -636,6 +641,35 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
                                                                                    rowBytes:aCols * aElemSize
                                                                                 matrixBytes:aRows * aCols * aElemSize
                                                                                    dataType:getMPSDataType(out)];
+
+      MPSMatrixDescriptor* infoMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                    columns:1
+                                                                                   matrices:batchSize
+                                                                                   rowBytes:sizeof(int)
+                                                                                matrixBytes:sizeof(int)
+                                                                                   dataType:getMPSDataType(info)];
+      //init status to write to (empty)
+      id<MTLBuffer> status = [device newBufferWithLength:sizeof(int) options:MTLResourceStorageModeShared];
+      if (status) {
+    int* statusPtr = (int*)[status contents];
+  *statusPtr = 42; // Set the initial content to 42
+  
+  NSLog(@"Status Value: %d", *statusPtr);
+  }
+  else {
+    NSLog(@"Failed to allocate status buffer");
+  }
+
+             // Add a completion handler to the command buffer here
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> commandBuffer) {
+      // Your completion code here
+      int* statusPtr = (int*)[status contents];
+      int statusVal = *statusPtr;
+      NSLog(@"Status Value: %d", statusVal);
+      // Update the 'info' tensor here based on statusVal
+      // ...
+    }];
+
       
 
       for (const auto i : c10::irange(batchSize)) {
@@ -649,15 +683,19 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
                                                                 offset:(out.storage_offset() + aBatchOffset) * aElemSize
                                                             descriptor:solutionMatrixDesc] autorelease];
 
+  
         [filter encodeToCommandBuffer:commandBuffer
                         sourceMatrix:sourceMatrix
                         resultMatrix:solutionMatrix
-                        status:nil];
+                        status:status];
 
       }
       getMPSProfiler().endProfileKernel(filter);
     }
   });
+
+  // TODO: idk why this has to be done
+  // otherwise it sould just have the input data
   if (lower) {
     out.tril_(0);
   }
