@@ -1,6 +1,7 @@
 #include <c10/util/tempfile.h>
 #include <gtest/gtest.h>
 #include <filesystem>
+#include <optional>
 
 TEST(TempFileTest, MatchesExpectedPattern) {
   c10::TempFile pattern = c10::make_tempfile("test-pattern-");
@@ -11,7 +12,7 @@ TEST(TempFileTest, MatchesExpectedPattern) {
 }
 
 TEST(TempDirTest, tryMakeTempdir) {
-  c10::optional<c10::TempDir> tempdir = c10::make_tempdir("test-dir-");
+  std::optional<c10::TempDir> tempdir = c10::make_tempdir("test-dir-");
   auto tempdir_name = tempdir->name;
 
   // directory should exist while tempdir is alive
