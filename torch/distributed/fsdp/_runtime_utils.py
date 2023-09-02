@@ -42,6 +42,10 @@ from torch.utils._pytree import tree_flatten
 
 log = logging.getLogger(__name__)
 
+import os
+RANK = int(os.environ.get("RANK", "0"))
+_post_backward_reshard_called = False
+
 # Do not include "process_group" to enable hybrid shard and MoE cases
 HOMOGENEOUS_ATTR_NAMES = (
     "_use_orig_params",
@@ -491,6 +495,10 @@ def _post_forward(
         state.training_state = TrainingState.IDLE
         if handle:
             handle._training_state = HandleTrainingState.IDLE
+        # Clear FreeEventQueue
+        if state._is_root:
+            while event_with_tensor := state._free_event_queue.dequeue():
+                _free_storage(event_with_tensor.tensor)
         return output
 
 
@@ -542,6 +550,9 @@ def _root_pre_forward(
             if _is_composable(state):
                 return _root_cast_forward_input(state, module, args, kwargs)
             return args, kwargs
+
+        # Each iteration before forward, we set the FreeEventQueue to use forward direction
+        state._free_event_queue.use_forward_direction()
 
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
@@ -657,6 +668,8 @@ def _pre_backward_hook(
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
             _reset_flat_param_grad_info_if_needed(state._all_handles)
+            # Switch direction of _FreeEventQueue to match backward order
+            state._free_event_queue.use_backward_direction()
         elif handle:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -674,6 +687,8 @@ def _pre_backward_hook(
             # If the handles have been prefetched, then there is no need to
             # call `_unshard()` again
             if not handle._prefetched:
+                if RANK == 0:
+                    print("Regular unshard")
                 _unshard(
                     state,
                     handle,
@@ -688,6 +703,10 @@ def _pre_backward_hook(
         with torch.profiler.record_function(
             "FullyShardedDataParallel._pre_backward_prefetch"
         ):
+            if RANK == 0:
+                print(
+                    "FullyShardedDataParallel._pre_backward_prefetch"
+                )
             _prefetch_next_handle(state, handle, _PrefetchMode.BACKWARD)
         handle.prepare_gradient_for_backward()
         handle._ran_pre_backward_hook = True
@@ -775,12 +794,20 @@ def _post_backward_reshard(
     free_unsharded_flat_param = _should_free_in_backward(state, handle)
     _reshard(state, handle, free_unsharded_flat_param)
 
+    if RANK == 0:
+        print("_post_backward_reshard")
+    global _post_backward_reshard_called
+    _post_backward_reshard_called = True
     # TODO: Post-backward prefetching does not support the multiple handles
     # per module case since the post-backward hook runs per handle, not per
     # group of handles.
     with torch.profiler.record_function(
         "FullyShardedDataParallel._post_backward_prefetch"
     ):
+        if RANK == 0:
+            print(
+                "FullyShardedDataParallel._post_backward_prefetch"
+            )
         _prefetch_next_handle(state, handle, _PrefetchMode.BACKWARD)
 
 
@@ -1187,6 +1214,8 @@ def _prefetch_next_handle(
         return
     handle = _get_handle_to_prefetch(state, current_handle)
     if not handle:
+        if RANK == 0:
+            print("No candidate handle")
         return
     # Temporarily emulate the training state while calling `_unshard` to
     # ensure the correct `as_params` for `_use_unsharded_views()`

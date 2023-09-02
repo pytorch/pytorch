@@ -53,6 +53,7 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 
+RANK = int(os.environ.get("RANK", "0"))
 """
 [Note: Fully Sharded Module]
 We define the "fully sharded module" to be the original ``nn.Module`` that owns
@@ -1263,6 +1264,8 @@ class FlatParamHandle:
                 else self.flat_param
             )
             self._use_unsharded_flat_param(unsharded_flat_param)
+            if RANK == 0:
+                print(f"Handle {self._handle_index} does not need unshard")
             return
 
         if self._limit_all_gathers:
@@ -1283,6 +1286,8 @@ class FlatParamHandle:
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
         padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
+        if RANK == 0:
+            print(f"Unshard handle {self._handle_index}")
 
     def needs_unshard(self) -> bool:
         """Returns if the handle's flat parameter needs to be unsharded."""
