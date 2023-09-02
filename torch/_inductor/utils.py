@@ -1053,6 +1053,6 @@ def is_dynamic(*args):
         elif not isinstance(t, ir.IRNode):
             continue
         else:
-            raise ValueError(f"unexpected type for is_dynamic {type(t)}")
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
 
     return False
