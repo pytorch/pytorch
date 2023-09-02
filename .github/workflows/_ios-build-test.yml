@@ -218,6 +218,6 @@ jobs:
 
       - uses: actions/upload-artifact@v3
         with:
-          name: pytorch-ios-build-artifacts
+          name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
           if-no-files-found: error
           path: ${{ runner.temp }}/${{ matrix.ios_arch }}
