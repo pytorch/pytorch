@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict, OrderedDict
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import DefaultDict, Dict, List, Optional, Set, Tuple
 
@@ -189,7 +189,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = set()
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: OrderedDict[str, torch.Tensor] = OrderedDict()
+        self.constants: Dict[str, torch.Tensor] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -201,7 +201,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
-        self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
@@ -503,9 +502,9 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
-    def add_tensor_constant(self, data, name=None):
-        def allocate(name):
-            for constant_name, value in self.constants.items():
+    def add_tensor_constant(self, data):
+        def allocate():
+            for name, value in self.constants.items():
                 if (
                     not data.is_mkldnn
                     and data.size() == value.size()
@@ -514,21 +513,17 @@ class GraphLowering(torch.fx.Interpreter):
                     and data.device == value.device
                     and torch.eq(data, value).all()
                 ):
-                    return constant_name
-
-            if name is None:
-                name = f"constant{len(self.constants)}"
+                    return name
+            name = f"constant{len(self.constants)}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
             ).hexdigest()
             return name
 
-        name = allocate(name)
-
         return TensorBox.create(
             ir.ConstantBuffer(
-                name,
+                allocate(),
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -623,7 +618,7 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr(self.module, target)
 
         if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value, target)
+            return self.add_tensor_constant(value)
 
         with no_dispatch():
             if value.shape == ():
@@ -634,7 +629,7 @@ class GraphLowering(torch.fx.Interpreter):
 
                 return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        return self.add_tensor_constant(value, target)
+        return self.add_tensor_constant(value)
 
     def call_module(self, target, args, kwargs):
         raise AssertionError()
@@ -952,9 +947,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
-        output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)

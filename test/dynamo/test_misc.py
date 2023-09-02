@@ -1544,6 +1544,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_unique_f16(self):
+        def fn():
+            x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
+            return np.unique(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn()
+        self.assertEqual(r.dtype, np.float16)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -1566,6 +1578,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(func(args).shape, opt_f(args_clone).shape))
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 1)  # mul_
+
+    def test_out_variants_with_resizing_on_graph_inputs(self):
+        def fn(x, y):
+            return torch.cosh(x, out=y) + 1
+
+        x = torch.rand(2, 3)
+        y = torch.rand(4)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
@@ -1771,14 +1795,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, obj)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
-
-    def test_manual_seed(self):
-        def fn(a, b):
-            x = a + b
-            torch.manual_seed(9000)
-            return x + 1
-
-        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
 
     def test_usr_cls_staticmethod(self):
         class Foo:
@@ -2226,13 +2242,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(100, requires_grad=True)
+        x = torch.randn(10, requires_grad=True)
         ref = fn(x)
 
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        # Python code is needed here, since torch.manual_seed graph-breaks.
+        # Refs: https://github.com/pytorch/pytorch/issues/107187
+        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
