@@ -3620,7 +3620,7 @@ class TestCudaMallocAsync(TestCase):
             self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))
 
         torch.cuda.memory.empty_cache()
-        if TEST_CUDA:
+        if not TEST_WITH_ROCM:
             # NB: This is not available on ROCm
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:True")
         start_mem = torch.cuda.memory_stats()[key_allocated]
@@ -3637,7 +3637,7 @@ class TestCudaMallocAsync(TestCase):
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
 
-        if TEST_CUDA:
+        if not TEST_WITH_ROCM:
             # NB: This is not available on ROCm
             with self.assertRaises(RuntimeError):
                 torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
