@@ -1326,6 +1326,7 @@
   dispatch:
     SparseCPU, SparseCUDA: cat_sparse
     QuantizedCPU: cat_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: cat_nested
   tags: core
 
 - func: cat.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)

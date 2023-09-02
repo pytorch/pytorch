@@ -51,7 +51,7 @@ from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_SDPA,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
     TEST_MULTIGPU,
@@ -1365,6 +1365,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_numpy_recompilation_scalar(self):
+        def fn(x, a):
+            return np.where(x < 0.5, a, x)
+
+        x = np.random.randn(8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, dynamic=True)(fn)
+
+        ref = fn(x, 3)
+        res = opt_fn(x, 3)
+        self.assertEqual(ref, res)
+
+        ref = fn(x, 4)
+        res = opt_fn(x, 4)
+        self.assertEqual(ref, res)
+
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_tensor_interacts_with_numpy_ndarray(self):
         def fn(x, y):
@@ -3906,7 +3924,7 @@ def fn():
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_parsing_sdpa(self):
