@@ -937,9 +937,9 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
-    _PytorchRecordFunctionState rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
+    _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
-    _pytorch_record_function_exit(&rf);
+    _pytorch_record_function_exit(rf);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
@@ -962,9 +962,9 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  _PytorchRecordFunctionState rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
-  _pytorch_record_function_exit(&rf);
+  _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
