@@ -210,6 +210,7 @@ def mps_ops_modifier(ops):
     # Supported complex OPS
     SUPPORTED_COMPLEX_OPS = [
         '__radd__',
+        '__rmul__',
         'add',
         'atleast_1d',
         'atleast_2d',
@@ -227,11 +228,14 @@ def mps_ops_modifier(ops):
         'isinf',
         'isreal',
         'item',
+        'kron',
         'linspace',
         'logspace',
+        'mul',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
         'ones',
+        'outer',
         'positive',
         'randn',
         'ravel',
