@@ -100,45 +100,54 @@ jobs:
           retry_wait_seconds: 90
           command: |
             set -x
-            cd ios/TestApp
-            # install fastlane
+
+            pushd ios/TestApp
+            # Install fastlane
             sudo gem install bundler && bundle install
             bundle update fastlane
+            popd
 
-      - name: Build PyTorch Mobile Runtime
+      - name: Build PyTorch mobile runtime
+        shell: bash
         run: |
+          set -eux
           # shellcheck disable=SC1091
           export TCLLIBPATH="/usr/local/lib"
-          python -VV
           ${CONDA_RUN} scripts/build_ios.sh
 
       - name: Build TestApp
         if: matrix.ios_platform == 'SIMULATOR'
         timeout-minutes: 15
         run: |
-          # run the ruby build script
+          # Run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
             echo 'Error: xcodebuild is not installed.'
             exit 1
           fi
           ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
-      - name: Run Simulator Tests
+      - name: Run simulator tests
         if: matrix.ios_platform == 'SIMULATOR'
+        shell: bash
         run: |
+          set -eux
           # shellcheck disable=SC1091
-          # use the pytorch nightly build to generate models
-          ${CONDA_RUN} pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
-          # generate models for differnet backends
-          cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          # Use the pytorch nightly build to generate models
+          ${CONDA_RUN} pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+
+          # Generate models for differnet backends
+          pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
             ${CONDA_RUN} python coreml_backend.py
           else
-            cd "${GITHUB_WORKSPACE}"
+            pushd "${GITHUB_WORKSPACE}"
             ${CONDA_RUN} python test/mobile/model_test/gen_test_model.py ios-test
+            popd
           fi
-          cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          popd
+
+          pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             echo "Setting up the TestApp for LiteInterpreter"
             ruby setup.rb --lite 1
@@ -146,8 +155,10 @@ jobs:
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
           fi
-          cd "${GITHUB_WORKSPACE}/ios/TestApp"
-          # instruments -s -devices
+          popd
+
+          pushd "${GITHUB_WORKSPACE}/ios/TestApp"
+          # Instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
               bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
@@ -157,9 +168,56 @@ jobs:
           else
             bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
+          popd
 
-      - name: Dump Simulator Tests On a Failure
+      - name: Dump simulator tests on failure
         if: failure() && inputs.ios-platform == 'SIMULATOR'
         run: |
           echo "Simulator Tests Logs:"
           cat /Users/runner/Library/Logs/scan/*.log
+
+      - name: Prepare the build artifacts for upload
+        shell: bash
+        run: |
+          set -eux
+
+          # The structure of the folder is as follows:
+          #
+          # RUNNER_TEMP/
+          # └── IOS_ARCH/
+          #     ├── LICENSE
+          #     ├── install
+          #     │   ├── include
+          #     │   │   └── headers
+          #     │   └── lib
+          #     │       ├── libXNNPACK.a
+          #     │       ├── libc10.a
+          #     │       ├── libclog.a
+          #     │       ├── libcpuinfo.a
+          #     │       ├── libeigen_blas.a
+          #     │       ├── libpthreadpool.a
+          #     │       ├── libpytorch_qnnpack.a
+          #     │       ├── libtorch.a
+          #     │       └── libtorch_cpu.a
+          #     ├── src
+          #     │   └── LibTorch-Lite.h
+          #     └── version.txt
+          SETUP_DIR="${RUNNER_TEMP}/${IOS_ARCH}"
+          mkdir -p "${SETUP_DIR}/src"
+
+          cp -R "${GITHUB_WORKSPACE}/build_ios/install" "${SETUP_DIR}"
+          # Copy the umbrella header and license
+          if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+            cp "${GITHUB_WORKSPACE}/ios/LibTorch-Lite.h" "${SETUP_DIR}/src"
+          else
+            cp "${GITHUB_WORKSPACE}/ios/LibTorch.h" "${SETUP_DIR}/src"
+          fi
+
+          # Copy license and version
+          cp "${GITHUB_WORKSPACE}/LICENSE" version.txt "${SETUP_DIR}"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios-build-artifacts
+          if-no-files-found: error
+          path: ${{ runner.temp }}/${{ matrix.ios_arch }}
