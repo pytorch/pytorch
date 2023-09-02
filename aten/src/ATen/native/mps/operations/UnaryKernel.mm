@@ -13,7 +13,7 @@
 #include <fmt/format.h>
 
 namespace at::native {
-const std::string& getMetalType(const c10::ScalarType& t) {
+static const std::string& getMetalType(const c10::ScalarType& t) {
   // Mapping from c10::ScalarType to integral type that can be used for unary ops
   static std::unordered_map<c10::ScalarType, std::string> scalar_to_metal_type = {
       {c10::ScalarType::Half, "half"},
@@ -31,11 +31,11 @@ const std::string& getMetalType(const c10::ScalarType& t) {
   return it->second;
 }
 
-const std::string& getMetalType(const c10::Scalar& s) {
+static const std::string& getMetalType(const c10::Scalar& s) {
   return getMetalType(s.type());
 }
 
-const std::string& getMetalType(const Tensor& t) {
+static const std::string& getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 

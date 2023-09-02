@@ -14,6 +14,7 @@ from torch._inductor.compile_fx import compile_fx_inner
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    freeze_rng_state,
     IS_FBCODE,
     TEST_WITH_ASAN,
 )
@@ -347,6 +348,23 @@ class CudaReproTests(TestCase):
         actual = torch.compile(forward, fullgraph=True)(x)
         self.assertEqual(actual, correct)
 
+    def test_full_copy(self):
+        def forward(x):
+            full_10 = torch.ops.aten.full.default(
+                [204, 204, 28],
+                0,
+                dtype=torch.float64,
+                layout=torch.strided,
+                device="cuda",
+                pin_memory=False,
+            )
+            return x + full_10.to("cpu")
+
+        o = torch.randn([204, 204, 28], dtype=torch.float64)
+        correct = forward(o)
+        actual = torch.compile(forward, fullgraph=True)(o)
+        self.assertEqual(actual, correct)
+
     def test_autotune_inplace_kernel(self):
         """
         This UT tests autotune on an inplace kernel. The autotune should not contaminate
@@ -606,7 +624,8 @@ class CudaReproTests(TestCase):
                 start = math.log2(0.5)
                 end = math.log2(1 / (2**8))
 
-                self.scales = nn.Buffer(
+                self.register_buffer(
+                    "scales",
                     2
                     ** torch.arange(
                         start,
@@ -876,7 +895,7 @@ class CudaReproTests(TestCase):
         """
 
         def fn(values, offsets):
-            return torch.ops.prims._inductor_bucketize(values, offsets)
+            return torch.bucketize(values, offsets)
 
         values = torch.rand((64, 64), device="cuda")
         offsets = torch.tensor([0.05, 0.1, 0.5, 0.8, 0.85, 0.95], device="cuda")
@@ -1037,6 +1056,19 @@ class CudaReproTests(TestCase):
         opt_fn = torch.compile(m)
         actual = opt_fn(x)
         self.assertEqual(expect, actual)
+
+    @config.patch(fallback_random=True)
+    def test_multi_output_layout_fallback(self):
+        mod = nn.RReLU(lower=3.2350976, upper=8.4220314, inplace=True)
+        inp = torch.rand([4, 4]).cuda()
+        m = torch.compile(mod)
+
+        with freeze_rng_state():
+            o1 = m(inp.clone())
+
+        o2 = mod(inp.clone())
+
+        self.assertEqual(o1, o2)
 
 
 if __name__ == "__main__":

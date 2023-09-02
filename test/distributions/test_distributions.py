@@ -4657,6 +4657,7 @@ class TestLazyLogitsInitialization(DistributionsTestCase):
 
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+@skipIfTorchDynamo("FIXME: Tries to trace through SciPy and fails")
 class TestAgainstScipy(DistributionsTestCase):
     def setUp(self):
         super().setUp()

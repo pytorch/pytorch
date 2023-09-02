@@ -315,8 +315,10 @@ def quantized_args(
     *arg_q_descriptors: bool,
     scale: Optional[float] = None,
     zero_point: Optional[int] = None,
+    quantize_output: bool = True,
 ):
     """A decorator which extends support for quantized version of the base operator.
+
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
@@ -353,6 +355,7 @@ def quantized_args(
           the first quantized input scale.
         zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
+        quantize_output: If True, quantize the output of the base operator. Default is True
     """
 
     def decorator(fn):
@@ -435,7 +438,9 @@ def quantized_args(
                 _zero_point is not None
             ), "Bug: Zero point must be set for quantized operator"
 
-            return quantize_helper(g, output, _scale, _zero_point)
+            if quantize_output:
+                return quantize_helper(g, output, _scale, _zero_point)
+            return output
 
         return wrapper
 
