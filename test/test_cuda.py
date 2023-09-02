@@ -3619,14 +3619,14 @@ class TestCudaMallocAsync(TestCase):
             # not supported with the cudaMallocAsync backend
             self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))
 
-        torch.cuda.memory.empty_cache()
         if not TEST_WITH_ROCM:
+            torch.cuda.memory.empty_cache()
             # NB: This is not available on ROCm
             torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:True")
-        start_mem = torch.cuda.memory_stats()[key_allocated]
-        w = torch.rand(nelems, device='cuda')
-        reg_mem = torch.cuda.memory_stats()[key_allocated]
-        self.assertTrue(reg_mem - start_mem == nbytes)
+            start_mem = torch.cuda.memory_stats()[key_allocated]
+            w = torch.rand(nelems, device='cuda')
+            reg_mem = torch.cuda.memory_stats()[key_allocated]
+            self.assertTrue(reg_mem - start_mem == nbytes)
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
