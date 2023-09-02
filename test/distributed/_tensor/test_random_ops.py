@@ -150,42 +150,42 @@ class DistTensorRandomOpTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [4, 4 * self.world_size]
 
-        dtensor = torch.distributed._tensor.rand(
-            size, device_mesh=device_mesh, placements=[Shard(1)]
-        )
-        local_tensor = funcol.all_gather_tensor(
-            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-        )
+        for fn in [
+            torch.distributed._tensor.rand,
+            torch.distributed._tensor.randn,
+        ]:
+            dtensor = fn(size, device_mesh=device_mesh, placements=[Shard(1)])
+            local_tensor = funcol.all_gather_tensor(
+                dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
+            )
 
-        # compare with local tensors from other ranks
-        self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                # other rank should have an identical local tensor
-                other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                self.assertNotEqual(
-                    local_tensor[self_slice, :],
-                    local_tensor[other_slice, :],
-                )
+            # compare with local tensors from other ranks
+            self_slice = slice(4 * self.rank, 4 * self.rank + 4)
+            for other_rank in range(self.world_size):
+                if self.rank != other_rank:
+                    # other rank should have an identical local tensor
+                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                    self.assertNotEqual(
+                        local_tensor[self_slice, :],
+                        local_tensor[other_slice, :],
+                    )
 
-        torch.cuda.manual_seed(self.rank)
-        dtensor = torch.distributed._tensor.rand(
-            size, device_mesh=device_mesh, placements=[Replicate()]
-        )
-        local_tensor = funcol.all_gather_tensor(
-            dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
-        )
+            torch.cuda.manual_seed(self.rank)
+            dtensor = fn(size, device_mesh=device_mesh, placements=[Replicate()])
+            local_tensor = funcol.all_gather_tensor(
+                dtensor.to_local(), gather_dim=0, group=(device_mesh, 0)
+            )
 
-        # compare with local tensors from other ranks
-        self_slice = slice(4 * self.rank, 4 * self.rank + 4)
-        for other_rank in range(self.world_size):
-            if self.rank != other_rank:
-                # other rank should have an identical local tensor
-                other_slice = slice(4 * other_rank, 4 * other_rank + 4)
-                self.assertEqual(
-                    local_tensor[self_slice, :],
-                    local_tensor[other_slice, :],
-                )
+            # compare with local tensors from other ranks
+            self_slice = slice(4 * self.rank, 4 * self.rank + 4)
+            for other_rank in range(self.world_size):
+                if self.rank != other_rank:
+                    # other rank should have an identical local tensor
+                    other_slice = slice(4 * other_rank, 4 * other_rank + 4)
+                    self.assertEqual(
+                        local_tensor[self_slice, :],
+                        local_tensor[other_slice, :],
+                    )
 
     @with_comms
     @skip_if_lt_x_gpu(4)
