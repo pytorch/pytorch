@@ -294,25 +294,16 @@ def export(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            # TODO Horrible hack to skip dynamo
-            if False and isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
-                if len(constraints) > 0:
-                    raise UserError(
-                        UserErrorType.INVALID_INPUT,
-                        "Cannot provide constraints for already exported program."
-                    )
-                gm_torch_level = f
-            else:
-                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
-                    gm_torch_level, _ = torch._dynamo.export(
-                        f,
-                        constraints=constraints,
-                        assume_static_by_default=True,
-                        tracing_mode="symbolic",
-                    )(
-                        *args,
-                        **kwargs,
-                    )
+            with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
+                gm_torch_level, _ = torch._dynamo.export(
+                    f,
+                    constraints=constraints,
+                    assume_static_by_default=True,
+                    tracing_mode="symbolic",
+                )(
+                    *args,
+                    **kwargs,
+                )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:

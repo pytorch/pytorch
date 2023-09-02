@@ -268,6 +268,15 @@ class TestInductorDynamic(TestCase):
         actual = cfn(3)
         self.assertEqual(expect, actual)
 
+    def test_full(self, device):
+        def fn(a):
+            return torch.full((3,), a)
+
+        cfn = self.compile_fn(fn)
+        expect = fn(5)
+        actual = cfn(5)
+        self.assertEqual(expect, actual)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals())
 

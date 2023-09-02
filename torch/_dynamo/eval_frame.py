@@ -265,7 +265,7 @@ class _TorchDynamoContext:
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
 
-    def __call__(self, fn, fx_node_meta_context=None):
+    def __call__(self, fn):
         # public api for compiler config/options
         def get_compiler_config():
             return self.compiler_config

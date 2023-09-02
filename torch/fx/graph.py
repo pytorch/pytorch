@@ -597,22 +597,21 @@ class CodeGen:
 
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
-        code = ''.join(body).lstrip('\n')
-        code = '\n'.join('    ' + line for line in code.split('\n'))
-
         # remove counter and generate lineno to node index mapping
         lineno_map: Dict[int, Optional[int]] = {}
         prologue_len = prologue.count('\n') + 1
         new_lines: List[str] = []
         cur_idx = None
-        for line in code.split('\n'):
+        for line in ''.join(body).split('\n'):
             counter = re.search(r"# COUNTER: (\d+)", line)
             if counter and counter.group(1) is not None:
                 cur_idx = int(counter.group(1))
             else:
                 lineno_map[len(new_lines) + prologue_len] = cur_idx
                 new_lines.append(line)
-        code = "\n".join(new_lines)
+
+        code = "\n".join(new_lines).lstrip('\n')
+        code = '\n'.join('    ' + line for line in code.split('\n'))
 
         fn_code = f"""
 {wrap_stmts}

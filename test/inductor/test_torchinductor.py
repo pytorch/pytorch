@@ -3346,6 +3346,10 @@ class CommonTemplate:
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
 
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         foo_opt = torch.compile(matmul_with_op)
 
         # test no-op

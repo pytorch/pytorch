@@ -240,7 +240,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         root_tx,
         export: bool,
         export_constraints,
-        frame,
         frame_state,
         local_scope: Scope,
         global_scope: Scope,
@@ -253,7 +252,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.input_source_to_var: Dict[Source, VariableTracker] = {}
         self.export = export
         self.export_constraints = export_constraints
-        self.frame = frame
         self.frame_state = frame_state
         self.tensor_weakref_to_sizes_strides: WeakIdKeyDictionary = {}
 
