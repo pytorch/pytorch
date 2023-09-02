@@ -1036,8 +1036,9 @@ def is_dynamic(*args):
 
     for t in args:
         if isinstance(t, ir.TensorBox):
-            if any(s.free_symbols for s in t.data.get_size()) or any(
-                s.free_symbols for s in t.data.get_stride()
+            if any(s.free_symbols for s in t.data.get_size()) or (
+                hasattr(t.data, "get_stride")
+                and any(s.free_symbols for s in t.data.get_stride())
             ):
                 return True
         elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
