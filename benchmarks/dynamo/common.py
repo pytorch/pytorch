@@ -1,6 +1,25 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
+
+# BEGIN CHANGES ONLY FOR PERF TEST PURPOSE #####
+# REMOVE BEFORE LAND ####
+from torch._inductor import config
+
+config.benchmark_fusion = True
+config.debug_fusion = True
+config.benchmark_kernel = True
+config.triton.unique_kernel_names = True
+from torch._inductor.scheduler import log
+
+log.setLevel(logging.DEBUG)
+from torch._inductor.codegen.triton import log
+
+log.setLevel(logging.DEBUG)
+
+# END CHANGES ONLY FOR PERF TEST PURPOSE #####
+
 import argparse
 import collections
 import contextlib
