@@ -92,13 +92,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
         torch.compile(f)(torch.randn(5, 5, 5))
-        entries = _debug_get_cache_entry_list(f.__code__)
+        entries = _debug_get_cache_entry_list(f)
         self.assertTrue(len(entries) > 0)
 
         def g(x):
             return x + 2
 
-        entries = _debug_get_cache_entry_list(g.__code__)
+        entries = _debug_get_cache_entry_list(g)
         self.assertTrue(len(entries) == 0)
 
         try:
