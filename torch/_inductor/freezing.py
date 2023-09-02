@@ -3,7 +3,7 @@ import itertools
 import logging
 
 import weakref
-from typing import Any, Callable, Counter, Dict, List, Optional, Tuple
+from typing import Any, Callable, cast, Counter, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -92,10 +92,10 @@ class ConstantFolder(torch.fx.Interpreter):
         self.replaced_uses: Counter[Node] = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
-        self.insertable_tensor_check = (
+        self.insertable_tensor_check: Callable[[torch.Tensor], bool] = (
             insertable_tensor_check
             if insertable_tensor_check is not None
-            else return_true
+            else cast(Callable[[torch.Tensor], bool], return_true)
         )
 
     def run_node(self, node):
