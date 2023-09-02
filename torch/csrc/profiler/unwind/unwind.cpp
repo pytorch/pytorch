@@ -46,6 +46,14 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 
+//#define USE_IPC_SYMBOLIZIER
+#ifndef USE_IPC_SYMBOLIZIER
+#include <bfd.h>
+#include <future>
+#define DMGL_PARAMS (1 << 0) /* Include function args */
+#define DMGL_ANSI (1 << 1) /* Include const, volatile, etc */
+#endif
+
 struct UpgradeExclusive {
   UpgradeExclusive(std::shared_lock<std::shared_timed_mutex>& rdlock)
       : rdlock_(rdlock) {
@@ -312,6 +320,7 @@ std::vector<void*> unwind() {
   return frames;
 }
 
+#ifdef USE_IPC_SYMBOLIZIER
 struct Symbolizer {
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
@@ -336,6 +345,7 @@ struct Symbolizer {
     entry.queried.push_back(addr);
     auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
     entry.comm->out() << (void*)libaddress << "\n";
+    std::cout << maybe_library->name() << " " << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
     // get filled and block before we read the results.
@@ -398,6 +408,190 @@ struct Symbolizer {
     }
   };
 };
+#else
+
+struct Symbolizer {
+  static std::lock_guard<std::mutex> guard() {
+    static std::mutex mutex;
+    return std::lock_guard<std::mutex>(mutex);
+  }
+  Symbolizer() {
+    bfd_init();
+    bfd_set_default_target("x86-64");
+    bfd_set_error_handler([](const char*, va_list lst) {});
+  }
+  static Symbolizer& get() {
+    static Symbolizer singleton;
+    return singleton;
+  }
+  void request(void* addr) {
+    if (frame_map_.count(addr)) {
+      return;
+    }
+    has_pending_results_ = true;
+    auto maybe_library =
+        addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
+    if (!maybe_library) {
+      frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
+      return;
+    }
+    auto& entry =
+        getOrCreate(maybe_library->name(), maybe_library->load_bias());
+    entry.pending_.push_back(addr);
+  }
+  const Frame& lookup(void* addr) {
+    if (has_pending_results_) {
+      std::vector<std::future<std::vector<Frame>>> futures;
+      for (auto& kv : entries_) {
+        Entry* e = &kv.second;
+        futures.emplace_back(std::async(
+            std::launch::async, [e, this] { return doPendingRequests(*e); }));
+      }
+      auto futures_it = futures.begin();
+      for (auto& kv : entries_) {
+        futures_it->wait();
+        auto frames = futures_it->get();
+        for (auto i : c10::irange(kv.second.pending_.size())) {
+          frame_map_[kv.second.pending_.at(i)] = frames.at(i);
+        }
+        kv.second.pending_.clear();
+        futures_it++;
+      }
+      has_pending_results_ = false;
+    }
+    return frame_map_.at(addr);
+  }
+
+ private:
+  static constexpr int BLOCK = 1024;
+
+  struct Entry {
+    Entry(std::string name, uint64_t load_bias)
+        : name_(std::move(name)),
+          load_bias_(load_bias),
+          bfd_(nullptr, [](struct bfd* b) {
+            if (b) {
+              bfd_close(b);
+            }
+          }) {}
+    std::string name_;
+    uint64_t load_bias_;
+    std::unique_ptr<bfd, void (*)(bfd*)> bfd_;
+    std::vector<asymbol*> syms_;
+    std::vector<void*> pending_;
+  };
+
+  bool has_pending_results_ = false;
+  ska::flat_hash_map<std::string, Entry> entries_;
+  ska::flat_hash_map<void*, Frame> frame_map_;
+
+  Entry& getOrCreate(const std::string& name, uint64_t load_bias) {
+    auto it = entries_.find(name);
+    if (it == entries_.end()) {
+      it = entries_.insert_or_assign(name, Entry(name, load_bias)).first;
+    }
+    return it->second;
+  }
+  std::vector<Frame> doPendingRequests(Entry& e) {
+    if (!e.bfd_) {
+      char** matching;
+      e.bfd_.reset(bfd_openr(e.name_.c_str(), nullptr));
+      TORCH_INTERNAL_ASSERT(e.bfd_, "failed to open library");
+      e.bfd_->flags |= BFD_DECOMPRESS;
+      TORCH_INTERNAL_ASSERT(
+          !bfd_check_format(e.bfd_.get(), bfd_archive),
+          "unexpected library format");
+      TORCH_INTERNAL_ASSERT(
+          bfd_check_format_matches(e.bfd_.get(), bfd_object, &matching),
+          "unexpected library object format");
+
+      if ((bfd_get_file_flags(e.bfd_.get()) & HAS_SYMS) != 0) {
+        bool dynamic = false;
+
+        auto storage = bfd_get_symtab_upper_bound(e.bfd_.get());
+        if (storage == 0) {
+          storage = bfd_get_dynamic_symtab_upper_bound(e.bfd_.get());
+          dynamic = true;
+        }
+        TORCH_INTERNAL_ASSERT(
+            storage >= 0,
+            "unexpected error getting symbol table storage requirements");
+        e.syms_.resize(storage / sizeof(asymbol*) + 1);
+        size_t real_size = 0;
+        if (dynamic) {
+          real_size =
+              bfd_canonicalize_dynamic_symtab(e.bfd_.get(), e.syms_.data());
+        } else {
+          real_size = bfd_canonicalize_symtab(e.bfd_.get(), e.syms_.data());
+          if (real_size == 0) {
+            storage = bfd_get_dynamic_symtab_upper_bound(e.bfd_.get());
+            if (storage > 0) {
+              e.syms_.resize(storage / sizeof(asymbol*) + 1);
+              real_size =
+                  bfd_canonicalize_dynamic_symtab(e.bfd_.get(), e.syms_.data());
+            }
+          }
+        }
+        e.syms_.resize(real_size);
+      }
+    }
+    std::vector<Frame> results;
+    for (auto addr : e.pending_) {
+      struct BFDData {
+        bool found;
+        uint64_t addr;
+        const char* filename;
+        const char* functionname;
+        unsigned int line;
+        unsigned int discriminator;
+        asymbol** syms;
+      };
+      BFDData data;
+      data.found = false;
+      data.addr = ((uint64_t)addr - e.load_bias_ - 1);
+      data.syms = e.syms_.data();
+      bfd_map_over_sections(
+          e.bfd_.get(),
+          [](bfd* bfd, asection* section, void* _data) {
+            BFDData& data = *(BFDData*)_data;
+            if (data.found || (section->flags & SEC_ALLOC) == 0 ||
+                data.addr < section->vma ||
+                data.addr >= section->vma + section->size) {
+              return;
+            }
+            data.found = bfd_find_nearest_line_discriminator(
+                bfd,
+                section,
+                data.syms,
+                data.addr - section->vma,
+                &data.filename,
+                &data.functionname,
+                &data.line,
+                &data.discriminator);
+          },
+          &data);
+      Frame frame{"??", "??", 0};
+      if (data.found) {
+        if (data.functionname != nullptr && *data.functionname != '\0') {
+          frame.funcname = data.functionname;
+          char* alloc = bfd_demangle(
+              e.bfd_.get(), data.functionname, DMGL_ANSI | DMGL_PARAMS);
+          if (alloc) {
+            frame.funcname = alloc;
+            free(alloc);
+          }
+        }
+        frame.lineno = data.line;
+        if (data.filename) {
+          frame.filename = data.filename;
+        }
+      }
+      results.emplace_back(std::move(frame));
+    }
+    return results;
+  }
+};
+#endif
 
 #ifdef FBCODE_CAFFE2
 // in CUDA binaries, we have to use the internal symbolizer because
