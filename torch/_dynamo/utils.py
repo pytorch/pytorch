@@ -880,9 +880,11 @@ def enum_repr(value, local):
 
 def iter_contains(items, v, tx, options):
     """Implements items.__contains__(v) for items an interable"""
-    if check_constant_args([v], {}) and v.is_python_constant():
+    from .variables import ConstantVariable
+
+    if v.is_python_constant():
         result = any(x.as_python_constant() == v.as_python_constant() for x in items)
-        return variables.ConstantVariable(result, **options)
+        return ConstantVariable(result, **options)
 
     from .builtin import BuiltinVariable
 

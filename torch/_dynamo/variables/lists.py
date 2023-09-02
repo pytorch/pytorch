@@ -812,6 +812,7 @@ class SetVariable(VariableTracker):
 
         unimplemented(f"Sets with {type(vt)} NYI")
 
+    # TODO This shouldn't exist. Everything should just take a tx as arg
     @property
     def _underlying_items(self):
         underlying_items = set()

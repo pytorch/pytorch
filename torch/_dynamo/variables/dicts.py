@@ -312,6 +312,9 @@ class DictView(VariableTracker):
     def as_python_constant(self):
         return getattr(self.dv_dict.as_python_constant(), self.kv)()
 
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]
+
     def python_type(self):
         raise NotImplementedError(f"Cannot instantiate {self.__class__}")
 
@@ -342,18 +345,19 @@ class DictView(VariableTracker):
 class DictKeys(DictView):
     kv = "keys"
     # TODO Implement intersect / union
-    # FIXME Eager allows to use tensors as keys. dynamo doesn't
+    # FIXME Eager allows to use build dicts with tensor as keys. dynamo doesn't
 
-    def unpack_var_sequence(self, tx):
-        # TODO(lezcano): Why does ConstantDict is unpacked into a list of keys
-        return self.dv_dict.unpack_var_sequence(tx)
+    @property
+    def items(self):
+        return self.dv_dict.unpack_var_sequence(self.dv_dict.tx)
 
 
 class DictValues(DictView):
     kv = "values"
 
-    def unpack_var_sequence(self, tx):
-        return [x.add_options(self) for x in self.items]
+    @property
+    def items(self):
+        return self.dv_dict.items.values()
 
 
 class DataClassVariable(ConstDictVariable):
