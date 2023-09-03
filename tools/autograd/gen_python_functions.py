@@ -159,9 +159,9 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
     "normal_functional",  # only used by the functionalization pas
-    "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
-    "_nested_view_from_buffer_copy",
-    "_nested_view_from_buffer_copy_out",
+    # "_nested_view_from_buffer",  # View only version of _nested_from_buffer. This will force users to only use the "safe" version.
+    # "_nested_view_from_buffer_copy",
+    # "_nested_view_from_buffer_copy_out",
     "nbytes",
     "itemsize",
 ]

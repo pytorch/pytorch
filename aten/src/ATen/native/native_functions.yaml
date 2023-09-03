@@ -5948,7 +5948,7 @@
 # The input arguments' types to this functions are temporary. When nested tensors switch to using SymInts for their metadata representation
 # this will need to be updated
 - func: _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)
-  variants: function
+  variants: function, method
   device_check: NoCheck
   dispatch:
     CPU, CUDA: _nested_view_from_buffer
@@ -8673,6 +8673,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: gt_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: ge_scalar_nested
   tags: [core, pointwise]
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
