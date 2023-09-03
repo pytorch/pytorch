@@ -982,6 +982,13 @@ def clip(
     max: Optional[ArrayLikeOrScalar] = None,
     out: Optional[OutArray] = None,
 ):
+    is_min_scalar = _dtypes_impl.is_scalar_or_symbolic(min)
+    is_max_scalar = _dtypes_impl.is_scalar_or_symbolic(max)
+    if is_min_scalar and not is_max_scalar:
+        min = _util._coerce_to_tensor(min)
+    if is_max_scalar and not is_min_scalar:
+        max = _util._coerce_to_tensor(max)
+
     return torch.clamp(a, min, max)
 
 
