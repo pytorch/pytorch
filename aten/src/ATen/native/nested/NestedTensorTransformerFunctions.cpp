@@ -27,11 +27,11 @@ inline void check_nested_tensor_matrix_constraints(
   // error out for now
   TORCH_CHECK(
       nested_tensor_impl_is_contiguous(nt_input),
-      "for now linear only supports contiguous nested tensor");
+      "for now ", caller, " only supports contiguous nested tensor");
   TORCH_CHECK(
-      nested_tensor.dim() == 3 && dense_matrix.dim() == 2,
+      nested_tensor.dim() >= 3 && dense_matrix.dim() == 2,
       caller,
-      " requires nested_tensor.dim == 3 and dense_matrix.dim == 2."
+      " requires nested_tensor.dim >= 3 and dense_matrix.dim == 2."
       " Nested tensor dim: ",
       nested_tensor.dim(),
       ". Dense tensor dim: ",

@@ -783,6 +783,10 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
       "empty nested tensor cannot be reshaped");
   // basic information after reshaping
   int64_t ntensors_reshaped = proposed_shape[0];
+  if (proposed_shape.size() == 1 && proposed_shape[0] == -1 && self.is_contiguous()) {
+    const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
+    return self_buf;
+  }
   TORCH_CHECK(
       ntensors == ntensors_reshaped,
       "view: For now nested view cannot change or infer the implicit batch dimension");
