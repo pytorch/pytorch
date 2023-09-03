@@ -3,14 +3,17 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 
 /**
- * Improvement of std::string_view.
+ * Port of std::string_view with methods from C++20.
  * Implemented following the interface definition in
  * https://en.cppreference.com/w/cpp/string/basic_string_view
  * See there for the API documentation.
@@ -111,8 +114,7 @@ class basic_string_view final {
     return C10_UNLIKELY(pos >= size_)
         ? (throw std::out_of_range(
                "string_view::operator[] or string_view::at() out of range. Index: " +
-               std::to_string(pos) +
-               ", size: " + std::to_string(size())),
+               std::to_string(pos) + ", size: " + std::to_string(size())),
            at_(0))
         : at_(pos);
 #else
@@ -177,8 +179,7 @@ class basic_string_view final {
     if (pos > size_) {
       throw std::out_of_range(
           "basic_string_view::copy: out of range. Index: " +
-          std::to_string(pos) +
-          ", size: " + std::to_string(size()));
+          std::to_string(pos) + ", size: " + std::to_string(size()));
     }
     size_type copy_length = std::min(count, size_ - pos);
     for (auto iter = begin() + pos, end = iter + copy_length; iter != end;) {
@@ -194,8 +195,7 @@ class basic_string_view final {
     return (pos > size_)
         ? (throw std::out_of_range(
                "basic_string_view::substr parameter out of bounds. Index: " +
-               std::to_string(pos) +
-               ", size: " + std::to_string(size())),
+               std::to_string(pos) + ", size: " + std::to_string(size())),
            substr_())
         : substr_(pos, count);
 #else
@@ -611,4 +611,3 @@ struct hash<::c10::basic_string_view<CharT>> {
   }
 };
 } // namespace std
-
