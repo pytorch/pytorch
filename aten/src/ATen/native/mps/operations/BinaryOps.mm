@@ -67,6 +67,7 @@ static void binaryOpTensor(const Tensor& self,
               "MPS: ",
               op_name,
               " op with int64 input is supported natively starting from macOS 13.2");
+  TORCH_CHECK_TYPE(!isComplexType(self.scalar_type()), "Complex types are unsupported on MPS");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
