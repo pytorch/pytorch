@@ -7202,7 +7202,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.freezing import ConstantFolder
+            from torch._inductor.constant_folding import ConstantFolder
 
             with mode:
                 ConstantFolder(mod).run()
