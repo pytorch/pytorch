@@ -1460,7 +1460,8 @@ void qmul_kernel(Tensor& out, const Tensor& self, const Tensor& other) {
   });
 }
 
-void qmaxpool_2d_nhwc_kernel(
+template <typename scalar_t, typename scalar_t_underlying>
+void _qmaxpool_2d_nhwc_kernel(
     const Tensor& qx,
     int64_t iC, // input/output channels
     int64_t iH,
@@ -1476,7 +1477,6 @@ void qmaxpool_2d_nhwc_kernel(
     int64_t dH,
     int64_t dW, // dilation
     Tensor& qy) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
 
@@ -1486,8 +1486,8 @@ void qmaxpool_2d_nhwc_kernel(
       data_index_init(begin, b, nBatch, row, oH, col, oW);
 
       for (const auto i : c10::irange(begin, end)) {
-        auto* i_p = reinterpret_cast<scalar_t::underlying*>(idata + b * iW * iH * iC);
-        auto* o_p = reinterpret_cast<scalar_t::underlying*>(odata + i * iC);
+        auto* i_p = reinterpret_cast<scalar_t_underlying*>(idata + b * iW * iH * iC);
+        auto* o_p = reinterpret_cast<scalar_t_underlying*>(odata + i * iC);
 
         // Loop over reduction block
         int64_t h_start = row * sH - pH;
@@ -1505,7 +1505,7 @@ void qmaxpool_2d_nhwc_kernel(
         constexpr auto vec_width = Vectorized<scalar_t>::size();
         for (; c + 4 * vec_width <= iC; c += 4 * vec_width) {
           Vectorized<scalar_t> acc{
-              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+              scalar_t(std::numeric_limits<scalar_t_underlying>::lowest())};
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
           Vectorized<scalar_t> accs[4] = {acc, acc, acc, acc};
           int64_t tcntr = 0;
@@ -1528,7 +1528,7 @@ void qmaxpool_2d_nhwc_kernel(
         // Vector loop
         for (; c + vec_width <= iC; c += vec_width) {
           Vectorized<scalar_t> acc{
-              scalar_t(std::numeric_limits<scalar_t::underlying>::lowest())};
+              scalar_t(std::numeric_limits<scalar_t_underlying>::lowest())};
           int64_t tcntr = 0;
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
@@ -1542,7 +1542,7 @@ void qmaxpool_2d_nhwc_kernel(
         } // for c
 
         for (; c < iC; ++c) {
-          auto max_val = std::numeric_limits<scalar_t::underlying>::lowest();
+          auto max_val = std::numeric_limits<scalar_t_underlying>::lowest();
           int64_t tcntr = 0;
           int64_t x, y;
           for (y = h_start; y < h_end; y += dH) {
@@ -1559,7 +1559,33 @@ void qmaxpool_2d_nhwc_kernel(
         data_index_step(b, nBatch, row, oH, col, oW);
       }
     });
-  });
+}
+
+void qmaxpool_2d_nhwc_kernel(
+    const Tensor& qx,
+    int64_t iC, // input/output channels
+    int64_t iH,
+    int64_t iW, // input sizes
+    int64_t oH,
+    int64_t oW, // output sizes
+    int64_t kH,
+    int64_t kW, // kernel size
+    int64_t sH,
+    int64_t sW, // strides
+    int64_t pH,
+    int64_t pW, // padding
+    int64_t dH,
+    int64_t dW, // dilation
+    Tensor& qy) {
+  if (qx.scalar_type() == ScalarType::Byte) {
+    AT_DISPATCH_INTEGRAL_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
+      _qmaxpool_2d_nhwc_kernel<scalar_t, scalar_t>(qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+    });
+  } else {
+    AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d_nhwc", [&]() {
+      _qmaxpool_2d_nhwc_kernel<scalar_t, scalar_t::underlying>(qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+    });
+  }
 }
 
 void qmaxpool_3d_nthwc_kernel(
