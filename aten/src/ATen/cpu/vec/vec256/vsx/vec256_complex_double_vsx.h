@@ -320,10 +320,6 @@ class Vectorized<ComplexDbl> {
     return ln * vd_imag_half; // i/2*ln()
   }
 
-  Vectorized<ComplexDbl> isnan() const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-
   Vectorized<ComplexDbl> sin() const {
     return map(std::sin);
   }
