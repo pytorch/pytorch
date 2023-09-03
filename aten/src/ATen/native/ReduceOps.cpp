@@ -1186,9 +1186,6 @@ Tensor& sum_out(const Tensor& self, DimnameList dim,
 
 Tensor& nansum_out(const Tensor& self, at::OptionalIntArrayRef dim,
                        bool keepdim, optional<ScalarType> opt_dtype, Tensor& result) {
-  if (self.device().is_cpu()) {
-    TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
-  }
 
   // For integral types, use existing sum as
   // integral types don't have `Nan`.

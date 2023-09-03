@@ -222,6 +222,12 @@ public:
   Vectorized<c10::complex<float>> log1p() const {
     return map(std::log1p);
   }
+  Vectorized<c10::complex<float>> isnan() const {
+    __m256 real = _mm256_cmp_ps(values, values, _CMP_UNORD_Q);
+    __m256 imag = _mm256_cmp_ps(values, _mm256_permute_ps(values, 0x05), _CMP_UNORD_Q);
+    __m256 mask = _mm256_or_ps(real, imag);
+    return Vectorized<c10::complex<float>>(_mm256_testz_ps(mask, mask));
+  }
   Vectorized<c10::complex<float>> asin() const {
     // asin(x)
     // = -i*ln(iz + sqrt(1 -z^2))

@@ -374,6 +374,10 @@ class Vectorized<ComplexFlt> {
     return angle_() & real_mask;
   }
 
+  Vectorized<ComplexFlt> isnan() const {
+    TORCH_CHECK(false, "not supported for complex numbers");
+  }
+
   Vectorized<ComplexFlt> sin() const {
     return map(std::sin);
   }

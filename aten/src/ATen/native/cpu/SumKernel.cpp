@@ -620,11 +620,32 @@ void sum_kernel_impl(TensorIterator &iter) {
   });
 }
 
+template <typename scalar_t>
+struct nansum_complex {
+  void operator()(TensorIterator& iter) {
+    scalar_t sum = scalar_t{0.};
+    cpu_kernel(iter, [&](scalar_t a) -> scalar_t{
+      if (!at::_isnan(a)) {
+        sum += a;
+      } else {
+        sum += scalar_t{0.};
+      }
+      return sum;
+    });
+  }
+};
+
 void nansum_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
-    cascade_sum</*ignore_nan=*/true, scalar_t>(iter);
-  });
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, iter.dtype(), "nansum_cpu", [&] {
+      nansum_complex<scalar_t>{}(iter);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
+      cascade_sum</*ignore_nan=*/true, scalar_t>(iter);
+    });
+  }
 }
 
 }  // namespace (anonymous)
