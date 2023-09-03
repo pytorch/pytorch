@@ -292,6 +292,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
     def check_kwargs(self, kwargs, supported_types):
+        print("test")
         assert (
             all(isinstance(value, supported_types) for value in kwargs.values())
             or not kwargs
