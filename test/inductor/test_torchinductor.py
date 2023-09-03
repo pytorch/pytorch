@@ -3346,6 +3346,10 @@ class CommonTemplate:
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
 
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         foo_opt = torch.compile(matmul_with_op)
 
         # test no-op
@@ -4800,7 +4804,7 @@ class CommonTemplate:
 
     def test_slice_scatter2(self):
         def fn(a, b):
-            return aten.slice_scatter(a, b, 0, 0, 370)
+            return aten.slice_scatter(a, b, 0, 0, 9223372036854775807)
 
         self.common(
             fn,
@@ -7198,7 +7202,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.freezing import ConstantFolder
+            from torch._inductor.constant_folding import ConstantFolder
 
             with mode:
                 ConstantFolder(mod).run()
