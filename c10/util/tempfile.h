@@ -4,7 +4,17 @@
 
 #include <cerrno>
 #include <cstring>
+#if __has_include(<version>)
+#include <version>
+#endif
+
+#if __has_include(<filesystem>) || ( defined(__cpp_lib_filesystem) && __cpp_lib_filesystem >= 201703L)
 #include <filesystem>
+namespace stdfs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace stdfs = std::experimental::filesystem;
+#endif
 #include <optional>
 #include <string>
 #include <string_view>
@@ -37,7 +47,7 @@ inline std::string make_filename(std::string_view name_prefix) {
     }
   }
 
-  std::filesystem::path filename(tmp_directory);
+  stdfs::path filename(tmp_directory);
 
   filename /= name_prefix;
   filename += kRandomPattern;
@@ -57,7 +67,7 @@ inline std::string make_filename() {
 } // namespace detail
 
 struct TempFile {
-  TempFile(const std::filesystem::path& name, int fd = -1) noexcept
+  TempFile(const stdfs::path& name, int fd = -1) noexcept
       : fd(fd), name(name.string()) {}
   TempFile(const TempFile&) = delete;
   TempFile(TempFile&& other) noexcept
@@ -77,7 +87,7 @@ struct TempFile {
 
   ~TempFile() {
     if (!name.empty()) {
-      std::filesystem::remove(name);
+      stdfs::remove(name);
 #if !defined(_WIN32)
       if (fd >= 0) {
         close(fd);
@@ -92,8 +102,7 @@ struct TempFile {
 
 struct TempDir {
   TempDir() = delete;
-  explicit TempDir(std::filesystem::path name) noexcept
-      : name(std::move(name)) {}
+  explicit TempDir(stdfs::path name) noexcept : name(std::move(name)) {}
   TempDir(const TempDir&) = delete;
   TempDir(TempDir&& other) noexcept : name(std::move(other.name)) {
     other.name.clear();
@@ -108,11 +117,11 @@ struct TempDir {
 
   ~TempDir() {
     if (!name.empty()) {
-      std::filesystem::remove(name);
+      stdfs::remove_all(name);
     }
   }
 
-  std::filesystem::path name;
+  stdfs::path name;
 };
 
 /// Attempts to return a temporary file or returns `nullopt` if an error
@@ -174,7 +183,7 @@ inline std::optional<TempDir> try_make_tempdir(
       return std::nullopt;
     }
     std::error_code ec{};
-    if (std::filesystem::create_directories(dirname, ec)) {
+    if (stdfs::create_directories(dirname, ec)) {
       return TempDir(dirname);
     }
     if (GetLastError() != ERROR_ALREADY_EXISTS) {
