@@ -5,24 +5,24 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
-#include <ATen/ops/lgamma_native.h>
 #include <ATen/ops/digamma_native.h>
+#include <ATen/ops/lgamma_native.h>
 #include <ATen/ops/polygamma_native.h>
 
 namespace at::native {
 namespace mps {
 
 /*
-* The gamma function approximations follow John D Cook's
-* c++ implementation:  https://www.johndcook.com/Gamma.cpp.
-* (BSD License)
-*
-*
-* The digamma kernel and helper function is derived from the pytorch cpu
-* of this function, which is itself derived from the implementation
-* of the digamma function in the Cephes Math Library.
-* See note [3-Clause BSD License for the Cephes Math Library].
-*/
+ * The gamma function approximations follow John D Cook's
+ * c++ implementation:  https://www.johndcook.com/Gamma.cpp.
+ * (BSD License)
+ *
+ *
+ * The digamma kernel and helper function is derived from the pytorch cpu
+ * of this function, which is itself derived from the implementation
+ * of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ */
 
 static const char* GAMMA_OPS_TEMPLATE = R"METAL(
 #include <metal_stdlib>
@@ -98,14 +98,14 @@ constant float GAMMA_DENOMINATOR_COEF[8] =
 // lgamma expansion coefficients
 constant float LGAMMA_EXPANSION_COEF[8] =
     {{
-		 1.0/12.0,
-		-1.0/360.0,
-		1.0/1260.0,
-		-1.0/1680.0,
-		1.0/1188.0,
-		-691.0/360360.0,
-		1.0/156.0,
-		-3617.0/122400.0
+        1.0/12.0,
+        -1.0/360.0,
+        1.0/1260.0,
+        -1.0/1680.0,
+        1.0/1188.0,
+        -691.0/360360.0,
+        1.0/156.0,
+        -3617.0/122400.0
     }};
 
 float LogGamma(float x);
@@ -119,12 +119,12 @@ float Gamma(float x) {{
         return 1.0/(x*(1.0 + EULER_MASCHERONI * x));
     }}
 
-	else if (x < 12.0) {{
+    else if (x < 12.0) {{
 
         // The algorithm directly approximates gamma over (1,2) and uses
         // reduction identities to reduce other arguments to this interval.
 
-		float y = x;
+        float y = x;
         int n = 0;
         bool less_than_one = (y < 1.0);
 
@@ -164,7 +164,7 @@ float Gamma(float x) {{
                 result *= y++;
         }}
 
-		return result;
+        return result;
     }}
 
     else {{
@@ -380,10 +380,7 @@ kernel void lgamma(device {0} *input [[buffer(0)]],
 
 )METAL";
 
-
-static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device,
-                                               const std::string& t1,
-                                               const std::string& t2) {
+static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device, const std::string& t1, const std::string& t2) {
   auto key = t1 + t2;
   static std::unordered_map<std::string, id<MTLLibrary>> libMap;
   auto it = libMap.find(key);
@@ -393,19 +390,18 @@ static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device,
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto rc =
-      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(GAMMA_OPS_TEMPLATE, t1, t2).c_str()]
-                           options:options
-                             error:&error];
+  auto rc = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(GAMMA_OPS_TEMPLATE, t1, t2).c_str()]
+                                 options:options
+                                   error:&error];
   TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
   libMap[key] = rc;
   return rc;
 }
 
-static <MTLComputePipelineState> getCPLState(id<MTLDevice> device,
-                                               const std::string& t1,
-                                               const std::string& t2,
-                                               const std::string& fname) {
+static<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
+                                            const std::string& t1,
+                                            const std::string& t2,
+                                            const std::string& fname) {
   auto key = t1 + t2 + fname;
   static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
   auto it = cplMap.find(key);
@@ -435,7 +431,6 @@ static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
 } // namespace mps
 
 TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
-
   TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support lgamma_out op with scalar type: Double");
 
   Tensor output = output_;
@@ -446,9 +441,9 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
   }
 
   if (!self.is_contiguous()) {
-      output = output.contiguous();
-      needs_output_copy = true;
-    }
+    output = output.contiguous();
+    needs_output_copy = true;
+  }
 
   using namespace mps;
 
@@ -456,12 +451,8 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
   std::string output_type = scalarToMetalTypeString(output.scalar_type());
 
   @autoreleasepool {
-
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(device,
-                                                        input_type,
-                                                        output_type,
-                                                        "lgamma");
+    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, "lgamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -475,7 +466,6 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
       [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
       [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
 
-
       mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -487,7 +477,6 @@ TORCH_IMPL_FUNC(lgamma_out_mps)(const Tensor& self, const Tensor& output_) {
 }
 
 TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
-
   TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support digamma_out op with scalar type: Double");
 
   Tensor output = output_;
@@ -498,9 +487,9 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
   }
 
   if (!self.is_contiguous()) {
-      output = output.contiguous();
-      needs_output_copy = true;
-    }
+    output = output.contiguous();
+    needs_output_copy = true;
+  }
 
   using namespace mps;
 
@@ -508,12 +497,8 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
   std::string output_type = scalarToMetalTypeString(output.scalar_type());
 
   @autoreleasepool {
-
     id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState = getCPLState(device,
-                                                        input_type,
-                                                        output_type,
-                                                        "digamma");
+    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, "digamma");
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {
@@ -527,7 +512,6 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
       [computeEncoder setBuffer:selfBuf offset:self.storage_offset() * self.element_size() atIndex:0];
       [computeEncoder setBuffer:outBuf offset:output.storage_offset() * output.element_size() atIndex:1];
 
-
       mps::dispatch1DJob(computeEncoder, cplState, static_cast<uint32_t>(length));
 
       getMPSProfiler().endProfileKernel(cplState);
@@ -539,8 +523,8 @@ TORCH_IMPL_FUNC(digamma_out_mps)(const Tensor& self, const Tensor& output_) {
 }
 
 TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, const Tensor& output_) {
-
-  TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support polygamma_out op with scalar type: Double");
+  TORCH_CHECK(self.scalar_type() != ScalarType::Double,
+              "MPS does not support polygamma_out op with scalar type: Double");
   TORCH_CHECK(order >= 0, "Polygamma is implemented only for nonnegative real numbers");
 
   Tensor output = output_;
@@ -551,9 +535,9 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
   }
 
   if (!self.is_contiguous()) {
-      output = output.contiguous();
-      needs_output_copy = true;
-    }
+    output = output.contiguous();
+    needs_output_copy = true;
+  }
 
   using namespace mps;
 
@@ -561,24 +545,18 @@ TORCH_IMPL_FUNC(polygamma_out_mps)(const int64_t order, const Tensor& self, cons
   std::string output_type = scalarToMetalTypeString(output.scalar_type());
   std::string func_name;
 
-  if (order == 0){
+  if (order == 0) {
     func_name = "digamma";
-  }
-  else if (order == 1){
+  } else if (order == 1) {
     func_name = "trigamma";
-  }
-  else {
+  } else {
     func_name = "polygamma";
   }
 
   @autoreleasepool {
-
     id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-    id<MTLComputePipelineState> cplState = getCPLState(device,
-                                                        input_type,
-                                                        output_type,
-                                                        func_name);
+    id<MTLComputePipelineState> cplState = getCPLState(device, input_type, output_type, func_name);
 
     MPSStream* mpsStream = getCurrentMPSStream();
     dispatch_sync(mpsStream->queue(), ^() {

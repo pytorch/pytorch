@@ -10556,11 +10556,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.lgamma`
+        # This can be changed once we actually implement 'lcm'
         # Should return fn, args, kwargs, string_version
-        return (torch.lgamma,
-                torch.tensor([100], device='mps'), {},
-                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
+        return (torch.lcm,
+                [torch.tensor([1], device='mps'), torch.tensor([2], device='mps')], {},
+                "torch.lcm(torch.tensor([1], device='mps'), torch.tensor([2], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
