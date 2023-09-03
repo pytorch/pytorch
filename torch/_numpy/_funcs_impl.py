@@ -7,6 +7,7 @@ pytorch tensors.
 # where type annotations are used in conjunction with the @normalizer decorator.
 from __future__ import annotations
 
+import math
 import builtins
 import itertools
 import operator
@@ -305,8 +306,8 @@ def linspace(
 
 
 def geomspace(
-    start: ArrayLike,
-    stop: ArrayLike,
+    start: ArrayLikeOrScalar,
+    stop: ArrayLikeOrScalar,
     num=50,
     endpoint=True,
     dtype: Optional[DTypeLike] = None,
@@ -314,11 +315,20 @@ def geomspace(
 ):
     if axis != 0 or not endpoint:
         raise NotImplementedError
-    base = torch.pow(stop / start, 1.0 / (num - 1))
-    logbase = torch.log(base)
+    all_scalars = all(_dtypes_impl.is_scalar_or_symbolic(x) for x in [start, stop, num])
+
+    if all_scalars:
+        power = math.pow
+        log = math.log
+    else:
+        power = torch.pow
+        log = torch.log
+
+    base = power(stop / start, 1.0 / (num - 1))
+    logbase = log(base)
     return torch.logspace(
-        torch.log(start) / logbase,
-        torch.log(stop) / logbase,
+        log(start) / logbase,
+        log(stop) / logbase,
         num,
         base=base,
     )
