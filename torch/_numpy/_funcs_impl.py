@@ -7,9 +7,10 @@ pytorch tensors.
 # where type annotations are used in conjunction with the @normalizer decorator.
 from __future__ import annotations
 
-import math
 import builtins
 import itertools
+
+import math
 import operator
 from typing import Optional, Sequence
 
