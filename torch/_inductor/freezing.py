@@ -61,7 +61,7 @@ class ConstantFolder(torch.fx.Interpreter):
         insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
     ):
         super().__init__(gm)
-        self.node_replacements: Dict[int, torch.Tensor] = {}
+        self.node_replacements: Dict[torch.fx.Node, torch.Tensor] = {}
         self.replaced_uses: Counter[int] = collections.Counter()
         self.unknown_value = object()
         self.skip_constructors = skip_constructors
@@ -110,8 +110,8 @@ class ConstantFolder(torch.fx.Interpreter):
         out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
-            if not self.insertable_tensor_check(out):  # type: ignore[operator]
-                return out
+            if not isinstance(out, torch.Tensor):
+                raise TypeError("Expected a torch.Tensor, got {}".format(type(out)))
 
             self.node_replacements[node] = out
 
