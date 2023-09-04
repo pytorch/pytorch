@@ -20,6 +20,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 #include <utility>
 
@@ -376,10 +377,10 @@ Tensor _qembeddingbag_nbit_prepack_helper(
   int NUM_ELEM_PER_BYTE = 8 / bit_width;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
-      "qembeddingbag_",
-      std::to_string(bit_width),
-      "bit_prepack only works for the number of columns a multiple of ",
-      std::to_string(NUM_ELEM_PER_BYTE));
+      fmt::format(
+          "qembeddingbag_{}bit_prepack only works for the number of columns a multiple of {}",
+          bit_width,
+          NUM_ELEM_PER_BYTE));
 
   // The "fused" representation stores the scale and bias with the
   // row-wise quantized data in one tensor.

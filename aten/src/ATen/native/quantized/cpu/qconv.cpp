@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <ATen/core/Tensor.h>
@@ -36,6 +37,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
@@ -49,7 +51,7 @@ bool ConvDimChecks(
     int64_t padding_dims,
     int64_t output_padding_dims,
     int64_t dilation_dims,
-    std::string func_name,
+    std::string_view func_name,
     bool transpose = false) {
   TORCH_CHECK(
       act_dims == kSpatialDim + 2,
@@ -1452,8 +1454,7 @@ static at::Tensor _quantized_convolution_onednn(
     }
   }
 
-  std::string func_name = "quantized::packed_weights_conv";
-  func_name += std::to_string(kSpatialDim) + "d";
+  std::string func_name = fmt::format("quantized::packed_weights_conv{}d", kSpatialDim);
   if (has_binary_post_op) {
     func_name += binary_attr.value().data();
   }
@@ -1562,8 +1563,7 @@ static at::Tensor _quantized_convolution_onednn(
     TORCH_CHECK(bias_val_float.dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
         bias_val_float.size(0) == output_channels,
-        "bias should have K elements: " + std::to_string(output_channels));
-    auto bias_desc = ideep::tensor::desc(bias_val_float.sizes().vec(), dnnl::memory::data_type::f32);
+        fmt::format("bias should have K elements: {}", output_channels));
     onednn_bias.init(bias_desc, bias_val_float.data_ptr());
   }
 

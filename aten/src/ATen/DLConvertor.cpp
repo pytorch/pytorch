@@ -1,6 +1,8 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
 
+#include <string>
+
 using namespace std;
 namespace at {
 
