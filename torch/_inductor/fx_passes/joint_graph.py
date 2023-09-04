@@ -38,6 +38,8 @@ def remove_no_ops(
     graph = gm.graph
 
     def fake_tensors_eq(t1, t2, fields=("shape", "dtype", "device")):
+        if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
+            return False
         for field in fields:
             if getattr(t1, field) != getattr(t2, field):
                 return False
@@ -110,9 +112,12 @@ def remove_no_ops(
 def constant_fold_uniform_value(gm):
     "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
     aten = torch.ops.aten
-    from torch._inductor.freezing import ConstantFolder
+    from torch._inductor.constant_folding import ConstantFolder
 
-    cf = ConstantFolder(gm)
+    def is_uniform_valued_tensor(t):
+        return t.numel() != 0 and (t == t.flatten()[0]).all()
+
+    cf = ConstantFolder(gm, insertable_tensor_check=is_uniform_valued_tensor)
     cf.run()
 
     node_replacements = cf.node_replacements
@@ -138,7 +143,7 @@ def constant_fold_uniform_value(gm):
         # remove constants which can be replaced with a constructor.
 
         # TODO - we could also Tensors which get replaced with arange here
-        if constant.numel() == 0 or not (constant == constant.flatten()[0]).all():
+        if not is_uniform_valued_tensor(constant):
             continue
 
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now

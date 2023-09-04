@@ -34,6 +34,8 @@ __all__ = [
     "DefaultDeviceType",
 ]
 
+_DEFAULT_DETERMINISM_MODE = "default"
+
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
@@ -66,7 +68,7 @@ def _get_device_module(device="cuda"):
     return device_module
 
 
-class DefaultDeviceType(object):
+class DefaultDeviceType:
     r"""
     A class that manages the default device type for checkpointing.
     If no non-CPU tensors are present, the default device type will
@@ -157,20 +159,21 @@ def set_device_states(devices, states) -> None:
 
 
 def _get_autocast_kwargs(device="cuda"):
-
     if device == "cuda":
         device_autocast_kwargs = {
             "enabled": torch.is_autocast_enabled(),
             "dtype": torch.get_autocast_gpu_dtype(),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
-    else:
+    elif _supports_autocast(device):
         device_module = _get_device_module(device)
         device_autocast_kwargs = {
             "enabled": device_module.is_autocast_enabled(),
             "dtype": device_module.get_autocast_dtype(),
             "cache_enabled": torch.is_autocast_cache_enabled(),
         }
+    else:
+        device_autocast_kwargs = None
 
     cpu_autocast_kwargs = {
         "enabled": torch.is_autocast_cpu_enabled(),
@@ -180,6 +183,10 @@ def _get_autocast_kwargs(device="cuda"):
 
     return device_autocast_kwargs, cpu_autocast_kwargs
 
+def _supports_autocast(device):
+    device_module = _get_device_module(device)
+    return device == "cuda" or (hasattr(device_module, "is_autocast_enabled")
+                                and hasattr(device_module, "get_autocast_dtype"))
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
@@ -200,7 +207,7 @@ class CheckpointFunction(torch.autograd.Function):
             # we have no way to anticipate this will happen before we run the function.)
             ctx.had_device_in_fwd = False
             device_module = _get_device_module(ctx.device)
-            if device_module._initialized:
+            if getattr(device_module, "_initialized", False):
                 ctx.had_device_in_fwd = True
                 ctx.fwd_devices, ctx.fwd_device_states = get_device_states(*args)
 
@@ -255,9 +262,12 @@ class CheckpointFunction(torch.autograd.Function):
                 if ctx.had_device_in_fwd:
                     set_device_states(ctx.fwd_devices, ctx.fwd_device_states)
             detached_inputs = detach_variable(tuple(inputs))
-            with torch.enable_grad(), device_module.amp.autocast(
+
+            device_autocast_ctx = device_module.amp.autocast(
                 **ctx.device_autocast_kwargs
-            ), torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
+            ) if _supports_autocast(ctx.device) else contextlib.nullcontext()
+            with torch.enable_grad(), device_autocast_ctx, \
+                 torch.cpu.amp.autocast(**ctx.cpu_autocast_kwargs):
                 outputs = ctx.run_function(*detached_inputs)
 
         if isinstance(outputs, torch.Tensor):
@@ -287,23 +297,34 @@ class CheckpointFunction(torch.autograd.Function):
 def noop_context_fn():
     return contextlib.nullcontext(), contextlib.nullcontext()
 
-
+# TorchDynamo does not step inside utils.checkpoint function.  The flow
+# looks likes this
+#  1) TorchDynamo tries to wrap utils.checkpoint in a HigherOrderOp by
+#     speculatively checking if the forward function is safe to trace.
+#  2) If yes, then Dynamo-generated Fx graph has the wrapped higher
+#     order op. As a result, TorchDynamo does not look inside utils.checkpoint.
+#  3) If not, then TorchDynamo falls back to eager by performing a graph
+#     break. And here, the following disable wrapper ensures that
+#     TorchDynamo does not trigger again on the frames created by
+#     utils.checkpoint innards.
+@torch._disable_dynamo
 def checkpoint(
     function,
     *args,
     use_reentrant: Optional[bool] = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    determinism_check: str = "default",
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model
 
-    Checkpointing is a technique that trades compute for memory. Instead of
-    storing all intermediate activations of the entire computation graph for
-    the backward pass, the checkpointed part omits saving intermediate
-    activations and recomputes them during the backward pass. This can be
-    applied to any part of a model.
+    Activation checkpointing is a technique that trades compute for memory.
+    Instead of keeping tensors needed for backward alive until they are used in
+    gradient computation during backward, forward computation in checkpointed
+    regions omits saving tensors for backward and recomputes them during the
+    backward pass. Activation checkpointing can be applied to any part of a
+    model.
 
     There are currently two checkpointing implementations available, determined
     by the :attr:`use_reentrant` parameter. It is recommended that you use
@@ -429,15 +450,17 @@ def checkpoint(
             )
         return CheckpointFunction.apply(function, preserve, *args)
     else:
-        return _checkpoint_without_reentrant(
-            function,
-            preserve,
-            context_fn,
-            determinism_check,
-            debug,
-            *args,
-            **kwargs,
+        gen = _checkpoint_without_reentrant_generator(
+            function, preserve, context_fn, determinism_check, debug, *args, **kwargs
         )
+        # Runs pre-forward logic
+        next(gen)
+        ret = function(*args, **kwargs)
+        # Runs post-forward logic
+        try:
+            next(gen)
+        except StopIteration:
+            return ret
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
@@ -963,7 +986,7 @@ def _default_meta_extractor(x: torch.Tensor) -> Dict[str, Any]:
     }
 
 _allowed_determinism_checks_to_fns: Dict[str, Callable[[torch.Tensor], Any]] = {
-    "default": _default_meta_extractor,
+    _DEFAULT_DETERMINISM_MODE: _default_meta_extractor,
     "none": lambda _: None,
 }
 
@@ -1077,11 +1100,12 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
-def _checkpoint_without_reentrant(
+
+def _checkpoint_without_reentrant_generator(
     fn,
     preserve_rng_state=True,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
-    determinism_check: str = "default",
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
     *args,
     **kwargs
@@ -1143,7 +1167,7 @@ def _checkpoint_without_reentrant(
         # we have no way to anticipate this will happen before we run the function.
         # If they do so, we raise an error.)
         had_device_in_fwd = False
-        if device_module._initialized:
+        if getattr(device_module, "_initialized", False):
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
@@ -1162,9 +1186,11 @@ def _checkpoint_without_reentrant(
                 if had_device_in_fwd:
                     set_device_states(fwd_devices, fwd_device_states)
 
-            with device_module.amp.autocast(
+            device_autocast_ctx = device_module.amp.autocast(
                 **device_autocast_kwargs
-            ), torch.cpu.amp.autocast(**cpu_autocast_kwargs), recompute_context:
+            ) if _supports_autocast(device) else contextlib.nullcontext()
+            with device_autocast_ctx, torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
+                 recompute_context:
                 fn(*args, **kwargs)
 
     new_frame = _CheckpointFrame(
@@ -1178,13 +1204,15 @@ def _checkpoint_without_reentrant(
 
     # When ambient grad_mode is False
     if new_frame.input_saver.grad_fn is None:
-        return fn(*args, **kwargs)
+        yield
+        return
 
     with _checkpoint_hook(new_frame), forward_context:
-        ret = fn(*args, **kwargs)
+        yield
     new_frame.forward_completed = True
 
-    if device_module._initialized and preserve_rng_state and not had_device_in_fwd:
+    if getattr(device_module, "_initialized", False) and \
+       preserve_rng_state and not had_device_in_fwd:
         # Device was not initialized before running the forward, so we didn't
         # stash the device state.
         raise RuntimeError(
@@ -1193,4 +1221,4 @@ def _checkpoint_without_reentrant(
             "if you need this feature."
         )
 
-    return ret
+    return

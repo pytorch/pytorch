@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adds docstrings to functions defined in the torch._C"""
 
 import re
@@ -1258,7 +1257,7 @@ be the PyTorch datatype corresponding to the NumPy's scalar's datatype.
 
 When :attr:`obj` is none of the above but a scalar, or a sequence of scalars then the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
-CPU device, and not share its memory.
+current default device, and not share its memory.
 
 .. seealso::
 
@@ -1283,7 +1282,8 @@ Keyword args:
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
            error is thrown if it cannot.
     device (:class:`torch.device`, optional): the device of the returned tensor.
-           Default: ``None``, which causes the device of :attr:`obj` to be used.
+           Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
+           :attr:`obj` is a Python sequence, the current default device will be used.
     requires_grad (bool, optional): whether the returned tensor requires grad.
            Default: ``False``, which causes the returned tensor not to require a gradient.
            If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
@@ -3044,6 +3044,7 @@ resolve_neg(input) -> Tensor
 
 Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+
 Args:
     {input}
 
@@ -3054,12 +3055,11 @@ Example::
     >>> z = y.imag
     >>> z.is_neg()
     True
-    >>> out = y.resolve_neg()
+    >>> out = z.resolve_neg()
     >>> out
-    tensor([-1, -2, -3])
+    tensor([-1., -2., 3.])
     >>> out.is_neg()
     False
-
 """.format(
         **common_args
     ),
@@ -9586,6 +9586,7 @@ Rounds elements of :attr:`input` to the nearest integer.
 
 For integer inputs, follows the array-api convention of returning a
 copy of the input tensor.
+The return type of output is same as that of input's dtype.
 
 .. note::
     This function implements the "round half to even" to
@@ -9773,7 +9774,7 @@ Args:
 Example::
 
     >>> a = torch.zeros(8, 8)
-    >>> b = torch.ones(8)
+    >>> b = torch.ones(2, 8)
     >>> a.slice_scatter(b, start=6)
     tensor([[0., 0., 0., 0., 0., 0., 0., 0.],
             [0., 0., 0., 0., 0., 0., 0., 0.],
@@ -9784,7 +9785,7 @@ Example::
             [1., 1., 1., 1., 1., 1., 1., 1.],
             [1., 1., 1., 1., 1., 1., 1., 1.]])
 
-    >>> b = torch.ones(2)
+    >>> b = torch.ones(8, 2)
     >>> a.slice_scatter(b, dim=1, start=2, end=6, step=2)
     tensor([[0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
@@ -10514,8 +10515,8 @@ Example::
 
 add_docstr(
     torch.sparse_coo_tensor,
-    r"""
-sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""sparse_coo_tensor(indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None, is_coalesced=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
@@ -10523,7 +10524,9 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 
 .. note::
 
-   This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
+   This function returns an :ref:`uncoalesced tensor
+   <sparse-uncoalesced-coo-docs>` when :attr:`is_coalesced` is
+   unspecified or ``None``.
 
 {sparse_factory_device_note}
 
@@ -10548,6 +10551,15 @@ Keyword args:
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
     {check_invariants}
+    is_coalesced (bool, optional): When``True``, the caller is
+        responsible for providing tensor indices that correspond to a
+        coalesced tensor.  If the :attr:`check_invariants` flag is
+        False, no error will be raised if the prerequisites are not
+        met and this will lead to silently incorrect results. To force
+        coalescion please use :meth:`coalesce` on the resulting
+        Tensor.
+        Default: None: except for trivial cases (e.g. nnz < 2) the
+        resulting Tensor has is_coalesced set to ``False```.
 
 Example::
 
@@ -11961,13 +11973,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`.
 
 .. math::
-    \text{output} = min(
-        \text{quant\_max},
-        max(
-            \text{quant\_min},
-            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-        )
-    )
+    \text{output} = (
+        min(
+            \text{quant\_max},
+            max(
+                \text{quant\_min},
+                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+            )
+        ) - \text{zero\_point}
+    ) \times \text{scale}
 
 Args:
     input (Tensor): the input value(s), ``torch.float32`` tensor
@@ -11987,26 +12001,28 @@ Example::
     >>> torch.fake_quantize_per_tensor_affine(x, 0.1, 0, 0, 255)
     tensor([0.1000, 1.0000, 0.4000, 0.0000])
     >>> torch.fake_quantize_per_tensor_affine(x, torch.tensor(0.1), torch.tensor(0), 0, 255)
-    tensor([0.6000, 0.4000, 0.0000, 0.0000])
+    tensor([0.1000, 1.0000, 0.4000, 0.0000])
 """,
 )
 
 add_docstr(
     torch.fake_quantize_per_channel_affine,
     r"""
-fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+fake_quantize_per_channel_affine(input, scale, zero_point, axis, quant_min, quant_max) -> Tensor
 
 Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
 
 .. math::
-    \text{output} = min(
-        \text{quant\_max},
-        max(
-            \text{quant\_min},
-            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-        )
-    )
+    \text{output} = (
+        min(
+            \text{quant\_max},
+            max(
+                \text{quant\_min},
+                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+            )
+        ) - \text{zero\_point}
+    ) \times \text{scale}
 
 Args:
     input (Tensor): the input value(s), in ``torch.float32``
@@ -12432,6 +12448,8 @@ Examples:
     (105, 1, 21, 3)
     >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).stride()
     (105, 1, 21, 3)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).dim_order()
+    (0, 2, 3, 1)
 """.format(
         **factory_common_args
     ),
@@ -13604,9 +13622,7 @@ add_docstr(
     r"""
 Generator.manual_seed(seed) -> Generator
 
-Sets the seed for generating random numbers. Returns a `torch.Generator` object.
-It is recommended to set a large seed, i.e. a number that has a good balance of 0
-and 1 bits. Avoid having many 0 bits in the seed.
+Sets the seed for generating random numbers. Returns a `torch.Generator` object. Any 32-bit integer is a valid seed.
 
 Arguments:
     seed (int): The desired seed. Value must be within the inclusive range
@@ -13784,8 +13800,10 @@ bucketize(input, boundaries, *, out_int32=False, right=False, out=None) -> Tenso
 
 Returns the indices of the buckets to which each value in the :attr:`input` belongs, where the
 boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
-as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More
-formally, the returned index satisfies the following rules:
+as :attr:`input`. If :attr:`right` is False (default), then the left boundary is open. Note that
+this behavior is opposite the behavior of
+`numpy.digitize <https://docs.scipy.org/doc/numpy/reference/generated/numpy.digitize.html>`_.
+More formally, the returned index satisfies the following rules:
 
 .. list-table::
    :widths: 15 85
@@ -14051,23 +14069,19 @@ for unary_base_func_name in (
     if hasattr(torch, unary_foreach_func_name):
         add_docstr(
             getattr(torch, unary_foreach_func_name),
-            r"""
-{}(self: List[Tensor]) -> List[Tensor]
+            rf"""
+{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
 
-Apply :func:`torch.{}` to each Tensor of the input list.
-            """.format(
-                unary_foreach_func_name, unary_base_func_name
-            ),
+Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+            """,
         )
     unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
     if hasattr(torch, unary_inplace_foreach_func_name):
         add_docstr(
             getattr(torch, unary_inplace_foreach_func_name),
-            r"""
-{}(self: List[Tensor]) -> None
+            rf"""
+{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
 
-Apply :func:`torch.{}` to each Tensor of the input list.
-        """.format(
-                unary_inplace_foreach_func_name, unary_base_func_name
-            ),
+Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+        """,
         )

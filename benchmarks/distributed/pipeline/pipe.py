@@ -3,20 +3,22 @@ import math
 import os
 import time
 
-from benchmark_dataset import BenchmarkLMDataset, collate_sentences_lm
 import torch
-from torch.distributed import rpc
 import torch.nn as nn
-from torch.utils.data import DataLoader
+
+from benchmark_dataset import BenchmarkLMDataset, collate_sentences_lm
+from torch.distributed import rpc
 
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.utils import partition_model
 from torch.optim import Adam
+from torch.utils.data import DataLoader
 
-def sizeof_fmt(num, suffix='B'):
-    for unit in ['', 'Ki', 'Mi', 'Gi', 'Ti']:
+
+def sizeof_fmt(num, suffix="B"):
+    for unit in ["", "Ki", "Mi", "Gi", "Ti"]:
         if abs(num) < 1024.0:
-            return "%3.2f%sB" % (num, unit)
+            return f"{num:3.2f}{unit}B"
         num /= 1024.0
 
 
@@ -48,7 +50,9 @@ class PositionalEncodingLayer(nn.Module):
 
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model)
+        )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
@@ -104,13 +108,17 @@ class TransformerLMSequential(nn.Sequential):
 
 def make_model(args, device, ntokens):
     ninp = 2048  # embedding dimension
-    nhid = 2048  # the dimension of the feedforward network model in nn.TransformerEncoder
+    nhid = (
+        2048  # the dimension of the feedforward network model in nn.TransformerEncoder
+    )
     nhead = 32  # the number of heads in the multiheadattention models
     dropout = 0
     initrange = 0.1
     ndecoder = args.num_decoder_layers
 
-    model = TransformerLMSequential(ntokens, ninp, nhead, nhid, dropout, initrange, ndecoder).to(device)
+    model = TransformerLMSequential(
+        ntokens, ninp, nhead, nhid, dropout, initrange, ndecoder
+    ).to(device)
 
     criterion = nn.CrossEntropyLoss()
     lr = 0.01  # learning rate
@@ -145,8 +153,9 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
         else:
             return torch.cuda.current_device()
 
-
-    print('Number of parameters for model: {}'.format(sum(p.numel() for p in model.parameters())))
+    print(
+        f"Number of parameters for model: {sum(p.numel() for p in model.parameters())}"
+    )
     for i, batch in enumerate(lm_dataloader):
         bi = batch["input"]
         if args.max_batch and i > args.max_batch:
@@ -156,7 +165,9 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
             tmp = batch["input"].to(get_first_device(model))
             output = model(tmp).local_value()
         except Exception as e:
-            raise RuntimeError(f"training failed on {torch.distributed.get_rank()}") from e
+            raise RuntimeError(
+                f"training failed on {torch.distributed.get_rank()}"
+            ) from e
 
         target = batch["target"].to(get_last_device(model))
         output = output.to(target.device)
@@ -184,11 +195,12 @@ def train(lm_dataloader, model, criterion, optimizer, vocab_size, args):
             total_loss = 0
             start_time = time.time()
 
-    print('Peak memory usage for GPUs: ', end='')
+    print("Peak memory usage for GPUs: ", end="")
     for i in range(len(model.devices)):
-        print("cuda:{}: {}, ".format(
-            i,
-            sizeof_fmt(torch.cuda.memory_stats(i)["allocated_bytes.all.peak"])), end='')
+        print(
+            f"cuda:{i}: {sizeof_fmt(torch.cuda.memory_stats(i)['allocated_bytes.all.peak'])}, ",
+            end="",
+        )
     print()
 
 
@@ -212,7 +224,11 @@ def make_model_and_data(args, device):
     model, criterion, optimizer = make_model(args, device, vocab_size)
     lm_dataset = BenchmarkLMDataset()
     lm_dataloader = DataLoader(
-        lm_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0, collate_fn=collate_sentences_lm
+        lm_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=0,
+        collate_fn=collate_sentences_lm,
     )
     return {
         "model": model,
@@ -224,8 +240,8 @@ def make_model_and_data(args, device):
 
 
 def bench_single_process(args):
-    os.environ.update({"MASTER_ADDR" : args.host})
-    os.environ.update({"MASTER_PORT" : "10638"})
+    os.environ.update({"MASTER_ADDR": args.host})
+    os.environ.update({"MASTER_PORT": "10638"})
 
     rpc.init_rpc(
         "worker",
@@ -244,23 +260,33 @@ def bench_single_process(args):
 
     balance = generate_balance(num_devices, len(model))
     model = partition_model(model, balance)
-    p = Pipe(
-        model, chunks=args.chunks, checkpoint=args.checkpoint
-    )
+    p = Pipe(model, chunks=args.chunks, checkpoint=args.checkpoint)
     del model
     del blob["model"]
 
-    train(blob["data"], p, blob["criterion"], blob["optimizer"], blob["vocab_size"], args)
+    train(
+        blob["data"], p, blob["criterion"], blob["optimizer"], blob["vocab_size"], args
+    )
+
 
 parser = argparse.ArgumentParser(description="benchmark")
 parser.add_argument("--host", "-o", type=str, default="localhost", help="hostname")
-parser.add_argument("--chunks", type=int, default=4, help="number of microbatches per batch")
+parser.add_argument(
+    "--chunks", type=int, default=4, help="number of microbatches per batch"
+)
 parser.add_argument("--batch-size", type=int, default=8, help="size of a batch")
 parser.add_argument("--max-batch", type=int, default=10, help="Max number of batches")
-parser.add_argument("--num-decoder-layers", type=int, default=10, help="Number of decoder layers in the model")
 parser.add_argument(
-    "--checkpoint", default="except_last", choices=["always", "except_last", "never"],
-    help="Checkpointing strategy for pipe"
+    "--num-decoder-layers",
+    type=int,
+    default=10,
+    help="Number of decoder layers in the model",
+)
+parser.add_argument(
+    "--checkpoint",
+    default="except_last",
+    choices=["always", "except_last", "never"],
+    help="Checkpointing strategy for pipe",
 )
 parser.add_argument(
     "--num-devices", type=int, default=4, help="Number of GPU devices to use"

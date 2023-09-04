@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::Slice_1"
+    output: "onnx::Slice_12"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -17,7 +17,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Slice_2"
+    output: "onnx::Slice_13"
     name: "Constant_1"
     op_type: "Constant"
     attribute {
@@ -31,7 +31,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Slice_3"
+    output: "onnx::Slice_14"
     name: "Constant_2"
     op_type: "Constant"
     attribute {
@@ -45,7 +45,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Slice_4"
+    output: "onnx::Slice_15"
     name: "Constant_3"
     op_type: "Constant"
     attribute {
@@ -60,16 +60,16 @@ graph {
   }
   node {
     input: "onnx::Slice_0"
-    input: "onnx::Slice_2"
-    input: "onnx::Slice_3"
-    input: "onnx::Slice_1"
-    input: "onnx::Slice_4"
-    output: "onnx::Gather_5"
+    input: "onnx::Slice_13"
+    input: "onnx::Slice_14"
+    input: "onnx::Slice_12"
+    input: "onnx::Slice_15"
+    output: "onnx::Gather_9"
     name: "Slice_4"
     op_type: "Slice"
   }
   node {
-    output: "onnx::Gather_6"
+    output: "onnx::Gather_10"
     name: "Constant_5"
     op_type: "Constant"
     attribute {
@@ -82,9 +82,9 @@ graph {
     }
   }
   node {
-    input: "onnx::Gather_5"
-    input: "onnx::Gather_6"
-    output: "7"
+    input: "onnx::Gather_9"
+    input: "onnx::Gather_10"
+    output: "11"
     name: "Gather_6"
     op_type: "Gather"
     attribute {
@@ -93,7 +93,7 @@ graph {
       type: INT
     }
   }
-  name: "torch_jit"
+  name: "main_graph"
   input {
     name: "onnx::Slice_0"
     type {
@@ -111,7 +111,7 @@ graph {
     }
   }
   output {
-    name: "7"
+    name: "11"
     type {
       tensor_type {
         elem_type: 1

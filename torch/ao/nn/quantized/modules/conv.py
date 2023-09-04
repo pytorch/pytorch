@@ -1,4 +1,3 @@
-# coding=utf-8
 r"""Quantized convolution modules."""
 
 from typing import Optional, List, TypeVar
@@ -64,7 +63,7 @@ class _ConvNd(WeightedQuantizedModule):
         self.output_padding = output_padding
         self.groups = groups
         if padding_mode not in _SUPPORTED_PADDING:
-            raise ValueError("'padding_mode' {} is not supported by quantized convolution".format(padding_mode))
+            raise ValueError(f"'padding_mode' {padding_mode} is not supported by quantized convolution")
         self.padding_mode = padding_mode
         # Initialize as NCHW. set_weight will internally transpose to NHWC.
         if self.transposed:
@@ -593,7 +592,7 @@ class _ConvTransposeNd(_ConvNd):
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode, device=None, dtype=None):
         if padding_mode != 'zeros':
-            raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
+            raise ValueError(f'Only "zeros" padding mode is supported for {self.__class__.__name__}')
         factory_kwargs = {'device': device, 'dtype': dtype}
         # Subclasses of _ConvNd need to call _init rather than __init__. See
         # discussion on PR #49702

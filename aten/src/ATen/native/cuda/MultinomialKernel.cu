@@ -11,7 +11,6 @@
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <c10/cuda/CUDADeviceAssertion.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CUDAFunctions.h>
@@ -49,7 +48,7 @@ inline __device__ bool _isinf(T x) {
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
-__global__ void renormRowsL1(scalar_t* dist, long rows, long cols, TORCH_DSA_KERNEL_ARGS) {
+__global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
   extern __shared__  unsigned char my_smem[];
   scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -58,13 +57,13 @@ __global__ void renormRowsL1(scalar_t* dist, long rows, long cols, TORCH_DSA_KER
     scalar_t sum = static_cast<scalar_t>(0);
     for (int64_t col = threadIdx.x; col < cols; col += blockDim.x) {
       val = dist[row * cols + col];
-      CUDA_KERNEL_ASSERT2(!(val < zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!(val < zero)); // ! < 0 for NaN handling
       sum = sum + val;
     }
 
     sum = cuda_utils::BlockReduceSum(sum, smem);
     if (threadIdx.x == 0) {
-      CUDA_KERNEL_ASSERT2(!(val < zero)); // ! < 0 for NaN handling
+      CUDA_KERNEL_ASSERT(!(val < zero)); // ! < 0 for NaN handling
       smem[0] = sum;
     }
     __syncthreads();
@@ -94,10 +93,11 @@ void renormRows(Tensor& t) {
   dim3 block(std::min(maxThreads, warp_size * ceil_div(cols, int64_t{warp_size})));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
-    TORCH_DSA_KERNEL_LAUNCH(renormRowsL1<scalar_t>,
-        grid, block, (block.x / warp_size) * sizeof(scalar_t),
-        at::cuda::getCurrentCUDAStream(), t.mutable_data_ptr<scalar_t>(),
+    renormRowsL1<scalar_t>
+        <<<grid, block, (block.x / warp_size) * sizeof(scalar_t),
+        at::cuda::getCurrentCUDAStream()>>>(t.mutable_data_ptr<scalar_t>(),
             rows, cols);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
@@ -194,8 +194,7 @@ __global__ void sampleMultinomialOnce(
     const scalar_t* sampled,
     const scalar_t* dist,
     int stride_dist, // dist->stride(0)
-    int stride_categories, // dist->stride(1)
-    TORCH_DSA_KERNEL_ARGS
+    int stride_categories // dist->stride(1)
 ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
@@ -214,9 +213,9 @@ __global__ void sampleMultinomialOnce(
     scalar_t val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
       val = dist[curDist * stride_dist + cat * stride_categories];
-      CUDA_KERNEL_ASSERT2(!at::_isnan(val));
-      CUDA_KERNEL_ASSERT2(!_isinf(val));
-      CUDA_KERNEL_ASSERT2(!(val < zero));
+      CUDA_KERNEL_ASSERT(!at::_isnan(val));
+      CUDA_KERNEL_ASSERT(!_isinf(val));
+      CUDA_KERNEL_ASSERT(!(val < zero));
       sum = sum + static_cast<accscalar_t>(val);
     }
 
@@ -226,8 +225,8 @@ __global__ void sampleMultinomialOnce(
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
       // Make sure the sum of our distribution didn't overflow
-      CUDA_KERNEL_ASSERT2(!_isinf(val));
-      CUDA_KERNEL_ASSERT2(sum > accZero);
+      CUDA_KERNEL_ASSERT(!_isinf(val));
+      CUDA_KERNEL_ASSERT(sum > accZero);
 
       foundPos = 0;
       smem[0] = sum;
@@ -367,18 +366,19 @@ void multinomial_with_replacement_kernel_impl(
       dim3 block(requiredThreads);
       dim3 grid(std::min(static_cast<int>(numDist), numSM * 4));
 
-      TORCH_DSA_KERNEL_LAUNCH(
-          (sampleMultinomialOnce<scalar_t, accscalar_t>),
-          grid, block,
+      sampleMultinomialOnce<scalar_t, accscalar_t>
+          <<<grid, block,
           requiredShared,
-          at::cuda::getCurrentCUDAStream(),
-          result.mutable_data_ptr<int64_t>(),
-          numDist,
-          numCategories,
-          sampled.const_data_ptr<scalar_t>(),
-          self_v.const_data_ptr<scalar_t>(),
-          self_v.stride(0),
-          self_v.stride(1));
+          at::cuda::getCurrentCUDAStream()>>>(
+              result.mutable_data_ptr<int64_t>(),
+                  numDist,
+                  numCategories,
+                  sampled.const_data_ptr<scalar_t>(),
+                  self_v.const_data_ptr<scalar_t>(),
+                  self_v.stride(0),
+                  self_v.stride(1)
+          );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // Generic, slow implementation with memory allocations
 

@@ -45,7 +45,9 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
   set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
 endif()
 enable_language(CUDA)
-set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+if("X${CMAKE_CUDA_STANDARD}" STREQUAL "X" )
+  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+endif()
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 # CMP0074 - find_package will respect <PackageName>_ROOT variables
@@ -265,6 +267,22 @@ if(CAFFE2_USE_CUDNN)
   endif()
 else()
   message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
+endif()
+
+if(CAFFE2_USE_CUSPARSELT)
+  find_package(CUSPARSELT)
+
+  if(NOT CUSPARSELT_FOUND)
+    message(WARNING
+      "Cannot find cuSPARSELt library. Turning the option off")
+    set(CAFFE2_USE_CUSPARSELT OFF)
+  else()
+    add_library(torch::cusparselt INTERFACE IMPORTED)
+    target_include_directories(torch::cusparselt INTERFACE ${CUSPARSELT_INCLUDE_PATH})
+    target_link_libraries(torch::cusparselt INTERFACE ${CUSPARSELT_LIBRARY_PATH})
+  endif()
+else()
+  message(STATUS "USE_CUSPARSELT is set to 0. Compiling without cuSPARSELt support")
 endif()
 
 # curand

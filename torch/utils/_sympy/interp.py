@@ -14,6 +14,7 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -21,10 +22,12 @@ import torch
 
 @functools.lru_cache(None)
 def handlers():
-    from torch._inductor.ir import CleanDiv
-    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv
 
-    # TODO: CeilDiv, ModularIndexing
+    # TODO add CeilDiv (it doesn't appear in the index_expr)
+
+    # TODO default to some decompositions if the interpreter doesn't have them
+    # like decomposing ModularIndexing or implementing Le(a,b) as Ge(b, a)
 
     HANDLERS = {
         sympy.Or: "or_",
@@ -37,12 +40,14 @@ def handlers():
         sympy.Ge: "ge",
         sympy.Not: "not_",
         TrueDiv: "truediv",
-        FloorDiv: "div",
+        FloorDiv: "floordiv",
         CleanDiv: "div",
+        Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
         Pow: "pow",
         sympy.Pow: "pow",
+        Mod: "mod",
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",
@@ -51,6 +56,7 @@ def handlers():
         sympy.ceiling: "ceil",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
+        ModularIndexing: "modular_indexing",
     }
     return HANDLERS
 
@@ -62,15 +68,16 @@ def sympy_interp(
     analysis, env: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
 ):
     # Handle base cases
-    # TODO: not really sure if I'm passing the right dtype here
-    # TODO: wouldn't it be better to pass the sympy expression through
-    # sometimes?
-    if isinstance(expr, sympy.Integer):
-        return analysis.constant(int(expr), torch.int64)
+    dtype = None
+    if isinstance(expr, BooleanAtom):
+        dtype = torch.bool
+    elif isinstance(expr, sympy.Integer):
+        dtype = torch.int64
     elif isinstance(expr, sympy.Number):
-        return analysis.constant(float(expr), torch.double)
-    elif isinstance(expr, BooleanAtom):
-        return analysis.constant(bool(expr), torch.bool)
+        dtype = torch.double
+
+    if dtype is not None:
+        return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
         return env[expr]
 
