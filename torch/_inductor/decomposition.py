@@ -17,6 +17,8 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._higher_order_ops.out_dtype import out_dtype
+from torch._prims_common import type_to_dtype
 
 from . import config
 
@@ -54,6 +56,7 @@ inductor_decompositions = get_decompositions(
         aten.sqrt_,
         aten.std,
         aten.std_mean,
+        out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
@@ -112,6 +115,15 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+@register_decomposition([aten.full])
+def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, fill_value, **kwargs)
+    return NotImplemented
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
