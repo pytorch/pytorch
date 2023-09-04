@@ -527,6 +527,7 @@ class WrapperCodeGen(CodeGen):
                 elif (
                     origin_info_list
                     and isinstance(line, str)
+                    and config.profiler_mark_wrapper_call
                     and re.search(r"triton|extern_kernels", line)
                 ):
                     # Inspect the contents of line to see if

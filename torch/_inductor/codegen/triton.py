@@ -2342,14 +2342,17 @@ class TritonScheduling(BaseScheduling):
         return tiled_groups, reduction_hint_val, mutations, index_dtype
 
     def codegen_insert_marker(self, node_schedule):
-        wrapper = V.graph.wrapper_code
-        # Introduce a data structure to hold the marker info
-        # Then pass the new data structure to writeline
-        # This will cause a with record_function to be emitted on the
-        # next line
-        op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
-        origin_ops = [(op.op_type, op.mod_name, op.torch_op) for op in op_info.oi_list]
-        wrapper.writeline(op_info)
+        if config.profiler_mark_wrapper_call:
+            wrapper = V.graph.wrapper_code
+            # Introduce a data structure to hold the marker info
+            # Then pass the new data structure to writeline
+            # This will cause a with record_function to be emitted on the
+            # next line
+            op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
+            origin_ops = [
+                (op.op_type, op.mod_name, op.torch_op) for op in op_info.oi_list
+            ]
+            wrapper.writeline(op_info)
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
