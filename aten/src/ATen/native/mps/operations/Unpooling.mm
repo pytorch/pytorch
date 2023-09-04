@@ -2,7 +2,6 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
-#include <ATen/native/mps/operations/Unpooling.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -10,7 +9,6 @@
 #else
 #include <ATen/ops/max_unpool2d_native.h>
 #endif
-
 
 namespace at::native {
 namespace mps {
@@ -38,31 +36,9 @@ kernel void max_unpooling2d_forward(constant int64_t& numInputElements [[buffer(
   }}
 }}
 
-kernel void max_unpooling2d_backward(constant int64_t& numInputElements [[buffer(0)]],
-                                    device {0} *input [[buffer(1)]],
-                                    device int64_t* indices [[buffer(2)]],
-                                    constant int64_t& numChannels [[buffer(3)]],
-                                    constant int64_t& inputHeight [[buffer(4)]],
-                                    constant int64_t& inputWidth [[buffer(5)]],
-                                    constant int64_t& outputHeight [[buffer(6)]],
-                                    constant int64_t& outputWidth [[buffer(7)]],
-                                    device {1} *output [[buffer(8)]],
-                                    uint id [[thread_position_in_grid]]) {{
-  if (id < numInputElements) {{
-    int c = (id / inputWidth / inputHeight) % numChannels;
-    int n = id / inputWidth / inputHeight / numChannels;
-    input += (n * numChannels + c) * outputHeight * outputWidth;
-    int maxind = indices[id];
-    output[id] = input[maxind];
-  }}
-}}
-
-
 )METAL";
 
-static id<MTLLibrary> compileUnpoolOpsLibrary(id<MTLDevice> device,
-                                               const std::string& t1,
-                                               const std::string& t2) {
+static id<MTLLibrary> compileUnpoolOpsLibrary(id<MTLDevice> device, const std::string& t1, const std::string& t2) {
   auto key = t1 + t2;
   static std::unordered_map<std::string, id<MTLLibrary>> libMap;
   auto it = libMap.find(key);
@@ -114,31 +90,38 @@ static void dispatch1DJob(id<MTLComputeCommandEncoder> commandEncoder,
 } // namespace mps
 
 Tensor& max_unpooling2d_forward_out_mps(const Tensor& self_,
-                                  const Tensor& indices_,
-                                  IntArrayRef output_size,
-                                  Tensor& output) {
-
+                                        const Tensor& indices_,
+                                        IntArrayRef output_size,
+                                        Tensor& output) {
   at::globalContext().alertNotDeterministic("max_unpooling2d_forward_out");
 
   TORCH_CHECK(output.is_contiguous(), "output must be contiguous");
   TORCH_CHECK(indices_.scalar_type() == at::ScalarType::Long,
-               "elements in indices should be type int64 but got: ", indices_.scalar_type());
+              "elements in indices should be type int64 but got: ",
+              indices_.scalar_type());
 
   for (int64_t i = 1; i < self_.ndimension(); ++i) {
-    TORCH_CHECK(self_.size(i) > 0, "max_unpooling2d_forward_out_cuda(): ",
+    TORCH_CHECK(self_.size(i) > 0,
+                "max_unpooling2d_forward_out_cuda(): ",
                 "Expected input to have non-zero size for non-batch dimensions, but got ",
-                self_.sizes(), " with dimension ", i , " being empty.");
+                self_.sizes(),
+                " with dimension ",
+                i,
+                " being empty.");
   }
 
-  TORCH_CHECK(
-      (self_.ndimension() == 3 || self_.ndimension() == 4),
-      "Input to max_unpooling2d should be a 3d or 4d Tensor, but got tensor with dimension: ", self_.ndimension());
-  TORCH_CHECK(
-      self_.sizes() == indices_.sizes(),
-      "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "There should be exactly two elements (height, width) in output_size, but got ", output_size.size(), " elements.");
+  TORCH_CHECK((self_.ndimension() == 3 || self_.ndimension() == 4),
+              "Input to max_unpooling2d should be a 3d or 4d Tensor, but got tensor with dimension: ",
+              self_.ndimension());
+  TORCH_CHECK(self_.sizes() == indices_.sizes(),
+              "Expected shape of indices to be: ",
+              self_.sizes(),
+              " but got: ",
+              indices_.sizes());
+  TORCH_CHECK(output_size.size() == 2,
+              "There should be exactly two elements (height, width) in output_size, but got ",
+              output_size.size(),
+              " elements.");
 
   auto outputHeight = output_size[0];
   auto outputWidth = output_size[1];
@@ -165,14 +148,13 @@ Tensor& max_unpooling2d_forward_out_mps(const Tensor& self_,
   output.zero_();
 
   if (numInputElements != 0) {
-
     using namespace at::mps;
 
     MPSStream* stream = getCurrentMPSStream();
     id<MTLComputePipelineState> cplState = mps::getCPLState(MPSDevice::getInstance()->device(),
-                                                        mps::scalarToMetalTypeString(self.scalar_type()),
-                                                        mps::scalarToMetalTypeString(output.scalar_type()),
-                                                        "max_unpooling2d_forward");
+                                                            mps::scalarToMetalTypeString(self.scalar_type()),
+                                                            mps::scalarToMetalTypeString(output.scalar_type()),
+                                                            "max_unpooling2d_forward");
     dispatch_sync(stream->queue(), ^() {
       getMPSProfiler().beginProfileKernel(cplState, "max_unpooling2d_forward", {self});
 
@@ -206,120 +188,10 @@ Tensor& max_unpooling2d_forward_out_mps(const Tensor& self_,
   return output;
 }
 
-Tensor max_unpooling2d_forward_mps(const Tensor& self,
-                                   const Tensor& indices,
-                                   IntArrayRef output_size) {
+Tensor max_unpooling2d_forward_mps(const Tensor& self, const Tensor& indices, IntArrayRef output_size) {
   auto output = at::empty({0}, self.options());
   max_unpooling2d_forward_out_mps(self, indices, output_size, output);
   return output;
-}
-
-Tensor& max_unpooling2d_backward_out_mps(const Tensor& grad_output_,
-                                      const Tensor& self_,
-                                      const Tensor& indices_,
-                                      IntArrayRef output_size,
-                                      Tensor& grad_input) {
-
-  TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
-  TORCH_CHECK(indices_.scalar_type() == at::ScalarType::Long,
-                  "elements in indices should be type int64 but got type: ", indices_.scalar_type());
-
-  TORCH_CHECK( (self_.ndimension() == 3 || self_.ndimension() == 4),
-                  "Input to max_unpooling2d should be a 3d or 4d Tensor, instead got: ",
-                      self_);
-
-  TORCH_CHECK(self_.sizes() == indices_.sizes(),
-              "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
-
-  TORCH_CHECK(output_size.size() == 2, "output_size must have two elements, got size: ", output_size.size());
-
-  int64_t outputHeight = output_size[0];
-  int64_t outputWidth = output_size[1];
-
-  int dimw = 2;
-  int dimh = 1;
-
-  auto self = self_.contiguous();
-  auto indices = indices_.contiguous();
-  auto grad_output = grad_output_.contiguous();
-
-  int64_t numChannels;
-
-  if (self.ndimension() == 3) {
-    int64_t numChannels = self.size(0);
-  }
-  else {
-    ++dimw;
-    ++dimh;
-    int64_t numChannels = self.size(1);
-  }
-
-  int64_t inputWidth = self.size(dimw);
-  int64_t inputHeight = self.size(dimh);
-  int64_t numInputElements = self.numel();
-
-  if (outputHeight != grad_output.size(dimh) || outputWidth != grad_output.size(dimw)) {
-    AT_ERROR(
-        "Inconsistent gradOutput size. output height: ",
-        outputHeight,
-        ", output width= ",
-        outputWidth,
-        ", gradOutput: ",
-        grad_output.size(dimh),
-        "x",
-        grad_output.size(dimw));
-  }
-
-  grad_input.resize_as_(self);
-  grad_input.zero_();
-
-  if (numInputElements == 0) {
-    return grad_input;
-  }
-
-  using namespace at::mps;
-
-  MPSStream* stream = getCurrentMPSStream();
-  id<MTLComputePipelineState> cplState = mps::getCPLState(MPSDevice::getInstance()->device(),
-                                                          mps::scalarToMetalTypeString(grad_output.scalar_type()),
-                                                          mps::scalarToMetalTypeString(grad_input.scalar_type()),
-                                                          "max_unpooling2d_forward");
-  dispatch_sync(stream->queue(), ^() {
-    getMPSProfiler().beginProfileKernel(cplState, "max_unpooling2d_backward", {self});
-
-    id<MTLComputeCommandEncoder> commandEncoder = stream->commandEncoder();
-
-    id<MTLBuffer> gradInputBuf = __builtin_bit_cast(id<MTLBuffer>, grad_input.storage().data());
-    id<MTLBuffer> gradOutputBuf = __builtin_bit_cast(id<MTLBuffer>, grad_output.storage().data());
-    id<MTLBuffer> indicesBuf = __builtin_bit_cast(id<MTLBuffer>, indices.storage().data());
-
-    [commandEncoder pushDebugGroup:@"Dispatch max_unpooling2d_forward kernel"];
-    [commandEncoder setComputePipelineState:cplState];
-
-    [commandEncoder setBytes:&numInputElements length:sizeof(numInputElements) atIndex:0];
-    [commandEncoder setBuffer:gradOutputBuf offset:grad_output.storage_offset() * grad_output.itemsize() atIndex:1];
-    [commandEncoder setBuffer:indicesBuf offset:indices.storage_offset() * indices.itemsize() atIndex:2];
-    [commandEncoder setBytes:&numChannels length:sizeof(numChannels) atIndex:3];
-    [commandEncoder setBytes:&inputHeight length:sizeof(inputHeight) atIndex:4];
-    [commandEncoder setBytes:&inputWidth length:sizeof(inputWidth) atIndex:5];
-    [commandEncoder setBytes:&outputHeight length:sizeof(outputHeight) atIndex:6];
-    [commandEncoder setBytes:&outputWidth length:sizeof(outputWidth) atIndex:7];
-    [commandEncoder setBuffer:gradInputBuf offset:grad_input.storage_offset() * grad_input.itemsize() atIndex:8];
-
-    mps::dispatch1DJob(commandEncoder, cplState, static_cast<uint32_t>(numInputElements));
-
-    getMPSProfiler().endProfileKernel(cplState);
-  });
-  return grad_input;
-}
-
-Tensor max_unpooling2d_backward_mps(const Tensor& grad_output,
-                                    const Tensor& self,
-                                    const Tensor& indices,
-                                    IntArrayRef output_size) {
-  auto grad_input = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  max_unpooling2d_backward_out_mps(grad_output, self, indices, output_size, grad_input);
-  return grad_input;
 }
 
 } // namespace at::native
