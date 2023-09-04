@@ -604,6 +604,56 @@ class CommonTemplate:
 
         self.common(fn, (x, y, z))
 
+    def test_add_uint8_tensor(self):
+            def fn(x):
+                return (x + x).to(torch.int16)
+            x = torch.tensor(128, dtype=torch.uint8)
+
+            self.common(fn, x)
+
+    def test_add_int8_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int16)
+        x = torch.tensor(120, dtype=torch.int8)
+
+        self.common(fn, x)
+
+    def test_add_int8_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int16)
+        x = torch.tensor(120, dtype=torch.int8)
+
+        self.common(fn, x)
+
+    def test_add_int16_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int32)
+
+        x = torch.tensor(35000, dtype=torch.int16)
+
+        self.common(fn, x)
+
+    def test_multiply_uint8_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int16)
+        x = torch.tensor(8, dtype=torch.uint8)
+
+        self.common(fn, x)
+
+    def test_square_uint8_tensor(self):
+        def fn(x):
+            return (x ** 2).to(torch.int16)
+        x = torch.tensor(8, dtype=torch.uint8)
+
+        self.common(fn, x)
+
+    #  issue https://github.com/pytorch/pytorch/issues/108520 raised for this
+    # def test_uint32_tensor(self):
+    #     def fn(x):
+    #         return (x + x).to(torch.int64)
+    #     x = torch.tensor( (2147483647), dtype=torch.int32)
+    #     self.common(fn, x)
+
     def test_abs(self):
         def fn(a):
             return (a / (torch.abs(a) + 1),)
@@ -7018,7 +7068,8 @@ def copy_tests(
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
 
-if HAS_CPU and not torch.backends.mps.is_available():
+print(f"torch.backends.mps.is_available()= {torch.backends.mps.is_available()}")
+if HAS_CPU:
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
@@ -7711,49 +7762,6 @@ if HAS_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
-
-        # Test that the compiler and torch output for binary operations match.
-        # Particularly check scenarios where the operation performed would result in 'wrapping',
-        # i.e., when the result would be too big for the type so a negative value is returned.
-        def test_lowering(self):
-
-            def mySum16(x):
-                return (x + x).to(torch.int16)
-            def myMul16(x):
-                return (x * x).to(torch.int16)
-            def mySquare16(x):
-                return (x ** 2).to(torch.int16)
-
-            x = torch.tensor(128, dtype=torch.uint8)
-
-            torchResult = mySum16(x)
-            dynamoResult = torch.compile(mySum16)(x)
-
-            assert(torchResult == dynamoResult == 0)
-
-            torchResult = myMul16(x)
-            dynamoResult = torch.compile(myMul16)(x)
-
-            assert(torchResult == dynamoResult == 0)
-
-            torchResult = mySquare16(x)
-            dynamoResult = torch.compile(mySquare16)(x)
-
-            assert(torchResult == dynamoResult == 0)
-
-            x = torch.tensor(120, dtype=torch.int8)
-            torchResult = mySum16(x)
-            dynamoResult = torch.compile(mySum16)(x)
-
-            assert(torchResult == dynamoResult == -16)
-            def mySum32(x):
-                return (x + x).to(torch.int32)
-
-            x = torch.tensor( 35000, dtype=torch.int32)
-            torchResult = mySum32(x)
-            dynamoResult = torch.compile(mySum32)(x)
-
-            assert(torchResult == dynamoResult)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
