@@ -380,8 +380,12 @@ def make_pointwise(
 
         # Get the first TensorBox/ExpandView input as the reference tensor for
         # sizes, data types, and device.
-        tensor_inputs = [inp for inp in inputs if isinstance(inp, (TensorBox, ExpandView))]
-        assert len(tensor_inputs) > 0, f"expected at least one tensor/expanded view. Got: {[type(inp) for inp in inputs]}"
+        tensor_inputs = [
+            inp for inp in inputs if isinstance(inp, (TensorBox, ExpandView))
+        ]
+        assert (
+            len(tensor_inputs) > 0
+        ), f"expected at least one tensor/expanded view. Got: {[type(inp) for inp in inputs]}"
         ref = tensor_inputs[0]
 
         loaders = [x.make_loader() for x in inputs]
