@@ -94,6 +94,7 @@ class ConstantVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
+        from torch.utils._pytree import NodeDef
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -112,6 +113,13 @@ class ConstantVariable(VariableTracker):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
             return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
                 tx, name, args, kwargs
+            )
+
+        if isinstance(self.value, NodeDef) and name in ("flatten_fn", "unflatten_fn"):
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(getattr(self.value, name), **options),
+                args,
+                kwargs,
             )
 
         try:

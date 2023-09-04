@@ -207,6 +207,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             inner = str(getattr(self.value, "__name__", None))
         return f"{self.__class__.__name__}({inner})"
 
+    def as_python_constant(self):
+        return self.value
+
     def python_type(self):
         return self.value_type
 

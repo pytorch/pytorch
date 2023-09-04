@@ -21,7 +21,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
+from ..source import AttrSource, GetItemSource, is_constant_source, SuperSource, TypeSource
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
@@ -1101,6 +1101,24 @@ class BuiltinVariable(VariableTracker):
                 unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
+        elif name == "__bases__" and (
+                (
+                    isinstance(obj, variables.BuiltinVariable)
+                    and obj.python_type() is type
+                )
+                or isinstance(obj, variables.UserDefinedClassVariable)
+        ):
+            value = obj.as_python_constant()
+            bases = value.__bases__
+            if source is None:
+                assert len(bases) == 1 and bases[0] is object
+                tuple_args = [BuiltinVariable(object)]
+            else:
+                tuple_args = [
+                    VariableBuilder(tx, GetItemSource(source, i))(b)
+                    for i, b in enumerate(bases)
+                ]
+            return variables.TupleVariable(tuple_args, **options)
         elif isinstance(
             obj,
             (
@@ -1294,6 +1312,11 @@ class BuiltinVariable(VariableTracker):
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable(id(mod))
         else:
+            try:
+                value = args[0].as_python_constant()
+                return variables.ConstantVariable(id(value))
+            except:
+                pass
             unimplemented(f"call_id with args {args}")
 
     def _comparison(self, tx, left, right):

@@ -41,6 +41,7 @@ from .misc import (
     PythonModuleVariable,
     SuperVariable,
     UnknownVariable,
+    TreeSpecVariable,
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
