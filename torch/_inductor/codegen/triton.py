@@ -2503,9 +2503,7 @@ class TritonScheduling(BaseScheduling):
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
             # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
-            src_code = src_code.replace(
-                str(Placeholder.DESCRIPTIVE_NAME), kernel_name
-            )
+            src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
