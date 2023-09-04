@@ -328,7 +328,8 @@ class TestFFT(TestCase):
         # FIXME: https://github.com/pytorch/pytorch/issues/108204
         default_msg = (
             r"(Unsupported dtype|"
-            r"FFT doesn't support tensors* of type)"
+            r"FFT doesn't support (tensors*|transforms) of type|"
+            r"expected scalar type \w+ but found|)"
         )
         if dtype is torch.half and device_type == 'cuda' and TEST_WITH_ROCM:
             err_msg = default_msg
