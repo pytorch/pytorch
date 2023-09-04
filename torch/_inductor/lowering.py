@@ -392,8 +392,8 @@ def make_pointwise(
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
-            elif dtype == torch.uint8:
-                # ensure uint8 value gets truncated properly
+            elif dtype == torch.uint8 or dtype == torch.int8 or dtype == torch.int16 or dtype == torch.int32:
+                # ensure types are honoured properly.
                 return ops.to_dtype(fn(*[load(index) for load in loaders]), dtype)
             else:
                 return fn(*[load(index) for load in loaders])
