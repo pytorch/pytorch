@@ -18,7 +18,6 @@ from torch.testing._internal.common_distributed import (
     _dynamo_dist_per_rank_init,
     requires_nccl,
     skip_if_lt_x_gpu,
-    skip_if_rocm
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import has_triton, run_and_get_triton_code
@@ -156,7 +155,6 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allgather_into_tensor_inductor(self):
@@ -248,7 +246,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf0.copy_(arg0_1)") \
             .check("buf1 = buf0") \
             .check("buf1_work = dist.all_reduce(buf1") \
-            .check("fun_col._register_tensor_work(buf1, buf1_work)") \
+            .check("fun_col_impl._register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf0)") \
             .check("return (buf2, )") \
             .run(code)
@@ -280,7 +278,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check_not("buf1.copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
-            .check("fun_col._register_tensor_work(buf2, buf2_work)") \
+            .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
             .check("buf4 = empty_strided") \
@@ -319,7 +317,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf1 = buf0; del buf0  # reuse") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
-            .check("fun_col._register_tensor_work(buf2, buf2_work)") \
+            .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
             .check("return (buf3, buf4, buf5") \
@@ -561,9 +559,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
-            .check("buf3_work = fun_col._all_gather_into_tensor_coalesced_fallback("
+            .check("buf3_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
-            .check("fun_col._register_tensor_work(buf3, buf3_work)") \
+            .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
             .check("buf6 = buf0; del buf0  # reuse") \
@@ -605,9 +603,9 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf2 = empty_strided") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
-            .check("buf3_work = fun_col._reduce_scatter_tensor_coalesced_fallback("
+            .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
                    "output_tensors=buf3, input_tensors=buf3_inputs") \
-            .check("fun_col._register_tensor_work(buf3, buf3_work)") \
+            .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
             .check("buf6 = buf0; del buf0  # reuse") \

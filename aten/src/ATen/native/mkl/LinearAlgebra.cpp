@@ -38,6 +38,14 @@ void mkl_gemm_batched(
   TORCH_INTERNAL_ASSERT(false, "mkl_gemm_batched: ATen not compiled with MKL support");
 }
 
+void mkl_gemm_bf16bf16f32(
+    TransposeType trans_A, TransposeType trans_B,
+    int M, int N, int K, const float alpha,
+    const c10::BFloat16* A, int lda, const c10::BFloat16* B, int ldb,
+    const float beta, float* C, int ldc) {
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32: ATen not compiled with MKL support");
+}
+
 }}
 
 #else // AT_MKL_ENABLED
@@ -102,6 +110,21 @@ void mkl_gemm_batched(
                     reinterpret_cast<const void*>(&alpha),
                     reinterpret_cast<const void**>(A), &lda, reinterpret_cast<const void**>(B), &ldb,
                     reinterpret_cast<const void*>(&beta), reinterpret_cast<void**>(C), &ldc, 1, &batch_size);
+}
+
+void mkl_gemm_bf16bf16f32(
+    TransposeType trans_A, TransposeType trans_B,
+    int M, int N, int K, const float alpha,
+    const c10::BFloat16* A, int lda, const c10::BFloat16* B, int ldb,
+    const float beta, float* C, int ldc) {
+#ifdef MKL_HAS_SBGEMM
+  auto transa_cblas = to_cblas(trans_A);
+  auto transb_cblas = to_cblas(trans_B);
+  cblas_gemm_bf16bf16f32(CblasColMajor, transa_cblas, transb_cblas, M, N, K, alpha,
+                         (const MKL_BF16*)A, lda, (const MKL_BF16*)B, ldb, beta, C, ldc);
+#else
+  TORCH_INTERNAL_ASSERT(false, "mkl_gemm_bf16bf16f32 requires mkl version > 2021.0");
+#endif
 }
 
 }} // namespace at::native

@@ -21,6 +21,13 @@ python -c "import torch; print(torch.__version__)"
 
 ## Benchmark List
 
-Please refer to each subfolder to discover each benchmark suite
+Please refer to each subfolder to discover each benchmark suite. Links are provided where descriptions exist:
 
-* [Fast RNNs benchmarks](fastrnns/README.md)
+* [Fast RNNs](fastrnns/README.md)
+* [Dynamo](dynamo/README.md)
+* [Functional autograd](functional_autograd_benchmark/README.md)
+* [Instruction counts](instruction_counts/README.md)
+* [Operator](operator_benchmark/README.md)
+* [Overrides](overrides_benchmark/README.md)
+* [Sparse](sparse/README.md)
+* [Tensor expression](tensorexpr/HowToRun.md)
