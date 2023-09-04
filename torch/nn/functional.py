@@ -5249,7 +5249,7 @@ def multi_head_attention_forward(
         target_type=query.dtype
     )
 
-    if is_causal and attn_mask is None:
+    if is_causal and attn_mask is None and (key_padding_mask is not None or need_weights):
         raise RuntimeError(
             "Need attn_mask if specifying the is_causal hint. "
             "You may use the Transformer module method "
