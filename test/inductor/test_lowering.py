@@ -52,12 +52,3 @@ print(torchResult)
 print(dynamoResult)
 
 assert(torchResult == dynamoResult)
-
-
-
-
-
-
-
-
-
