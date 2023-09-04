@@ -107,7 +107,7 @@ def emit_metric(
             **{m.name: m.value() for m in env_var_metrics},
         }
     except ValueError as e:
-        warn(f"Not emitting metrics. {e}")
+        warn(f"Not emitting metrics for {metric_name}. {e}")
         return
 
     # Prefix key with metric name and timestamp to derisk chance of a uuid1 name collision
@@ -136,8 +136,10 @@ def emit_metric(
         except Exception as e:
             # We don't want to fail the job if we can't upload the metric.
             # We still raise the ValueErrors outside this try block since those indicate improperly configured metrics
-            warn(f"Error uploading metric to DynamoDB: {e}")
+            warn(f"Error uploading metric {metric_name} to DynamoDB: {e}")
             return
+    else:
+        print(f"Not emitting metrics for {metric_name}. Boto wasn't imported.")
 
 
 def _convert_float_values_to_decimals(data: Dict[str, Any]) -> Dict[str, Any]:
