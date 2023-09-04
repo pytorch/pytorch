@@ -20,7 +20,6 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
-    OriginOpInfo,
     OriginOpList,
     sympy_dot,
     sympy_product,
@@ -505,7 +504,7 @@ class WrapperCodeGen(CodeGen):
                     self.lines[i] = self.lines[i].plan(planning_state)
 
             device_cm_stack = contextlib.ExitStack()
-            origin_info_list = []
+            origin_info_list = None
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
                     self.wrapper_call.writeline(
@@ -521,22 +520,21 @@ class WrapperCodeGen(CodeGen):
                 ):
                     line.codegen(self.wrapper_call, device_cm_stack)
                 elif isinstance(line, OriginOpList):
-                    # Need to make a new type to flag the
-                    # Orig op info similar to EnterCudaDeviceContextManagerLine
+                    # Save the line containing OriginOp Info so
+                    # it can be added to the nvtx marker when the
+                    # the kernel launch instruction is generated.
                     origin_info_list = line
-                else:
+                elif (
+                    origin_info_list
+                    and isinstance(line, str)
+                    and re.search(r"triton|extern_kernels", line)
+                ):
                     # Inspect the contents of line to see if
                     # it is a triton kernel.  If so add the record_func
-                    with contextlib.ExitStack() as k_stack:
-                        if origin_info_list and ('triton' in line or 'extern_kernels' in line):
-                            marker_string = str(origin_info_list)
-                            self.wrapper_call.writeline(
-                                f'with record_function("triton_info: {marker_string}"):'
-                            )
-                            k_stack.enter_context(self.wrapper_call.indent())
-                            # Reset the list after the marker is written
-                            origin_info_list = []
-                        self.wrapper_call.writeline(line)
+                    origin_info_list.codegen(self.wrapper_call, device_cm_stack, line)
+                    origin_info_list = None
+                else:
+                    self.wrapper_call.writeline(line)
 
             output_refs = self.get_output_refs()
             self.mark_output_type()

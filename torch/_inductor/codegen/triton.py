@@ -2006,7 +2006,6 @@ class TritonKernel(Kernel):
             V.graph.scheduler.current_device.index,
         )
 
-
     def warn_mix_layout(self, kernel_name):
         """
         Print message if the kernel have mixed layout inputs.

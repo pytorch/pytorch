@@ -77,20 +77,6 @@ def do_bench(*args, **kwargs):
     return triton_do_bench(*args, **kwargs)[0]
 
 
-@dataclass
-class OriginOpInfo:
-    op_type: str
-    mod_name: str
-    torch_op: str
-    aot_seq_nr: int
-
-    def __post_init__(self):
-        self.mod_name = re.sub(r'\"', '', self.mod_name)
-
-@dataclass
-class OriginOpList:
-    oi_list: list[OriginOpInfo]
-
 @functools.lru_cache(None)
 def has_triton() -> bool:
     if not torch.cuda.is_available():
@@ -306,9 +292,10 @@ def get_module_name_from_meta(meta_dict):
     torch_op = ""
     if "nn_module_stack" in meta_dict:
         mod_name, torch_op = list(meta_dict["nn_module_stack"].values())[0]
-        mod_name = re.sub(r'\[[a-zA-Z\']*\]', '', mod_name)
-        mod_name = re.sub(r'__', '', mod_name)
+        mod_name = re.sub(r"\[[a-zA-Z\']*\]", "", mod_name)
+        mod_name = re.sub(r"__", "", mod_name)
     return mod_name, torch_op
+
 
 def get_origin_op_info(node_schedule, descriptive_names):
     all_origins = aggregate_origins(node_schedule)
@@ -739,6 +726,27 @@ class DebugDirManager:
     def __exit__(self, *args):
         shutil.rmtree(self.new_name)
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
+
+@dataclass
+class OriginOpInfo:
+    op_type: str
+    mod_name: str
+    torch_op: str
+    aot_seq_nr: int
+
+
+@dataclass
+class OriginOpList:
+    oi_list: List[OriginOpInfo]
+
+    def codegen(self, code: IndentedBuffer, cm_stack: contextlib.ExitStack, line: str):
+        with cm_stack as k_stack:
+            marker_string = str(self)
+            code.writeline(f'with record_function("triton_info: {marker_string}"):')
+            k_stack.enter_context(code.indent())
+            code.writeline(line)
+        return
 
 
 def run_and_get_code(fn, *args, **kwargs):
