@@ -213,7 +213,7 @@ void initMonitorBindings(PyObject* module) {
             Event e;
             e.name = name;
             e.timestamp = timestamp;
-            e.data = data;
+            e.data = std::move(data);
             return e;
           }),
           py::arg("name"),
@@ -274,7 +274,7 @@ void initMonitorBindings(PyObject* module) {
   m.def(
       "register_event_handler",
       [](std::function<void(const Event&)> f) {
-        auto handler = std::make_shared<PythonEventHandler>(f);
+        auto handler = std::make_shared<PythonEventHandler>(std::move(f));
         registerEventHandler(handler);
         return handler;
       },
@@ -287,7 +287,7 @@ void initMonitorBindings(PyObject* module) {
       )DOC");
   m.def(
       "unregister_event_handler",
-      [](std::shared_ptr<PythonEventHandler> handler) {
+      [](const std::shared_ptr<PythonEventHandler>& handler) {
         unregisterEventHandler(handler);
       },
       py::arg("handler"),

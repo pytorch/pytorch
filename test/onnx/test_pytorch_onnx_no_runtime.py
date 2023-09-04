@@ -21,7 +21,6 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.onnx import OperatorExportTypes, symbolic_helper, utils
-from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
 
@@ -34,7 +33,7 @@ def export_to_onnx(
     ] = None,
     mocks: Optional[Iterable] = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
-    opset_version: int = GLOBALS.export_onnx_opset_version,
+    opset_version: int = 17,
     **torch_onnx_export_kwargs,
 ) -> onnx.ModelProto:
     """Exports `model(input)` to ONNX and returns it.
@@ -406,11 +405,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         onnx_model = export_to_onnx(
             MyClip(),
             torch.randn(3, 4, requires_grad=True),
-            custom_ops=[
-                common_utils.custom_op(
-                    "aten::clamp", bad_clamp, GLOBALS.export_onnx_opset_version
-                )
-            ],
+            custom_ops=[common_utils.custom_op("aten::clamp", bad_clamp, 17)],
             operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK,
         )
         self.assertAtenOp(onnx_model, "clamp", "Tensor")
@@ -1152,6 +1147,40 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertEqual(onnx_model.graph.node[-1].attribute[0].name, "dilations")
         self.assertEqual(onnx_model.graph.node[-1].attribute[1].name, "pads")
         self.assertEqual(onnx_model.graph.node[-1].attribute[2].name, "strides")
+
+    @unittest.skipIf(
+        not torch.hub._check_module_exists("torch_scatter"),
+        "torch_scatter not installed.",
+    )
+    def test_random_namespace_custom_op_is_onnx_exportable(self):
+        from torch_scatter import scatter_max  # type: ignore[import]
+
+        class MyModel(torch.nn.Module):
+            def forward(self, src: torch.Tensor, idx: torch.Tensor):
+                return scatter_max(src, idx)
+
+        m = MyModel().eval()
+        src = torch.ones([3, 10], dtype=torch.float32)
+        idx = torch.randint(0, 4, [3, 10], dtype=torch.long)
+
+        def sym_scatter_max(g, src, index, dim, out, dim_size):
+            return g.op(
+                "torch_scatter::scatter_max", src, index, dim_size_i=-1, outputs=2
+            )
+
+        torch.onnx.register_custom_op_symbolic(
+            "torch_scatter::scatter_max", sym_scatter_max, 1
+        )
+        with torch.no_grad():
+            torch.onnx.export(
+                m,
+                (src, idx),
+                "mymodel.onnx",
+                verbose=False,
+                opset_version=13,
+                custom_opsets={"torch_scatter": 1},
+                do_constant_folding=True,
+            )
 
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):

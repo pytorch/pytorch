@@ -51,4 +51,4 @@ class ChannelShuffle(Module):
         return F.channel_shuffle(input, self.groups)
 
     def extra_repr(self) -> str:
-        return 'groups={}'.format(self.groups)
+        return f'groups={self.groups}'

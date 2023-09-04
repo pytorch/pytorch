@@ -7,6 +7,7 @@
  */
 // This file is auto-generated. See "generate_kernels.py"
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
+using namespace PyTorchMemEffAttention;
 __global__ void __launch_bounds__(
     AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 128, 64, 128>::kNumThreads,
     AttentionBackwardKernel<cutlass::arch::Sm70, cutlass::half_t, false, false, false, 128, 64, 128>::kMinBlocksPerSm)

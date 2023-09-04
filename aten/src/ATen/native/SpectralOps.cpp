@@ -502,7 +502,7 @@ Tensor& fft_rfftn_symint_out(const Tensor& self,
   return out;
 }
 
-ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
+static ShapeAndDims canonicalize_fft_c2r_shape_and_dim_args(
     c10::string_view fname, const Tensor& self,
     const at::OptionalSymIntArrayRef& s,
     const at::OptionalIntArrayRef& dims,
@@ -793,19 +793,19 @@ Tensor fft_ifftshift(const Tensor& x, at::OptionalIntArrayRef dim_opt) {
 
 // We call the following methods via CUDA hooks because they are really only
 // valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
-int64_t _cufft_get_plan_cache_max_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_max_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize(device_index);
 }
 
-void _cufft_set_plan_cache_max_size(int64_t device_index, int64_t max_size) {
+void _cufft_set_plan_cache_max_size(DeviceIndex device_index, int64_t max_size) {
   detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(device_index, max_size);
 }
 
-int64_t _cufft_get_plan_cache_size(int64_t device_index) {
+int64_t _cufft_get_plan_cache_size(DeviceIndex device_index) {
   return detail::getCUDAHooks().cuFFTGetPlanCacheSize(device_index);
 }
 
-void _cufft_clear_plan_cache(int64_t device_index) {
+void _cufft_clear_plan_cache(DeviceIndex device_index) {
   detail::getCUDAHooks().cuFFTClearPlanCache(device_index);
 }
 
