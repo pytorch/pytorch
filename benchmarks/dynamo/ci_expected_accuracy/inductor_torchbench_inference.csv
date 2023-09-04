@@ -61,8 +61,4 @@ timm_vision_transformer_large,pass_due_to_skip,0
 timm_vovnet,pass,0
 tts_angular,pass,2
 vgg16,pass,0
-<<<<<<< HEAD
-=======
-vision_maskrcnn,pass,126
->>>>>>> d32f9fb1422 ([dynamo][finishing colesbury's PR 100642] Guard on nn.Module dicts and type)
 yolov3,pass,2
