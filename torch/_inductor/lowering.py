@@ -395,7 +395,7 @@ def make_pointwise(
             
             # For cpu we need to ensure that types smaller than int32 are honoured for operations.
             # Without this logic, the operations would be incorrectly performed with the larger int32 type.  
-            elif not is_cuda and (dtype == torch.uint8 or dtype == torch.int8 or dtype == torch.int16):
+            elif not is_cuda and dtype in (torch.uint8, torch.int8, torch.int16):
                 # ensure types are honoured properly.
                 return ops.to_dtype(fn(*[load(index) for load in loaders]), dtype)
             else:
