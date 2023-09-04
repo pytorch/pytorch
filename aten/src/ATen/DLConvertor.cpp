@@ -1,8 +1,7 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/Functions.h>
 
-#include <iostream>
-#include <sstream>
+#include <string>
 
 using namespace std;
 namespace at {
@@ -133,7 +132,7 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
       return at::detail::getXPUHooks().getATenDeviceFromDLPackDevice(ctx, data);
     default:
       TORCH_CHECK(
-          false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
+          false, "Unsupported device_type: " + std::to_string(ctx.device_type));
   }
 }
 
@@ -148,7 +147,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kUInt bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kUInt bits " + std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLInt:
@@ -167,7 +166,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kInt bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kInt bits " + std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat:
@@ -183,7 +182,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kFloat bits " + std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLBfloat:
@@ -193,7 +192,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kFloat bits " + std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLComplex:
@@ -209,7 +208,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK(
-              false, "Unsupported kFloat bits " + c10::to_string(dtype.bits));
+              false, "Unsupported kFloat bits " + std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLBool:
@@ -224,7 +223,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
       break;
     default:
       TORCH_CHECK(
-          false, "Unsupported code " + c10::to_string(dtype.code));
+          false, "Unsupported code " + std::to_string(dtype.code));
   }
   return stype;
 }
