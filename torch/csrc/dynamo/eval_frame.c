@@ -583,8 +583,7 @@ Debugger helper functions.
 */
 
 PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
-  // TODO(anijain2305) - CacheEntry being the first class Python object might
-  // obviate the need of this function. Revisit.
+  // get the cache entry out of a code object
   PyObject* object = NULL;
   if (!PyArg_ParseTuple(args, "O", &object)) {
     return NULL;
@@ -597,26 +596,12 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
 
   ExtraState* extra = get_extra_state(code);
   CacheEntry* current_node = extract_cache_entry(extra);
-
-  PyObject* outer_list = PyList_New(0);
-  if (!outer_list) {
-    return NULL;  // Return NULL if failed to create list
+  if (current_node == NULL)
+  {
+    Py_RETURN_NONE;
   }
-  while (current_node != NULL && current_node != (CacheEntry*)Py_None) {
-    // Creating a new Python tuple for the check_fn and code of current CacheEntry
-    PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
-    int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
-    Py_DECREF(inner_list);  // Decrement our own reference
-    if (flag < 0) {
-      Py_DECREF(outer_list);  // Clean up if failed to append
-      return NULL;
-    }
-
-    // Move to the next node in the linked list
-    current_node = current_node->next;
-  }
-  // Return the outer list
-  return outer_list;
+  Py_INCREF(current_node);
+  return (PyObject*)current_node;
 }
 
 static inline PyObject* call_callback(

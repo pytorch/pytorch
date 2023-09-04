@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <memory>
+#include <optional>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -83,7 +84,7 @@ int main(int argc, char* argv[]) {
   setsid(); // Daemonize the process
 
   std::unique_ptr<ManagerServerSocket> srv_socket;
-  c10::optional<c10::TempDir> tempdir;
+  std::optional<c10::TempDir> tempdir;
   try {
     tempdir = c10::try_make_tempdir(/*name_prefix=*/"torch-shm-dir-");
     if (!tempdir.has_value()) {
@@ -91,7 +92,7 @@ int main(int argc, char* argv[]) {
           "could not generate a random directory for manager socket");
     }
 
-    std::string tempfile = tempdir->name + "/manager.sock";
+    std::string tempfile = (tempdir->name / "manager.sock").string();
 
     srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
