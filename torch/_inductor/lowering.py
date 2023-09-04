@@ -377,12 +377,17 @@ def make_pointwise(
                 inputs[-1] = mul(inputs[-1], alpha)
         else:
             assert alpha is None
-        loaders = [x.make_loader() for x in inputs]
-        ranges = inputs[0].get_size()
-        dtype = override_return_dtype or inputs[0].get_dtype()
-        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
 
-        for other in inputs[1:]:
+        tensor_inputs = [inp for inp in inputs if isinstance(inp, TensorBox)]
+        assert len(tensor_inputs) > 0, f"expected at least one tensor. Got: {[type(inp) for inp in inputs]}"
+        ref = tensor_inputs[0]
+
+        loaders = [x.make_loader() for x in inputs]
+        ranges = ref.get_size()
+        dtype = override_return_dtype or ref.get_dtype()
+        is_cuda = decode_device(ref.get_device()).type == "cuda"
+
+        for other in inputs:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
                 other.get_size()
             ), f"ndim mismatch {fn} {ranges} {other.get_size()}"
@@ -403,7 +408,7 @@ def make_pointwise(
                     device = i.get_device()
                     break
             if not device:
-                device = inputs[0].get_device()
+                device = ref.get_device()
 
         device = override_device or device
 
