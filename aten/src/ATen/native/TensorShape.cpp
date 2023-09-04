@@ -3712,14 +3712,6 @@ Tensor alias(const Tensor& self) {
   return alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
 }
 
-Tensor alias_sparse_coo(const Tensor& self) {
-  return at::sparse::alias_with_values(self, self._values());
-}
-
-Tensor alias_sparse_compressed(const Tensor& self) {
-  return at::sparse_csr::alias_with_values(self, self.values());
-}
-
 Tensor detach(const Tensor& self) {
   // NB: detach() is not the same thing as alias()! The main difference is that
   // detach does not allow metadata change while alias does.

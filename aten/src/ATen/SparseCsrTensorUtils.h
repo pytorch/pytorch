@@ -316,40 +316,6 @@ inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
   }
 }
 
-// Return an alias of self with the given values tensor.
-//
-// Warning: This function does not validate sparse tensor invariants
-// for efficiency but it checks that the shape and device of values
-// match exactly with the ones of self.values() for sanity.
-//
-// Example usages:
-//
-//   alias_with_values(self, self.values()) is equivalent to alias on a sparse
-//     compressed tensor
-//
-//   alias_with_values(self, self.values().to(...)) is a type conversion without
-//     copying indices
-//
-inline Tensor alias_with_values(Tensor const& self, Tensor const& values) {
-  TORCH_INTERNAL_ASSERT(
-      at::sparse_csr::is_sparse_compressed(self),
-      "alias_with_values: not a sparse compressed tensor");
-  TORCH_INTERNAL_ASSERT(
-      self.values().sizes() == values.sizes(),
-      "alias_with_values: mismatch of values sizes");
-  TORCH_INTERNAL_ASSERT(
-      self.device() == values.device(),
-      "alias_with_values: mismatch of values device");
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) =
-      at::sparse_csr::getCompressedPlainIndices(self);
-  SparseCsrTensor self_ = detail::make_tensor<SparseCsrTensorImpl>(
-      self.key_set(), self.device(), self.layout(), values.dtype());
-  get_sparse_csr_impl(self_)->set_member_tensors(
-      compressed_indices, plain_indices, values, self.sizes());
-  return self_;
-}
-
 template <typename binary_op_t, typename binary_op_out_t>
 inline bool only_sparse_compressed_binary_op_trivial_cases(
     const Tensor& self,
