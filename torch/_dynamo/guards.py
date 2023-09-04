@@ -1146,9 +1146,7 @@ class CheckFunctionManager:
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode, guard_code = build_guard_function(
-            unique_code_parts, make_guard_fn_args
-        )
+        guard_body, pycode = build_guard_function(unique_code_parts, make_guard_fn_args)
 
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS\n", guard_body)
@@ -1202,7 +1200,7 @@ class CheckFunctionManager:
         return None
 
 
-def build_guard_function(code_parts, closure_args) -> Tuple[str, str, str]:
+def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     if HAS_UNPARSE_FUNCTIONS:
@@ -1242,7 +1240,7 @@ def build_guard_function(code_parts, closure_args) -> Tuple[str, str, str]:
         make_guard_fn.splice(guard)
         make_guard_fn.writeline("return guard")
 
-    return guard_body.getvalue(), make_guard_fn.getvalue(), guard.getvalue()
+    return guard_body.getvalue(), make_guard_fn.getvalue()
 
 
 stashed_first_fail_reason = None
