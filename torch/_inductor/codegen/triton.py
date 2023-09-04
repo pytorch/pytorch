@@ -6,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict, Iterable, List, Set, Tuple, Union, Any, Counter, Optional
+from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -777,7 +777,9 @@ class TritonKernel(Kernel):
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], List[Union[sympy.Expr, str]]] = {}
+        self.indirect_max_sizes: Dict[
+            Tuple[str, str], List[Union[sympy.Expr, str]]
+        ] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
@@ -886,7 +888,7 @@ class TritonKernel(Kernel):
         groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]
     ):
         sv = V.graph.sizevars
-        new_ranges: List[Any]= [[] for _ in groups]
+        new_ranges: List[Any] = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
 
@@ -2655,7 +2657,7 @@ class TritonScheduling(BaseScheduling):
                 )
                 >= 0
             ):
-                tilings.append(CandidateTiling(tiled_groups, score, dep.name))# type: ignore[arg-type]
+                tilings.append(CandidateTiling(tiled_groups, score, dep.name))  # type: ignore[arg-type]
         return tilings
 
     @classmethod
@@ -2718,7 +2720,7 @@ class TritonScheduling(BaseScheduling):
         for tiled_groups in ranked_tilings:
             new_groups = (*tiled_groups, reduction_numel)
             if all(
-                TritonKernel.is_compatible(new_groups, node.get_ranges()) # type: ignore[arg-type]
+                TritonKernel.is_compatible(new_groups, node.get_ranges())  # type: ignore[arg-type]
                 for node in node_schedule
                 if isinstance(node, scheduler.SchedulerNode)
             ):
