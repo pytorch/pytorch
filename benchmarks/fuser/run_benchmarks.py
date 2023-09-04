@@ -305,7 +305,7 @@ def run_benchmarks(operators, shapes):
             )
         )
 
-        def bench(name):
+        def bench(name, operator, args, shape):
             nnc_op = torch.jit.trace(operator, args)
             result = benchmark(nnc_op, args)
             print(
@@ -322,11 +322,11 @@ def run_benchmarks(operators, shapes):
             sys.stdout.flush()
 
         with_nnc()
-        bench("nnc")
+        bench("nnc", operator, args, shape)
         with_nvfuser()
-        bench("nvfuser")
+        bench("nvfuser", operator, args, shape)
         with_legacy()
-        bench("legacy")
+        bench("legacy", operator, args, shape)
 
 
 if __name__ == "__main__":

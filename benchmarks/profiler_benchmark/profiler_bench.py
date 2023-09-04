@@ -90,7 +90,7 @@ if __name__ == "__main__":
 
         if profiling_enabled:
 
-            def payload():
+            def payload(workload=workload, input_x=input_x):
                 x = None
                 with torch.autograd.profiler.profile(
                     use_cuda=args.with_cuda,
@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
         else:
 
-            def payload():
+            def payload(workload=workload, input_x=input_x):
                 return workload(input_x)
 
         t = Timer(

@@ -3456,7 +3456,7 @@ def run(runner, args, original_dir=None):
             # NB: Assumes only the first batch-y like dimension is the batch
             marked = False
 
-            def detect_and_mark_batch(t):
+            def detect_and_mark_batch(t, batch_size=batch_size):
                 nonlocal marked
                 for i, s in enumerate(t.size()):
                     if s == batch_size:

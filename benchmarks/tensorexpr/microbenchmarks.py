@@ -282,7 +282,7 @@ def run_benchmarks(benchmarks, sizes):
                     print(time2 / time1, time1, time2)
                     print()
 
-                    def check_correctness(a, b):
+                    def check_correctness(a, b, name=name):
                         if not np.allclose(a, b):
                             print(name)
                             assert np.allclose(a, b)
