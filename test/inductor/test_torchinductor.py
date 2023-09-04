@@ -7067,9 +7067,7 @@ def copy_tests(
 
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
-
-print(f"torch.backends.mps.is_available()= {torch.backends.mps.is_available()}")
-if HAS_CPU:
+if HAS_CPU and not torch.backends.mps.is_available():
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
