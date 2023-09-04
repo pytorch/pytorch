@@ -1,8 +1,9 @@
+import collections
 import itertools
 import logging
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Callable, Counter, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -46,6 +47,116 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     # is this necessary ?
     gm.recompile()
     return preserved_arg_indices
+
+
+def return_true(*args, **kwargs):
+    return True
+
+
+class ConstantFolder(torch.fx.Interpreter):
+    def __init__(
+        self,
+        gm,
+        skip_constructors=False,
+        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
+    ):
+        super().__init__(gm)
+        self.node_replacements: Dict[int, torch.Tensor] = {}
+        self.replaced_uses: Counter[int] = collections.Counter()
+        self.unknown_value = object()
+        self.skip_constructors = skip_constructors
+        self.insertable_tensor_check = (
+            insertable_tensor_check
+            if insertable_tensor_check is not None
+            else return_true
+        )
+
+    def run_node(self, node):
+        aten = torch.ops.aten
+        args, kwargs = self.fetch_args_kwargs_from_env(node)
+
+        if node.target == "output":
+            return super().run_node(node)
+
+        flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
+
+        if self.unknown_value in flattened_inputs:
+            return self.unknown_value
+
+        # TODO - fix errors with this
+        if (
+            node.op == "call_function"
+            and node.target == aten._efficientzerotensor.default
+        ):
+            return self.unknown_value
+
+        # skip constructors, since inductor generates optimal code for them already
+        # and turning into tensor would result in an additional global memory read
+        # TODO - more complicated strategy
+        if (
+            self.skip_constructors
+            and node.op != "get_attr"
+            and not any(isinstance(e, torch.Tensor) for e in flattened_inputs)
+        ):
+            return self.unknown_value
+
+        # All mutations should either be removed or on inputs which we did not make constant
+        if (
+            isinstance(node.target, torch._ops.OpOverload)
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        ):
+            return self.unknown_value
+
+        out = super().run_node(node)
+
+        if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if not self.insertable_tensor_check(out):  # type: ignore[operator]
+                return out
+
+            self.node_replacements[node] = out
+
+            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
+
+            for n in flattened_node_inps:
+                if not isinstance(n, torch.fx.Node):
+                    continue
+
+                self.replaced_uses[n] += 1
+
+            for to_delete in self.user_to_last_uses.get(node, []):
+                if self.replaced_uses[to_delete] == len(to_delete.users):
+                    self.node_replacements.pop(to_delete, None)
+
+        return out
+
+    def run(self):
+        env = {}
+        for n in self.module.graph.nodes:
+            if n.op == "placeholder":
+                env[n] = self.unknown_value
+        return super().run(initial_env=env)
+
+
+@torch.utils._python_dispatch._disable_current_modes()  # type: ignore[no-redef]
+def constant_fold(gm):
+    cf = ConstantFolder(gm, skip_constructors=True)
+    cf.run()
+
+    for node, constant in cf.node_replacements.items():
+        replace_node_with_constant(gm, node, constant)
+
+    erased_params = []
+    for node in gm.graph.nodes:
+        if node.op == "get_attr" and len(node.users) == 0:
+            delattr(gm, node.target)
+            erased_params.append(node)
+
+    for node in erased_params:
+        gm.graph.erase_node(node)
+
+    gm.graph.eliminate_dead_code()
+    gm.graph.lint()
+    gm.recompile()
 
 
 def freeze(
