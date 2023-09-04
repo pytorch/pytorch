@@ -11063,12 +11063,19 @@ op_db: List[OpInfo] = [
                # RuntimeError: sampled_addmm: Expected result to have sparse csr layout, but got Strided
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),
                # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
                # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
-               # AssertionError: Tensor-likes are not close!
-               #   result and expected tensors have opposite signs because _neg_view on sparse is silently wrong
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: unsupported memory format option Preserve
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: sparse_mask does not support automatic differentiation for outputs with complex dtype
@@ -11095,26 +11102,30 @@ op_db: List[OpInfo] = [
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
                # RuntimeError: Sparse CSR tensors do not have strides.
-               #   while explicitly calling stride() method in test_tags.
                DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
                # RuntimeError: Sparse CSR tensors do not have strides
-               #   while preparing arguments for torch.Tensor._make_wrapper_subclass in CompositeCompliantTensor.__new__
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
                # RuntimeError: Sparse CSR tensors do not have strides
-               #   while preparing arguments for torch.Tensor._make_wrapper_subclass in CompositeCompliantTensor.__new__
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_backward'),
-               # AssertionError: Tensor-likes are not close!
-               #   result and expected tensors have opposite signs because _neg_view on sparse is silently wrong
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # RuntimeError: Sparse CSR tensors do not have strides
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: unsupported memory format option Preserve
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
-               # RuntimeError: Sparse CSR tensors do not have is_contiguous
+               # RuntimeError: Sparse CSR tensors do not have is_contiguou
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
-               # NotImplementedError: Cannot access storage of SparseCsrTensorImpl
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
                # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_fail_gradgrad'),

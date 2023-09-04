@@ -121,30 +121,6 @@ TORCH_API Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz);
 
 TORCH_API Tensor zeros_like_with_indices(const Tensor& t);
 
-// Return an alias of self with the given values tensor.
-//
-// Warning: This function does not validate sparse tensor invariants
-// for efficiency but it checks that the shape and device of values
-// match exactly with the ones of self._values() for sanity.
-//
-// Example usages:
-//
-//   alias_with_values(self, self._values()) is equivalent to alias on a sparse COO tensor
-//
-//   alias_with_values(self, self._values().to(...)) is a type conversion without copying indices
-//
-inline Tensor alias_with_values(Tensor const& self, Tensor const& values) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse(), "alias_with_values: not a sparse tensor");
-  TORCH_INTERNAL_ASSERT(self._values().sizes() == values.sizes(), "alias_with_values: mismatch of _values sizes");
-  TORCH_INTERNAL_ASSERT(self.device() == values.device(), "alias_with_values: mismatch of _values device");
-  SparseTensor self_ = detail::make_tensor<SparseTensorImpl>(self.key_set(), values.dtype());
-  auto* impl = get_sparse_impl(self_);
-  impl->resize_(self.sparse_dim(), self.dense_dim(), self.sizes());
-  impl->set_indices_and_values_unsafe(self._indices(), values);
-  impl->set_coalesced(self.is_coalesced());
-  return self_;
-}
-
 template <size_t static_shape_max_len>
 class TensorGeometryHolder {
   using geometry_holder_t = std::array<int64_t, static_shape_max_len>;
