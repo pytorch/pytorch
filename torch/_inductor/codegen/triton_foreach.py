@@ -147,13 +147,13 @@ class ForeachKernel(Kernel):
         index_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=index_dtype),
+            "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_KRNL_NAME)
+        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
         return (
             f"@foreach(num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"

@@ -3968,7 +3968,7 @@ def scaled_dot_product_flash_attention(
         query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
     )
     return (
-        output,
+        output.transpose(1, 2),
         logsumexp,
         cum_seq_q,
         cum_seq_k,

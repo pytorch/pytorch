@@ -1032,25 +1032,6 @@ def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
-def is_dynamic(*args):
-    from . import ir
-
-    for t in args:
-        if isinstance(t, ir.TensorBox):
-            if any(s.free_symbols for s in t.data.get_size()):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size")
-            if any(s.free_symbols for s in t.get_size()):
-                return True
-        elif not isinstance(t, ir.IRNode):
-            continue
-        else:
-            raise ValueError(f"unexpected type for is_dynamic {type(t)}")
-
-    return False
-
-
 # Placeholder strings used in triton codegen.
 class Placeholder(enum.Enum):
     # The placeholder for the actual name of a triton kernel.
@@ -1059,4 +1040,4 @@ class Placeholder(enum.Enum):
 
     # The descriptive name of the triton kernel; when unique_kernel_names = False, this
     # placeholder will be replaced with a string with more information.
-    DESCRIPTIVE_KRNL_NAME = "DESCRIPTIVE_KRNL_NAME"
+    DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"

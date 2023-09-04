@@ -120,7 +120,7 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_KRNL_NAME)
+        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
         return (
             f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"

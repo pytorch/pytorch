@@ -112,7 +112,7 @@ def remove_no_ops(
 def constant_fold_uniform_value(gm):
     "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
     aten = torch.ops.aten
-    from torch._inductor.freezing import ConstantFolder
+    from torch._inductor.constant_folding import ConstantFolder
 
     def is_uniform_valued_tensor(t):
         return t.numel() != 0 and (t == t.flatten()[0]).all()
