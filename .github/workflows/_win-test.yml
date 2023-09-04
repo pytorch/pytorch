@@ -36,10 +36,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 300
     steps:
-      - name: Enable git symlinks on Windows
+      # Duplicated in win-build because this MUST go before a checkout
+      - name: Enable git symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
           git config --global core.symlinks true
+
+          # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
+          # the directory on Windows and prevent GHA from checking out as reported
+          # in https://github.com/actions/checkout/issues/1018
+          git config --global core.fsmonitor false
 
       - name: Clean up leftover processes on non-ephemeral Windows runner
         uses: pytorch/test-infra/.github/actions/cleanup-runner@main

@@ -1,11 +1,12 @@
 # Owner(s): ["module: dynamo"]
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo as torchdynamo
 from torch._export import export
 from torch._export.serde.serialize import GraphModuleOpUpgrader
-from torch._export.serde.upgrade import get_target_version
+from torch._export.serde.upgrade import get_target_version, get_upgraders
 from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
@@ -29,6 +30,24 @@ def gelu_0_9(self: Tensor) -> Tensor:
     ),
 }
 
+TEST_UPGRADERS_ENTRY_MAP = {
+    "div__Scalar_mode_0_3":
+        """
+from typing import Any, Optional
+def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Optional[str]=None) -> torch.Tensor:
+    return self.divide_(other, rounding_mode=rounding_mode)"""
+}
+
+TEST_OP_VERSION_MAP = {
+    "aten::div_.Scalar_mode": [
+        torch._C._UpgraderEntry(
+            4,
+            "div__Scalar_mode_0_3",
+            "aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)"
+        )
+    ]
+}
+
 
 def count_op(graph, target_str):
     return len(
@@ -37,6 +56,25 @@ def count_op(graph, target_str):
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestUpgrade(TestCase):
+    def test_get_upgraders(self):
+        with patch.object(torch._C, "_get_upgraders_entry_map", return_value=TEST_UPGRADERS_ENTRY_MAP), \
+                patch.object(torch._C, "_get_operator_version_map", return_value=TEST_OP_VERSION_MAP):
+            op_upgraders = get_upgraders()
+            self.assertEqual(op_upgraders, {
+                "div__Scalar_mode_0_3": (
+                    "aten::div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)",
+                    """
+from typing import Any, Optional
+def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Optional[str]=None) -> torch.Tensor:
+    return self.divide_(other, rounding_mode=rounding_mode)""",
+                )})
+
+    def test_get_upgraders_missing_from_entry_map_raises(self):
+        with patch.object(torch._C, "_get_upgraders_entry_map", return_value={}), \
+                patch.object(torch._C, "_get_operator_version_map", return_value=TEST_OP_VERSION_MAP):
+            with self.assertRaises(RuntimeError):
+                get_upgraders()
+
     def test_upgrader_with_invalid_format_throws_exception(self):
         """Invalid upgrader function string should throw exception"""
         upgraders = [("div(Tensor a, Tensor b) -> Tensor", "TEST")]
@@ -66,7 +104,7 @@ class TestUpgrade(TestCase):
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
-        upgraded = ep.transform(*upgrader.upgrader_passes)
+        upgraded = ep._transform(*upgrader.upgrader_passes)
         upgraded.graph_module.print_readable()
 
         count = count_op(upgraded.graph, "aten::div.Scalar_mode")
@@ -79,7 +117,7 @@ class TestUpgrade(TestCase):
             return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
-        ep = export(fn, inputs, [], _add_runtime_assertions=False)
+        ep = export(fn, inputs, {}, [])
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)

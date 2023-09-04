@@ -1,26 +1,22 @@
 import functools
 
 import torch
+
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_triton_template
+from ..utils import use_aten_gemm_kernels, use_triton_template
 from ..virtualized import V
 from .mm_common import mm_args, mm_grid, mm_options
 
 aten = torch.ops.aten
 
-
-def ref_mm_plus_mm(a, b, c, d, out):
-    torch.mm(a, b, out=out)
-    out.addmm_(c, d)
-    return out
-
-
-aten_mm_plus_mm = ExternKernelChoice(ref_mm_plus_mm)
+aten_mm_plus_mm = ExternKernelChoice(
+    torch.ops.inductor._mm_plus_mm, "torch::inductor::_mm_plus_mm"
+)
 
 mm_plus_mm_template = TritonTemplate(
     name="mm_plus_mm",
@@ -31,6 +27,9 @@ mm_plus_mm_template = TritonTemplate(
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
     K1 = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
     # K2 = {{size("C", 1)}}
     stride_am = {{stride("A", 0)}}
     stride_ak = {{stride("A", 1)}}
@@ -104,39 +103,89 @@ mm_plus_mm_template = TritonTemplate(
 def mm_configs():
     import triton
 
-    # these have been tweaked to workaround register issues
-    return [
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=16
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=1, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=1, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=1, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
-        ),
+    # List of dictionaries to store the kernel configs. Configs that evaluate to true
+    # will be utilised on the target platform
+    mm_triton_configs = [
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 2,
+            "num_warps": 4,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 3,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 4,
+            "num_warps": 16,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32},
+            "num_stages": 4,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32},
+            "num_stages": 4,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32},
+            "num_stages": 1,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64},
+            "num_stages": 1,
+            "num_warps": 8,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128},
+            "num_stages": 1,
+            "num_warps": 8,
+            "cond": torch.version.hip is None,
+        },
+        {
+            "config": {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16},
+            "num_stages": 2,
+            "num_warps": 4,
+            "cond": True,
+        },
+        {
+            "config": {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16},
+            "num_stages": 1,
+            "num_warps": 2,
+            "cond": True,
+        },
     ]
+
+    # Filter out configs in which cond evaluates to true
+    # On ROCm convert num_stages to 1 as pipelining provides no benefit
+    if torch.version.hip:
+        filtered_configs = [
+            triton.Config(c["config"], num_stages=1, num_warps=c["num_warps"])
+            for c in mm_triton_configs
+            if c["cond"]
+        ]
+    else:
+        filtered_configs = [
+            triton.Config(
+                c["config"], num_stages=c["num_stages"], num_warps=c["num_warps"]
+            )
+            for c in mm_triton_configs
+            if c["cond"]
+        ]
+
+    return filtered_configs
 
 
 def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
@@ -146,10 +195,15 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     m1, n1, k1, layout1, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     m2, n2, _, layout2, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
     # Optimization is optional, because we can always just not do the fusion
-    if not V.graph.sizevars.statically_known_list_equals(
-        mat1.get_size(), mat3.get_size()
-    ) or not V.graph.sizevars.statically_known_list_equals(
-        mat2.get_size(), mat4.get_size()
+    if (
+        m1 * n1 == 0
+        or m2 * n2 == 0
+        or not V.graph.sizevars.statically_known_list_equals(
+            mat1.get_size(), mat3.get_size()
+        )
+        or not V.graph.sizevars.statically_known_list_equals(
+            mat2.get_size(), mat4.get_size()
+        )
     ):
         # TODO(jansel): support different K values when this is fixed:
         # https://github.com/openai/triton/issues/967
@@ -163,7 +217,11 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     assert layout1 == layout2
     # options to tune from
-    choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+    choices = (
+        [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout1)]
+        if use_aten_gemm_kernels()
+        else []
+    )
     if use_triton_template(layout1):
         for config in mm_configs():
             # see https://github.com/openai/triton/issues/1298

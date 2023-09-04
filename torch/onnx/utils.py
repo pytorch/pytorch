@@ -205,6 +205,7 @@ def export(
     keep_initializers_as_inputs: Optional[bool] = None,
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
+    autograd_inlining: Optional[bool] = True,
 ) -> None:
     r"""Exports a model into ONNX format.
 
@@ -358,9 +359,9 @@ def export(
 
                     Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 14): The version of the
+        opset_version (int, default 17): The version of the
             `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
-            to target. Must be >= 7 and <= 16.
+            to target. Must be >= 7 and <= 17.
         do_constant_folding (bool, default True): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -453,6 +454,11 @@ def export(
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
 
+            If True, `deduplicate_initializers` pass will not be executed. This means
+            initializers with duplicated values will not be deduplicated and
+            will be treated as distinct inputs to the graph. This allows different
+            input initializers to be supplied at the runtime following export.
+
             If ``opset_version < 9``, initializers MUST be part of graph
             inputs and this argument will be ignored and the behavior will be
             equivalent to setting this argument to True.
@@ -496,6 +502,9 @@ def export(
             * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
                 only if the type of the ``nn.Module`` is found in the set.
 
+        autograd_inlining (bool, default True): Flag used to control whether to inline autograd functions.
+            Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
+
     Raises:
         :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
         :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
@@ -520,6 +529,7 @@ def export(
         keep_initializers_as_inputs=keep_initializers_as_inputs,
         custom_opsets=custom_opsets,
         export_modules_as_functions=export_modules_as_functions,
+        autograd_inlining=autograd_inlining,
     )
 
 
@@ -581,7 +591,8 @@ def _optimize_graph(
     # Remove fork/wait nodes
     _C._jit_pass_inline_fork_wait(graph)
     _C._jit_pass_lint(graph)
-    _C._jit_pass_onnx_autograd_function_process(graph)
+    if GLOBALS.autograd_inlining:
+        _C._jit_pass_onnx_autograd_function_process(graph)
     _C._jit_pass_lower_all_tuples(graph)
 
     # we now record some ops like ones/zeros
@@ -1225,6 +1236,7 @@ def _model_to_graph(
 
 
 @_beartype.beartype
+@torch._disable_dynamo
 def export_to_pretty_string(
     model,
     args,
@@ -1483,6 +1495,7 @@ def _export(
     add_node_names=True,
     onnx_shape_inference=True,
     export_modules_as_functions=False,
+    autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False
 
@@ -1511,6 +1524,20 @@ def _export(
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
 
+    # torch.onnx.export does not support opset versions >=18
+    if opset_version > _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET:
+        # We do not want to fail because we should still allow users to create
+        # custom symbolic functions for opset>17
+        warnings.warn(
+            f"Exporting to ONNX opset version {opset_version} is not supported. "
+            f"by 'torch.onnx.export()'. "
+            f"The highest opset version supported is {_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET}. "
+            f"To use a newer opset version, consider 'torch.onnx.dynamo_export()'. "
+            f"Note that dynamo_export() is in preview. Please report errors with "
+            f"dynamo_export() as Github issues to https://github.com/pytorch/pytorch/issues.",
+            category=errors.OnnxExporterWarning,
+        )
+
     if export_modules_as_functions and opset_version < 15:
         raise ValueError(
             "`export_modules_as_functions` is not supported for `opset_version` < 15."
@@ -1534,6 +1561,8 @@ def _export(
 
     try:
         GLOBALS.in_onnx_export = True
+        _autograd_inlining_previous = GLOBALS.autograd_inlining
+        GLOBALS.autograd_inlining = autograd_inlining
 
         module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
@@ -1593,9 +1622,11 @@ def _export(
                     module_typenames_to_export_as_functions,
                     list(params_dict.keys()),
                 )
-            params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
-            )
+
+            if keep_initializers_as_inputs is not True:
+                params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
+                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
@@ -1658,6 +1689,7 @@ def _export(
     finally:
         assert GLOBALS.in_onnx_export
         GLOBALS.in_onnx_export = False
+        GLOBALS.autograd_inlining = _autograd_inlining_previous
         _reset_trace_module_map()
 
     return torch_out

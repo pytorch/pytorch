@@ -9,22 +9,13 @@ from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr
 
-# It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
-# so those cases are omitted intentionally
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
     GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_NN_MODULE,
-}
-
-_GUARD_SOURCE_FSDP_MODULE = {
-    GuardSource.LOCAL: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_NN_MODULE: GuardSource.LOCAL_FSDP_MODULE,
-    GuardSource.GLOBAL_NN_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
-    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
     GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_NOT_NN_MODULE = {
@@ -80,6 +71,7 @@ def reconstruct_getitem(
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
+    cell_or_freevar: bool = False
 
     def reconstruct(self, codegen):
         return [codegen.create_load(self.local_name)]
@@ -138,6 +130,18 @@ class GlobalSource(Source):
 
     def name(self):
         return f"G[{repr(self.global_name)}]"
+
+
+@dataclasses.dataclass(frozen=True)
+class DummyGlobalSource(Source):
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+    def name(self):
+        return ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -445,29 +449,11 @@ class NotNNModuleSource(NNModuleSource):
 @dataclasses.dataclass(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
 @dataclasses.dataclass(frozen=True)
-class DeterministicAlgorithmsSource(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-
-@dataclasses.dataclass(frozen=True)
-class GradModeSource(Source):
-    def name(self):
-        return ""
-
-    def guard_source(self):
-        return GuardSource.GLOBAL
-
-
-@dataclasses.dataclass(frozen=True)
-class DefaultDeviceSource(Source):
+class GlobalStateSource(Source):
     def name(self):
         return ""
 
@@ -492,6 +478,19 @@ class ConstantSource(Source):
         raise NotImplementedError()
 
 
+@dataclasses.dataclass(frozen=True)
+class NumpyTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"__as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "as_tensor")
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
@@ -504,7 +503,13 @@ class ShapeEnvSource(Source):
         return GuardSource.SHAPE_ENV
 
 
-def is_from_local_source(source: Source):
+def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if isinstance(source, ChainedSource):
-        return is_from_local_source(source.base)
-    return isinstance(source, LocalSource)
+        return is_from_local_source(
+            source.base, allow_cell_or_freevar=allow_cell_or_freevar
+        )
+    if not isinstance(source, LocalSource):
+        return False
+    if not allow_cell_or_freevar and source.cell_or_freevar:
+        return False
+    return True

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.WARNING)
 
 class Partition:
-    def __init__(self, id: int = None, nodes: Iterable[Node] = None):
+    def __init__(self, id: Optional[int] = None, nodes: Optional[Iterable[Node]] = None):
         self.id = id
         self.nodes: Set[Node] = set(nodes) if nodes is not None else set()
 

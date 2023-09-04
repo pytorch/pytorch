@@ -3,7 +3,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS
 import inspect
 import contextlib
 
@@ -11,7 +11,6 @@ import contextlib
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 
-TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
@@ -25,10 +24,13 @@ TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDN
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
+SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5))
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
-SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
-PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
+PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and (not TEST_WITH_ROCM) and (not IS_WINDOWS) and SM80OrLater)
+PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)
+# This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
+PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
 if TEST_NUMBA:
     import numba.cuda
@@ -48,7 +50,7 @@ def initialize_cuda_context_rng():
     if not __cuda_ctx_rng_initialized:
         # initialize cuda context and rng for memory tests
         for i in range(torch.cuda.device_count()):
-            torch.randn(1, device="cuda:{}".format(i))
+            torch.randn(1, device=f"cuda:{i}")
         __cuda_ctx_rng_initialized = True
 
 
@@ -198,6 +200,40 @@ def _check_hipsparse_generic_available():
 
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
+
+# Shared by test_cuda.py and test_multigpu.py
+def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+    # Create a module+optimizer that will use scaling, and a control module+optimizer
+    # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
+    mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+    mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
+    with torch.no_grad():
+        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+            s.copy_(c)
+
+    kwargs = {"lr": 1.0}
+    if optimizer_kwargs is not None:
+        kwargs.update(optimizer_kwargs)
+    opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
+    opt_scaling = optimizer_ctor(mod_scaling.parameters(), **kwargs)
+
+    return mod_control, mod_scaling, opt_control, opt_scaling
+
+
+def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+    data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+            (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+            (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
+            (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
+
+    loss_fn = torch.nn.MSELoss().cuda()
+
+    skip_iter = 2
+
+    return _create_scaling_models_optimizers(
+        device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+    ) + (data, loss_fn, skip_iter)
+
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
