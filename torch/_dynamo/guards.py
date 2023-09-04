@@ -1167,7 +1167,7 @@ class CheckFunctionManager:
         # TODO(whc) maybe '.code_parts' was only kept around for the guard callback? so we don't need both
         guard_fn.args = largs
         guard_fn.code_parts = code_parts
-        guard_fn.src = guard_code
+        guard_fn.src = guard_body
         # Grab only G, but preserve "G" because guards access it as "G"
         guard_fn.global_scope = {
             "G": global_builder.scope["G"],
