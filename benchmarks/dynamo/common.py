@@ -3515,10 +3515,8 @@ def run(runner, args, original_dir=None):
         for i, name in enumerate(model_names):
             current_name = name
             placeholder_batch_size = 0
-            if args.progress:
-                print(f"Running model {i+1}/{nmodels}", flush=True)
 
-            def write_csv(status):
+            def write_csv(status, i, name, placeholder_batch_size):
                 if args.accuracy:
                     headers = ["dev", "name", "batch_size", "accuracy"]
                     rows = [
@@ -3540,6 +3538,8 @@ def run(runner, args, original_dir=None):
 
                 for row in rows:
                     output_csv(output_filename, headers, row)
+            if args.progress:
+                print(f"Running model {i+1}/{nmodels}", flush=True)
 
             try:
                 timeout = args.timeout
@@ -3550,10 +3550,10 @@ def run(runner, args, original_dir=None):
                 )
             except subprocess.TimeoutExpired:
                 print("TIMEOUT", file=sys.stderr)
-                write_csv("timeout")
+                write_csv("timeout", i, name, placeholder_batch_size)
             except subprocess.SubprocessError:
                 print("ERROR", file=sys.stderr)
-                write_csv("infra_error")
+                write_csv("infra_error", i, name, placeholder_batch_size)
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
 
 

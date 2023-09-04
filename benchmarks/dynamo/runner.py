@@ -1155,10 +1155,10 @@ class RegressionDetector:
                     flag_fn = FLAG_FNS[metric]
                     flag = np.logical_and(
                         df_merge[compiler + "_prev"].apply(
-                            lambda x: not pd.isna(x) and not flag_fn(x)
+                            lambda x, flag_fn=flag_fn: not pd.isna(x) and not flag_fn(x)
                         ),
                         df_merge[compiler + "_cur"].apply(
-                            lambda x: not pd.isna(x) and flag_fn(x)
+                            lambda x, flag_fn=flag_fn: not pd.isna(x) and flag_fn(x)
                         ),
                     )
                     df_bad = df_merge[flag]

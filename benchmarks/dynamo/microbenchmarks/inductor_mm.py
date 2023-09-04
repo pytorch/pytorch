@@ -73,10 +73,10 @@ def test_GPU_time(shapes):
         config.triton.mm = "triton"
         inductor_triton_mm(a, b)
 
-        torch_ms, _, _ = triton.testing.do_bench(lambda: torch_mm(a, b))
-        triton_ms, _, _ = triton.testing.do_bench(lambda: triton_mm(a, b))
-        ind_aten_ms, _, _ = triton.testing.do_bench(lambda: inductor_aten_mm(a, b))
-        ind_triton_ms, _, _ = triton.testing.do_bench(lambda: inductor_triton_mm(a, b))
+        torch_ms, _, _ = triton.testing.do_bench(lambda a=a, b=b: torch_mm(a, b))
+        triton_ms, _, _ = triton.testing.do_bench(lambda a=a, b=b: triton_mm(a, b))
+        ind_aten_ms, _, _ = triton.testing.do_bench(lambda a=a, b=b: inductor_aten_mm(a, b))
+        ind_triton_ms, _, _ = triton.testing.do_bench(lambda a=a, b=b: inductor_triton_mm(a, b))
         print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
         torch._dynamo.reset()

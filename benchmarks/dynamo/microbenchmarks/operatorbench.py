@@ -42,7 +42,7 @@ def compute_speedups(
                 # do_bench() clears L2 cache to hide the latency of CPU launch time
                 # along with cuda synchronization
                 timings[rep, m] = triton.testing.do_bench(
-                    lambda: model(*example_inputs)
+                    lambda model=model: model(*example_inputs)
                 )
             else:
                 from torch._inductor.utils import timed
