@@ -1623,11 +1623,11 @@ Tensor renorm_jvp(
 
   return where(
       norm > double_maxnorm,
-      factor *
-          (self_t -
-           self_p * invnorm *
-               norm_jvp(
-                   self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true)),
+      (factor *
+       (self_t -
+        self_p * invnorm *
+            norm_jvp(self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true)))
+          .to(self_t.scalar_type()),
       self_t);
 }
 

@@ -361,7 +361,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
     string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" +
-        keepdim_info + ":" + to_string(castInputData);
+        keepdim_info + ":" + toString(in_dtype) + ":" + to_string(castInputData);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
