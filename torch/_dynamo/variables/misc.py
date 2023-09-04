@@ -11,16 +11,17 @@ import torch._numpy as tnp
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
-from ..source import AttrSource, ODictGetItemSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource
 from ..utils import check_constant_args, identity, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
-from .dicts import DefaultDictVariable
+from .dicts import ConstDictVariable, DefaultDictVariable
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
 from .user_defined import UserDefinedObjectVariable
+from torch.utils._pytree import NodeDef, TreeSpec
 
 
 class SuperVariable(VariableTracker):
@@ -967,3 +968,37 @@ class NullVariable(VariableTracker):
 
 class DeletedVariable(VariableTracker):
     """Marker used to implement delattr()"""
+
+
+class TreeSpecVariable(VariableTracker):
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def as_python_constant(self):
+        return self.value
+
+    def python_type(self):
+        return type(self.value)
+
+    def const_getattr(self, tx, name: str) -> "VariableTracker":
+        print(f"TreeSpecVariable.const_getattr: getattr(self.value, {name}): {getattr(self.value, name)}")
+        return getattr(self.value, name)
+
+    def var_getattr(self, tx, name: str) -> "VariableTracker":
+        if name == "type":
+            return variables.UserDefinedClassVariable(value=self.value.type)
+        if name == "children_specs":
+            return variables.ListVariable([TreeSpecVariable(value=spec) for spec in self.value.children_specs])
+        return super().var_getattr(tx, name)
+
+    @staticmethod
+    def is_matching_cls(instance_cls):
+        from torch.utils._pytree import LeafSpec, TreeSpec
+        return instance_cls in (LeafSpec, TreeSpec)
+
+    @staticmethod
+    def create(instance_cls, args, options):
+        assert TreeSpecVariable.is_matching_cls(instance_cls)
+        args = [a.as_python_constant() for a in args]
+        return TreeSpecVariable(instance_cls(*args), **options)
