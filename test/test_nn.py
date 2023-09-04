@@ -1731,53 +1731,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         check_weight_norm(torch.nn.LSTM(32, 32), 'weight_ih_l0', 4)
         check_weight_norm(torch.nn.LSTM(32, 32, proj_size=16), 'weight_hr_l0', 5)
 
-
-    def test_weight_norm(self):
-        for dtype in [torch.float, torch.bfloat16]:
-            input = torch.randn(3, 4, dtype=dtype)
-            m = nn.Linear(4, 5).to(dtype=dtype)
-            expected_output = m(input)
-
-            # add weight normalization
-            m = torch.nn.utils.weight_norm(m)
-            self.assertEqual(m.weight_v.size(), m.weight.size())
-            self.assertEqual(m.weight_g.size(), (5, 1))
-            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-            # remove weight norm
-            m = torch.nn.utils.remove_weight_norm(m)
-            self.assertFalse(hasattr(m, 'weight_g'))
-            self.assertFalse(hasattr(m, 'weight_v'))
-            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-            # test with dim=1
-            m = torch.nn.utils.weight_norm(m, dim=1)
-            self.assertEqual(m.weight_v.size(), m.weight.size())
-            self.assertEqual(m.weight_g.size(), (1, 4))
-            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
-
-            # test with dim=None
-            m = nn.Linear(4, 5).to(dtype=dtype)
-            expected_output = m(input)
-            m = torch.nn.utils.weight_norm(m, dim=None)
-            self.assertEqual(m(input), expected_output)
-
-            with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
-                m = torch.nn.utils.weight_norm(m)
-                m = torch.nn.utils.weight_norm(m)
-
-        # For float16, the forward of the Module doesn't work but we must still be able
-        # to register the weight norm as this is often done before sending the Module to
-        # CUDA.
-        m = nn.Linear(4, 5, dtype=torch.float16)
-        m = torch.nn.utils.weight_norm(m)
-
-        m = nn.Linear(4, 5, dtype=torch.bfloat16, device="cpu")
-        m = torch.nn.utils.weight_norm(m)
-
-        m = nn.Linear(4, 5, dtype=torch.bfloat16, device="cuda")
-        m = torch.nn.utils.weight_norm(m)
-
     def test_parameterlistdict_setting_attributes(self):
         with warnings.catch_warnings(record=True) as w:
             mod = nn.ParameterList(map(nn.Parameter, [torch.rand(2), torch.rand(2)]))
@@ -12777,6 +12730,50 @@ class TestNNDeviceType(NNTestCase):
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
+
+    def test_weight_norm(self, device):
+        for dtype in [torch.float, torch.bfloat16]:
+            input = torch.randn(3, 4, dtype=dtype, device=device)
+            m = nn.Linear(4, 5, dtype=dtype, device=device)
+            expected_output = m(input)
+
+            # add weight normalization
+            m = torch.nn.utils.weight_norm(m)
+            self.assertEqual(m.weight_v.size(), m.weight.size())
+            self.assertEqual(m.weight_g.size(), (5, 1))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # remove weight norm
+            m = torch.nn.utils.remove_weight_norm(m)
+            self.assertFalse(hasattr(m, 'weight_g'))
+            self.assertFalse(hasattr(m, 'weight_v'))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # test with dim=1
+            m = torch.nn.utils.weight_norm(m, dim=1)
+            self.assertEqual(m.weight_v.size(), m.weight.size())
+            self.assertEqual(m.weight_g.size(), (1, 4))
+            self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+            # test with dim=None
+            m = nn.Linear(4, 5, dtype=dtype, device=device)
+            expected_output = m(input)
+            m = torch.nn.utils.weight_norm(m, dim=None)
+            self.assertEqual(m(input), expected_output)
+
+            with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
+                m = torch.nn.utils.weight_norm(m)
+                m = torch.nn.utils.weight_norm(m)
+
+        # For float16, the forward of the Module doesn't work but we must still be able
+        # to register the weight norm as this is often done before sending the Module to
+        # CUDA.
+        m = nn.Linear(4, 5, dtype=torch.float16, device=device)
+        m = torch.nn.utils.weight_norm(m)
+
+        # For bfloat16
+        m = nn.Linear(4, 5, dtype=torch.bfloat16, device=device)
+        m = torch.nn.utils.weight_norm(m)
 
 class TestFunctionalPickle(TestCase):
 
