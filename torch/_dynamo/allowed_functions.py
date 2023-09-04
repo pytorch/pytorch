@@ -163,6 +163,7 @@ def _allowed_function_ids():
         disallowed_modules = (
             "torch.optim.",
             "torch.utils._foreach_utils",  # omit the period so we match all the functions in this module
+            "torch.utils._pytree",
             "torch.nn.modules.rnn.",
             "torch._dynamo.",
             "torch._C._dynamo.",

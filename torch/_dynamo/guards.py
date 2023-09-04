@@ -71,6 +71,7 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
+dict_version = torch._C._dynamo.guards.dict_version
 
 
 # For user stack printing
@@ -105,6 +106,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
+        ("___dict_version", dict_version),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
@@ -274,6 +276,13 @@ class GuardBuilder(GuardBuilderBase):
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        self._produce_guard_code(guard, [code])
+
+    def DICT_VERSION(self, guard: Guard):
+        # ___check_dict_version is same as `dict_version(x) == y`
+        ref = self.arg_ref(guard)
+        version = dict_version(self.get(guard.name))
+        code = f"___dict_version({ref}) == {version}"
         self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
