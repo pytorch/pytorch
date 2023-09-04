@@ -22,103 +22,97 @@ set(_source_code
   ]==])
 
 include(CMakePushCheckState)
-cmake_push_check_state(RESET)
 foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
   if(TARGET Sanitizer::${sanitizer_name})
     continue()
   endif()
-
-  set(CMAKE_REQUIRED_FLAGS
-      "-fsanitize=${sanitizer_name};-fno-omit-frame-pointer")
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" OR CMAKE_C_COMPILER_ID STREQUAL
-                                              "MSVC")
-    if(sanitizer_name STREQUAL "address")
-      set(CMAKE_REQUIRED_FLAGS "/fsanitize=${sanitizer_name}")
-    else()
-      continue()
-    endif()
-  endif()
-  if(sanitizer_name STREQUAL "address")
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL
-                                                 "Clang")
-      list(APPEND CMAKE_REQUIRED_FLAGS "-shared-libasan")
-    endif()
-  endif()
-  if(sanitizer_name STREQUAL "undefined" AND UBSAN_FLAGS)
-    list(APPEND CMAKE_REQUIRED_FLAGS "${UBSAN_FLAGS}")
-  endif()
-  if(sanitizer_name STREQUAL "memory")
-    list(APPEND CMAKE_REQUIRED_FLAGS "-fsanitize-memory-track-origins=2")
-  endif()
+  cmake_push_check_state(RESET)
 
   set(CMAKE_REQUIRED_QUIET ON)
-  set(_run_res 0)
-  include(CheckCSourceRuns)
-  include(CheckCXXSourceRuns)
   foreach(lang IN LISTS languages)
-    if(lang STREQUAL C)
-      check_c_source_runs("${_source_code}"
-                        __${lang}_${sanitizer_name}_res)
-      if(__${lang}_${sanitizer_name}_res)
-        set(_run_res 1)
+    if(NOT lang STREQUAL C AND NOT lang STREQUAL CXX)
+      continue()
+    endif()
+    if(CMAKE_${lang}_COMPILER_ID STREQUAL "MSVC")
+      if(sanitizer_name STREQUAL "address")
+        set(SANITIZER_FLAGS "/fsanitize=${sanitizer_name}")
+      else()
+        continue()
+      endif()
+    else()
+      set(SANITIZER_FLAGS
+          "-fsanitize=${sanitizer_name};-fno-omit-frame-pointer")
+    endif()
+    if(sanitizer_name STREQUAL "undefined" AND UBSAN_FLAGS)
+      list(APPEND SANITIZER_FLAGS "${UBSAN_FLAGS}")
+    endif()
+    if(sanitizer_name STREQUAL "memory")
+      list(APPEND SANITIZER_FLAGS "-fsanitize-memory-track-origins=2")
+    endif()
+    string(REPLACE ";" " " CMAKE_REQUIRED_FLAGS "${SANITIZER_FLAGS}")
+
+    set(SANITIZER_LINK_FLAGS)
+    if(CMAKE_${lang}_COMPILER_ID STREQUAL "MSVC")
+      list(APPEND SANITIZER_LINK_FLAGS "/INCREMENTAL:NO")
+    else()
+      list(APPEND SANITIZER_LINK_FLAGS "-fsanitize=${sanitizer_name}")
+      if(CMAKE_${lang}_COMPILER_ID STREQUAL "Clang")
+        list(APPEND SANITIZER_LINK_FLAGS "-shared-libasan")
       endif()
     endif()
-    if(lang STREQUAL CXX)
-      check_cxx_source_runs("${_source_code}"
-                        __${lang}_${sanitizer_name}_res)
-      if(__${lang}_${sanitizer_name}_res)
-        set(_run_res 1)
+    set(CMAKE_REQUIRED_LINK_OPTIONS "${SANITIZER_LINK_FLAGS}")
+
+    unset(__res)
+    if(lang STREQUAL C)
+      if(CMAKE_${lang}_COMPILER_ID STREQUAL "MSVC")
+        include(CheckCSourceCompiles)
+        check_c_source_compiles("${_source_code}" __res)
+      else()
+        include(CheckCSourceRuns)
+        check_c_source_runs("${_source_code}" __res)
+      endif()
+    else()
+      if(CMAKE_${lang}_COMPILER_ID STREQUAL "MSVC")
+        include(CheckCXXSourceCompiles)
+        check_cxx_source_compiles("${_source_code}" __res)
+      else()
+        include(CheckCXXSourceRuns)
+        check_cxx_source_runs("${_source_code}" __res)
+      endif()
+    endif()
+    if(NOT __res)
+      continue()
+    endif()
+    if(NOT TARGET Sanitizer::${sanitizer_name})
+      add_library(Sanitizer::${sanitizer_name} INTERFACE IMPORTED GLOBAL)
+    endif()
+    foreach(SANITIZER_FLAG IN LISTS SANITIZER_FLAGS)
+      target_compile_options(
+        Sanitizer::${sanitizer_name}
+        INTERFACE $<$<COMPILE_LANGUAGE:${lang}>:${SANITIZER_FLAG}>)
+    endforeach()
+    foreach(SANITIZER_FLAG IN LISTS SANITIZER_LINK_FLAGS)
+      target_link_options(Sanitizer::${sanitizer_name} INTERFACE
+                          $<$<COMPILE_LANGUAGE:${lang}>:${SANITIZER_FLAG}>)
+    endforeach()
+
+    if(sanitizer_name STREQUAL "address")
+      if(lang STREQUAL CXX)
+        if(CMAKE_${lang}_COMPILER_ID STREQUAL "MSVC")
+          # These annotations are in process, disable them
+          target_compile_definitions(
+            Sanitizer::${sanitizer_name}
+            INTERFACE $<$<COMPILE_LANGUAGE:${lang}>:_DISABLE_VECTOR_ANNOTATION>
+                      $<$<COMPILE_LANGUAGE:${lang}>:_DISABLE_STRING_ANNOTATION>)
+        else()
+          target_compile_definitions(
+            Sanitizer::${sanitizer_name}
+            INTERFACE
+              $<$<COMPILE_LANGUAGE:${lang}>:_GLIBCXX_SANITIZE_VECTOR>
+              $<$<COMPILE_LANGUAGE:${lang}>:_GLIBCXX_SANITIZE_STD_ALLOCATOR>)
+        endif()
       endif()
     endif()
   endforeach()
-  if(_run_res)
-    add_library(Sanitizer::${sanitizer_name} INTERFACE IMPORTED GLOBAL)
-    target_compile_options(
-      Sanitizer::${sanitizer_name}
-      INTERFACE
-        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
-        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
-    )
-    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_C_COMPILER_ID
-                                                     STREQUAL "MSVC")
-      target_link_options(
-        Sanitizer::${sanitizer_name}
-        INTERFACE
-        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
-        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
-      )
-    else()
-      target_link_options(
-        Sanitizer::${sanitizer_name}
-        INTERFACE
-        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:/INCREMENTAL:NO>
-        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:/INCREMENTAL:NO>
-      )
-    endif()
-
-    if(sanitizer_name STREQUAL "address")
-      target_compile_definitions(
-        Sanitizer::${sanitizer_name}
-        INTERFACE
-          $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_VECTOR>
-          $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_STD_ALLOCATOR>
-      )
-      target_link_options(
-        Sanitizer::${sanitizer_name}
-        INTERFACE
-        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>,$<CXX_COMPILER_ID:GNU>>:-lasan>
-        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>,$<C_COMPILER_ID:GNU>>:-lasan>
-      )
-    endif()
-    if(sanitizer_name STREQUAL "undefined")
-      target_link_options(
-        Sanitizer::${sanitizer_name}
-        INTERFACE
-        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>,$<CXX_COMPILER_ID:GNU>>:-lubsan>
-        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>,$<C_COMPILER_ID:GNU>>:-lubsan>
-      )
-    endif()
-  endif()
+  cmake_pop_check_state()
 endforeach()
-
-cmake_pop_check_state()
