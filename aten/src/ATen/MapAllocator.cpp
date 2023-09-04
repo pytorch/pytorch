@@ -8,7 +8,6 @@
 #endif
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Unicode.h>
 
 /* stuff for mapped files */
@@ -29,7 +28,6 @@
 #include <c10/util/win32-headers.h>
 #endif
 #include <fmt/format.h>
-#include <fmt/std.h>
 
 namespace at {
 
