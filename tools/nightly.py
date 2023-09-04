@@ -60,9 +60,9 @@ LOGGER: Optional[logging.Logger] = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
 DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
-USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)\@")
+USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)@")
 LOG_DIRNAME_RE = re.compile(
-    r"(\d{4}-\d\d-\d\d_\d\dh\d\dm\d\ds)_" r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
+    r"(\d{4}-\d{2}-\d{2}_\d{2}h\d{2}m\d{2}s)_" r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
 )
 SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "hypothesis", "ipython", "sphinx")
 
