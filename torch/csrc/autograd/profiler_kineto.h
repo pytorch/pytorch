@@ -175,8 +175,6 @@ TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
-TORCH_API bool profilerIsEnabled();
-
 } // namespace profiler
 } // namespace autograd
 

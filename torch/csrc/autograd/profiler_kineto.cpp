@@ -883,12 +883,6 @@ void ProfilerResult::save(const std::string& path) {
   trace_->save(path);
 }
 
-bool isProfilerEnabled() {
-  // TODO: I think it should check both false and true
-  // Or alternatively, go check for callbacks not empty? see autograd/function.h
-  return KinetoThreadLocalState::get(false) != nullptr;
-}
-
 } // namespace profiler
 } // namespace autograd
 
