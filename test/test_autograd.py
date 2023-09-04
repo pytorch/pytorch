@@ -1397,14 +1397,14 @@ class TestAutograd(TestCase):
             post_counter = [0]
             pre_counter = [0]
 
-            def posthook(grad_input, grad_output):
+            def posthook(grad_input, grad_output, pre_counter=pre_counter, post_counter=post_counter):
                 self.assertEqual(pre_counter[0], 3)
                 self.assertTrue(torch.allclose(grad_output[0], torch.ones(1) * 8))
                 self.assertTrue(torch.allclose(grad_input[0], torch.ones(1) * 16))
                 post_counter[0] += 1
                 return grad_input
 
-            def prehook(grad_output):
+            def prehook(grad_output, pre_counter=pre_counter):
                 pre_counter[0] += 1
                 return (grad_output[0] * 2,)
 
@@ -1428,7 +1428,7 @@ class TestAutograd(TestCase):
             a = torch.rand(3, 3, requires_grad=True)
             b = mul2(a)
 
-            def prehook(grad_output):
+            def prehook(grad_output, pre_counter=pre_counter):
                 pre_counter[0] += 1
                 return None
 
@@ -1500,7 +1500,7 @@ class TestAutograd(TestCase):
             b = mul2(a)
             counter = [0]
 
-            def prehook(grad_output):
+            def prehook(grad_output, counter=counter):
                 counter[0] += 1
                 return None
 
@@ -1516,13 +1516,13 @@ class TestAutograd(TestCase):
             b = mul2(a)
             counter = [0]
 
-            def prehook1(grad_output):
+            def prehook1(grad_output, handle2=handle2, handle3=handle3):
                 handle2.remove()
                 # Remove hook that is already removed is OK
                 handle3.remove()
                 return None
 
-            def prehook2(grad_output):
+            def prehook2(grad_output, counter=counter):
                 counter[0] += 1
                 return None
 
@@ -1728,15 +1728,15 @@ class TestAutograd(TestCase):
         for fn in (DoubleMul.apply, var_mean):
             counts = [0, 0, 0]
 
-            def fn0(grad):
+            def fn0(grad, counts=counts, out1=out1):
                 counts[0] += 1
                 self.assertEqual(grad, torch.ones_like(out1) * 2)
 
-            def fn1(grad):
+            def fn1(grad, counts=counts, out1=out1):
                 counts[1] += 1
                 self.assertEqual(grad, torch.ones_like(out1) * 3)
 
-            def fn2(grad):
+            def fn2(grad, counts=counts, out1=out1):
                 counts[2] += 1
                 self.assertEqual(grad, torch.ones_like(out1))
 
@@ -2144,7 +2144,7 @@ class TestAutograd(TestCase):
             self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
             self.assertIsNone(w.grad_fn)
             self.assertFalse(z.requires_grad)
-            self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+            self.assertRaises(RuntimeError, lambda z=z: z.backward(torch.ones(5, 5)))
             self.assertIsNone(z.grad_fn)
 
         # test nested decorator and with-statement on no_grad
@@ -5438,7 +5438,8 @@ Done""")
                             fwd_should_fail = fwd_bad and check_forward_ad
                             bwd_should_fail = bwd_bad and check_backward_ad
 
-                            def run():
+                            def run(x=x, fwd_bad=fwd_bad, bwd_bad=bwd_bad, check_forward_ad=check_forward_ad,
+                                    check_backward_ad=check_backward_ad, fast_mode=fast_mode):
                                 gradcheck(UserFn.apply, (x, fwd_bad, bwd_bad), check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad, check_undefined_grad=check_backward_ad,
                                           check_batched_grad=check_backward_ad, fast_mode=fast_mode)
@@ -5451,6 +5452,7 @@ Done""")
                                 continue
 
                             if not fwd_should_fail and not bwd_should_fail:
+
                                 run()
                             else:
                                 # If both fail, backward AD failure "hides" forward AD failure
@@ -5676,9 +5678,9 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
-    def _test_checkpointing_non_reentrant_autocast(self, device_type):
+    def _test_checkpointing_non_reentrant_autocast(self, device_type, enabled=enabled):
         for enabled in [True, False]:
-            def foo(x, y, z):
+            def foo(x, y, z, enabled=enabled):
                 # torch.mm is on autocast's list of ops that should run in
                 # the autocast precision
                 x = torch.mm(x, y)
@@ -6739,7 +6741,7 @@ for shape in [(1,), ()]:
                     # Used for special casing the tests below
                     output_is_a_view = (make_view or fn_id == "view_of_temp")
 
-                    def fn(a, b):
+                    def fn(a, b, fn_id=fn_id, make_view=make_view, inplace=inplace):
                         # never modify a, b inplace for gracheck
                         a = a.clone()
                         b = b.clone()
@@ -7287,7 +7289,7 @@ for shape in [(1,), ()]:
         inp = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
 
         for flag, msg in flag_to_error.items():
-            def test_fn(inp):
+            def test_fn(inp, flag=flag):
                 if flag == "not_a_view_of_inp_base":
                     inp = inp.view_as(inp)
                 return ViewFn.apply(inp, flag)
@@ -7404,7 +7406,7 @@ for shape in [(1,), ()]:
                     return gO1 + gO2, gO1
 
                 @staticmethod
-                def jvp(ctx, x_t, y_t):
+                def jvp(ctx, x_t, y_t, fn=fn):
                     return x_t + y_t, fn(x_t)
 
             a = torch.tensor(1., dtype=torch.double, requires_grad=True)
@@ -8298,7 +8300,7 @@ for shape in [(1,), ()]:
                 test(lambda: torch.randn(5, requires_grad=True, dtype=torch.double), cuda, pin_memory)
                 # Sparse tensor
                 x = torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.]), requires_grad=True)
-                test(lambda: x, cuda, pin_memory)
+                test(lambda x=x: x, cuda, pin_memory)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_graph_save_on_cpu_cuda(self):
