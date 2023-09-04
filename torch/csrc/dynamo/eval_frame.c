@@ -847,20 +847,20 @@ inline static PyObject* eval_custom_code_impl(
   return result;
 }
 
-// Wrapper function adds a profiler event
+// This wrapper function adds a profiler event
 inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     int throw_flag) {
-  _PytorchRecordFunctionState rf = _pytorch_record_function_enter("Dynamo-Compiled Region");
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
     code,
     throw_flag
   );
-  _pytorch_record_function_exit(&rf);
+  _pytorch_record_function_exit(rf);
   return result;
 }
 

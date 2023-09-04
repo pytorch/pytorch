@@ -163,7 +163,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with torch.profiler.profile() as prof:
             opt_fn(*inputs)
 
-        self.assertTrue(any(e.name == "Dynamo-Compiled Region" for e in prof.events()))
+        self.assertTrue(any(e.name == "Torch-Compiled Region" for e in prof.events()))
 
 
 if __name__ == "__main__":
