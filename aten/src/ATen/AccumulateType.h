@@ -74,17 +74,14 @@ using acc_type_device = typename AccumulateTypeDevice<T, device>::type;
 template <typename T, bool is_cuda>
 using acc_type = typename AccumulateType<T, is_cuda>::type;
 
-#define ACC_TYPE(scalar_type, primitive_type, device_type) \
-  template <>                                              \
-  struct AccumulateTypeDevice<scalar_type, device_type> {  \
-    using type = primitive_type;                           \
+#define ACC_TYPE(t, acc_t, device_type)         \
+  template <>                                   \
+  struct AccumulateTypeDevice<t, device_type> { \
+    using type = acc_t;                         \
   };
-#define MPS_ACC_TYPE(scalar_type, primitive_type) \
-  ACC_TYPE(scalar_type, primitive_type, c10::DeviceType::MPS)
-#define CUDA_ACC_TYPE(scalar_type, primitive_type) \
-  ACC_TYPE(scalar_type, primitive_type, c10::DeviceType::CUDA)
-#define CPU_ACC_TYPE(scalar_type, primitive_type) \
-  ACC_TYPE(scalar_type, primitive_type, c10::DeviceType::CPU)
+#define MPS_ACC_TYPE(t, acc_t) ACC_TYPE(t, acc_t, c10::DeviceType::MPS)
+#define CUDA_ACC_TYPE(t, acc_t) ACC_TYPE(t, acc_t, c10::DeviceType::CUDA)
+#define CPU_ACC_TYPE(t, acc_t) ACC_TYPE(t, acc_t, c10::DeviceType::CPU)
 
 MPS_ACC_TYPE(BFloat16, float);
 MPS_ACC_TYPE(Half, float);
