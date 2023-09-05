@@ -155,11 +155,14 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
                 indeg[user] += 1
     free_nodes = set([node for node in snodes if indeg[node] == 0])
 
-    result = []
+    result: List["scheduler.BaseSchedulerNode"] = []
     unused_nodes = set()
     unused_nodes = set([snode for snode in snodes])
 
-    def add_node(snode):
+    def schedule_node(result, snode):
+        """
+        Schedule a single node.
+        """
         assert snode in unused_nodes
         assert snode in free_nodes
         free_nodes.remove(snode)
@@ -170,10 +173,11 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
                 indeg[user] -= 1
                 if indeg[user] == 0:
                     free_nodes.add(user)
+        return result
 
-    def add_all_nodes(snodes):
+    def schedule_nodes(result, snodes):
         """
-        Schedules all nodes in an arbitrary topologically valid order.
+        Schedules all nodes in `snodes` in an arbitrary topologically valid order.
         """
         all_nodes = set(snodes)
         assert all([node in unused_nodes for node in all_nodes])
@@ -182,15 +186,17 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
             # there should be at least one node that is a "free node" (i.e. indeg == 0),
             # hence infinite loop is not possible. But we check here just to be safe.
             progress = False
-            for snode in tuple_sorted(all_nodes):
-                if snode in free_nodes:
-                    add_node(snode)
-                    all_nodes.remove(snode)
+            for node in tuple_sorted(all_nodes):
+                if node in free_nodes:
+                    result = schedule_node(result, node)
+                    all_nodes.remove(node)
                     progress = True
             if not progress:
                 raise Exception("Unable to find a free node (indeg == 0). This is an impossible state to reach. Please report a bug to PyTorch.")
+        return result
 
-    add_all_nodes(
+    result = schedule_nodes(
+        result,
         list(comm_ancestors[comm_nodes[0]]) + [comm_nodes[0]],
     )
 
@@ -212,7 +218,7 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
             [get_runtime_of_snode(node) for node in priority1]
         )
         comm_cost = get_runtime_of_snode(comm_nodes[idx - 1])
-        add_all_nodes(tuple_sorted(priority1))
+        result = schedule_nodes(result, tuple_sorted(priority1))
 
         debug_print("Priority 2")
         group1_cost = total_cost
@@ -245,7 +251,7 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
                     # TODO: Smarter heuristics for packing the cost here
                     if (comm_cost - total_cost) <= runtime_cost / 2:
                         continue
-                    add_node(snode)
+                    result = schedule_node(result, snode)
                     total_cost += get_runtime_of_snode(snode)
         rollable_compute = total_cost - group1_cost
         # The idea here is that if there are no compute nodes in priority 3, we
@@ -263,11 +269,11 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
 
         debug_print("priority 3")
         priority3 = unused_nodes & comm_ancestors[comm_nodes[idx]]
-        add_all_nodes(list(priority3) + [comm_nodes[idx]])
+        result = schedule_nodes(result, list(priority3) + [comm_nodes[idx]])
 
         debug_print()
 
-    add_all_nodes(unused_nodes)
+    result = schedule_nodes(result, unused_nodes)
 
     result = sink_waits(result)
     result = raise_comms(result)
