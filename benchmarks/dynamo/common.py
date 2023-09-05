@@ -3386,7 +3386,12 @@ def run(runner, args, original_dir=None):
                     with tqdm(desc="loading model"):
                         extra_args = []
                         if hasattr(args, "rank") and hasattr(args, "world_size"):
-                            extra_args += ["--rank", str(args.rank), "--world_size", str(args.world_size)]
+                            extra_args += [
+                                "--rank",
+                                str(args.rank),
+                                "--world_size",
+                                str(args.world_size),
+                            ]
 
                         if args.part:
                             (
@@ -3400,7 +3405,7 @@ def run(runner, args, original_dir=None):
                                 model_name,
                                 batch_size=batch_size,
                                 part=args.part,
-                                extra_args=extra_args
+                                extra_args=extra_args,
                             )
                         else:
                             if args.fsdp:
@@ -3413,7 +3418,10 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    "cpu", model_name, batch_size=batch_size, extra_args=extra_args
+                                    "cpu",
+                                    model_name,
+                                    batch_size=batch_size,
+                                    extra_args=extra_args,
                                 )
                             else:
                                 (
@@ -3423,7 +3431,10 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    device, model_name, batch_size=batch_size, extra_args=extra_args
+                                    device,
+                                    model_name,
+                                    batch_size=batch_size,
+                                    extra_args=extra_args,
                                 )
                 except NotImplementedError as e:
                     print(e)

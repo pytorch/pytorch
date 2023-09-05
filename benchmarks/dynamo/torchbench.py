@@ -306,7 +306,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         model_name,
         batch_size=None,
         part=None,
-        extra_args=[],
+        extra_args=None,
     ):
         if self.args.enable_activation_checkpointing:
             raise NotImplementedError(
@@ -348,6 +348,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
+        if extra_args is None:
+            extra_args = []
         if part:
             extra_args += ["--part", part]
 
