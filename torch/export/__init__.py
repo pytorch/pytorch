@@ -379,8 +379,9 @@ class ExportedProgram:
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph Signature: {self.graph_signature}\n"
-            f"Symbol to range: {self.range_constraints}\n"
+            f"Graph signature: {self.graph_signature}\n"
+            f"Range constraints: {self.range_constraints}\n"
+            f"Equality constraints: {self.equality_constraints}\n"
         )
         return string
 
@@ -398,7 +399,7 @@ class ExportedProgram:
         )
 
         pm = PassManager(list(passes))
-        res = pm(self.graph_module)
+        res = pm(copy.deepcopy(self.graph_module))
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
