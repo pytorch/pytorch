@@ -76,7 +76,8 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
                 return_node_name = return_node.name
                 # we found a param/buffer mutation
                 if return_node_name in buffers_to_mutate:
-                    buffer_node_name = buffers_to_mutate[return_node_name]
+                    # TODO Fix situation here to replace dot with underscore...
+                    buffer_node_name = buffers_to_mutate[return_node_name].replace('.', '_')
                     assert buffer_node_name in buffer_name_to_node
                     buffer_node = buffer_name_to_node[buffer_node_name]
                     with gm.graph.inserting_before(node):

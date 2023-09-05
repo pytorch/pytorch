@@ -10,7 +10,7 @@ from torchgen.api.python import (
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
-from torchgen.model import DispatchKey, Variant
+from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -1035,6 +1035,7 @@ def gen_pyi(
             "is_quantized": ["is_quantized: _bool"],
             "is_meta": ["is_meta: _bool"],
             "is_mps": ["is_mps: _bool"],
+            "is_mtia": ["is_mtia: _bool"],
             "is_ort": ["is_ort: _bool"],
             "is_mkldnn": ["is_mkldnn: _bool"],
             "is_vulkan": ["is_vulkan: _bool"],
@@ -1227,6 +1228,9 @@ def gen_pyi(
     # Dispatch key hints
     # ~~~~~~~~~~~~~~~~~~
     dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+    torch_dispatch_mode_key_hints = [
+        f"{k.name}: _TorchDispatchModeKey = ..." for k in _TorchDispatchModeKey
+    ]
 
     # Tags Enum type hints
     # ~~~~~~~~~~~~~~~~~~~~
@@ -1247,6 +1251,7 @@ def gen_pyi(
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
         "dispatch_key_hints": dispatch_key_hints,
+        "torch_dispatch_mode_key_hints": torch_dispatch_mode_key_hints,
         "all_directive": all_directive,
         "tag_attributes": tag_attributes,
     }
