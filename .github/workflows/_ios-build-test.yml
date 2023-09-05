@@ -380,7 +380,6 @@ jobs:
           # all files sequentially which is both slow and has too many requests. More info is at
           # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
           zip -r ${ARTIFACT_NAME} install src version.txt LICENSE
-          popd
 
           pip install -q awscli==1.29.40
           DRY_RUN=${DRY_RUN:-enabled}
@@ -389,6 +388,8 @@ jobs:
             AWS_S3_CP="aws s3 cp"
           fi
           ${AWS_S3_CP} "${ARTIFACT_NAME}" s3://ossci-ios-build/ --acl public-read
+          popd
+
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v3
