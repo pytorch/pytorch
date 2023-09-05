@@ -84,6 +84,24 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v.grad, torch.tensor([2.0, 4.0, 6.0]))
         self.assertEqual(cnts.frame_count, 0)
 
+    def test_tensor_only_register_hook_in_graph_local_inner(self):
+        def fn(x):
+            def local_hook(grad):
+                return grad * 2
+
+            z = x * x
+            x.register_hook(local_hook)
+            z.register_hook(local_hook)
+            return x, z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch._dynamo.optimize(cnts)(fn)
+        v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
+        v = fn(v)
+        v[0].backward(torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(v[0].grad, torch.tensor([2.0, 4.0, 6.0]))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_tensor_register_hook_in_graph_local(self):
         def local_hook(grad):
             return grad * 2

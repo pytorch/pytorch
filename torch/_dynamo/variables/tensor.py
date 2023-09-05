@@ -649,7 +649,7 @@ class TensorVariable(VariableTracker):
             import os
 
             gpu_id = int(os.environ.get("LOCAL_RANK", 0))
-            # see On dynamo tensor_hooks
+            # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
 
@@ -686,7 +686,7 @@ class TensorVariable(VariableTracker):
                 grapharg = GraphArg(src, fn, False, None)
                 grapharg.has_symbols = False
                 hook_proxy.node.meta["grapharg"] = grapharg
-                # this is a placeholder implementation for now, the real POR to avoid recompiling on hook identity
+                # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
                 # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
                 # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
                 self.as_proxy().register_hook(hook_proxy)

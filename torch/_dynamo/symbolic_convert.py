@@ -794,7 +794,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        # If the last top VT in the stack (just popped) is a handle (see On dynamo tensor_hooks), we associate
+        # If the last top VT in the stack (just popped) is a handle (see [On tensor.register_hook]), we associate
         # the stored name.
         if isinstance(loaded_vt, RemovableHandleVariable):
             new_name = self.output.new_var(name)

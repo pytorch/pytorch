@@ -10,6 +10,8 @@ from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
+import types
+import functools
 
 from functorch import make_fx
 
@@ -2922,8 +2924,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 unused_nodes = []
                 for i, node in enumerate(fw_module.graph.nodes):
                     if node.op == "placeholder":
-                        # workaround https://github.com/pytorch/pytorch/issues/97894
-                        if (len(node.users) == 0) and not isinstance(adjusted_flat_args[i], float):
+                        # This should be as simple as rejecting nodes without users. Unfortunately,
+                        # there are a ton of edge cases here https://github.com/pytorch/pytorch/issues/97894, activation
+                        # checkpointing, etc. So we just skip what should be a nice invariant, in favor of explicitly rejecting
+                        # functions.
+                        # if (len(node.users) == 0))
+                        if isinstance(adjusted_flat_args[i], (types.FunctionType, functools.partial)):
                             unused_nodes.append(node)
                         else:
                             kept_flat_args.append(adjusted_flat_args[i])

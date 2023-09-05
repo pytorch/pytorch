@@ -389,11 +389,22 @@ class SideEffects:
             hook,
             handle,
         ) in self.tensor_hooks:
-            # On dynamo tensor_hooks
+            # Note: [On tensor.register_hook]
             #
-            # register_hook in the Graph: We bypass direct inclusion of register_hook calls in the graph.
+            # register_hook on a tensor, AKA backward hooks, have slightly nuanced differences in how they are implemented
+            # when it comes to hooks on objects with sources (inputs, params) vs objects without sources (intermediaries).
+            #
+            # For tensors with a source, we bypass direct inclusion of register_hook calls in the graph.
             # Instead, these are tracked and stashed as a global variable, enabling their association with tensors in
-            # the residuals. During dynamo's frame creation, these hooks are invoked seamlessly.
+            # the residuals. During dynamo's frame creation, these hooks are invoked seamlessly on known reconstructible/fetch-able
+            # tensors. Because a source indicates knowledge of this object outside the torch compile region, and
+            # because we are running residuals firmly before .backward() can be run, it is sound to invoke
+            # `register_hook` on a known tensor.
+            #
+            # For tensors without a source, the behavior is similar to the above case, except instead of doing the register_hook
+            # call in residuals, we write a register_hook call to the graph. As fx does not understand function
+            # argument, we manually lift the argument up to an input, and use that to register hooks.
+            # This is done so that we can preserve the hook registration without graph breaking.
             #
             # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
             # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
@@ -402,11 +413,16 @@ class SideEffects:
             #
             # Dynamo Tensor Hooks Workflow:
             # - Functions passed to register_hook are lifted globally.
-            # - In the "side_effects" phase of codegen, we iterate over tensors with hooks to:
-            #   - Generate the tensor.
-            #   - Issue a register_hook call on the tensor, linking to the globally stored function.
-            #   - Incorporate a handle if one was established in the eager phase.
-            # The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
+            # - For tensors with sources:
+            #   - In the "side_effects" phase of codegen, we iterate over tensors with hooks to:
+            #     - Generate the tensor.
+            #     - Issue a register_hook call on the tensor, linking to the globally stored function.
+            #     - Incorporate a handle if one was established in the eager phase.
+            #  - For tensors without sources:
+            #    - We don't generate any instructions for registering a hook.
+            #    - We lift the fn up as an input.
+            #    - We then manually insert a register_hook call into the graph.
+            # - The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
             if tensor.source:
                 cg(tensor)
                 cg.extend_output([cg.create_load_attr("register_hook")])
