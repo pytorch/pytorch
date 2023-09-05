@@ -63,9 +63,7 @@ void set_params_fprop(FlashFwdParams &params,
                       void *softmax_lse_d,
                       float p_dropout,
                       float softmax_scale,
-                      bool is_causal,
-                      bool is_deterministic,
-                      bool is_using_qloop) {
+                      bool is_causal) {
 
     auto acc_type = at::kFloat;
     auto data_type = q.dtype();
@@ -152,8 +150,6 @@ void set_params_fprop(FlashFwdParams &params,
     // Set this to probability of keeping an element to simplify things.
     params.p_dropout = p_dropout;
     params.is_causal = is_causal;
-    params.is_deterministic = is_deterministic;
-    params.is_using_qloop = is_using_qloop;
 }
 
 void set_params_dgrad(FlashBwdParams &params,
@@ -178,10 +174,7 @@ void set_params_dgrad(FlashBwdParams &params,
                       void *softmax_lse_d,
                       float p_dropout,
                       float softmax_scale,
-                      bool is_causal,
-                      bool is_deterministic,
-                      bool is_performance_mode,
-                      bool is_using_qloop) {
+                      bool is_causal) {
 
     auto acc_type = at::kFloat;
     auto data_type = q.dtype();
@@ -285,9 +278,6 @@ void set_params_dgrad(FlashBwdParams &params,
     // Set this to probability of keeping an element to simplify things.
     params.p_dropout = p_dropout;
     params.is_causal = is_causal;
-    params.is_deterministic = is_deterministic;
-    params.is_performance_mode = is_performance_mode;
-    params.is_using_qloop = is_using_qloop;
 }
 
 std::vector<at::Tensor>
@@ -303,9 +293,9 @@ mha_fwd(const at::Tensor &q,
         const float softmax_scale,
         const bool zero_tensors,
         const bool is_causal,
-        const bool return_softmax, // in rocm ,this will return the random number matrix when doing dropout
-        const int num_splits,      // num_splits is not used in rocm
-        c10::optional<at::Generator> gen_) {
+        const bool return_softmax, //o in rocm ,this will return the random number matrix when doing dropout
+        const int num_splits       // num_splits is not used in rocm
+        ) {
     const bool is_deterministic = true;
     const bool is_using_qloop = true;
     auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -369,8 +359,7 @@ mha_fwd(const at::Tensor &q,
         if (return_softmax) { s.zero_(); }
     }
 
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
     set_params_fprop(launch_params.params,
                      batch_size,
@@ -387,9 +376,7 @@ mha_fwd(const at::Tensor &q,
                      softmax_lse.data_ptr(),
                      p_dropout,
                      softmax_scale,
-                     is_causal,
-                     is_deterministic,
-                     is_using_qloop);
+                     is_causal);
 
     // number of times random will be generated per thread, to offset philox counter in thc random
     // state
@@ -431,13 +418,15 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const float softmax_scale,
         const bool zero_tensors,
         const bool is_causal,
-        const bool is_deterministic,
-        const bool is_performance_mode,
-        const bool is_using_qloop,
         const int num_splits,
-        c10::optional<at::Generator> gen_
+	at::Tensor philox_seed,  // Not used or supported on ROCm
+	at::Tensor philox_offset // Not used or supported on ROCm
 ) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
+
+    const bool is_deterministic = true;
+    const bool is_using_qloop = true;
+    const bool is_performance_mode = true;
 
     bool is_dropout = p_dropout > 0.0;
     auto stream = at::cuda::getCurrentHIPStream().stream();
@@ -521,8 +510,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         // softmax_d.zero_();
     }
 
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
-        gen_, at::cuda::detail::getDefaultCUDAGenerator());
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
 
     set_params_dgrad(launch_params.params,
                      batch_size,
@@ -538,10 +526,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                      softmax_lse.data_ptr(),
                      p_dropout,
                      softmax_scale,
-                     is_causal,
-                     is_deterministic,
-                     is_performance_mode,
-                     is_using_qloop);
+                     is_causal);
 
     if( is_dropout ) {
         // See Note [Acquire lock when using random generators]
@@ -1383,21 +1368,21 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 // }
 
 
-int main(){
-    bool pass = true;
-    bool do_verification = true; // whether do verification
-    pass &= fwd_test(do_verification);
-    std::cout << "Forward finished!" <<std::endl;
-    pass &= bwd_test(do_verification);
-    std::cout << "Backward finished!" <<std::endl;
-    if(do_verification){
-        if(pass)
-            std::cout << "Verification passed!" <<std::endl;
-        else
-            std::cout << "Verification failed!" <<std::endl;
-    }
-    return pass ? 0 : 1;
-}
+// int main(){
+//     bool pass = true;
+//     bool do_verification = true; // whether do verification
+//     pass &= fwd_test(do_verification);
+//     std::cout << "Forward finished!" <<std::endl;
+//     pass &= bwd_test(do_verification);
+//     std::cout << "Backward finished!" <<std::endl;
+//     if(do_verification){
+//         if(pass)
+//             std::cout << "Verification passed!" <<std::endl;
+//         else
+//             std::cout << "Verification failed!" <<std::endl;
+//     }
+//     return pass ? 0 : 1;
+// }
 } // namespace fmha
 
-#endif
+// #endif
