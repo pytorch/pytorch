@@ -24,6 +24,7 @@ from torch._refs import (
 
 
 __all__ = [
+    "airy_ai",
     "bessel_j0",
     "bessel_j1",
     "entr",
@@ -45,6 +46,11 @@ __all__ = [
 ]
 aten = torch._ops.ops.aten
 
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def airy_ai(a: TensorLikeType) -> TensorLikeType:
+    return prims.airy_ai(a)
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,

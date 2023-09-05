@@ -52,6 +52,7 @@ __all__ = [
     "abs",
     "acos",
     "acosh",
+    "airy_ai",
     "asin",
     "asinh",
     "atan",
@@ -486,6 +487,13 @@ acos = _make_elementwise_unary_prim(
 acosh = _make_elementwise_unary_prim(
     "acosh",
     impl_aten=torch.acosh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+airy_ai = _make_elementwise_unary_prim(
+    "airy_ai",
+    impl_aten=torch.special.airy_ai,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

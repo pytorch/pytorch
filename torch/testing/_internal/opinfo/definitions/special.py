@@ -687,6 +687,19 @@ python_ref_db: List[OpInfo] = [
     #
     # Elementwise Unary Special OpInfos
     #
+        ElementwiseUnaryPythonRefInfo(
+        "_refs.special.airy_ai",
+        torch_opinfo_name="special.airy_ai",
+        op_db=op_db,
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-04,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.bessel_j0",
         torch_opinfo_name="special.bessel_j0",
