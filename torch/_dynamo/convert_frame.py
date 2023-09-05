@@ -345,10 +345,7 @@ def convert_frame_assert(
             unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
-            frame_state["has_tensor_or_module"] = False
             return None
-        else:
-            frame_state["has_tensor_or_module"] = True
 
         global initial_grad_state
         initial_grad_state = torch.is_grad_enabled()

@@ -105,7 +105,11 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -2154,10 +2158,18 @@ class InstructionTranslator(InstructionTranslatorBase):
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
+    def symbolic_locals_contain_module_class(self):
+        for v in self.symbolic_locals.values():
+            if isinstance(v, UserDefinedClassVariable) and issubclass(
+                v.as_python_constant(), torch.nn.Module
+            ):
+                return True
+        return False
+
     def RETURN_VALUE(self, inst):
         if (
             self.output.count_calls() == 0
-            and not self.output.frame_state["has_tensor_or_module"]
+            and not self.symbolic_locals_contain_module_class()
             and not self.export
         ):
             raise exc.SkipFrame("because no content in function call")
