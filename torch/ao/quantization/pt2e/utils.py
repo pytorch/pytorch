@@ -14,6 +14,8 @@ from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noq
 
 from torch.ao.quantization.quantizer import QuantizationAnnotation
 
+import queue
+
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
@@ -35,13 +37,17 @@ _DEQUANTIZE_OPS = [
 
 
 def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
-    if target.op == "output":
-        return False
-    if next_node == target:
-        return True
+    q = queue.Queue()
     for n in next_node.users.keys():
-        if _is_connected(n, target):
+        q.put(n)
+    while not q.empty():
+        node = q.get()
+        if node.op == "output":
+            return False
+        if node == target:
             return True
+        for n in node.users.keys():
+            q.put(n)
     return False
 
 
