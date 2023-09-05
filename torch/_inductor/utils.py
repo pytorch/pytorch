@@ -902,11 +902,17 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
-PYTHON_TYPE_TO_SCHEMA_TYPE = {
-    torch.dtype: "int",
-    torch.device: "Device",
-    bool: "bool",
-}
+def python_type_to_schema_type():
+    from . import ir
+
+    PYTHON_TYPE_TO_SCHEMA_TYPE = {
+        torch.dtype: "int",
+        torch.device: "Device",
+        bool: "bool",
+        float: "float",
+        ir.TensorBox: "Tensor",
+    }
+    return PYTHON_TYPE_TO_SCHEMA_TYPE
 
 
 def may_get_optional_schema_type(schema_type, is_optional_arg):
@@ -927,8 +933,8 @@ def type_match(arg, arg_type, is_optional_arg):
             # TODO: add support here
             return False
 
-    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
-        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+    if arg.__class__ in python_type_to_schema_type():
+        schema_type = python_type_to_schema_type()[arg.__class__]
         may_optional_schema_type = may_get_optional_schema_type(
             schema_type, is_optional_arg
         )
@@ -961,6 +967,9 @@ def schema_match(schema, args, kwargs):
     def is_optional(arg):
         return "Optional" in str(arg.type)
 
+    def allow_none(arg):
+        return is_optional(arg) or arg.has_default_value()
+
     assert len(args) <= max_pos_args, args_error_message(
         len(args), max_pos_args, min_args
     )
@@ -977,7 +986,7 @@ def schema_match(schema, args, kwargs):
                 obj = kwargs[argument.name]
                 is_kwd = True
 
-        if obj is None and not is_optional(argument):
+        if obj is None and not allow_none(argument):
             return False
 
         if obj is not None:

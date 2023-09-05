@@ -6749,6 +6749,19 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
+    def test_scaled_dot_product_flash_attention(self):
+        def fn(q, k, v):
+            return aten._scaled_dot_product_flash_attention(q, k, v, scale=0.125)[:2]
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+            ),
+        )
+
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
