@@ -1665,25 +1665,25 @@ def _gather_orig_param_state(
             if not torch.is_tensor(value) or value.dim() == 0:
                 continue
 
-        value = value[: flat_param._numels[param_idx]].reshape(
-            flat_param._shapes[param_idx]
-        )
-        if shard_state:
-            osd_config = fsdp_state._optim_state_dict_config
-            if getattr(osd_config, "_use_dtensor", False):
-                assert fsdp_state._device_mesh is not None
-                value = _ext_chunk_dtensor(
-                    value, fsdp_state.rank, fsdp_state._device_mesh
-                )
-            else:
-                assert fsdp_state.process_group is not None
-                value = _ext_chunk_tensor(
-                    value,
-                    fsdp_state.rank,
-                    fsdp_state.world_size,
-                    fsdp_state._device_handle.device_count(),
-                    fsdp_state.process_group,
-                )
-        value = value.cpu()
-        gathered_state[state_name] = value
+            value = value[: flat_param._numels[param_idx]].reshape(
+                flat_param._shapes[param_idx]
+            )
+            if shard_state:
+                osd_config = fsdp_state._optim_state_dict_config
+                if getattr(osd_config, "_use_dtensor", False):
+                    assert fsdp_state._device_mesh is not None
+                    value = _ext_chunk_dtensor(
+                        value, fsdp_state.rank, fsdp_state._device_mesh
+                    )
+                else:
+                    assert fsdp_state.process_group is not None
+                    value = _ext_chunk_tensor(
+                        value,
+                        fsdp_state.rank,
+                        fsdp_state.world_size,
+                        fsdp_state._device_handle.device_count(),
+                        fsdp_state.process_group,
+                    )
+            value = value.cpu()
+            gathered_state[state_name] = value
     return gathered_state
