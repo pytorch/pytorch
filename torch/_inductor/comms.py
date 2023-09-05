@@ -268,6 +268,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
 
 
 def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+    print(f"before, result is {snodes}")
     result = sink_waits(snodes)
     print(f"after sink_waits, result is {result}")
     result = raise_comms(result)
