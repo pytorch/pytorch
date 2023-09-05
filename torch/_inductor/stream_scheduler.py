@@ -433,9 +433,25 @@ class SSGraph:
                 if len(predecessor.successors) == 1:
                     cur_node.stream_id = self.stream_pool_pop(predecessor)
                 else:
-                    cur_node.stream_id = self.stream_pool_pop()
+                    # fix nop node bug in super_slomo. there are corrosing references between two nop nodes.
+                    nop_node_count = 0
+                    for successors in cur_node.successors.values():
+                        if successors.is_nop_node:
+                            nop_node_count += 1
+                    if nop_node_count >= 2:
+                        cur_node.stream_id = 0
+                    else:
+                        cur_node.stream_id = self.stream_pool_pop()
             else:
-                cur_node.stream_id = self.stream_pool_pop()
+                # fix nop node bug in super_slomo. there are corrosing references between two nop nodes.
+                nop_node_count = 0
+                for successors in cur_node.successors.values():
+                    if successors.is_nop_node:
+                        nop_node_count += 1
+                if nop_node_count >= 2:
+                    cur_node.stream_id = 0
+                else:
+                    cur_node.stream_id = self.stream_pool_pop()
         for successor in cur_node.successors.values():
             if successor.stream_id == -1:
                 self.dig_node(successor)
