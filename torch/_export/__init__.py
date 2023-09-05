@@ -2,6 +2,7 @@ import dataclasses
 import io
 import re
 import pathlib
+import types
 import weakref
 import zipfile
 from collections import OrderedDict
@@ -102,7 +103,6 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 DECOMP_TABLE = core_aten_decompositions()
 
 
-# FIXME: actually migrate it to pre_autograd tracing
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
     f: Callable,
@@ -157,6 +157,15 @@ def capture_pre_autograd_graph(
 
         for n in m.graph.nodes:
             n.meta["is_torch_exported"] = True
+
+        def _train(self, mode: bool = True):
+            raise NotImplementedError("Calling train() is not supported yet.")
+
+        def _eval(self, mode: bool = True):
+            raise NotImplementedError("Calling eval() is not supported yet.")
+
+        m.train = types.MethodType(_train, m)  # type: ignore[method-assign]
+        m.eval = types.MethodType(_eval, m)  # type: ignore[method-assign]
         return m
 
 
