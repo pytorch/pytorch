@@ -2177,7 +2177,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
     def test_qat_update_shared_qspec(self):
         """
-        Test the case where nodes used in SharedQuantizationpec were replaced
+        Test the case where nodes used in SharedQuantizationSpec were replaced
         during QAT subgraph rewriting.
         """
         class M(torch.nn.Module):
