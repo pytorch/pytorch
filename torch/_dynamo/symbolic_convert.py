@@ -2155,7 +2155,11 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if (
+            self.output.count_calls() == 0
+            and not self.output.frame_state["has_tensor_or_module"]
+            and not self.export
+        ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(

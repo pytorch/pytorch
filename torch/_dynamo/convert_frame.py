@@ -173,7 +173,9 @@ def has_tensor_in_frame(frame):
             return seen_ids[obj_id]
         seen_ids[obj_id] = False
 
-        if isinstance(obj, (torch.Tensor, torch.nn.Module)):
+        if isinstance(obj, (torch.Tensor, torch.nn.Module)) or issubclass(
+            obj, torch.nn.Module
+        ):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]
         elif istype(obj, (list, tuple)):
@@ -343,7 +345,10 @@ def convert_frame_assert(
             unimplemented("cache_size_limit reached")
 
         if not has_tensor_in_frame(frame):
+            frame_state["has_tensor_or_module"] = False
             return None
+        else:
+            frame_state["has_tensor_or_module"] = True
 
         global initial_grad_state
         initial_grad_state = torch.is_grad_enabled()
