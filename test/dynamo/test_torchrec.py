@@ -1,10 +1,14 @@
+# Owner(s): ["module: dynamo"]
 import unittest
 from typing import Dict, List
 
 import torch
 import torch._dynamo.test_case
 from torch import nn
+
+from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import NoTest
 
 try:
     from torchrec.datasets.random import RandomRecDataset
@@ -54,8 +58,13 @@ class BucketizeMod(torch.nn.Module):
         )
 
 
+if not HAS_TORCHREC:
+    print("torchrec not available, skipping tests", file=sys.stderr)
+    TestCase = NoTest  # noqa: F811
+
+
 @unittest.skipIf(not HAS_TORCHREC, "these tests require torchrec")
-class TorchRecTests(torch._dynamo.test_case.TestCase):
+class TorchRecTests(TestCase):
     def test_pooled(self):
         tables = [
             (nn.EmbeddingBag(2000, 8), ["a0", "b0"]),
