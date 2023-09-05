@@ -1085,7 +1085,7 @@ class Scheduler:
         self.topological_sort_schedule()
         self.fuse_nodes()
         # Refresh node_users and inverse_users to reflect fused nodes
-        if config.maximize_compute_comm_overlap:
+        if config.reorder_for_compute_comm_overlap:
             self.compute_node_users()
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.compute_last_usage()
