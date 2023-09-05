@@ -10,8 +10,6 @@
 
 #include <c10/util/irange.h>
 
-#include <iostream>
-
 namespace torch::jit::tensorexpr {
 
 using namespace analysis;
