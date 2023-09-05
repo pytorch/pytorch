@@ -14,6 +14,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from collections import OrderedDict
 from dataclasses import dataclass
 from io import StringIO
 from typing import (
@@ -287,9 +288,14 @@ def get_module_name_from_meta(meta_dict):
     mod_name = ""
     torch_op = ""
     if "nn_module_stack" in meta_dict:
-        mod_name, torch_op = list(meta_dict["nn_module_stack"].values())[0]
-        mod_name = re.sub(r"\[[a-zA-Z\']*\]", "", mod_name)
-        mod_name = re.sub(r"__", "", mod_name)
+        # nn_module_stack is set in multiple places and is organized
+        # differently.
+        if isinstance(meta_dict["nn_module_stack"], OrderedDict):
+            mod_name, torch_op = list(meta_dict["nn_module_stack"].items())[0]
+        else:
+            mod_name, torch_op = list(meta_dict["nn_module_stack"].values())[0]
+            mod_name = re.sub(r"\[[a-zA-Z\']*\]", "", mod_name)
+            mod_name = re.sub(r"__", "", mod_name)
     return mod_name, torch_op
 
 
