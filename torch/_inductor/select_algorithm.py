@@ -846,9 +846,9 @@ class AlgorithmSelectorCache(PersistentCache):
             torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
-        def benchmark_in_current_process(options):
+        def benchmark_in_current_process(choices):
             timings = {}
-            for choice in options:
+            for choice in choices:
                 try:
                     timing = benchmark_choice_in_current_process(choice)
                 except RuntimeError as e:
@@ -870,13 +870,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return timings
 
-        def benchmark_in_sub_process(options):
+        def benchmark_in_sub_process(choices):
             from . import autotune_process
 
             # only benchmark triton kernel in sub process for now.
             # ATen/Extern kernel are still benchmarked in the current process.
-            extern = [c for c in options if isinstance(c, ExternKernelCaller)]
-            triton = [c for c in options if not isinstance(c, ExternKernelCaller)]
+            extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
+            triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
             timings = benchmark_in_current_process(extern)
             timings.update(autotune_process.benchmark_in_sub_process(triton))

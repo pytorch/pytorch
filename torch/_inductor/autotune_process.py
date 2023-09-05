@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
 import pickle
 import subprocess
@@ -24,8 +25,12 @@ if TYPE_CHECKING:
 from .utils import do_bench
 from .virtualized import V
 
-DEBUG = False
+
 EXIT_HANDLER_REGISTERED = False
+
+log = logging.getLogger(__name__)
+if os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_DEBUG", "0") == "1":
+    log.setLevel(logging.DEBUG)
 
 
 # Used to synchronize between parent and child processes
@@ -39,18 +44,36 @@ class Pong:
 
 @dataclasses.dataclass
 class TuningProcess:
+    """
+    Abstraction for launching a helper process to benchmark kernels. Rather
+    than spawning the parent process, the approach Popens a new process with
+    an entry point that we control. Avoiding the spawn means we do not re-enter
+    the toplevel script. The subprocess communicates with the parent process
+    via pickling requests/responses over stdin/stdout pipes.
+    """
+
     device: int
     process: Optional[subprocess.Popen[bytes]] = None
 
     @staticmethod
     def process_main() -> None:
         """
+        Entry point for the child process.
+        """
+        log.debug("Entering TuningProcess child main")
+        try:
+            TuningProcess.workloop()
+        except Exception:
+            log.exception("Exception in TuningProcess")
+
+    @staticmethod
+    def workloop() -> None:
+        """
         Work loop for the benchmarking subprocess.
         """
-        if DEBUG:
-            print("Entering TuningProcess child main", file=sys.stderr)
 
         def reply(obj):
+            # Note this is subtly different than the put() method below.
             pickle.dump(obj, sys.stdout.buffer)
             sys.stdout.flush()
 
@@ -80,7 +103,6 @@ class TuningProcess:
             [sys.executable, "-m", "torch._inductor.autotune_process_entry"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
             env=env,
         )
 
@@ -88,6 +110,8 @@ class TuningProcess:
         """
         Push a work item to the child process.
         """
+        # In case of a prior crash, ensure the subprocess is running
+        self.initialize()
         assert self.process is not None
         assert self.process.stdin is not None
         pickle.dump(obj, self.process.stdin)
@@ -102,15 +126,14 @@ class TuningProcess:
         try:
             return pickle.load(self.process.stdout)
         except EOFError:
-            # Child crashed; recreate it
+            # Child crashed; clean up
             self.close()
-            self.initialize()
             raise
-        except pickle.UnpicklingError:
+        except pickle.UnpicklingError as ex:
             raise RuntimeError(
                 "Error deserializing response from the benchmarking subprocess. "
                 "Is the benchmark code path writing to stdout?"
-            )
+            ) from ex
 
     def close(self) -> None:
         """
@@ -119,10 +142,8 @@ class TuningProcess:
         if self.process is not None:
             assert self.process.stdin is not None
             assert self.process.stdout is not None
-            assert self.process.stderr is not None
             self.process.stdin.close()
             self.process.stdout.close()
-            self.process.stderr.close()
             self.process = None
 
     def terminate(self) -> None:
@@ -143,6 +164,12 @@ class TuningProcess:
 
 @dataclasses.dataclass
 class TuningProcessPool:
+    """
+    Maintains a pool of TuningProcesses to benchmark kernels in parallel
+    across devices. By default, we create one TuningProcess per device and
+    set the sub-process environment to make only that device visible.
+    """
+
     processes: Optional[Queue[TuningProcess]] = None
     executor: Optional[ThreadPoolExecutor] = None
 
@@ -155,7 +182,7 @@ class TuningProcessPool:
             return
 
         count = count or torch.cuda.device_count()
-        assert count > 0
+        assert count > 0 and count <= torch.cuda.device_count()
 
         # Launch the child processes and push a msg to "warm up"
         self.processes = Queue()
@@ -310,19 +337,20 @@ class BenchmarkRequest:
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
-        if DEBUG:
+        debug = log.isEnabledFor(logging.DEBUG)
+        if debug:
             start_ts = time.time()
 
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        if DEBUG:
-            print(
-                f"benchmark module key: {self.module_cache_key}, path: {self.module_path}",
-                file=sys.stderr,
-            )
+        log.debug(
+            "benchmark module key: %s, path: %s",
+            self.module_cache_key,
+            self.module_path,
+        )
 
         run = getattr(mod, self.kernel_name).run
 
-        if DEBUG:
+        if debug:
             load_elapse = time.time() - start_ts
             start_ts = time.time()
 
@@ -336,7 +364,7 @@ class BenchmarkRequest:
             assert isinstance(self.output_tensor, TensorMeta)
             output_tensor = self.output_tensor.to_tensor()
 
-        if DEBUG:
+        if debug:
             create_tensor_elapse = time.time() - start_ts
             start_ts = time.time()
 
@@ -353,13 +381,16 @@ class BenchmarkRequest:
         out = do_bench(worker)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
-        if DEBUG:
+        if debug:
             bench_elapse = time.time() - start_ts
-            print(
-                f"InChidProcess {self.module_cache_key}: load {load_elapse}, "
-                + f"create tensor {create_tensor_elapse}, bench {bench_elapse}",
-                file=sys.stderr,
+            log.debug(
+                "InChildProcess %s: load %f, create tensor %f, bench %f",
+                self.module_cache_key,
+                load_elapse,
+                create_tensor_elapse,
+                bench_elapse,
             )
+
         return out
 
 
