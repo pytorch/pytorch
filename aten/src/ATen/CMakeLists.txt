@@ -167,7 +167,7 @@ file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 # flash_attention sources
 #file(GLOB flash_attention_cpp_hip "native/transformers/hip/flash_attn_rocm/*.cpp")
 file(GLOB flash_attention_cpp_hip "native/transformers/hip/flash_attn_rocm/*.hip")
-file(GLOB flash_attention_src_hip_hip "native/transformers/cuda/flash_attn_rocm/src/*.hip")
+file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn_rocm/src/*.hip")
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
