@@ -24,6 +24,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
@@ -98,21 +99,36 @@ def _init_process_group_state(
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
     policy: Optional[_Policy],
+    device_mesh: Optional[DeviceMesh] = None,
 ) -> _FSDPState:
+    if process_group is not None and device_mesh is not None:
+        raise ValueError(
+            "Cannot pass both process_group and device_mesh at the "
+            "same time. Please just pass only one of them."
+        )
     is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
     if is_hybrid_strategy:
-        if process_group is None and policy is None:
+        if process_group is None and policy is None and device_mesh is None:
             # Raise an error here, since this is manual wrapping with no process group
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
+                f"Manual wrapping with {sharding_strategy}",
+                "requires explicit specification of process group or device_mesh.",
             )
-        state = _init_process_group_state_for_hybrid_shard(state, process_group)
+        else:
+            state = _init_process_group_state_for_hybrid_shard(
+                state, process_group, device_mesh
+            )
     else:
-        state.process_group = (
-            process_group if process_group is not None else _get_default_group()
-        )
+        if device_mesh:
+            state._device_mesh = device_mesh
+            state.process_group = device_mesh.get_dim_groups(mesh_dim=0)
+        else:
+            state.process_group = (
+                process_group if process_group is not None else _get_default_group()
+            )
+
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
     data_parallel_world_size = state.world_size
@@ -131,9 +147,23 @@ def _init_process_group_state(
 
 @no_type_check
 def _init_process_group_state_for_hybrid_shard(
-    state: _FSDPState, process_group
+    state: _FSDPState,
+    process_group: ProcessGroupType,
+    device_mesh: DeviceMesh,
 ) -> _FSDPState:
-    if process_group is None:
+    if device_mesh:
+        if _is_valid_hybrid_shard_device_mesh(device_mesh):
+            state._device_mesh = device_mesh
+            # We currently only allow _inter_node_pg to be the outermost dimension, and the
+            # process_group(intra_node) to be the innermost dimension.
+            state._inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
+            state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
+        else:
+            raise ValueError(
+                "Expected device_mesh to have ndim=2 "
+                f"but got {len(device_mesh.get_dim_groups())}"
+            )
+    elif process_group is None:
         default_group = _get_default_group()
         intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(
             default_group, state._device_handle.device_count()
@@ -167,6 +197,11 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
         and len(process_group) == 2
         and all(isinstance(pg, dist.ProcessGroup) for pg in process_group)
     )
+
+
+@no_type_check
+def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
+    return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
 @no_type_check
