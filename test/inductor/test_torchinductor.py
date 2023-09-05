@@ -633,7 +633,23 @@ class CommonTemplate:
         def fn(x):
             return (x * x).to(torch.int16)
 
-        x = torch.tensor([8], dtype=torch.uint8)
+        x = torch.tensor([16], dtype=torch.uint8)
+
+        self.common(fn, x)
+
+    def test_square_uint8_tensor_overflow(self):
+        def fn(x):
+            return (x**2).to(torch.int16)
+
+        x = torch.tensor([18], dtype=torch.uint8)
+
+        self.common(fn, x)
+
+    def test_multiply_uint8_tensor_overflow(self):
+        def fn(x):
+            return (x * x).to(torch.int16)
+
+        x = torch.tensor([18], dtype=torch.uint8)
 
         self.common(fn, x)
 
@@ -641,7 +657,7 @@ class CommonTemplate:
         def fn(x):
             return (x**2).to(torch.int16)
 
-        x = torch.tensor([8], dtype=torch.uint8)
+        x = torch.tensor([16], dtype=torch.uint8)
 
         self.common(fn, x)
 
