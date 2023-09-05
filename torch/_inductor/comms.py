@@ -130,6 +130,8 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         Step 4: We schedule comm N + 1,
         Repeat this for subsequent comm nodes.
     """
+    result = []
+
     comm_nodes = []
     for snode in snodes:
         if isinstance(snode.node, ir.CollectiveKernel):
@@ -262,6 +264,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
             rolled_over_compute_cost = rollable_compute_cost
 
     schedule_nodes(unscheduled_nodes)
+    return result
 
 
 def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
