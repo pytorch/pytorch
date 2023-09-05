@@ -41,7 +41,7 @@ variable_list CppFunctionTensorPreHook::operator()(
       // Don't change gradient
       continue;
     }
-    check_single_result(value, res, c10::to_string(i));
+    check_single_result(value, res, std::to_string(i));
     value = std::move(res);
   }
   variable_list results(values);

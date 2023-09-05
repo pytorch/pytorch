@@ -4,6 +4,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <vector>
@@ -382,24 +383,23 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   }
 
   if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += c10::to_string(num_forward_inputs) + ", got ";
-    msg += c10::to_string(num_outputs) + ")";
+    std::string msg = fmt::format(
+        "function {} returned an incorrect number of gradients (expected {}, got {})",
+        name(),
+        num_forward_inputs,
+        num_outputs);
     throw std::runtime_error(msg);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
       if (outputs[i].defined()) {
-        std::string msg("function ");
-        msg += name() +
-            " returned a gradient different that is defined at position ";
-        msg += c10::to_string(i + 1) +
-            ", but the corresponding forward input was not a Variable";
+        std::string msg = fmt::format(
+            "function {} returned a gradient different that is defined at position {}, but the corresponding forward input was not a Variable",
+            name(),
+            i + 1);
         throw std::runtime_error(msg);
       }
       continue;

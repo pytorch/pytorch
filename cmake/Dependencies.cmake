@@ -1845,7 +1845,7 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # shouldn't be too bad to just disable the checks.
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
-list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
 # ---[ Kineto
