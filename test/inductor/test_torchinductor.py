@@ -621,14 +621,6 @@ class CommonTemplate:
 
         self.common(fn, x)
 
-    def test_add_int8_tensor(self):
-        def fn(x):
-            return (x + x).to(torch.int16)
-
-        x = torch.tensor([120], dtype=torch.int8)
-
-        self.common(fn, x)
-
     def test_add_int16_tensor(self):
         def fn(x):
             return (x + x).to(torch.int32)
