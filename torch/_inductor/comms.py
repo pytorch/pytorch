@@ -247,7 +247,7 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
                 total_compute_runtime_cost += compute_runtime_cost
         rollable_compute_cost = total_compute_runtime_cost - step1_runtime_cost
 
-        # Step 3: We schedule the compute nodes dependent on comm N and required for comm `idx`.
+        # Step 3: We schedule the compute nodes dependent on comm `idx-1` and required for comm `idx`.
         needed_by_next_comm_nodes = unscheduled_nodes & comm_ancestors[comm_nodes[idx]]
         schedule_nodes(list(needed_by_next_comm_nodes))
 
