@@ -1470,13 +1470,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
-        for _ in range(10):
+        n_iter = torch._dynamo.config.cache_size_limit
+        for _ in range(n_iter):
             x = random.randint(2, 30)
             ref = mandelbrot_numpy(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
         # We need to specialise the number as it's in a forloop
-        self.assertEqual(cnts.frame_count, 10)
+        self.assertEqual(cnts.frame_count, n_iter)
 
     def test_numpy_as_global(self):
         global x
@@ -1812,6 +1813,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, obj)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
+
+    def test_manual_seed(self):
+        def fn(a, b):
+            x = a + b
+            torch.manual_seed(9000)
+            return x + 1
+
+        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
 
     def test_usr_cls_staticmethod(self):
         class Foo:
@@ -2229,6 +2238,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         num = torch.Size([10, 8]).numel()
         self.assertEqual(opt_fn(), num)
 
+    def test_torch_size_numel_dynamic(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x.size().numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.rand(10, 1, 8, 1)
+        expect = fn(x)
+        self.assertEqual(opt_fn(x), expect)
+
+    def test_shape_type(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x + (type(x.shape) == torch.Size)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2259,17 +2289,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(10, requires_grad=True)
+        x = torch.randn(100, requires_grad=True)
         ref = fn(x)
 
-        # Python code is needed here, since torch.manual_seed graph-breaks.
-        # Refs: https://github.com/pytorch/pytorch/issues/107187
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.op_count, 1)
-        self.assertEqual(cnts.frame_count, 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()

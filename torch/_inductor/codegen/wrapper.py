@@ -917,7 +917,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.cuda = False
         self.supports_intermediate_hooks = False
         self.outputs_need_copy = set()
-        self.resized_outputs = {}
         self.kernel_callsite_id = count()
 
         from .cpp import cexpr
@@ -1114,14 +1113,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         self.wrapper_call.writeline(
                             f"outputs[{idx}].copy_({output_as_strided});"
                         )
-                    resize_to = self.resized_outputs.get(name, None)
-                    if resize_to is not None:
-                        resize_to_args = ", ".join(
-                            self.expr_printer(d) for d in resize_to
-                        )
-                        self.wrapper_call.writeline(
-                            f"outputs[{idx}].resize_({{{resize_to_args}}});"
-                        )
             self.wrapper_call.writeline("\n}")
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
@@ -1276,16 +1267,17 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if V.graph.sizevars.statically_known_leq(
                 buffer.get_numel(), output_buffer.get_numel()
             ):
-                buf_str = f"auto {name} = outputs[{output_idx}];"
                 # avoid resize_output warning:
                 # "An output with one or more elements was resized since it had..."
-                if buffer.get_size() != output_buffer.get_size():
-                    resize_to_args = ", ".join(
-                        self.expr_printer(d) for d in buffer.get_size()
-                    )
-                    buf_str += f" {name}.resize_({{{resize_to_args}}});"
-                    assert name not in self.resized_outputs
-                    self.resized_outputs[name] = list(output_buffer.get_size())
+                if (
+                    buffer.get_size() != output_buffer.get_size()
+                    or buffer.get_stride() != output_buffer.get_stride()
+                ):
+                    size_str = self.codegen_shape_tuple(buffer.get_size())
+                    stride_str = self.codegen_shape_tuple(buffer.get_stride())
+                    buf_str = f"auto {name} = outputs[{output_idx}].as_strided({size_str}, {stride_str});"
+                else:
+                    buf_str = f"auto {name} = outputs[{output_idx}];"
                 return buf_str
             else:
                 self.outputs_need_copy.add(name)

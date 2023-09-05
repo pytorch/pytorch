@@ -1852,6 +1852,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.square',
         '_refs.stft',
         '_refs.T',
+        '_refs.take_along_dim',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',

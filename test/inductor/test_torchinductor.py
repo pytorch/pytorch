@@ -6212,6 +6212,30 @@ class CommonTemplate:
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
+    @requires_cuda()
+    @torch._inductor.config.patch("layout_optimization", True)
+    def test_inductor_layout_optimization_input_mutations(self):
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+
+        def f(x):
+            x.mul_(2)
+            out = mod(x)
+            return out
+
+        f_compiled = torch.compile(f)
+        x_ref = torch.rand(2, 3, 128, 128, device="cuda")
+        x_test = x_ref.clone().detach()
+        with torch.no_grad():
+            out_ref = f(x_ref)
+            out_test = f_compiled(x_test)
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(out_ref.shape, out_test.shape)
+            # Importantly, since inductor._config.keep_output_stride is True,
+            # the outputs should have matching strides here.
+            self.assertEqual(out_ref.stride(), out_test.stride())
+            self.assertEqual(x_ref, x_test)
+
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x, i):
