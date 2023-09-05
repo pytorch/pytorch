@@ -87,6 +87,7 @@ from .dicts import (
 from .distributed import (
     DeviceMeshVariable,
     PlacementClassVariable,
+    PlacementVariable,
     ProcessGroupVariable,
 )
 from .functions import (
@@ -187,6 +188,9 @@ class GraphArg:
 
     def erase(self):
         self._example = None
+
+    def __eq__(self, other):
+        return self.source.name() == other.source.name()
 
 
 @dataclasses.dataclass
@@ -408,7 +412,7 @@ class VariableBuilder:
             # store key variables in global location for reconstruction
             for key in value.keys():
                 if self.tensor_can_be_dict_key(key):
-                    self.tx.store_dict_key(global_key_name(key), key)
+                    self.tx.store_global_weakref(global_key_name(key), key)
 
             def index_source(key):
                 if self.tensor_can_be_dict_key(key):
@@ -662,6 +666,14 @@ class VariableBuilder:
             # TODO: see if we need to add custom guard instead
             # of a simple ID_MATCH
             return PlacementClassVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return PlacementVariable(
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
