@@ -15,15 +15,16 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.variables import TreeSpecVariable, UserFunctionVariable
+from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
-from ..source import AttrSource, GeneratorStateSource
+from ..source import GeneratorStateSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    is_treespec_cls,
     istype,
     product,
     proxy_args_kwargs,
@@ -36,7 +37,6 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .dicts import ConstDictVariable
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
@@ -597,7 +597,7 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
-        elif self.value.__module__ == "torch.utils._pytree":
+        elif hasattr(self.value, "__module__") and self.value.__module__ == "torch.utils._pytree":
             if isinstance(self.value, types.FunctionType):
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(self.value, **options),
@@ -605,69 +605,9 @@ class TorchVariable(VariableTracker):
                     kwargs,
                 )
             else:
-                return TreeSpecVariable.create(self.value, args, options)
-        # elif self.value == torch.utils._pytree.tree_flatten:
-        #     if len(args) != 1:
-        #         unimplemented("Unsupported flatten with len(args) != 1")
-
-        #     flattened, spec = torch.utils._pytree.tree_flatten(args[0])
-        #     return TupleVariable(
-        #         [ListVariable(flattened), ConstantVariable(spec)], **options
-        #     )
-        # elif self.value == torch.utils._pytree.tree_unflatten:
-        #     if len(args) != 2:
-        #         unimplemented("Unsupported unflatten with len(args) != 2")
-
-        #     unflattened = torch.utils._pytree.tree_unflatten(args[0], args[1].value)
-
-        #     def _wrap_in_dynamo_variables(container):
-        #         if isinstance(container, VariableTracker):
-        #             return container
-
-        #         if isinstance(container, list):
-        #             return ListVariable(
-        #                 [_wrap_in_dynamo_variables(elem) for elem in container],
-        #                 **options,
-        #             )
-
-        #         if isinstance(container, tuple):
-        #             return TupleVariable(
-        #                 [_wrap_in_dynamo_variables(elem) for elem in container],
-        #                 **options,
-        #             )
-
-        #         if isinstance(container, dict):
-        #             return ConstDictVariable(
-        #                 {k: _wrap_in_dynamo_variables(v) for k, v in container.items()},
-        #                 type(container),
-        #                 **options,
-        #             )
-
-        #     return _wrap_in_dynamo_variables(unflattened)
-
-        # elif self.value == torch.fx._pytree.tree_flatten_spec:
-        #     if len(args) != 2:
-        #         unimplemented("Unsupported flatten_spec with len(args) != 2")
-
-        #     flattened, spec = torch.fx._pytree.tree_flatten_spec(args[0], args[1].value)
-        #     return TupleVariable(
-        #         [ListVariable(flattened), ConstantVariable(spec)], **options
-        #     )
-        # elif self.value == torch.utils._pytree.tree_map_only:
-        #     if len(args) != 3:
-        #         unimplemented("Unsupported tree_map_only with len(args) != 3")
-
-        #     ty = args[0].value  # type
-        #     fn = args[1]  # map fn
-        #     tree = args[2]  # tree
-
-        #     def map_fn(v):
-        #         if ty == v.python_type():
-        #             return fn.call_function(tx, [v], {})
-        #         else:
-        #             return v
-
-        #     return torch.utils._pytree.tree_map(map_fn, tree)
+                assert is_treespec_cls(self.value), f"not TreeSpec class: {self.value}"
+                const_args = [a.as_python_constant() for a in args]
+                return ConstantVariable(self.value(*const_args), **options)
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):

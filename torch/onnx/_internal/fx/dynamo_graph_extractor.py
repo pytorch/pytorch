@@ -45,7 +45,7 @@ class _PyTreeExtensionContext:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         for class_type in self._extensions:
-            pytree.SUPPORTED_NODES.pop(class_type)
+            pytree.SUPPORTED_NODES.pop(id(class_type))
 
     @_beartype.beartype
     def register_pytree_node(
@@ -64,7 +64,7 @@ class _PyTreeExtensionContext:
         Raises:
             AssertionError: If the custom python type is already registered.
         """
-        if class_type in pytree.SUPPORTED_NODES or class_type in self._extensions:
+        if id(class_type) in pytree.SUPPORTED_NODES or class_type in self._extensions:
             # PyTree node already registered.
             # E.g., `huggingface/transformer` registers `ModelOutput` as PyTree node after
             # https://github.com/huggingface/transformers/pull/25358.

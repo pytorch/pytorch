@@ -1,5 +1,4 @@
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
-import functools
 from collections import namedtuple, OrderedDict
 import dataclasses
 import json
@@ -336,8 +335,8 @@ def map_only(ty: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
     You can also directly use 'tree_map_only'
     """
-    def deco(f: Callable[[T], Any]) -> Callable[[Any], Any]:
-        def inner(x: T) -> Any:
+    def deco(f):
+        def inner(x):
             if isinstance(x, ty):
                 return f(x)
             else:
