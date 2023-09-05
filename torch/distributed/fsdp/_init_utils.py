@@ -508,11 +508,9 @@ def _init_param_handle_from_module(
         )
 
     ignored_buffers = {
-        [
-            buffer
-            for ignored_module in state._ignored_modules
-            for buffer in ignored_module.buffers()
-        ]
+        buffer
+        for ignored_module in state._ignored_modules
+        for buffer in ignored_module.buffers()
     }
 
     _move_module_to_device(
