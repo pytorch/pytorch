@@ -34,9 +34,13 @@ class _FreeEventQueue:
     once the limit ``_max_num_inflight_all_gathers`` is reached.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        max_num_inflight_all_gathers: int,
+    ) -> None:
         self._queue: Deque[EventWithTensor] = collections.deque()
-        self._max_num_inflight_all_gathers = 2  # empirically chosen
+        self._max_num_inflight_all_gathers = max_num_inflight_all_gathers
+        # Initial direction is forward
         self._direction: _QueueDirection = _QueueDirection.POP_LEFT
 
     def enqueue(self, free_event: EventWithTensor) -> None:
@@ -67,3 +71,19 @@ class _FreeEventQueue:
 
     def use_forward_direction(self) -> None:
         self._direction = _QueueDirection.POP_LEFT
+
+    def enqueue_or_update(
+        self,
+        event: torch.cuda.Event,
+        tensor: torch.Tensor,
+    ) -> None:
+        """Enqueues or updates a free event."""
+        for item in self._queue:
+            if item.tensor is tensor:
+                item.event = event
+                return None
+        event_with_tensor = EventWithTensor(
+            event,
+            tensor,
+        )
+        self.enqueue(event_with_tensor)

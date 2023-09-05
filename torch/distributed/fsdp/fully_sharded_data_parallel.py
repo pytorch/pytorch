@@ -298,7 +298,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             This configures explicit backward prefetching of all-gathers. If
             ``None``, then FSDP does not backward prefetch, and there is no
             communication and computation overlap in the backward pass. See
-            :class:`BackwardPrefetch` for details. (Default: ``BACKWARD_PRE``)
+            :class:`BackwardPrefetch` for details. (Default: ``BACKWARD_POST``)
         mixed_precision (Optional[MixedPrecision]):
             This configures native mixed precision for FSDP. If this is set to
             ``None``, then no mixed precision is used. Otherwise, parameter,
@@ -414,7 +414,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         auto_wrap_policy: Optional[
             Union[Callable, ModuleWrapPolicy, CustomPolicy]
         ] = None,
-        backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
+        backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_POST,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,

@@ -58,6 +58,7 @@ FSDP_FLATTENED = "_fsdp_flattened"
 # heuristic like this to predict the desired output dtype.
 _MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
+DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS = 2
 
 class _FSDPDeviceHandle:
     """

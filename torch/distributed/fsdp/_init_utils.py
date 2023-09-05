@@ -35,6 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
     clean_tensor_name,
     TrainingState,
+    DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS,
 )
 from torch.distributed.fsdp._flat_param import (
     _FSDP_USE_FULL_PREC_IN_EVAL,
@@ -458,7 +459,7 @@ def _init_core_state(
     state._use_orig_params = use_orig_params
     state.training_state = TrainingState.IDLE
     state._is_root = None
-    state._free_event_queue = _FreeEventQueue()
+    state._free_event_queue = _FreeEventQueue(DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS)
     state._debug_level = dist.get_debug_level()
     state._exec_order_data = exec_order_utils._ExecOrderData(
         state._debug_level,
@@ -501,6 +502,14 @@ def _init_prefetching_state(
     backward_prefetch: BackwardPrefetch,
     forward_prefetch: bool,
 ) -> _FSDPState:
+    if backward_prefetch == BackwardPrefetch.BACKWARD_PRE:
+        warnings.warn(
+            "The `BACKWARD_PRE` option for FSDP parameter `backward_prefetch` "
+            "has been consolidated with `BACKWARD_POST`. FSDP now supports `BACKWARD_POST` (prefetch "
+            "after an earlier instance's backward) or `None` (no prefetch at "
+            "all). Setting it to default value `BACKWARD_POST` now."
+        )
+        backward_prefetch = BackwardPrefetch.BACKWARD_POST
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
     # The data structures use tuples of handles to generalize over the case

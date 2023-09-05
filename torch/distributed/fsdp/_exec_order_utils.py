@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns
+from torch.distributed.fsdp._common_utils import _FSDPState, _get_param_to_fqns, DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS
 from torch.distributed.fsdp._flat_param import FlatParamHandle
 
 
@@ -97,7 +97,7 @@ class _ExecOrderData:
         current_index = current_handle._post_forward_index
         if current_index is None:
             return None
-        target_index = current_index - 1
+        target_index = current_index - DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS if current_handle._limit_all_gathers else 1
         target_handle: Optional[FlatParamHandle] = None
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
