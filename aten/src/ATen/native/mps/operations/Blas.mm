@@ -43,7 +43,7 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
               other.numel(),
               " elements respectively");
   TORCH_CHECK(self.device() == other.device(),
-              "expected all tensors to be on the same device. Found: ",
+              "Expected all tensors to be on the same device. Found: ",
               self.device(),
               ", ",
               other.device());

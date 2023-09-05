@@ -229,6 +229,15 @@ class TestFP8MatmulCuda(TestCase):
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
 
+    @parametrize("bias", [True, False])
+    def test_non_divisible_leading_dim(self, device, bias: torch.bool) -> None:
+        x = torch.rand((17, 16), device=device).to(torch.float8_e4m3fn)
+        y = torch.rand((16, 16), device=device).to(torch.float8_e4m3fn).t()
+        input_bias = None
+        if bias:
+            input_bias = torch.rand((16,), device=device).to(torch.half)
+        out_fp8, amax_fp8 = torch._scaled_mm(x, y, bias=input_bias)
+
     def test_float8_bias_relu_edgecase(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.full((k, l), 0.0, device=device).to(torch.float8_e4m3fn)
