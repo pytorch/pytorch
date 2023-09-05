@@ -1,6 +1,5 @@
 import dataclasses
 import logging
-import os
 import pickle
 import subprocess
 import sys
@@ -25,8 +24,6 @@ from .virtualized import V
 EXIT_HANDLER_REGISTERED = False
 
 log = logging.getLogger(__name__)
-if os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_DEBUG", "0") == "1":
-    log.setLevel(logging.DEBUG)
 
 
 # Used to synchronize between parent and child processes
