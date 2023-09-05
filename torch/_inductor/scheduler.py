@@ -1080,7 +1080,7 @@ class Scheduler:
 
         comms.decide_global_ordering_of_comms(self.nodes)
 
-        # self.compute_predecessors()
+        self.compute_predecessors()
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
