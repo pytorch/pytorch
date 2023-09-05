@@ -443,6 +443,13 @@ class GuardBuilder(GuardBuilderBase):
         # This subsumes the check for Module.training.
         if not hasattr(val, "training"):
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
+        if config.allow_rnn and isinstance(
+            val, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
+        ):
+            # TorchDynamo graph breaks on LSTMs, but this is a way if user wants
+            # to override it. LSTMs change the module state in every invocation,
+            # leading to recompilations.
+            return
         try:
             g = torch._C._dynamo.guards.nn_module_guard(val)
         except AttributeError:
