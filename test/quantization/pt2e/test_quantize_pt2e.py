@@ -1286,7 +1286,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 # using int32 to simulate int16
                 int16_qspec = QuantizationSpec(
-                    dtype=torch.int32,
+                    dtype=torch.int16,
                     quant_min=-2**15,
                     quant_max=2**15 - 1,
                     qscheme=torch.per_tensor_affine,
@@ -1349,7 +1349,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -1376,7 +1376,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
