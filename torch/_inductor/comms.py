@@ -247,13 +247,10 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
         rollable_compute_cost = total_compute_runtime_cost - priority1_runtime_cost
 
         # Priority 3: Now, we schedule the compute nodes dependent on comm N and required for comm N + 1.
-        priority3 = unscheduled_nodes & comm_ancestors[comm_nodes[idx]]
-        schedule_nodes(list(priority3) + [comm_nodes[idx]])
+        needed_by_next_comm_nodes = unscheduled_nodes & comm_ancestors[comm_nodes[idx]]
+        schedule_nodes(list(needed_by_next_comm_nodes) + [comm_nodes[idx]])
 
-        is_prev_comm_blocking_next_comm = (
-            len(comm_descendants[comm_nodes[idx - 1]] & comm_ancestors[comm_nodes[idx]])
-            > 0
-        )
+        is_prev_comm_blocking_next_comm = len(needed_by_next_comm_nodes) > 0
         # The idea here is that if there are no compute nodes from Priority 3
         # (i.e. if prev comm is not blocking next comm), we can roll over the compute nodes
         # in Priority 2 to overlap with the next comm, since they're not required to finish
