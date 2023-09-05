@@ -8,6 +8,7 @@ def get_runtime_of_snode(snode: "BaseSchedulerNode"):
 
     TODO(yf225): potentially replace with a more sophisticated cost model (e.g. analytical)
     """
+    print(f"get_runtime_of_snode: snode: {snode}")
     if isinstance(snode.node, ir.AllReduce):
         return 5
     if isinstance(snode.node, ir.CollectiveKernel):
