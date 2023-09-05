@@ -120,7 +120,7 @@ def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
     assert not any(isinstance(snode.node, ir.CollectiveKernel) for snode in snodes)
 
 
-def reorder_compute_for_overlap(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Decides a global ordering of all compute and communication nodes. Assumes that we already have a global ordering of communication nodes.
     Overall scheduling procedure is:
