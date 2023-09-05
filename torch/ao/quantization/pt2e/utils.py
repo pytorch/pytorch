@@ -37,7 +37,7 @@ _DEQUANTIZE_OPS = [
 
 
 def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
-    q = queue.Queue()
+    q: queue.Queue = queue.Queue()
     for n in next_node.users.keys():
         q.put(n)
     while not q.empty():
