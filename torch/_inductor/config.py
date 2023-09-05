@@ -163,8 +163,7 @@ def is_fbcode():
 
 
 # constant folding on the joint graph
-# Turn off constant folding due to issue #108388
-joint_graph_constant_folding = not is_fbcode()
+joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
