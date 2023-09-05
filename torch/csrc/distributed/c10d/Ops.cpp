@@ -231,9 +231,10 @@ IMPL_ALLGATHER(PrivateUse1)
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV( \
       at::Tensor& output_tensor,                                          \
       at::Tensor& input_tensor,                                           \
-      bool record_stream,                                                  \
+      bool record_stream,                                                 \
       const c10::intrusive_ptr<ProcessGroup>& process_group) {            \
-    AllgatherOptions opts = AllgatherOptions{std::chrono::milliseconds(-1), record_stream}; \
+    AllgatherOptions opts =                                               \
+        AllgatherOptions{std::chrono::milliseconds(-1), record_stream};   \
     auto work = process_group->getBackend(c10::DeviceType::DEV)           \
                     ->_allgather_base(output_tensor, input_tensor, opts); \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
