@@ -1865,6 +1865,7 @@ class TritonKernel(Kernel):
             if (
                 mutation in self.args.inplace_buffers
                 and mutation not in V.graph.removed_buffers
+                and mutation not in self.removed_buffers
             ):
                 mutated_args.add(self.args.inplace_buffers[mutation].inner_name)
             if mutation in self.args.output_buffers:
@@ -1939,9 +1940,6 @@ class TritonKernel(Kernel):
 
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark())
-
-        if name is not None:
-            return code.getvalue()
 
         return code.getvalue()
 
@@ -2265,8 +2263,7 @@ class TritonScheduling(BaseScheduling):
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
 
-        if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug("Schedule:\n %s", node_schedule)
+        schedule_log.debug("Schedule:\n %s", node_schedule)
 
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
@@ -2298,7 +2295,14 @@ class TritonScheduling(BaseScheduling):
         if not within_32bit(numel):
             return False
 
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        # Any use of a MultiOutputLayout will create a buffer with a
+        # Layout whose sizes are accounted for
+        buf_sizes = [
+            buf.get_layout().storage_size()
+            for buf in buffers
+            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+        ]
+
         if not all(within_32bit(size) for size in buf_sizes):
             return False
 
@@ -2348,7 +2352,6 @@ class TritonScheduling(BaseScheduling):
         return "tl.int64"
 
     def get_kernel_args(self, node_schedule, numel, reduction_numel):
-        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
         reductions = list(
             filter(
                 lambda n: n not in (EnableReduction, DisableReduction)
@@ -2372,7 +2375,7 @@ class TritonScheduling(BaseScheduling):
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
-        return tiled_groups, reduction_hint_val, mutations, index_dtype
+        return reduction_hint_val, mutations, index_dtype
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
@@ -2380,8 +2383,29 @@ class TritonScheduling(BaseScheduling):
         if origins:
             wrapper.writeline(origins)
 
+        if config.debug_fusion:
+            from torch._inductor.scheduler import (
+                BaseSchedulerNode,
+                ForeachKernelSchedulerNode,
+            )
+
+            if not any(
+                isinstance(n, ForeachKernelSchedulerNode) for n in node_schedule
+            ):
+                # We probablly should look what are the nodes inside a foreach
+                # schedule node
+                node_names = [
+                    n.get_name()
+                    for n in node_schedule
+                    if isinstance(n, BaseSchedulerNode)
+                ]
+                wrapper.writeline(
+                    f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
+                )
+
     def codegen_node_schedule(self, node_schedule, numel, reduction_numel):
-        tiled_groups, reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
+        tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
+        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
             node_schedule, numel, reduction_numel
         )
 
@@ -2394,10 +2418,18 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        src_code = kernel.codegen_kernel()
+        with V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
+
+            for node in node_schedule:
+                if node not in (EnableReduction, DisableReduction):
+                    node.mark_run()
+
         kernel_name = self.define_kernel(src_code, node_schedule)
+
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        V.graph.removed_buffers |= kernel.removed_buffers
 
         if config.warn_mix_layout:
             kernel.warn_mix_layout(kernel_name)
@@ -2431,9 +2463,10 @@ class TritonScheduling(BaseScheduling):
         with kernel:
             stack = contextlib.ExitStack()
             kernel.set_last_usage(current_reduction_nodes(node_schedule))
+
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
-                    node.mark_run()
+                    node.decide_inplace_update()
             for i, node in enumerate(node_schedule):
                 if node is DisableReduction:
                     stack.enter_context(kernel.disable_reduction())
@@ -2504,11 +2537,13 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        src_code = partial_code.finalize()
-        node_schedule = [template_node, *epilogue_nodes]
-        kernel_name = self.define_kernel(src_code, node_schedule)
+        with V.set_kernel_handler(kernel):
+            src_code = partial_code.finalize()
+            node_schedule = [template_node, *epilogue_nodes]
+            kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name)
+        V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
@@ -2517,32 +2552,35 @@ class TritonScheduling(BaseScheduling):
     def codegen_foreach(self, foreach_node):
         from .triton_foreach import ForeachKernel
 
-        for node_group in ForeachKernel.horizontal_partition(
-            foreach_node.get_subkernel_nodes()
+        for partitions_with_metadata in ForeachKernel.horizontal_partition(
+            foreach_node.get_subkernel_nodes(), self
         ):
-            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ForeachKernel()
-
-            for nodes in fused_node_lists:
-                _, (numel, rnumel) = max(
-                    nodes, key=lambda x: int(x.is_reduction())
-                ).group
+            for nodes, tiled_groups, numel, rnumel in partitions_with_metadata:
                 node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
                 (
-                    tiled_groups,
                     reduction_hint_val,
                     mutations,
                     index_dtype,
                 ) = self.get_kernel_args(node_schedule, numel, rnumel)
+
+                subkernel = kernel.create_sub_kernel(
+                    *tiled_groups,
+                    reduction_hint=reduction_hint_val,
+                    mutations=mutations,
+                    index_dtype=index_dtype,
+                )
+
                 self.codegen_node_schedule_with_kernel(
                     node_schedule,
-                    kernel.create_sub_kernel(
-                        *tiled_groups,
-                        reduction_hint=reduction_hint_val,
-                        mutations=mutations,
-                        index_dtype=index_dtype,
-                    ),
+                    subkernel,
                 )
+
+                with V.set_kernel_handler(subkernel):
+                    for node in node_schedule:
+                        if node not in (EnableReduction, DisableReduction):
+                            node.mark_run()
+                V.graph.removed_buffers |= subkernel.removed_buffers
 
             src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, [foreach_node])
