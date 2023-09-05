@@ -84,7 +84,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   fi
 
   # Install required libstdc++.so.6 version
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.10" ] || [ "$ANACONDA_PYTHON_VERSION" = "3.9" ] ; then
     conda_install_through_forge libstdcxx-ng=12
   fi
 
