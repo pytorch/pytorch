@@ -641,6 +641,36 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             FSDP(CPUGPUModule())
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_ignored_module_meta(self):
+        torch.cuda.set_device(self.rank)
+
+        class CPUGPUModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(1, 1)
+                self.b = nn.Linear(1, 1)
+
+        with torch.device("meta"):
+            m = CPUGPUModule()
+        m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)
+        meta_device = torch.device("meta")
+        self.assertEqual(meta_device, next(m.a.parameters()).device)
+
+        # Test with param_init_fn
+        with torch.device("meta"):
+            m = CPUGPUModule()
+        m = FSDP(
+            m,
+            device_id=torch.cuda.current_device(),
+            ignored_modules=[m.a],
+            use_orig_params=True,
+            param_init_fn=lambda m: m.to_empty(
+                device=torch.cuda.current_device(), recurse=False
+            ),
+        )
+        self.assertEqual(meta_device, next(m.a.parameters()).device)
+
+    @skip_if_lt_x_gpu(2)
     def test_multigpu_module(self):
         """
         Module on multiple GPUs wrapped in FSDP should raise an error.
