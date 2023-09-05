@@ -442,7 +442,7 @@ void TCPStore::doWait(
       TORCH_CHECK(false, "wait_canceled response is expected");
     }
   }
-  TORCH_CHECK(false, "Socket Timeout");
+  C10_THROW_ERROR(DistStoreError, "Socket Timeout");
 }
 
 void TCPStore::append(
