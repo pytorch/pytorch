@@ -902,6 +902,7 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
+@functools.lru_cache(None)
 def python_type_to_schema_type():
     from . import ir
 

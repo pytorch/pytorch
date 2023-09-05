@@ -3675,7 +3675,10 @@ class FallbackKernel(ExternKernelAlloc):
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
 
-    def get_args_value(self, pos):
+    def get_arg_default_value(self, pos):
+        assert hasattr(
+            self, "args_default_value"
+        ), "self.args_default_value has to be provided"
         assert pos < len(
             self.args_default_value
         ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
@@ -3706,7 +3709,9 @@ class FallbackKernel(ExternKernelAlloc):
             n_pos_args = len(self.args_default_value)
             # Some positional args are not provided, need to use their default value in cpp wrapper
             if n_args < n_pos_args:
-                pos_args = [self.get_args_value(i) for i in range(n_args, n_pos_args)]
+                pos_args = [
+                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                ]
                 pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
                 args.extend(pos_args)
 
