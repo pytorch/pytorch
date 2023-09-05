@@ -2941,7 +2941,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 compiled_fw_func = aot_config.fw_compiler(
                     fw_module, kept_flat_args
                 )
-                compiled_fw_func.kept_input_pos = kept_input_pos
 
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
@@ -3012,6 +3011,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
+        kept_fw_input_pos = kept_input_pos
         compiled_bw = compiled_bw_func
         metadata = fw_metadata
         num_symints_saved_for_bw = _num_symints_saved_for_bw
@@ -3036,7 +3036,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             # Trim unused args
             kept_args = []
-            for kept_pos in CompiledFunction.compiled_fw.kept_input_pos:
+            for kept_pos in CompiledFunction.kept_fw_input_pos:
                 kept_args.append(args[kept_pos])
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw,
