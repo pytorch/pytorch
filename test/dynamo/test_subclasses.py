@@ -327,9 +327,14 @@ class GraphModule(torch.nn.Module):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
         # Also adds additional guards on the inner tensor's sizes.
         # When the first input to an op has x.shape[0] > 5, we insert an extra add node.
+
+        # It also holds a second inner tensor that is 0-dim.
+        # Importantly, it is **not** the same shape as the outer wrapper.
+        # For now, this works because the subclass fakefication logic assumes
+        # that only the **first** inner tensor in a subclass can get dynamic dims.
         class DoubleSizeMaybeAddGeThreeTensor(torch.Tensor):
             @staticmethod
-            def __new__(cls, inner):
+            def __new__(cls, inner, inner_scalar_tensor):
                 # Double the outer-most dimension
                 outer_shape = (inner.shape[0] * 2,) + inner.shape[1:]
                 return torch.Tensor._make_wrapper_subclass(
@@ -349,18 +354,23 @@ class GraphModule(torch.nn.Module):
                     inner.requires_grad,
                 )
 
-            def __init__(self, inner):
+            def __init__(self, inner, inner_scalar_tensor):
                 self.inner_elem = inner
+                assert inner_scalar_tensor.shape == ()
+                assert inner_scalar_tensor.shape == ()
+                self.inner_scalar_tensor = inner_scalar_tensor
 
             def __tensor_flatten__(self):
-                return ["inner_elem"], None
+                return ["inner_elem", "inner_scalar_tensor"], None
 
             @staticmethod
             def __tensor_unflatten__(inner_tensors, _):
-                return DoubleSizeMaybeAddGeThreeTensor(inner_tensors["inner_elem"])
+                return DoubleSizeMaybeAddGeThreeTensor(
+                    inner_tensors["inner_elem"], inner_tensors["inner_scalar_tensor"]
+                )
 
             def __repr__(self):
-                return f"DoubleSizeMayberAddGeThreeTensor({repr(self.inner_elem)})"
+                return f"DoubleSizeMayberAddGeThreeTensor({repr(self.inner_elem)}, {repr(self.inner_scalar_tensor)})"
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -376,7 +386,9 @@ class GraphModule(torch.nn.Module):
                 if args_inner[0].shape[0] > 3:
                     out_inner += 2
 
-                return DoubleSizeMaybeAddGeThreeTensor(out_inner)
+                return DoubleSizeMaybeAddGeThreeTensor(
+                    out_inner, args[0].inner_scalar_tensor + 1
+                )
 
         lower_bound_str = None
         upper_bound_str = None
@@ -413,8 +425,9 @@ class GraphModule(torch.nn.Module):
                 return torch.div(x, x)
 
         inp = torch.ones(4, 4)
+        scalar_tensor = torch.tensor(3)
 
-        x = DoubleSizeMaybeAddGeThreeTensor(inp)
+        x = DoubleSizeMaybeAddGeThreeTensor(inp, scalar_tensor)
         torch._dynamo.mark_dynamic(x, 0)
         res = fn(x)
         # During fakeifying, we end up allocating a separate symint
@@ -423,6 +436,9 @@ class GraphModule(torch.nn.Module):
             "s0": 8,
             "s1": 4,
         }
+        # We also notably don't generate any symints for the second (scalar) tensor in the subclass-
+        # for now, dynamic shape are hardcoded to only apply to the first inner tensor in a subclass!
+        # This is something we should fix, but requires some API design.
         expected_var_to_sources = {
             "s0": "L['x'].size()[0]",
             "s1": "L['x'].inner_elem.size()[0]",

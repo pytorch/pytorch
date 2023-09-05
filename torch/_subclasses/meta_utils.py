@@ -229,7 +229,7 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        def sym_sizes_strides_storage_offset(t, src):
+        def sym_sizes_strides_storage_offset(t, src, *, dynamic_dims, constraint_dims):
             if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
@@ -282,7 +282,10 @@ class MetaConverter:
                 elif t.is_mkldnn:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
+                        t,
+                        source,
+                        dynamic_dims=dynamic_dims,
+                        constraint_dims=constraint_dims,
                     )
                     r = callback(
                         lambda: torch.empty_strided(
@@ -369,7 +372,12 @@ class MetaConverter:
                             sizes,
                             strides,
                             storage_offset,
-                        ) = sym_sizes_strides_storage_offset(t, source)
+                        ) = sym_sizes_strides_storage_offset(
+                            t,
+                            source,
+                            dynamic_dims=dynamic_dims,
+                            constraint_dims=constraint_dims,
+                        )
 
                         if safe_is_leaf(t):
                             # Leaf views that track view metadata are created by
@@ -407,15 +415,44 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
                     sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
+                        t,
+                        source,
+                        dynamic_dims=dynamic_dims,
+                        constraint_dims=constraint_dims,
                     )
 
+                    num_inner_tensors = 0
+
                     def empty_create(inner_t, inner_src):
+                        nonlocal num_inner_tensors
+                        num_inner_tensors += 1
+                        # Note [Assigning SymInts to wrapper tensors]
+                        # Today, the `mark_dynamic(t, dim)`  API is underspecified for wrapper tensor subclasses
+                        # that can hold multiple inner tensors, that (potentially) can have a different number
+                        # of dims than the outer wrapper subclass tensor.
+                        # This will require some API design to fix.
+                        # For now however, we do something simpler:
+                        # (1) Assume that the first inner tensor in the wrapper subclass has the same # dims
+                        #     as the outer subclass
+                        # (2) Assume that if a wrapper subclass holds multiple tensors, any other tensors
+                        #     do not need dynamic shapes.
+                        # This is enough to satisfy DTensor and Float8Tensor for now.
+                        if num_inner_tensors == 1:
+                            curr_dynamic_dims = dynamic_dims
+                            curr_constraint_dims = constraint_dims
+                        else:
+                            curr_dynamic_dims = None
+                            curr_constraint_dims = None
                         (
                             inner_sizes,
                             inner_strides,
                             inner_storage_offset,
-                        ) = sym_sizes_strides_storage_offset(inner_t, inner_src)
+                        ) = sym_sizes_strides_storage_offset(
+                            inner_t,
+                            inner_src,
+                            dynamic_dims=curr_dynamic_dims,
+                            constraint_dims=curr_constraint_dims,
+                        )
                         return torch.empty_strided(
                             inner_sizes,
                             inner_strides,
