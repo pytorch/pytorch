@@ -11,7 +11,7 @@ from typing import List
 import torch.fx as fx
 
 from . import ir, scheduler
-from .analysis import get_runtime_snode
+from .analysis import get_runtime_of_snode
 from .utils import printd
 from .dependencies import WeakDep
 
@@ -24,9 +24,9 @@ def tuple_sorted(x):
     def sort_func(elem):
         if isinstance(elem, str):
             return elem
-        elif isinstance(elem, fx.Node):
-            return elem.name
         else:
+            # We expect `elem` to be `scheduler.BaseSchedulerNode` type here,
+            # but we are not able to do isinstance assert because of circular dependency
             return elem.get_name()
 
     return sorted(x, key=sort_func)
@@ -83,16 +83,10 @@ def get_ancestors(node):
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            if isinstance(node, fx.Node):
-                for inp in node.args:
-                    if inp not in ancestors:
-                        ancestors.add(inp)
-                        new_nodes.append(inp)
-            else:
-                for inp in node.args:
-                    if inp not in ancestors:
-                        ancestors.add(inp)
-                        new_nodes.append(inp)
+            for inp in node.args:
+                if inp not in ancestors:
+                    ancestors.add(inp)
+                    new_nodes.append(inp)
         cur_nodes = new_nodes
     return ancestors
 
@@ -103,16 +97,10 @@ def get_descendants(node):
     while len(cur_nodes) > 0:
         new_nodes = []
         for node in cur_nodes:
-            if isinstance(node, fx.Node):
-                for inp in node.node_users:
-                    if inp not in descendants:
-                        descendants.add(inp)
-                        new_nodes.append(inp)
-            else:
-                for inp in node.node_users:
-                    if inp not in descendants:
-                        descendants.add(inp)
-                        new_nodes.append(inp)
+            for inp in node.node_users:
+                if inp not in descendants:
+                    descendants.add(inp)
+                    new_nodes.append(inp)
         cur_nodes = new_nodes
     return descendants
 
@@ -221,9 +209,9 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
             comm_ancestors[comm_nodes[idx]] - comm_descendants[comm_nodes[idx - 1]]
         )
         total_cost = rolled_over_compute + sum(
-            [get_runtime_snode(node) for node in priority1]
+            [get_runtime_of_snode(node) for node in priority1]
         )
-        comm_cost = get_runtime_snode(comm_nodes[idx - 1])
+        comm_cost = get_runtime_of_snode(comm_nodes[idx - 1])
         add_all_nodes(tuple_sorted(priority1))
 
         debug_print("Priority 2")
@@ -251,14 +239,14 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
                 if not isinstance(
                     snode.node, ir.CollectiveKernel
                 ):
-                    runtime_cost = get_runtime_snode(snode)
+                    runtime_cost = get_runtime_of_snode(snode)
                     # If we're not able to leverage more than half of this
                     # node's compute to overlap, we skip it.
                     # TODO: Smarter heuristics for packing the cost here
                     if (comm_cost - total_cost) <= runtime_cost / 2:
                         continue
                     add_node(snode)
-                    total_cost += get_runtime_snode(snode)
+                    total_cost += get_runtime_of_snode(snode)
         rollable_compute = total_cost - group1_cost
         # The idea here is that if there are no compute nodes in priority 3, we
         # can roll over the compute nodes in priority 2 to the next comm, since

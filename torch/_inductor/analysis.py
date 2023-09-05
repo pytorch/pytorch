@@ -2,7 +2,7 @@ from torch._inductor import scheduler
 
 from . import ir
 
-def get_runtime_snode(snode: "BaseSchedulerNode"):
+def get_runtime_of_snode(snode: "BaseSchedulerNode"):
     """
     Gets the runtime of Scheduler node. Currently somewhat of a placeholder, todo to be replaced by more sophisticated approaches.
 
