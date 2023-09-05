@@ -390,21 +390,21 @@ def export(
 
     param_buffer_table: Dict[str, str] = {}
     if isinstance(f, torch.nn.Module):
-        param_lookup = {}
-        buffer_lookup = {}
+        param_lookup: Dict[int, List[str]] = {}
+        buffer_lookup: Dict[int, List[str]] = {}
         for name, param in f.named_parameters():
-            param_lookup[id(param)] = name
+            param_lookup.get(id(param), []).append(name)
         for name, buffer in f.named_buffers():
-            buffer_lookup[id(buffer)] = name
+            buffer_lookup.get(id(buffer), []).append(name)
         for dynamo_name, dynamo_param in gm_torch_level.named_parameters(remove_duplicate=False):
             assert dynamo_name not in param_buffer_table
             if id(dynamo_param) in param_lookup:
-                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
+                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
 
         for dynamo_name, dynamo_buffer in gm_torch_level.named_buffers(remove_duplicate=False):
             assert dynamo_name not in param_buffer_table
             if id(dynamo_buffer) in buffer_lookup:
-                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
+                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
 
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
@@ -492,12 +492,9 @@ def export(
         flat_args,
     )
 
-    # TODO(zhxchen17) Properly handle duplicated buffers.
-    translated_params_buffers = {param_buffer_table.get(name, name): tensor for name, tensor in params_buffers.items()}
-    if isinstance(f, torch.nn.Module) and (len(translated_params_buffers) ==
-                                           len(export_graph_signature.parameters) + len(export_graph_signature.buffers)):
+    if isinstance(f, torch.nn.Module):
         _replace_param_buffer_names(param_buffer_table, export_graph_signature)
-        params_buffers = translated_params_buffers
+        params_buffers = {param_buffer_table.get(name, name): tensor for name, tensor in params_buffers.items()}
 
     module_call_signatures = {fqn: ModuleCallSignature(inputs=[], outputs=[], **specs) for fqn, specs in module_call_specs.items()}
 
