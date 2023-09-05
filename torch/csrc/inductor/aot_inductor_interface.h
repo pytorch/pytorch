@@ -44,6 +44,9 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorTensorOpaque {};
 using AOTInductorTensorHandle = AOTInductorTensorOpaque*;
 
+struct AOTInductorProxyExecutorOpaque {};
+using AOTInductorProxyExecutorHandle = AOTInductorProxyExecutorOpaque*;
+
 extern "C" {
 // Creates an AOTInductor model container. The parameter num_models
 // specifies the number of model instances that may be run concurrently for
@@ -63,7 +66,8 @@ AOTInductorError AOTInductorModelContainerRun(
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
-    AOTInductorStreamHandle stream_handle);
+    AOTInductorStreamHandle stream_handle,
+    AOTInductorProxyExecutorHandle proxy_executor_handle);
 
 // Retrieves the number of inputs for the model.
 AOTInductorError AOTInductorModelContainerGetNumInputs(
@@ -76,6 +80,12 @@ AOTInductorError AOTInductorModelContainerGetInputName(
     size_t input_idx,
     const char** input_name_out);
 
+// Retrieves the input dtype at the given index.
+AOTInductorError AOTInductorModelContainerGetInputDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t input_idx,
+    const char** input_name_out);
+
 // Retrieves the number of outputs for the model.
 AOTInductorError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
@@ -83,6 +93,12 @@ AOTInductorError AOTInductorModelContainerGetNumOutputs(
 
 // Retrieves the output name at the given index.
 AOTInductorError AOTInductorModelContainerGetOutputName(
+    AOTInductorModelContainerHandle container_handle,
+    size_t output_idx,
+    const char** output_name_out);
+
+// Retrieves the output dtype at the given index.
+AOTInductorError AOTInductorModelContainerGetOutputDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t output_idx,
     const char** output_name_out);

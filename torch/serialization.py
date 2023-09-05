@@ -1326,12 +1326,12 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
         byteorderdata = zip_file.get_record(byteordername)
         if byteorderdata not in [b'little', b'big']:
             raise ValueError('Unknown endianness type: ' + byteorderdata.decode())
-    elif get_default_load_endianness() == LoadEndianness.LITTLE:
+    elif get_default_load_endianness() == LoadEndianness.LITTLE or \
+            get_default_load_endianness() is None:
         byteorderdata = b'little'
     elif get_default_load_endianness() == LoadEndianness.BIG:
         byteorderdata = b'big'
-    elif get_default_load_endianness() == LoadEndianness.NATIVE or \
-            get_default_load_endianness() is None:
+    elif get_default_load_endianness() == LoadEndianness.NATIVE:
         pass
     else:
         raise ValueError('Invalid load endianness type')
@@ -1339,14 +1339,14 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
     if not zip_file.has_record(byteordername) and \
             get_default_load_endianness() is None and \
             sys.byteorder == 'big':
-        # Default behaviour should be changed in future
+        # Default behaviour was changed
         # See https://github.com/pytorch/pytorch/issues/101688
         warnings.warn("The default load endianness for checkpoints without a byteorder mark "
-                      "on big endian machines will be changed from 'native' to 'little' endian "
-                      "in a future release, to avoid this behavior please use "
+                      "on big endian machines was changed from 'native' to 'little' endian, "
+                      "to avoid this behavior please use "
                       "torch.serialization.set_default_load_endianness to set "
                       "the desired default load endianness",
-                      DeprecationWarning)
+                      UserWarning)
 
     def load_tensor(dtype, numel, key, location):
         name = f'data/{key}'

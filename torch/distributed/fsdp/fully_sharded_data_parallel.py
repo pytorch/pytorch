@@ -231,6 +231,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         thread in that way prevents over-allocating memory for subsequent
         all-gathers, and it should not actually delay GPU kernel execution.
 
+    .. note::
+        When using ``sharding_strategy=ShardingStrategy.HYBRID_SHARD`` with the
+        sharding process group being intra-node and the replication process
+        group being inter-node, setting ``NCCL_CROSS_NIC=1`` can help improve
+        the all-reduce times over the replication process group for some
+        cluster setups.
+
     Args:
         module (nn.Module):
             This is the module to be wrapped with FSDP.
@@ -1868,7 +1875,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 
@@ -2018,9 +2025,9 @@ def _get_param_to_fqn(
     """
     param_to_param_names = _get_param_to_fqns(model)
     for param_names in param_to_param_names.values():
-        assert len(param_names) > 0, (
-            "`_get_param_to_fqns()` " "should not construct empty lists"
-        )
+        assert (
+            len(param_names) > 0
+        ), "`_get_param_to_fqns()` should not construct empty lists"
         if len(param_names) > 1:
             raise RuntimeError(
                 "Each parameter should only map to one parameter name but got "

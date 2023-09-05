@@ -76,22 +76,8 @@ def get_slow_tests(
 
 def get_test_times(dirpath: str, filename: str) -> Dict[str, Dict[str, float]]:
     url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/test-times.json"
-    build_environment = os.environ.get("BUILD_ENVIRONMENT")
-    if build_environment is None:
-        test_times = fetch_and_cache(dirpath, filename, url, lambda x: x)
-        raise RuntimeError(
-            f"BUILD_ENVIRONMENT is not defined, available keys are {test_times.keys()}"
-        )
-
-    def process_response(the_response: Dict[str, Any]) -> Any:
-        if build_environment not in the_response:
-            raise RuntimeError(
-                f"{build_environment} not found, available envs are: {the_response.keys()}"
-            )
-        return the_response[build_environment]
-
     try:
-        return fetch_and_cache(dirpath, filename, url, process_response)
+        return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
         print("Couldn't download test times...")
         return {}

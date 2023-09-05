@@ -305,6 +305,8 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "dlrm",
 }
 
+DO_NOT_CAST_INPUTS = {"stable_diffusion"}
+
 
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
@@ -2018,6 +2020,12 @@ class BenchmarkRunner:
             )
             self.init_optimizer(name, current_device, model_fp64.parameters())
             fp64_outputs = self.run_n_iterations(model_fp64, inputs_fp64)
+            fp64_outputs = tree_map(
+                lambda x: x.to(torch.float64)
+                if isinstance(x, torch.Tensor) and x.is_floating_point()
+                else x,
+                fp64_outputs,
+            )
         except Exception:
             log.warning(
                 "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
@@ -3476,8 +3484,11 @@ def run(runner, args, original_dir=None):
                 torch.cuda.set_per_process_memory_fraction(
                     args.per_process_memory_fraction
                 )
+            if model_name in DO_NOT_CAST_INPUTS:
+                model, _ = runner.cast_based_on_args(model, example_inputs)
 
-            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            else:
+                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.run_one_model(
                 name,
                 model,

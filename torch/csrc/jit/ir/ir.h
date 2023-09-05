@@ -23,7 +23,7 @@
 #include <c10/util/Optional.h>
 
 #include <functional>
-#include <iosfwd>
+#include <iostream>
 #include <unordered_set>
 #include <vector>
 
@@ -1567,7 +1567,7 @@ struct TORCH_API ProfileIValueOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:
