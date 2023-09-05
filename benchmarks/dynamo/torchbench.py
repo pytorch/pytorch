@@ -81,6 +81,8 @@ SKIP = {
     "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
     # takes too long, extreme slowdown (< .001)
     "maml",
+    # Failing in eager mode
+    "clip",
 }
 
 SKIP_FOR_CPU = {
