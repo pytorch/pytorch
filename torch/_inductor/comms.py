@@ -128,10 +128,9 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
         comm_nodes[i].add_mutation_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
-def dumb_reordering(nodes: List[fx.Node]) -> List[fx.Node]:
+def reorder_comm_for_overlap(nodes: List["scheduler.BaseSchedulerNode"]) -> List[fx.Node]:
     """
-    Sinks waits and raises comms. Does not try to reorder compute in order to
-    maximize overlap.
+    Sinks waits and raises comms to maximize overlap. Does not try to reorder compute.
     """
     nodes = [node for node in nodes if "fusion_meta" in node.meta]
     nodes = sink_waits(nodes)

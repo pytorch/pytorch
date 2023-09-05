@@ -1084,10 +1084,11 @@ class Scheduler:
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.fuse_nodes()
-        # Refresh node_users and inverse_users to reflect fused nodes
         if config.reorder_for_compute_comm_overlap:
+            # Refresh node_users and inverse_users to reflect fused nodes
             self.compute_node_users()
-            self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+            # self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
+            self.nodes = comms.reorder_comm_for_overlap(self.nodes)
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
