@@ -186,8 +186,7 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
 
     # First, schedule all compute nodes that are required by first comm node,
     # as well as the first comm node itself.
-    result = schedule_nodes(
-        result,
+    schedule_nodes(
         list(comm_ancestors[comm_nodes[0]]) + [comm_nodes[0]],
     )
 
