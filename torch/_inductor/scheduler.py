@@ -1276,7 +1276,7 @@ class Scheduler:
             buf_to_snode[node.get_name()] = node
 
         for node in self.nodes:
-            node.users = []
+            node.node_users = []
             node.inverse_users = []
 
         # compute inverse_users
