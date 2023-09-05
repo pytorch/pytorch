@@ -60,7 +60,8 @@ jobs:
       USE_PYTORCH_METAL: ${{ matrix.use_metal }}
       USE_COREML_DELEGATE: ${{ matrix.use_coreml }}
       CUSTOM_OP_LIST: ${{ matrix.use_custom_op_list }}
-      # TODO: Figure out a better way than hardcoding this here
+      # TODO: Bump it to 2.2.0 after cherry pick this or figure out a better way
+      # to get this version instead of hard coding it here
       PYTORCH_VERSION: 2.1.0
     timeout-minutes: 240
     steps:
@@ -222,22 +223,22 @@ jobs:
           # Save the podspec for the upload job later
           if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
             DATE=$(date -u +%Y%m%d)
-            cp ${GITHUB_WORKSPACE}/ios/LibTorch-Lite-Nightly.podspec.template ${SETUP_DIR}/LibTorch-Lite-Nightly.podspec
-            sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${PYTORCH_VERSION}.${DATE}/g" ${SETUP_DIR}/LibTorch-Lite-Nightly.podspec
+            cp "${GITHUB_WORKSPACE}"/ios/LibTorch-Lite-Nightly.podspec.template "${SETUP_DIR}"/LibTorch-Lite-Nightly.podspec
+            sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${PYTORCH_VERSION}.${DATE}/g" "${SETUP_DIR}"/LibTorch-Lite-Nightly.podspec
 
-            cp ${GITHUB_WORKSPACE}/ios/LibTorch-Lite.podspec.template ${SETUP_DIR}/LibTorch-Lite.podspec
-            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" ${SETUP_DIR}/LibTorch-Lite.podspec
+            cp "${GITHUB_WORKSPACE}"/ios/LibTorch-Lite.podspec.template "${SETUP_DIR}"/LibTorch-Lite.podspec
+            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" "${SETUP_DIR}"/LibTorch-Lite.podspec
           else
             # NB: There is no nightly build without lite interpreter atm
-            cp ${GITHUB_WORKSPACE}/ios/LibTorch.podspec.template ${SETUP_DIR}/LibTorch.podspec
-            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" ${SETUP_DIR}/LibTorch.podspec
+            cp "${GITHUB_WORKSPACE}"/ios/LibTorch.podspec.template "${SETUP_DIR}"/LibTorch.podspec
+            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" "${SETUP_DIR}"/LibTorch.podspec
           fi
 
           pushd "${SETUP_DIR}"
           # NB: It's important to zip all the files before uploading because the GHA will upload
           # all files sequentially which is both slow and has too many requests. More info is at
           # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
-          zip -r "${IOS_ARCH}.zip" install src version.txt LICENSE *.podspec
+          zip -r "${IOS_ARCH}.zip" install src version.txt LICENSE ./*.podspec
           popd
 
       - uses: actions/upload-artifact@v3
@@ -296,8 +297,9 @@ jobs:
 
       - name: Prepare the final artifact
         env:
-          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+          IS_NIGHTLY: true # ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
+        working-directory: ${{ env.RUNNER_TEMP }}/arm64
         run: |
           set -eux
 
@@ -307,7 +309,6 @@ jobs:
           # Prepare all the sub directories
           mkdir -p "${DEST_DIR}"/install/lib
 
-          pushd "${RUNNER_TEMP}"/arm64
           # Copy header and share files, arm64 or x86_64 both work
           cp -R install/include "${DEST_DIR}"/install
           cp -R install/share "${DEST_DIR}"/install
@@ -324,11 +325,10 @@ jobs:
           fi
           PYTORCH_VERSION=$(cat "${DEST_DIR}"/version.txt)
           echo "PYTORCH_VERSION=${PYTORCH_VERSION}" >> "$GITHUB_ENV"
-          popd
 
-          pushd "${RUNNER_TEMP}"/arm64/install/lib
-          # Get all library binaries
-          LIBRARIES=($(ls *.a))
+          pushd install/lib
+          # shellcheck disable=SC2207
+          LIBRARIES=($(ls ./*.a))
           popd
 
           for LIB in "${LIBRARIES[@]}"; do
@@ -357,29 +357,33 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+          IS_NIGHTLY: true # ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
+        working-directory: ${{ env.DEST_DIR }}
         run: |
           set -eux
 
           ARTIFACT_NAME=libtorch
+          SPEC_NAME=LibTorch
+
           if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
             ARTIFACT_NAME="${ARTIFACT_NAME}_lite_ios"
+            SPEC_NAME="${SPEC_NAME}-Lite"
           else
             ARTIFACT_NAME="${ARTIFACT_NAME}_ios"
           fi
 
           if [ "${IS_NIGHTLY}" == true ]; then
             ARTIFACT_NAME="${ARTIFACT_NAME}_nightly_${PYTORCH_VERSION}.zip"
+            SPEC_NAME="${SPEC_NAME}-Nightly"
           else
             ARTIFACT_NAME="${ARTIFACT_NAME}_${PYTORCH_VERSION}.zip"
           fi
 
-          pushd "${DEST_DIR}"
           # NB: It's important to zip all the files before uploading because the GHA will upload
           # all files sequentially which is both slow and has too many requests. More info is at
           # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
-          zip -r ${ARTIFACT_NAME} install src version.txt LICENSE
+          zip -r "${ARTIFACT_NAME}" install src version.txt LICENSE
 
           pip install -q awscli==1.29.40
           DRY_RUN=${DRY_RUN:-enabled}
@@ -388,9 +392,9 @@ jobs:
             AWS_S3_CP="aws s3 cp"
           fi
           ${AWS_S3_CP} "${ARTIFACT_NAME}" s3://ossci-ios-build/ --acl public-read
-          popd
 
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
+          echo "SPEC_NAME=${SPEC_NAME}.podspec" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v3
         with:
@@ -400,7 +404,10 @@ jobs:
 
       - name: Upload the artifact to cocoapods
         shell: bash
+        working-directory: ${{ env.RUNNER_TEMP }}/arm64
         run: |
-          pod trunk push --help
-          # TODO: Need to see how it works
-          echo "${ARTIFACT_NAME}"
+          set -eux
+
+          gem install cocoapods
+          # Upload the spec to cocoapods
+          pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation "${SPEC_NAME}"
