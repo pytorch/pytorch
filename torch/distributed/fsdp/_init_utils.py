@@ -541,8 +541,18 @@ def _init_param_handle_from_module(
             check_fn=lambda submodule: _get_module_fsdp_state(submodule) is None
             and submodule not in state._ignored_modules,
         )
+
+    ignored_buffers = {
+        buffer
+        for ignored_module in state._ignored_modules
+        for buffer in ignored_module.buffers()
+    }
+
     _move_module_to_device(
-        fully_sharded_module, state._ignored_params, device_from_device_id
+        fully_sharded_module,
+        state._ignored_params,
+        ignored_buffers,
+        device_from_device_id,
     )
     state.compute_device = _get_compute_device(
         fully_sharded_module,
@@ -876,6 +886,7 @@ def _get_modules_to_materialize(
 def _move_module_to_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    ignored_buffers: Set[torch.Tensor],
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
@@ -916,10 +927,9 @@ def _move_module_to_device(
             for submodule in curr_module.children():
                 if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
                     queue.append(submodule)
-        # NOTE: This includes moving ignored modules' parameters. If we
-        # decide to change the semantics in the future, simply filter based
-        # on the ignored parameters (and buffers).
-        _move_states_to_device(params, buffers, device_from_device_id)
+        params_to_move = [p for p in params if p not in ignored_params]
+        bufs_to_move = [p for p in buffers if p not in ignored_buffers]
+        _move_states_to_device(params_to_move, bufs_to_move, device_from_device_id)
         return
     param = next(_get_orig_params(module, ignored_params), None)
     if param is not None and param.device == cpu_device:
