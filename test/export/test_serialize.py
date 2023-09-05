@@ -7,6 +7,7 @@ import zipfile
 
 import torch
 import torch._dynamo as torchdynamo
+from torch.export import ExportedProgram, ExportGraphSignature
 from torch._export import dynamic_dim, export, save, load
 from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
@@ -588,6 +589,69 @@ class TestSerializeCustomClass(TestCase):
 
         inputs = (torch.zeros(4, 4),)
         ep = export(f, inputs)
+
+        # Replace one of the values with an instance of our custom class
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.add.Tensor:
+                with ep.graph.inserting_before(node):
+                    custom_node = ep.graph.call_function(
+                        torch.ops._TorchScriptTesting.take_an_instance.default,
+                        (custom_obj,),
+                    )
+                    custom_node.meta["val"] = torch.ones(4, 4)
+                    arg0, _ = node.args
+                    node.args = (arg0, custom_node)
+
+        serialized_vals = serialize(ep)
+        deserialized_ep = deserialize(*serialized_vals)
+
+        for node in deserialized_ep.graph.nodes:
+            if (
+                node.op == "call_function" and
+                node.target == torch.ops._TorchScriptTesting.take_an_instance.default
+            ):
+                arg = node.args[0]
+                self.assertTrue(isinstance(arg, torch._C.ScriptObject))
+                self.assertEqual(arg.__getstate__(), custom_obj.__getstate__())
+                self.assertEqual(arg.top(), 7)
+
+    def test_custom_class_with_getattr(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    in_channels=3, out_channels=16, kernel_size=3, padding=1
+                )
+
+            def forward(self, x):
+                x = self.conv1(x)
+                return x + x
+
+        custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+        inputs = (torch.zeros(1, 3, 256, 256),)
+        ep = export(M(), inputs)
+
+        mod = ep.module()
+        ep = ExportedProgram(
+            mod,
+            mod.graph,
+            ExportGraphSignature(
+                [],
+                [],
+                ep.graph_signature.user_inputs,
+                ep.graph_signature.user_outputs,
+                {},
+                {},
+                {},
+                None,
+            ),
+            ep.call_spec,
+            {},
+            {},
+            [],
+            [],
+        )
 
         # Replace one of the values with an instance of our custom class
         for node in ep.graph.nodes:

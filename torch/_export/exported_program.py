@@ -246,6 +246,16 @@ def _create_graph_module_for_export(root, graph):
         gm = torch.fx.GraphModule(root, torch.fx.Graph())
         gm._graph = graph
 
+        # Copy over attrs
+        for k, _ in root.named_children():
+            torch.fx.graph_module._copy_attr(root, gm, k)
+
+        for k, _ in root.named_buffers():
+            torch.fx.graph_module._copy_attr(root, gm, k)
+
+        for k, _ in root.named_parameters():
+            torch.fx.graph_module._copy_attr(root, gm, k)
+
     return gm
 
 
