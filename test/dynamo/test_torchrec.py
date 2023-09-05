@@ -37,7 +37,7 @@ class BucketizeMod(torch.nn.Module):
             )
             self.boundaries_dict[key] = buf
 
-    def forward(self, features: KeyedJaggedTensor) -> KeyedJaggedTensor:
+    def forward(self, features: "KeyedJaggedTensor") -> "KeyedJaggedTensor":
         weights_list = []
         for key, boundaries in self.boundaries_dict.items():
             jt = features[key]
