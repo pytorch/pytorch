@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 # NOTE: Please update this value if any modifications are made to the schema
 SCHEMA_VERSION = 1
+TREESPEC_VERSION = 1
 
 # TODO (zhxchen17) Move to a separate file.
 class _Union:
@@ -260,4 +261,4 @@ class ExportedProgram:
     range_constraints: Dict[str, RangeConstraint]
     equality_constraints: List[Tuple[Tuple[str, int], Tuple[str, int]]]
     schema_version: int
-    original_traced_arguments: str
+    example_inputs: Optional[Tuple[List[bytes], Dict[str, bytes]]]

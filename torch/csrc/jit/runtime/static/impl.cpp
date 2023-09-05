@@ -28,7 +28,6 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>

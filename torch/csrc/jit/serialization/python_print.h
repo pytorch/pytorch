@@ -2,6 +2,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <iostream>
 #include <vector>
 
 namespace torch {

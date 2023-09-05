@@ -3565,6 +3565,8 @@ class TestMPS(TestCaseMPS):
             helper((1, 5), (4, 0, 5), src_dtype, dst_dtype)
             helper((3, 1, 0), (3, 5, 0), src_dtype, dst_dtype)
             helper((0, 1, 0), (0, 5, 0), src_dtype, dst_dtype)
+        # Regression test for https://github.com/pytorch/pytorch/issues/107867
+        self.assertEqual(torch.tensor([[1]], device='mps').item(), 1.0)
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
@@ -10624,14 +10626,11 @@ class TestConsistency(TestCaseMPS):
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
-        key = op.name + op.variant_test_name
-        run_grad_test = True
 
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
 
-        all_backward_pass = True
         for cpu_sample in cpu_samples:
             #
             # Forward check
@@ -10645,7 +10644,7 @@ class TestConsistency(TestCaseMPS):
             mps_kwargs = mps_sample.kwargs
 
             # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
             cpu_out = op(*cpu_args, **cpu_kwargs)
@@ -10676,16 +10675,11 @@ class TestConsistency(TestCaseMPS):
     @ops(mps_ops_grad_modifier(copy.deepcopy(test_consistency_op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
-        key = op.name + op.variant_test_name
-
-        run_grad_test = True
 
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
 
-        all_forward_pass = True
-        all_backward_pass = True
         for cpu_sample in cpu_samples:
             #
             # Forward check
@@ -10700,19 +10694,16 @@ class TestConsistency(TestCaseMPS):
             mps_kwargs = mps_sample.kwargs
 
             # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
                 mps_args[1] = cpu_args[1]
 
             cpu_out = op(*cpu_args, **cpu_kwargs)
             mps_out = op(*mps_args, **mps_kwargs)
 
-            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+            if op.name in self.FP32_LOW_PRECISION_LIST and dtype == torch.float32:
                 atol = 1e-4
                 rtol = 3e-5
-            elif op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
-                atol = 1e-4
-                rtol = 3e-5
-            elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
+            elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
             elif (op.name == "masked.mean"):
@@ -10731,7 +10722,6 @@ class TestConsistency(TestCaseMPS):
                 rtol = None
 
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
-
 
             #
             # Backward check
