@@ -104,35 +104,32 @@ class PyCodegen:
             value.as_python_constant()
         ):
             output.append(self.create_load_const(value.as_python_constant()))
+        elif isinstance(value, TensorWithTFOverrideVariable):
+            tensor_variable = value.tensor_variable
+            graph_outputs_key = self.add_graph_output(tensor_variable)
+            output.append(
+                self.create_load_global(value.global_class_name(), True, add=True)
+            )
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
+            output.extend(create_call_function(1, True))
         elif isinstance(
             value,
             (
                 TensorVariable,
                 SymNodeVariable,
-                TensorWithTFOverrideVariable,
                 UnspecializedPythonVariable,
                 NumpyNdarrayVariable,
             ),
         ):
-            if isinstance(value, TensorWithTFOverrideVariable):
-                # unwrap back to tensor
-                value = value.tensor_variable
-            graph_outputs_key = id(value.proxy)
-            if graph_outputs_key not in graph_outputs:
-                graph_outputs[graph_outputs_key] = GraphOutputEntry(
-                    len(graph_outputs), value
-                )
-            else:
-                graph_outputs[graph_outputs_key].merge(value)
+            graph_outputs_key = self.add_graph_output(value)
+
             if isinstance(value, NumpyNdarrayVariable):
                 self.load_import_from(utils.__name__, "to_numpy_helper")
-            output.append(self.create_load(self.graph_output_var))
-            output.append(
-                self._create_load_const(graph_outputs[graph_outputs_key].index)
-            )
-            output.append(create_instruction("BINARY_SUBSCR"))
+
+            self.load_graph_output(graph_outputs[graph_outputs_key].index)
+
             if isinstance(value, NumpyNdarrayVariable):
-                output.extend(create_call_function(1, False))
+                output.extend(create_call_function(1, True))
             elif isinstance(value, UnspecializedPythonVariable) and value.need_unwrap:
                 output.extend(
                     [self.create_load_attr("item")] + create_call_function(0, True)
@@ -158,6 +155,23 @@ class PyCodegen:
                 self.add_cache(value)
 
         self.top_of_stack = value
+
+    def add_graph_output(self, value):
+        graph_outputs_key = id(value.as_proxy())
+        if graph_outputs_key not in self.graph_outputs:
+            self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
+                len(self.graph_outputs), value
+            )
+        else:
+            self.graph_outputs[graph_outputs_key].merge(value)
+
+        return graph_outputs_key
+
+    def load_graph_output(self, index):
+        output = self._output
+        output.append(self.create_load(self.graph_output_var))
+        output.append(self._create_load_const(index))
+        output.append(create_instruction("BINARY_SUBSCR"))
 
     def add_cache(self, value):
         var = self.new_var()
@@ -297,12 +311,12 @@ class PyCodegen:
         """
         Generate a LOAD_GLOBAL instruction to fetch a given python module.
         """
-        root_globals = self.tx.output.root_globals
+        global_scope = self.tx.output.global_scope
         name = re.sub(r"^.*[.]", "", mod.__name__)
-        if root_globals.get(name, None) is mod:
+        if global_scope.get(name, None) is mod:
             return self.create_load_global(name, push_null, add=True)
         mangled_name = f"___module_{name}_{id(mod)}"
-        if mangled_name not in root_globals:
+        if mangled_name not in global_scope:
             self.tx.output.install_global(mangled_name, mod)
         return self.create_load_global(mangled_name, push_null, add=True)
 

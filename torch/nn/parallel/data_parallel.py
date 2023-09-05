@@ -155,7 +155,8 @@ class DataParallel(Module, Generic[T]):
         self.output_device = _get_device_index(output_device, True)
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
-        _check_balance(self.device_ids)
+        if device_type == "cuda":
+            _check_balance(self.device_ids)
 
         if len(self.device_ids) == 1:
             self.module.to(self.src_device_obj)
@@ -168,8 +169,8 @@ class DataParallel(Module, Generic[T]):
             for t in chain(self.module.parameters(), self.module.buffers()):
                 if t.device != self.src_device_obj:
                     raise RuntimeError("module must have its parameters and buffers "
-                                       "on device {} (device_ids[0]) but found one of "
-                                       "them on device: {}".format(self.src_device_obj, t.device))
+                                       f"on device {self.src_device_obj} (device_ids[0]) but found one of "
+                                       f"them on device: {t.device}")
 
             inputs, module_kwargs = self.scatter(inputs, kwargs, self.device_ids)
             # for forward function without any inputs, empty list and dict will be created
@@ -248,8 +249,8 @@ def data_parallel(
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:
             raise RuntimeError("module must have its parameters and buffers "
-                               "on device {} (device_ids[0]) but found one of "
-                               "them on device: {}".format(src_device_obj, t.device))
+                               f"on device {src_device_obj} (device_ids[0]) but found one of "
+                               f"them on device: {t.device}")
 
     inputs, module_kwargs = scatter_kwargs(inputs, module_kwargs, device_ids, dim)
     # for module without any inputs, empty list and dict will be created

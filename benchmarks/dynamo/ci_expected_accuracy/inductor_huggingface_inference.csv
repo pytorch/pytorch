@@ -13,7 +13,7 @@ CamemBert,pass,0
 DebertaForMaskedLM,pass,0
 DebertaForQuestionAnswering,pass,0
 DebertaV2ForMaskedLM,pass_due_to_skip,0
-DebertaV2ForQuestionAnswering,eager_2nd_run_OOM,0
+DebertaV2ForQuestionAnswering,pass,0
 DistilBertForMaskedLM,pass,0
 DistilBertForQuestionAnswering,pass,0
 DistillGPT2,pass,0

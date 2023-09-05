@@ -1,7 +1,6 @@
 #include <torch/csrc/autograd/variable.h>
 
 #include <torch/csrc/autograd/InferenceMode.h>
-#include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
@@ -10,8 +9,6 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
-
-#include <ATen/core/VariableHooksInterface.h>
 
 #include <ATen/ATen.h>
 #include <ATen/FuncTorchTLS.h>
@@ -41,13 +38,7 @@ DifferentiableViewMeta::DifferentiableViewMeta(
       backward_info_(std::move(backward_info)),
       forward_info_(std::move(forward_info)),
       shared_view_info_(shared_view_info),
-      creation_meta_(creation_meta),
-      creation_traceback_(
-          AnomalyMode::is_enabled() ? torch::CapturedTraceback::gather(
-                                          /*python*/ true,
-                                          /*script*/ false,
-                                          /*cpp*/ false)
-                                    : nullptr) {
+      creation_meta_(creation_meta) {
   is_view_ = true;
   if (backward_info_.has_value()) {
     self_impl->set_version_counter(
@@ -63,16 +54,6 @@ DifferentiableViewMeta::DifferentiableViewMeta(
     TORCH_INTERNAL_ASSERT(
         !forward_info_.has_value(),
         "Shared view info require forward view info to be empty")
-  }
-}
-
-void DifferentiableViewMeta::set_creation_meta(CreationMeta new_creation_meta) {
-  TORCH_CHECK(
-      has_bw_view(), "creation_meta can only exist for backward views.");
-  creation_meta_ = new_creation_meta;
-  if (AnomalyMode::is_enabled()) {
-    creation_traceback_ = torch::CapturedTraceback::gather(
-        /*python*/ true, /*script*/ false, /*cpp*/ false);
   }
 }
 
@@ -382,6 +363,19 @@ void clear_hooks(const at::TensorBase& self) {
   materialize_autograd_meta(self)->hooks_.clear();
 }
 
+void set_post_acc_grad_hooks(
+    const at::TensorBase& self,
+    std::unique_ptr<PostAccumulateGradHook> dict) {
+  AutogradMeta* meta = materialize_autograd_meta(self);
+  meta->post_acc_grad_hooks_ = std::move(dict);
+}
+
+std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
+    const Variable& self) {
+  TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
+  return get_autograd_meta(self)->post_acc_grad_hooks_;
+}
+
 void set_name(const Variable& self, const std::string& name) {
   materialize_autograd_meta(self)->name_ = name;
 }
@@ -410,36 +404,6 @@ DifferentiableViewMeta* get_view_autograd_meta(const at::TensorBase& self) {
 } // namespace impl
 
 using at::Tensor;
-
-struct VariableHooks final : at::impl::VariableHooksInterface {
-  at::TensorBase tensor_data(const at::TensorBase&) const override;
-  at::TensorBase variable_data(const at::TensorBase&) const override;
-  const std::shared_ptr<torch::autograd::Node>& grad_fn(
-      const at::TensorBase&) const override;
-  unsigned _register_hook(
-      const at::TensorBase&,
-      std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
-  void remove_hook(const at::TensorBase&, unsigned pos) const override;
-  bool is_view(const at::TensorBase&) const override;
-  const at::TensorBase& base(const at::TensorBase&) const override;
-  const std::string& name(const at::TensorBase&) const override;
-  bool is_leaf(const at::TensorBase&) const override;
-  int64_t output_nr(const at::TensorBase&) const override;
-  void set_data(const at::TensorBase& self, const at::TensorBase& new_data)
-      const override;
-  at::TensorBase data(const at::TensorBase& self) const override;
-  int64_t _version(const at::TensorBase& self) const override;
-  void retain_grad(const at::TensorBase& self) const override;
-  bool retains_grad(const at::TensorBase& self) const override;
-  void _backward(
-      const Tensor& self,
-      at::TensorList inputs,
-      const c10::optional<Tensor>& gradient,
-      c10::optional<bool> keep_graph,
-      bool create_graph) const override;
-  void requires_grad_(const at::TensorBase& self, bool _requires_grad)
-      const override;
-};
 
 VariableHooks variableHooks;
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
@@ -760,7 +724,7 @@ unsigned VariableHooks::_register_hook(
   auto& list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if (!list) {
     torch::autograd::impl::create_cpp_hook(
-        self, /*is_retains_grad_hook=*/false);
+        self, /*is_retains_grad_hooks=*/false);
   }
   unsigned idx = list->size();
   list->push_back(hook);
@@ -853,24 +817,6 @@ void handle_view_on_rebase(
           " cloning the output of the custom Function.");
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
-    }
-
-    auto* tb = diff_view_meta->get_creation_traceback().get();
-    if (tb) {
-      std::ostringstream oss;
-      torch::SymbolizedTracebacks st = torch::symbolize({tb});
-      const std::vector<uint64_t>& traceback = st.tracebacks[0];
-      for (uint64_t idx : traceback) {
-        const unwind::Frame& frame = st.all_frames[idx];
-        oss << "  File \"" << frame.filename << "\", line " << frame.lineno
-            << ", in " << frame.funcname << "\n";
-      }
-      msg = c10::str(msg, " This view was allocated at:\n", oss.str());
-    } else {
-      msg = c10::str(
-          msg,
-          " To find out where this view was allocated, run your entire forward region under"
-          " anomaly mode (torch.autograd.detect_anomaly(check_nan=False)).");
     }
 
     TORCH_CHECK(false, msg);

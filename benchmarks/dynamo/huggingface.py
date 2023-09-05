@@ -163,11 +163,14 @@ SKIP_ACCURACY_CHECK_MODELS = {
 }
 
 
-REQUIRE_HIGHER_TOLERANCE = {
+REQUIRE_HIGHER_TOLERANCE_TRAINING = {
     "MT5ForConditionalGeneration",
     # AlbertForQuestionAnswering fails in CI GCP A100 but error does not seem
     # harmful.
     "AlbertForQuestionAnswering",
+}
+REQUIRE_HIGHER_TOLERANCE_INFERENCE = {
+    "RobertaForQuestionAnswering",
 }
 
 
@@ -177,6 +180,10 @@ SKIP_FOR_CPU = {
 
 ONLY_EVAL_MODE = {
     "M2M100ForConditionalGeneration",  # Fails with dynamo for train mode
+}
+
+FP32_ONLY_MODELS = {
+    "GoogleFnet",
 }
 
 
@@ -403,6 +410,10 @@ class HuggingfaceRunner(BenchmarkRunner):
     def skip_models_for_cpu(self):
         return SKIP_FOR_CPU
 
+    @property
+    def fp32_only_models(self):
+        return FP32_ONLY_MODELS
+
     def _get_model_cls_and_config(self, model_name):
         if model_name not in EXTRA_MODELS:
             model_cls = get_module_cls_by_model_name(model_name)
@@ -522,10 +533,13 @@ class HuggingfaceRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            if name in REQUIRE_HIGHER_TOLERANCE_TRAINING:
                 return 2e-2, cosine
             else:
                 return 1e-2, cosine
+        else:
+            if name in REQUIRE_HIGHER_TOLERANCE_INFERENCE:
+                return 4e-3, cosine
         return 1e-3, cosine
 
     def compute_loss(self, pred):

@@ -7,10 +7,10 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/function_hook.h>
-#include <torch/csrc/profiler/combined_traceback.h>
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/core/VariableHooksInterface.h>
 #include <c10/util/Exception.h>
 
 #include <cstdint>
@@ -186,6 +186,12 @@ TORCH_API void add_hook(
 TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
+TORCH_API void set_post_acc_grad_hooks(
+    const at::TensorBase&,
+    std::unique_ptr<PostAccumulateGradHook> dict);
+TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
+    const Variable&);
+
 TORCH_API void create_cpp_hook(
     const at::TensorBase&,
     bool is_retains_grad_hooks = false);
@@ -230,6 +236,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // each other, so using both is not defined behavior.
   std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
+
+  // The post_acc_grad_hooks_ field stores only Python hooks
+  // (PyFunctionTensorPostAccGradHooks) that are called after the
+  // .grad field has been accumulated into. This is less complicated
+  // than the hooks_ field, which encapsulates a lot more.
+  std::unique_ptr<PostAccumulateGradHook> post_acc_grad_hooks_ = nullptr;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_{false};
@@ -595,7 +607,6 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
   /// version_counter.current_version().
   uint32_t attr_version_;
   CreationMeta creation_meta_;
-  std::shared_ptr<torch::CapturedTraceback> creation_traceback_;
 
  public:
   /// requires_grad is a backward AD field so we only use the view specific
@@ -637,12 +648,11 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
     return creation_meta_;
   }
 
-  const std::shared_ptr<torch::CapturedTraceback>& get_creation_traceback()
-      const {
-    return creation_traceback_;
+  void set_creation_meta(CreationMeta new_creation_meta) {
+    TORCH_CHECK(
+        has_bw_view(), "creation_meta can only exist for backward views.");
+    creation_meta_ = new_creation_meta;
   }
-
-  void set_creation_meta(CreationMeta new_creation_meta);
 
   bool has_fw_view() const {
     return shared_view_info_ || forward_info_.has_value();
@@ -798,6 +808,40 @@ inline Variable make_variable(
   }
   return Variable();
 }
+
+struct VariableHooks final : at::impl::VariableHooksInterface {
+  at::TensorBase tensor_data(const at::TensorBase&) const override;
+  at::TensorBase variable_data(const at::TensorBase&) const override;
+  const std::shared_ptr<torch::autograd::Node>& grad_fn(
+      const at::TensorBase&) const override;
+  unsigned _register_hook(
+      const at::TensorBase&,
+      std::function<at::TensorBase(const at::TensorBase&)> hook) const override;
+  void remove_hook(const at::TensorBase&, unsigned pos) const override;
+  bool is_view(const at::TensorBase&) const override;
+  const at::TensorBase& base(const at::TensorBase&) const override;
+  const std::string& name(const at::TensorBase&) const override;
+  bool is_leaf(const at::TensorBase&) const override;
+  int64_t output_nr(const at::TensorBase&) const override;
+  void set_data(const at::TensorBase& self, const at::TensorBase& new_data)
+      const override;
+  at::TensorBase data(const at::TensorBase& self) const override;
+  int64_t _version(const at::TensorBase& self) const override;
+  void retain_grad(const at::TensorBase& self) const override;
+  bool retains_grad(const at::TensorBase& self) const override;
+  void _backward(
+      const at::Tensor& self,
+      at::TensorList inputs,
+      const c10::optional<at::Tensor>& gradient,
+      c10::optional<bool> keep_graph,
+      bool create_graph) const override;
+  void requires_grad_(const at::TensorBase& self, bool _requires_grad)
+      const override;
+  void basic_autograd_not_implemented_fallback(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet dispatch_keys,
+      torch::jit::Stack* stack) const override;
+};
 
 namespace utils {
 

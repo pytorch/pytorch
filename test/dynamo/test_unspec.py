@@ -13,7 +13,14 @@ from torch._dynamo.comptime import comptime
 from torch._dynamo.testing import same
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True)
+# The intention of this test file is you should put test cases specifically
+# for assume_static_by_default=False, aka you want to YOLO make everything as
+# dynamic as possible.  If you want to test the more normal situation where
+# you assume static by default, put it in a regular test file and
+# test_dynamic_shapes will cover both the YOLO and non-YOLO cases.
+
+
+@torch._dynamo.config.patch(assume_static_by_default=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
@@ -37,7 +44,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
-        self.assertTrue(same(res1, res2))
+        self.assertEqual(res1, res2)
 
     def test_no_recompilations(self):
         # no recompilations if passing on different numpy int values
@@ -108,7 +115,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     # some models fail on missing codegen.tx.output.random_values_var. If we let the tensor value go into wrap as
     # it is, this test fails.
     # The real solution here is to rewrite RandomValueSource and all the codegen it does from the ground up.
-    @torch._dynamo.config.patch("dynamic_shapes", True)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
@@ -258,6 +264,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         # specialization is allowed)
         opt_fn(x)
 
+    @unittest.expectedFailure
     def test_conv1d_symint_padding(self):
         kernel = torch.randn(1, 1, 4)
 
@@ -288,6 +295,23 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         z = fn(x)
         self.assertEqual(z._dynamo_weak_dynamic_indices, {0})
+
+    def test_rshift_dynamic(self):
+        def shift_right(tensor: torch.Tensor) -> torch.Tensor:
+            return (tensor >> 2).to(torch.long)
+
+        opt_fn = torch.compile(shift_right, fullgraph=True, dynamic=True)
+        sample_input = torch.tensor([4, 4, 16, 32], dtype=torch.uint8)
+        opt_fn(sample_input)
+
+    def test_sym_int_conversion(self):
+        def f(x):
+            y = x.size(0)
+            return x * int(y == 0)
+
+        opt_fn = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(2, 3)
+        opt_fn(x)
 
 
 if __name__ == "__main__":

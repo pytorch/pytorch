@@ -3,13 +3,15 @@ import copy
 import unittest
 
 import torch
-import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
+from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_utils import IS_LINUX, TEST_WITH_ROCM
+from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -53,6 +55,261 @@ class TestPaternMatcher(TestCase):
             self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 3)
 
+    def _test_mixed_impl(self, fn, args, mixed_mm_expected, fallback_mixed_mm_expected):
+        torch._dynamo.reset()
+        counters.clear()
+        ref = fn(*args)
+        test, (code,) = run_and_get_code(torch.compile(fn), *args)
+        torch.testing.assert_close(ref, test)
+        self.assertEqual("mixed_mm" in code, mixed_mm_expected)
+        self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_mixed_mm=True)
+    def test_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 5, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float32),
+                torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, False)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_mixed_mm=True)
+    def test_mixed_mm_bad_cases(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda").t(),
+            ),
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.bfloat16),
+                torch.randint(0, 255, (2, 8), dtype=torch.uint8, device="cuda").t(),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, True)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_mixed_mm=True, max_autotune_gemm=True)
+    def test_mixed_mm_epi_works(self):
+        def fn(a, b, c, d):
+            return torch.mm(a, b.to(a.dtype)) * c + d
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, device="cuda"),
+                torch.randn(8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 2, device="cuda", dtype=torch.bfloat16),
+                torch.randint(-128, 127, (2, 8), dtype=torch.int8, device="cuda"),
+                torch.randn(8, device="cuda", dtype=torch.bfloat16),
+                torch.randn(8, device="cuda", dtype=torch.bfloat16),
+            ),
+            (
+                torch.randn(8, 5, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (5, 2), dtype=torch.uint8, device="cuda"),
+                torch.randn(2, device="cuda", dtype=torch.float16),
+                torch.randn(2, device="cuda", dtype=torch.float16),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_mixed_impl(fn, args, True, False)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    def test_mixed_mm_gating(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args = (
+            torch.randn(8, 8, device="cuda"),
+            torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
+        )
+        # will ignore the mixed_mm code (including fallback)
+        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, False, False)
+
+        # will use fallback_mixed_mm kernel due to no gemm_autotune
+        with inductor_config.patch({"force_mixed_mm": False, "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use mixed_mm kernel
+        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, True, False)
+
+        # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
+        with inductor_config.patch({"force_mixed_mm": True, "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, False)
+
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_mixed_mm_cpu(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        args = (
+            torch.randn(8, 8),
+            torch.randint(-128, 127, (8, 8), dtype=torch.int8),
+        )
+        self._test_mixed_impl(fn, args, False, False)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm(self):
+        def fn(a, b):
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, device="cuda", dtype=torch.float16),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda")
+                .t()
+                .contiguous()
+                .t(),
+            ),
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.int32, device="cuda"),
+            ),
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.int64, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertTrue("uint4x2_mixed_mm" in code)
+
+    @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm_epi(self):
+        def fn(a, b, c, d):
+            return (
+                torch.mm(
+                    a,
+                    torch.cat((b & 0xF, b >> 4), 1)
+                    .reshape(-1, b.shape[1])
+                    .to(a.dtype)
+                    .sub(8),
+                )
+                * c
+                + d
+            )
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+                torch.randn(8, device="cuda"),
+                torch.randn(8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertTrue("uint4x2_mixed_mm" in code)
+            self.assertTrue("fused_add_mm_mul" in code)
+
+    @inductor_config.patch(use_mixed_mm=True)
+    def test_uint4x2_mixed_mm_fail_to_match(self):
+        def fn(a, b):
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
+
+        args_list = [
+            (  # cpu
+                torch.randn(8, 8),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8),
+            ),
+            (  # int8
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(-128, 127, (4, 8), dtype=torch.int8, device="cuda"),
+            ),  # we don't match for int8 since numerics
+        ]  # for int8 bitshifts don't match between triton and pytorch
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertFalse("uint4x2_mixed_mm" in code)
+
+    @inductor_config.patch(use_mixed_mm=False)
+    def test_uint4x2_mixed_mm_gating_works(self):
+        def fn(a, b):
+            return torch.mm(
+                a,
+                torch.cat((b & 0xF, b >> 4), 1)
+                .reshape(-1, b.shape[1])
+                .to(a.dtype)
+                .sub(8),
+            )
+
+        args_list = [
+            (
+                torch.randn(8, 8, device="cuda"),
+                torch.randint(0, 255, (4, 8), dtype=torch.uint8, device="cuda"),
+            ),
+        ]
+
+        for args in args_list:
+            torch._dynamo.reset()
+            counters.clear()
+            ref = fn(*args)
+            test, (code,) = run_and_get_code(torch.compile(fn), *args)
+            torch.testing.assert_close(ref, test)
+            self.assertFalse("uint4x2_mixed_mm" in code)
+
     def test_addmm(self):
         def fn(a, b, c):
             return torch.add(a, torch.mm(b, c)), torch.mm(b, c) + a
@@ -76,6 +333,7 @@ class TestPaternMatcher(TestCase):
             (4, torch.randn(16, 16, device="cuda"), torch.randn(16, 16, device="cuda")),
         ]
         for args in args_list:
+            torch._dynamo.reset()
             counters.clear()
             e1, e2 = fn(*args)
             a1, a2 = torch.compile(fn)(*args)
@@ -103,8 +361,8 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
     def test_cat_addmm(self):
         def fn(a, b, c):
@@ -125,14 +383,15 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 4)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
+    @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
                 self.assertEqual(counter, expected)
-            elif not dynamo_config.dynamic_shapes:
+            else:
                 # cpp_wrapper for the CUDA backend runs two passes
                 self.assertEqual(counter, 2 * expected)
 
@@ -150,7 +409,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         counters.clear()
         args = [
@@ -161,7 +420,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -179,7 +438,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -203,6 +462,10 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_cumsum(self):
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -215,7 +478,15 @@ class TestPaternMatcher(TestCase):
             ).to(torch.int64)
             return torch.cumsum(ones, 1)
 
-        for fn in (fn1, fn2):
+        def fn3():
+            twos = torch.full([5, 4, 3], 2, dtype=torch.int64)
+            return torch.cumsum(twos, 0)
+
+        def fn4():
+            x = torch.full([100], 0.1, dtype=torch.float32)
+            return torch.cumsum(x, 0)
+
+        for fn in (fn1, fn2, fn3, fn4):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
@@ -292,6 +563,105 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
 
+    def test_cat_splitwithsizes(self):
+        # good case
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device="cuda"),
+            torch.randn(2, 3, device="cuda"),
+            torch.randn(2, 5, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 2)
+        counters.clear()
+
+        # cat node has other users
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 1
+            )
+            return [s**2 for s in split_with_sizes] + [cat**3]
+
+        args = [
+            torch.randn(2, 2, device="cuda"),
+            torch.randn(2, 3, device="cuda"),
+            torch.randn(2, 5, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        counters.clear()
+
+        # cat and split dims are different
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 3, 5], 0
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(10, 2, device="cuda"),
+            torch.randn(10, 3, device="cuda"),
+            torch.randn(10, 5, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        counters.clear()
+
+        # cat and split lenghts are different
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [5, 5], 1)
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device="cuda"),
+            torch.randn(2, 3, device="cuda"),
+            torch.randn(2, 5, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        counters.clear()
+
+        # cat input sizes and split sizes are different
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(
+                cat, [2, 5, 3], 1
+            )
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(2, 2, device="cuda"),
+            torch.randn(2, 3, device="cuda"),
+            torch.randn(2, 5, device="cuda"),
+        ]
+        expected = fn(*args)
+        actual = torch.compile(fn)(*args)
+        torch.testing.assert_close(actual, expected)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+        self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 0)
+        counters.clear()
+
     def test_match_with_mutation(self):
         from torch._inductor.pattern_matcher import (
             CallFunction,
@@ -364,7 +734,48 @@ class TestPaternMatcher(TestCase):
                 self.assertEqual(counter, int(fn is fn0))
                 torch.testing.assert_close(actual, expected)
 
+    def test_remove_pointless_clones(self):
+        @torch.compile(fullgraph=True)
+        def fn(a, b):
+            return torch.mm(a, b).clone()
+
+        result, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
+        # clone would create a buf1
+        self.assertIn("return (buf0, )", code[0])
+        self.assertNotIn("async_compile.cpp", code[0])
+
+    def test_unfuse_bias_addmm(self):
+        args = [
+            torch.randn(20, device="cuda"),
+            torch.randn(10, 15, device="cuda"),
+            torch.randn(15, 20, device="cuda"),
+        ]
+
+        @torch.compile()
+        def fn(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b)
+
+        _, (code) = run_and_get_code(fn, args[0], args[1], args[2])
+        FileCheck().check("extern_kernels.addmm(").run(code[0])
+
+        @torch.compile()
+        def fn2(inp, a, b):
+            return torch.nn.functional.gelu(torch.ops.aten.addmm(inp, a, b))
+
+        _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+        @torch.compile()
+        def fn2(inp, a, b):
+            return torch.nn.functional.gelu(
+                torch.ops.aten.addmm(inp, a, b).unsqueeze(0)
+            )
+
+        # hit the view path
+        _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
+        FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA and not TEST_WITH_ROCM:
+    if IS_LINUX and HAS_CUDA:
         run_tests()

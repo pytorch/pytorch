@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <c10/macros/Export.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
@@ -40,6 +39,7 @@ extern "C" {
 // This function is needed to avoid superfluous dependency on GNU OpenMP library
 // when cuPTI is linked statically For more details see
 // https://github.com/pytorch/pytorch/issues/51026
+__attribute__((weak)) int acc_get_device_type();
 __attribute__((weak)) int acc_get_device_type() {
   throw std::runtime_error(
       "Dummy implementation of acc_get_device_type is not supposed to be called!");
@@ -377,7 +377,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
     for (auto& e : events) {
-      if (e->parent_.expired()) {
+      if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
         event_tree_.push_back(e);
       }
 

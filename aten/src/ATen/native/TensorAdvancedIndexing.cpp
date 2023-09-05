@@ -443,6 +443,9 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   const auto& result = maybe_get_output();
 
   if (result.defined()) {
+    TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+                "index_out: self (", self.scalar_type(), ") and result (", result.scalar_type(),
+                ") must have the same scalar type");
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     for (const at::OptionalTensorRef& index : materialized) {
@@ -857,7 +860,9 @@ TORCH_IMPL_FUNC(index_copy_out)
 // Not calling into index_reduce_func_impl because of a different dtype dispatch
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  if (!result.is_same(self)) result.copy_(self);
+  if (!result.is_same(self)) {
+     result.copy_(self);
+  }
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
@@ -870,9 +875,11 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     //     selfSlice.add_(sourceSlice);
     //   }
     // But much faster as this reuses the iterator from add_
-    if (numel == 0) {
+    if (numel == 0 || self.numel() == 0) {
       return;
     }
+
+    dim = maybe_wrap_dim(dim, self.dim());
 
     // When the slice of source or result is noncontiguous,
     // original index_add is slow as it uses add for the sliced tensor,
@@ -884,12 +891,9 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     // avoid write conflict. scatter_add only need one parallel and the size of
     // outer dimensions is bigger to do parallel.
 
-    // TODO: When https://github.com/pytorch/pytorch/pull/82703 lands,
-    // using scatter_add will also get obvious speedup for the case dim == 0.
-    if ((result.stride(dim) == 1 || source.stride(dim) == 1) &&
+    if ((dim == 0 || dim == self.dim() - 1) &&
         // Data type of index should be long and alpha should be 1 to use scatter_add.
         alpha.equal(1.0) && index_contig.scalar_type() == ScalarType::Long &&
-        result.numel() > at::internal::GRAIN_SIZE &&
         // scatter_add does not support ComplexHalf
         source.scalar_type() != ScalarType::ComplexHalf &&
         result.scalar_type() != ScalarType::ComplexHalf) {
@@ -901,9 +905,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       // source.select(dim, i) is broadcast for result.select(dim, index_data[i])
       // The broadcast case is not applicable for scatter_add
       auto check_sizes = [&ep_sizes, &ep_strides, &numel](IntArrayRef a, IntArrayRef b, int64_t dim) -> bool {
-        if (a.size() != b.size()) {
-          return false;
-        }
 
         ep_sizes[dim] = numel;
         ep_strides[dim] = 1;
@@ -927,7 +928,6 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
         result.scatter_add_(dim, ep_index, source);
         return;
       }
-
     }
 
     auto selfSlice = result.select(dim, 0);
@@ -950,8 +950,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
           add_stub(iter.device_type(), iter, alpha);
       }
     });
-  }
-  else {
+  } else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
     // explicitly capture all required variables to work around windows build

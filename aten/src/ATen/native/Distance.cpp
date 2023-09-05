@@ -24,6 +24,7 @@
 #include <ATen/ops/cosine_similarity_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/pairwise_distance_native.h>
@@ -271,7 +272,7 @@ Tensor _pdist_backward(const Tensor& grad, const Tensor& self, const double p, c
 }
 
 Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, double eps) {
-  /*
+    /*
    * cosine_similarity(x1, x2) = <x1, x2> / (||x1|| * ||x2||)
    *
    * The current implementation is an improvement over the previous version.
@@ -300,42 +301,31 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
    * 3. Makes sure |cosing_similarity(x1, x2)| <= 1.0.
    *
    */
+
   auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
 
-  auto common_size = at::infer_size_dimvector(x1_.sizes(), x2_.sizes());
-  auto x1 = x1_.to(commonDtype).expand(common_size);
-  auto x2 = x2_.to(commonDtype).expand(common_size);
+  // We accept integral types (and bools lol) but vector_norm does not
+  auto x1_is_int = c10::isIntegralType(x1_.scalar_type(), /*încludeBool=*/true);
+  auto x2_is_int = c10::isIntegralType(x2_.scalar_type(), /*încludeBool=*/true);
+  auto x1 = x1_is_int ? x1_.to(commonDtype) : x1_;
+  auto x2 = x2_is_int ? x2_.to(commonDtype) : x2_;
 
-  auto x1_squared_norm = at::pow(x1, 2).sum(dim, /*keepdim=*/true);
-  auto x2_squared_norm = at::pow(x2, 2).sum(dim, /*keepdim=*/true);
+
+  // We want to divide each tensor by its norm first, as it's more numerically stable.
+  // This keeps the result between -1.0 and 1.0
+  // We clone them, as we're going to modify them in-place
+  // This allows the gradients to propagate propertly all the way to x1 and x2
+  auto x1_norm = at::linalg_vector_norm(x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
+  auto x2_norm = at::linalg_vector_norm(x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
   {
     at::NoGradGuard guard;
-    x1_squared_norm.clamp_min_(eps * eps);
-    x2_squared_norm.clamp_min_(eps * eps);
+    x1_norm.clamp_min_(eps);
+    x2_norm.clamp_min_(eps);
   }
 
-  auto x1_norm = x1_squared_norm.sqrt_();
-  auto x2_norm = x2_squared_norm.sqrt_();
-
-  auto x1_normalized = x1.div(x1_norm);
-  auto x2_normalized = x2.div(x2_norm);
-
-  Tensor cos_sim_value = at::sum(x1_normalized * x2_normalized, dim);
-
-  // The code above is resistant to over +/-1 overshoots.
-  // However, if this happens and if it is critical, uncommenting
-  // the lines below will solve the issue.
-  // We keep these lines commented as to reduce the number of kernel
-  // launches for better runtime performance.
-  //{
-  //  at::NoGradGuard guard;
-  //  cos_sim_value.clamp_min_(-1.0);
-  //  cos_sim_value.clamp_max_(1.0);
-  //}
-
-  return cos_sim_value;
+  return ((x1 / x1_norm) * (x2 / x2_norm)).sum(dim);
 }
 
 }}  // namespace at::native

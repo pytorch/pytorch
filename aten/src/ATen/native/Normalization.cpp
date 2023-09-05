@@ -114,14 +114,16 @@ struct Var {
 };
 
 static inline bool is_contiguous(const Tensor& t) {
-  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast);
+  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast) || t.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 }
 
 // For some ambiguous cases, it is possible a channels last contiguous Tensor has
 //   `suggest_memory_format` of Contiguous.
 // See https://github.com/pytorch/pytorch/issues/63224 for details.
 static inline MemoryFormat suggest_memory_format_contig(const Tensor& t) {
-  return t.is_contiguous() ? at::MemoryFormat::Contiguous : at::MemoryFormat::ChannelsLast;
+  return t.is_contiguous() ?
+    at::MemoryFormat::Contiguous : (t.is_contiguous(at::MemoryFormat::ChannelsLast3d) ?
+    at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast);
 }
 
 template<typename scalar_t, typename param_t>
@@ -386,7 +388,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   auto in_channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto grad_in_channel_stride = grad_input_mask[0] ? grad_input.strides()[1] : 0;
-  auto grad_in_data = grad_input_mask[0] ? grad_input.data_ptr<scalar_t>() : nullptr;
+  auto grad_in_data = grad_input_mask[0] ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   auto grad_out_channel_stride = grad_out_.strides()[1];
   auto grad_out_data = grad_out_.data_ptr<scalar_t>();
 

@@ -1,8 +1,7 @@
 import shutil
 
 import torch
-import torch._dynamo
-import torch._inductor
+import torch._export
 
 
 class Net(torch.nn.Module):
@@ -17,12 +16,12 @@ class Net(torch.nn.Module):
 x = torch.randn((32, 64), device="cuda")
 y = torch.randn((32, 64), device="cuda")
 
-for dynamic in [True, False]:
-    torch._dynamo.config.dynamic_shapes = dynamic
+# FIXME: re-enable dynamic shape after we add dynamic shape support to the
+# AOTInductor runtime
+with torch._dynamo.config.patch(dynamic_shapes=False):
     torch._dynamo.reset()
 
     with torch.no_grad():
-        module, _ = torch._dynamo.export(Net().cuda(), x, y)
-        lib_path = torch._inductor.aot_compile(module, [x, y])
+        lib_path, module = torch._export.aot_compile(Net().cuda(), (x, y))
 
-    shutil.copy(lib_path, f"libaot_inductor_output{'_dynamic' if dynamic else ''}.so")
+shutil.copy(lib_path, "libaot_inductor_output.so")

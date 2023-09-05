@@ -12,7 +12,7 @@ from torch._inductor.fx_passes.pre_grad import (
     transpose_matmul,
 )
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
 
@@ -154,5 +154,4 @@ class TestFxFusion(TestCase):
 
 
 if __name__ == "__main__":
-    if not TEST_WITH_ROCM:
-        run_tests()
+    run_tests()

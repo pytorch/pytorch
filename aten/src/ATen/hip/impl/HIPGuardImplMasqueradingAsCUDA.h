@@ -54,13 +54,13 @@ namespace c10 { namespace hip {
 // this HIP implementation.
 
 struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplInterface {
-  static constexpr DeviceType static_type = DeviceType::CUDA;
+  static constexpr c10::DeviceType static_type = c10::DeviceType::CUDA;
   HIPGuardImplMasqueradingAsCUDA() {}
-  HIPGuardImplMasqueradingAsCUDA(DeviceType t) {
-    TORCH_INTERNAL_ASSERT(t == DeviceType::CUDA);
+  HIPGuardImplMasqueradingAsCUDA(c10::DeviceType t) {
+    TORCH_INTERNAL_ASSERT(t == c10::DeviceType::CUDA);
   }
-  DeviceType type() const override {
-    return DeviceType::CUDA;
+  c10::DeviceType type() const override {
+    return c10::DeviceType::CUDA;
   }
   Device exchangeDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());
@@ -73,7 +73,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Device getDevice() const override {
     int device;
     C10_HIP_CHECK(hipGetDevice(&device));
-    return Device(DeviceType::CUDA, device);
+    return Device(c10::DeviceType::CUDA, device);
   }
   void setDevice(Device d) const override {
     TORCH_INTERNAL_ASSERT(d.is_cuda());

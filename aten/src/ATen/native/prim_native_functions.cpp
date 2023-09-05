@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/is_nonzero_native.h>
+#include <ATen/ops/_foobar_native.h>
 #include <ATen/ops/_test_functorch_fallback_native.h>
 #endif
 

@@ -1,5 +1,4 @@
 #include <torch/csrc/profiler/combined_traceback.h>
-#include <atomic>
 
 namespace torch {
 
@@ -12,25 +11,33 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
   auto r = std::make_shared<CapturedTraceback>();
   if (python) {
     auto p = python_support_.load();
-    while (p && r->frames_.size() == 0) {
+    while (p && r->frames_.empty()) {
       r->frames_ = p->gather();
       r->python_ = p;
       p = p->next_;
     }
   }
-#ifndef BUILD_LITE_INTERPRETER
   if (script) {
     r->script_frames_ = torch::jit::currentCallstack();
   }
-#endif
   if (cpp) {
     r->cpp_frames_ = unwind::unwind();
   }
   return r;
 }
 
+int CapturedTraceback::traversePython(visitproc visit, void* arg) {
+  TORCH_INTERNAL_ASSERT(python_);
+  return python_->traverse(frames_, visit, arg);
+}
+
+int CapturedTraceback::clearPython() {
+  TORCH_INTERNAL_ASSERT(python_);
+  return python_->clear(frames_);
+}
+
 CapturedTraceback::~CapturedTraceback() {
-  if (frames_.size() > 0) {
+  if (!frames_.empty()) {
     TORCH_INTERNAL_ASSERT(python_);
     python_->release(frames_);
   }
@@ -69,7 +76,7 @@ SymbolizedTracebacks symbolize(
     }
   }
   // gather symbol names for C++ frames
-  if (all_cpp_ips.size() > 0) {
+  if (!all_cpp_ips.empty()) {
     r.all_frames = unwind::symbolize(all_cpp_ips);
   }
 
@@ -82,7 +89,7 @@ SymbolizedTracebacks symbolize(
 
   for (const auto& e : to_symbolize) {
     if (e->python_) {
-      if (cur_python != e->python_ && cur_py_frames.size() > 0) {
+      if (cur_python != e->python_ && !cur_py_frames.empty()) {
         cur_python->appendSymbolized(cur_py_frames, r);
         cur_py_frames.clear();
       }
@@ -95,7 +102,7 @@ SymbolizedTracebacks symbolize(
       }
     }
   }
-  if (cur_py_frames.size() > 0) {
+  if (!cur_py_frames.empty()) {
     cur_python->appendSymbolized(cur_py_frames, r);
     cur_py_frames.clear();
   }
@@ -117,7 +124,6 @@ SymbolizedTracebacks symbolize(
     };
 
     auto append_jit = [&]() {
-#ifndef BUILD_LITE_INTERPRETER
       if (jit_appended) {
         return;
       }
@@ -128,7 +134,7 @@ SymbolizedTracebacks symbolize(
             f.filename; // sic: torchscript puts funcname in filename field
         auto flc = f.range.file_line_col();
         if (flc) {
-          size_t col;
+          size_t col = 0;
           std::tie(frame.filename, frame.lineno, col) = *flc;
         } else {
           frame.filename = "??";
@@ -137,7 +143,6 @@ SymbolizedTracebacks symbolize(
         r.tracebacks.back().push_back(r.all_frames.size());
         r.all_frames.emplace_back(std::move(frame));
       }
-#endif
     };
 
     for (void* f : sc->cpp_frames_) {

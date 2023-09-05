@@ -54,6 +54,7 @@
 
 using namespace gemm_kernel_utils;
 
+namespace PyTorchMemEffAttention {
 namespace {
 template <typename scalar_t, typename Arch>
 constexpr int getWarpsPerSmFw() {
@@ -187,9 +188,8 @@ struct AttentionKernel {
     unsigned long long dropout_batch_head_rng_offset;
     float dropout_prob;
     at::PhiloxCudaState rng_engine_inputs;
-    int64_t * extragraph_offset;
-    int64_t * seed;
-
+    int64_t* extragraph_offset;
+    int64_t* seed;
 
     // Moves pointers to what we should process
     // Returns "false" if there is no work to do
@@ -662,14 +662,15 @@ struct AttentionKernel {
     curandStatePhilox4_32_10_t curand_state_init;
     if (kSupportsDropout && p.use_dropout) {
       const auto seeds = at::cuda::philox::unpack(p.rng_engine_inputs);
-      if (p.rng_engine_inputs.captured_){
-          // See Note [Seed and Offset Device]
-          // When we are in cuda graph capture mode the seed and offset are stored on device
-          // We pass in int64_t* seed, and int64_t* offset to act as scratch space
-          // for storing the rng state during the forward pass and saving for backwards.
-          auto [seed, offset] = seeds;
-          *p.seed = seed;
-          *p.extragraph_offset = offset;
+      if (p.rng_engine_inputs.captured_) {
+        // See Note [Seed and Offset Device]
+        // When we are in cuda graph capture mode the seed and offset are stored
+        // on device We pass in int64_t* seed, and int64_t* offset to act as
+        // scratch space for storing the rng state during the forward pass and
+        // saving for backwards.
+        auto [seed, offset] = seeds;
+        *p.seed = seed;
+        *p.extragraph_offset = offset;
       }
       // each element of the attention matrix P with shape
       // (batch_sz, n_heads, n_queries, n_keys) is associated with a single
@@ -875,7 +876,6 @@ struct AttentionKernel {
           shared_storage.after_mm0.si, accum, my_lane_id, output_tile_coords);
 
       __syncthreads();
-
 
       // apply dropout (if applicable) after we've written Pij to smem.
       // dropout is applied by multiplying each element of Pij by:
@@ -1283,3 +1283,5 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
 template <typename AK>
 __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
     attention_kernel_batched(typename AK::Params params);
+
+} // namespace PyTorchMemEffAttention

@@ -91,6 +91,8 @@ TABLE = {
         "inductor_max_autotune_no_cudagraphs": (
             "--inference -n50 --inductor --inductor-compile-mode max-autotune-no-cudagraphs --disable-cudagraphs "
         ),
+        "torchscript-onnx": "--inference -n5 --torchscript-onnx",
+        "dynamo-onnx": "--inference -n5 --dynamo-onnx",
     },
 }
 
@@ -359,7 +361,7 @@ def get_mode(args):
     return "training"
 
 
-def get_skip_tests(suite):
+def get_skip_tests(suite, is_training: bool):
     """
     Generate -x seperated string to skip the unusual setup training tests
     """
@@ -370,7 +372,7 @@ def get_skip_tests(suite):
 
     if hasattr(module, "SKIP"):
         skip_tests.update(module.SKIP)
-    if hasattr(module, "SKIP_TRAIN"):
+    if is_training and hasattr(module, "SKIP_TRAIN"):
         skip_tests.update(module.SKIP_TRAIN)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
@@ -389,8 +391,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     devices_str = "_".join(devices)
     dtypes_str = "_".join(dtypes)
     compilers_str = "_".join(compilers)
-    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
-        mode, devices_str, dtypes_str, suites_str, compilers_str
+    generated_file = (
+        f"run_{mode}_{devices_str}_{dtypes_str}_{suites_str}_{compilers_str}.sh"
     )
     with open(generated_file, "w") as runfile:
         lines = []
@@ -419,7 +421,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-                    skip_tests_str = get_skip_tests(suite)
+                    skip_tests_str = get_skip_tests(suite, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
                     if args.log_operator_inputs:
@@ -606,7 +608,7 @@ class Parser:
 
     def has_header(self, output_filename):
         header_present = False
-        with open(output_filename, "r") as f:
+        with open(output_filename) as f:
             line = f.readline()
             if "dev" in line:
                 header_present = True
@@ -1024,7 +1026,7 @@ class SummaryStatDiffer:
         assert os.path.exists(self.lookup_file)
 
     def generate_diff(self, last2, filename, caption):
-        df_cur, df_prev = [pd.read_csv(os.path.join(path, filename)) for path in last2]
+        df_cur, df_prev = (pd.read_csv(os.path.join(path, filename)) for path in last2)
         df_merge = df_cur.merge(df_prev, on="Compiler", suffixes=("_cur", "_prev"))
         data = {col: [] for col in ("compiler", "suite", "prev_value", "cur_value")}
         for _, row in df_merge.iterrows():
@@ -1143,10 +1145,10 @@ class RegressionDetector:
                     if last2[compiler] is None:
                         continue
 
-                    df_cur, df_prev = [
+                    df_cur, df_prev = (
                         last2[compiler][i].untouched_parsed_frames[suite][metric]
                         for i in (0, 1)
-                    ]
+                    )
                     df_merge = df_cur.merge(
                         df_prev, on="name", suffixes=("_cur", "_prev")
                     )
@@ -1365,7 +1367,7 @@ class DashboardUpdater:
         all_lines = []
         for f in files:
             try:
-                with open(os.path.join(self.output_dir, f), "r") as fh:
+                with open(os.path.join(self.output_dir, f)) as fh:
                     all_lines.extend(fh.readlines())
             except FileNotFoundError:
                 pass

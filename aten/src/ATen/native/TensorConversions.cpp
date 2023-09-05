@@ -550,7 +550,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional
       return grad.to_mkldnn(input_.scalar_type());
     default:
       AT_ERROR("to_dense_backward: Unsupported input layout: ", input_layout);
-      return Tensor {};
+      return Tensor{};
   }
 }
 
@@ -891,41 +891,122 @@ static std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
 
 // Sparse layout conversions Start
 
+static inline
+void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self, const int64_t sparse_dim) {
+  auto layout_from = self.layout();
+  auto layout_to = kSparse;
+
+  auto layout_from_valid = layout_from == kStrided || layout_from == kSparse || at::sparse_csr::is_sparse_compressed(layout_from);
+  if (!layout_from_valid) {
+    AT_ERROR(funcname, ": unexpected source layout ", layout_from);
+  }
+
+  if (layout_from == kStrided) {
+    if (sparse_dim == 0 && self.dim() > 0) {
+      AT_ERROR(funcname, ": sparse_dim argument must be in >0 when self.dim()>0");
+    }
+    if (sparse_dim < 0 || sparse_dim > self.dim()) {
+      AT_ERROR(funcname, ": sparse_dim argument must be in [0,", self.dim(), "] range, but ", sparse_dim, " is given");
+    }
+  } else if (layout_from == kSparse) {
+    if (sparse_dim != self.sparse_dim()) {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " with sparse_dim argument !=self.sparse_dim() is not supported");
+    }
+  } else if (at::sparse_csr::is_sparse_compressed(layout_from)) {
+    if (sparse_dim != 2) {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " with sparse_dim argument !=2 is not supported");
+    }
+  }
+}
+
+static inline
+void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_from = self.layout();
+  auto layout_to = layout.value_or(kSparse);
+
+  auto layout_from_valid = layout_from == kStrided || layout_from == kSparse || at::sparse_csr::is_sparse_compressed(layout_from);
+  if (!layout_from_valid) {
+    AT_ERROR(funcname, ": unexpected source layout ", layout_from);
+  }
+  auto layout_to_valid = layout_to == kStrided || layout_to == kSparse || at::sparse_csr::is_sparse_compressed(layout_to);
+  if (!layout_to_valid) {
+    AT_ERROR(funcname, ": unexpected source layout ", layout_from);
+  }
+
+  if (layout_from == kSparse && layout_to != kSparse) {
+    if (self.sparse_dim() != 2) {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " for input tensors with sparse_dim()!=2 is not supported");
+    }
+  }
+
+  if ((layout_from == kSparseCsr || layout_from == kSparseCsc) &&
+      (layout_to == kSparseBsr || layout_to == kSparseBsc)) {
+    if (sparse_csr::numBatchDimensions(self) > 0) {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " for batched inputs is not supported");
+    }
+  }
+
+  if (blocksize.has_value()) {
+    auto blocksize_to = *blocksize;
+    if (blocksize_to[0] <= 0 || blocksize_to[1] <= 0) {
+      AT_ERROR(funcname, ": blocksize needs to be positive, but got ", blocksize_to);
+    }
+
+    if (layout_to == kSparseBsr || layout_to == kSparseBsc) {
+      if (layout_from == kSparseBsr || layout_from == kSparseBsc) {
+        auto blocksize_from = at::sparse_csr::getBlockSize(self);
+        if (!(blocksize_to == blocksize_from)) {
+          AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " with blocksize changed from ", blocksize_from, " to ", blocksize_to, " is not supported");
+        }
+      } else {
+        auto dense_dim = (layout_from == kStrided) ? dense_dim_opt.value_or(0) : self.dense_dim();
+        auto sparse_row_dim = -(dense_dim + 2);
+        auto sparse_col_dim = -(dense_dim + 1);
+        if ((self.size(sparse_row_dim) % blocksize_to[0] != 0) ||
+            (self.size(sparse_col_dim) % blocksize_to[1] != 0)) {
+            AT_ERROR(funcname, ": tensor sparse size (", self.size(sparse_row_dim), ",", self.size(sparse_row_dim), ") must be divisible by given blocksize (", blocksize_to[0], ",", blocksize_to[1], ")");
+        }
+      }
+    } else {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " with blocksize argument given is not supported");
+    }
+  } else {
+    if ((layout_to == kSparseBsr || layout_to == kSparseBsc) &&
+        !(layout_from == kSparseBsr && layout_from == kSparseBsc)) {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " without blocksize argument given is not supported");
+    }
+  }
+
+  if (dense_dim_opt.has_value()) {
+    if (layout_from != kStrided) {
+      AT_ERROR(funcname, ": conversion from ", layout_from, " to ", layout_to, " with dense_dim argument given is not supported");
+    }
+
+    auto dense_dim = *dense_dim_opt;
+    if (layout_to == kSparse) {
+      if (dense_dim == self.dim() && self.dim() > 0) {
+        AT_ERROR(funcname, ": dense_dim argument must be !=self.dim() when self.dim()>0");
+      }
+      if (dense_dim < 0 || dense_dim > self.dim()) {
+        AT_ERROR(funcname, ": dense_dim argument must be in [0,", self.dim(), "] range, but ", dense_dim, " is given");
+      }
+    } else {
+      if (dense_dim < 0 || dense_dim > self.dim() - 2) {
+        AT_ERROR(funcname, ": dense_dim argument must be in [0,", self.dim() - 2, "] range, but ", dense_dim, " is given");
+      }
+    }
+  }
+}
+
 template<Layout target_layout>
-static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+static Tensor dense_to_sparse_compressed(const Tensor& self, const Tensor& self_mask, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   static_assert(target_layout == Layout::SparseCsr || target_layout == Layout::SparseCsc
                 || target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc,
                 "invalid layout template parameter for dense_to_sparse_compressed");
-
   constexpr auto compressed_rows_layout = target_layout == Layout::SparseCsr || target_layout == Layout::SparseBsr;
   constexpr auto blocked_layout = target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc;
 
   int64_t dense_dim = dense_dim_opt.value_or(0);
-  TORCH_CHECK(
-      dense_dim >= 0 && dense_dim <= self.dim() - 2,
-      "number of dense dimensions must be in [0,", self.dim() - 2,
-      "] range, but it is equal to ", dense_dim);
-
-  if (blocked_layout) {
-    auto sparse_row_dim = -(dense_dim + 2);
-    auto sparse_col_dim = -(dense_dim + 1);
-    TORCH_CHECK(
-        blocksize[0] > 0 && blocksize[1] > 0,
-        "blocksize needs to be non zero, but got ",
-        blocksize);
-    TORCH_CHECK(
-        self.size(sparse_row_dim) % blocksize[0] == 0,
-        "Tensor size(", sparse_row_dim, ") ",
-        self.size(sparse_row_dim),
-        " needs to be divisible by blocksize[0] ",
-        blocksize[0]);
-    TORCH_CHECK(
-        self.size(sparse_col_dim) % blocksize[1] == 0,
-        "Tensor size(", sparse_col_dim, ") ",
-        self.size(sparse_col_dim),
-        " needs to be divisible by blocksize[1] ",
-        blocksize[1]);
-  }
 
   // Reshape values so that the block dims are explicitly added, and
   // calculate a mask tensor that has only batch and sparse dims, and
@@ -934,7 +1015,7 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
   auto n_batch_dim = self.dim() - 2 - dense_dim;
   auto is_batched = n_batch_dim > 0;
   auto values = blocked_layout ? _batch_tile_tensor(self, blocksize, dense_dim) :  self;
-  auto not_zero_mask = blocked_layout ? _batch_tile_tensor(self != 0, blocksize, dense_dim) : self != 0;
+  auto not_zero_mask = blocked_layout ? _batch_tile_tensor(self_mask, blocksize, dense_dim) : self_mask;
   if (blocked_layout || dense_dim > 0) {
     std::vector<int64_t> reduce_dim((blocked_layout ? 2 : 0) + dense_dim);
     std::iota(reduce_dim.begin(), reduce_dim.end(), n_batch_dim + 2);
@@ -993,65 +1074,133 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, IntArrayRef blocksi
         values.device());
 }
 
+Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = layout.value_or(kSparse);
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "dense_to_sparse: unexpected same input and output layout");
+  TORCH_INTERNAL_ASSERT(self.layout() == mask.layout(),
+                        "dense_to_sparse_with_mask: expected mask layout ", self.layout(), ", got ", mask.layout());
+  TORCH_INTERNAL_ASSERT(self.sizes() == mask.sizes(),
+                        "dense_to_sparse_with_mask: expected mask size ", self.sizes(), ", got ", mask.sizes());
+  _to_sparse_check_arguments("dense_to_sparse_with_mask", self, layout, blocksize, dense_dim_opt);
+
+  switch (layout_to) {
+  case kSparse:
+    return self.sparse_mask(mask.to_sparse(self.dim() - dense_dim_opt.value_or(0)));
+  case kSparseCsr:
+    return dense_to_sparse_compressed<Layout::SparseCsr>(self, mask, {}, dense_dim_opt);
+  case kSparseCsc:
+    return dense_to_sparse_compressed<Layout::SparseCsc>(self, mask, {}, dense_dim_opt);
+  case kSparseBsr:
+    return dense_to_sparse_compressed<Layout::SparseBsr>(self, mask, *blocksize, dense_dim_opt);
+  case kSparseBsc:
+    return dense_to_sparse_compressed<Layout::SparseBsc>(self, mask, *blocksize, dense_dim_opt);
+  default:
+    break;
+  }
+
+  AT_ERROR("dense_to_sparse_with_mask: ", self.layout(), " to ", layout_to, " conversion not supported");
+  return Tensor{};
+}
+
 Tensor dense_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  return dense_to_sparse_compressed<Layout::SparseCsr>(self, {}, dense_dim_opt);
+  auto layout_to = kSparseCsr;
+  _to_sparse_check_arguments("dense_to_sparse_csr", self, layout_to, {}, dense_dim_opt);
+
+  return dense_to_sparse_compressed<Layout::SparseCsr>(self, self != 0, {}, dense_dim_opt);
 }
 
 Tensor dense_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  return dense_to_sparse_compressed<Layout::SparseCsc>(self, {}, dense_dim_opt);
+  auto layout_to = kSparseCsc;
+  _to_sparse_check_arguments("dense_to_sparse_csc", self, layout_to, {}, dense_dim_opt);
+
+  return dense_to_sparse_compressed<Layout::SparseCsc>(self, self != 0, {}, dense_dim_opt);
 }
 
 Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  return dense_to_sparse_compressed<Layout::SparseBsr>(self, blocksize, dense_dim_opt);
+  auto layout_to = kSparseBsr;
+  _to_sparse_check_arguments("dense_to_sparse_bsr", self, layout_to, blocksize, dense_dim_opt);
+
+  return dense_to_sparse_compressed<Layout::SparseBsr>(self, self != 0, blocksize, dense_dim_opt);
 }
 
 Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  return dense_to_sparse_compressed<Layout::SparseBsc>(self, blocksize, dense_dim_opt);
+  auto layout_to = kSparseBsc;
+  _to_sparse_check_arguments("dense_to_sparse_bsc", self, layout_to, blocksize, dense_dim_opt);
+
+  return dense_to_sparse_compressed<Layout::SparseBsc>(self, self != 0, blocksize, dense_dim_opt);
 }
 
-static void _check_blocksize_matches(
-    const Tensor& self,
-    c10::optional<IntArrayRef> blocksize_opt,
-    const std::string& name) {
-  if (blocksize_opt.has_value()) {
-    const auto blocksize = *blocksize_opt;
-    const auto self_blocksize = at::sparse_csr::getBlockSize(self);
-    TORCH_CHECK(self_blocksize == blocksize,
-        name, "(): the provided blocksize does not match the blocksize of the to be converted tensor, ",
-        "got (", blocksize[0], ", ", blocksize[1], ") ",
-        "but expected (", self_blocksize[0], ", ", self_blocksize[1], ").");
+Tensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = layout.value_or(kSparse);
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "dense_to_sparse: unexpected same input and output layout");
+  _to_sparse_check_arguments("dense_to_sparse", self, layout, blocksize, dense_dim_opt);
+
+  switch (layout_to) {
+  case kSparse:
+    return self.to_sparse(self.dim() - dense_dim_opt.value_or(0));
+  case kSparseCsr:
+    return self.to_sparse_csr(dense_dim_opt);
+  case kSparseCsc:
+    return self.to_sparse_csc(dense_dim_opt);
+  case kSparseBsr:
+    return self.to_sparse_bsr(*blocksize, dense_dim_opt);
+  case kSparseBsc:
+    return self.to_sparse_bsc(*blocksize, dense_dim_opt);
+  default:
+    break;
   }
+
+  AT_ERROR("dense_to_sparse: ", self.layout(), " to ", layout_to, " conversion not supported");
+  return Tensor{};
 }
 
-static Tensor sparse_compressed_clone(
-    const Tensor& self,
-    c10::optional<IntArrayRef> blocksize,
-    const std::string& name) {
-  _check_blocksize_matches(self, blocksize, name);
-  // Just returning self doesn't work
-  // RuntimeError: t.use_count() <= 1 INTERNAL ASSERT FAILED at
-  // "../torch/csrc/autograd/autograd_not_implemented_fallback.cpp":152,
-  // please report a bug to PyTorch.
-  const auto layout = self.layout();
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
-  auto values = self.values();
-  return _sparse_compressed_tensor_unsafe(
-      compressed_indices,
-      plain_indices,
-      values,
-      self.sizes(),
-      values.scalar_type(),
-      layout,
-      values.device());
+Tensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
+  _to_sparse_check_arguments("dense_to_sparse", self, sparse_dim);
+
+  int64_t dims = self.dim();
+  at::TensorOptions sparse_options = self.options().layout(kSparse);
+  std::vector<int64_t> sizes = self.sizes().vec();
+  Tensor nz = self.nonzero().transpose(0, 1);
+  if (nz.size(1) == 0) {
+    auto sparse = new_with_dims_sparse(
+        sparse_dim,
+        dims - sparse_dim,
+        sizes,
+        optTypeMetaToScalarType(sparse_options.dtype_opt()),
+        sparse_options.layout_opt(),
+        sparse_options.device_opt(),
+        sparse_options.pinned_memory_opt());
+    return sparse._coalesced_(true);
+  }
+  Tensor indices;
+  if (sparse_dim == dims) {
+    indices = nz.clone();
+  } else {
+    Tensor i = nz.narrow(0, 0, sparse_dim);
+    std::tie(indices, std::ignore, std::ignore) = unique_dim(i, 1);
+    indices = indices.contiguous(); // many sparse CUDA kernels require
+                                    // contiguity, see issue #12633
+  }
+
+  Tensor values;
+  if (self.dim() > 0) {
+    auto ix = toListOfOptionalTensors(indices.chunk(indices.size(0), 0));
+    values = self.index(ix).squeeze(0).clone(at::MemoryFormat::Preserve);
+  } else {
+    AT_ASSERT(nz.sizes().equals({0, 1}));
+    // In this cases, indices is a clone of nz, which is a tensor of shape (0,
+    // 1). Given sparse tensor invariants, values should be shape (1,)
+    values = self.unsqueeze(0).clone(at::MemoryFormat::Preserve);
+  }
+
+  Tensor sparse = at::sparse_coo_tensor(indices, values, sizes, sparse_options);
+  return sparse._coalesced_(true);
 }
 
 static Tensor sparse_compressed_to_flipped(
     const Tensor& self,
     c10::optional<IntArrayRef> blocksize,
     const std::string& name) {
-  _check_blocksize_matches(self, blocksize, name);
-
   const auto layout = self.layout();
   // NOTE: errors on non-compressed sparse layouts.
   const auto flipped_layout = at::sparse_csr::flip_compressed_layout(layout);
@@ -1254,44 +1403,35 @@ static Tensor sparse_compressed_to_flipped(
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_compressed_to_sparse_csr conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseCsr;
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse_csr: unexpected same input and output layout");
+  _to_sparse_check_arguments("sparse_compressed_to_sparse_csr", self, layout_to, {}, dense_dim_opt);
+
   if (self.layout() == kSparseCsc) {
     return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csr");
   }
-  if (self.layout() == kSparseCsr) {
-    return sparse_compressed_clone(self, c10::nullopt, "to_sparse_csr");
-  }
-  AT_ERROR(
-      "sparse_compressed_to_sparse_csr expected SparseCsr or SparseCsc layout but got ",
-      self.layout());
+
+  AT_ERROR("sparse_compressed_to_sparse_csr: expected SparseCsr or SparseCsc layout but got ", self.layout());
+  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_compressed_to_sparse_csc conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseCsc;
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse_csc: unexpected same input and output layout");
+  _to_sparse_check_arguments("sparse_compressed_to_sparse_csc", self, layout_to, {}, dense_dim_opt);
+
   if (self.layout() == kSparseCsr) {
     return sparse_compressed_to_flipped(self, c10::nullopt, "to_sparse_csc");
   }
-  if (self.layout() == kSparseCsc) {
-    return sparse_compressed_clone(self, c10::nullopt, "to_sparse_csc");
-  }
-  AT_ERROR(
-      "sparse_compressed_to_sparse_csc expected SparseCsr or SparseCsc layout but got ",
-      self.layout());
-  return self;
+
+  AT_ERROR("sparse_compressed_to_sparse_csc: expected SparseCsr or SparseCsc layout but got ", self.layout());
+  return Tensor{};
 }
 
 Tensor coo_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  TORCH_CHECK(
-      self.sparse_dim() == 2,
-      "Only tensors with two sparse dimensions can be converted to the SparseCsr layout, got self with ",
-      self.sparse_dim(), " sparse dimensions.");
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("coo_to_sparse_csr conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseCsr;
+  _to_sparse_check_arguments("coo_to_sparse_csr", self, layout_to, {}, dense_dim_opt);
+
   auto coalesced_self = self.coalesce();
   auto row_indices = coalesced_self.indices()[0];
   bool out_int32 = (row_indices.scalar_type() == at::kInt);
@@ -1308,13 +1448,9 @@ Tensor coo_to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_op
 }
 
 Tensor coo_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
-  TORCH_CHECK(
-      self.sparse_dim() == 2,
-      "Only tensors with two sparse dimensions can be converted to the SparseCsc layout, got self with ",
-      self.sparse_dim(), " sparse dimensions.");
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("coo_to_sparse_csc conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseCsc;
+  _to_sparse_check_arguments("coo_to_sparse_csc", self, layout_to, {}, dense_dim_opt);
+
   auto transposed_csr = self.transpose(0, 1).to_sparse_csr(dense_dim_opt);
   return at::native::_sparse_csc_tensor_unsafe(
       transposed_csr.crow_indices(),
@@ -1327,16 +1463,16 @@ Tensor coo_to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_op
 }
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("coo_to_sparse_bsr conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseBsr;
+  _to_sparse_check_arguments("coo_to_sparse_bsr", self, layout_to, blocksize, dense_dim_opt);
+
   return self.to_sparse_csr(dense_dim_opt).to_sparse_bsr(blocksize);
 }
 
 Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("coo_to_sparse_bsc conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseBsc;
+  _to_sparse_check_arguments("coo_to_sparse_bsc", self, layout_to, blocksize, dense_dim_opt);
+
   return self.to_sparse_csc(dense_dim_opt).to_sparse_bsc(blocksize);
 }
 
@@ -1567,20 +1703,6 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
   static_assert(target_layout == Layout::SparseBsr || target_layout == Layout::SparseBsc,
                 "invalid layout template parameter for _compressed_to_block_compressed_cpu");
 
-  TORCH_CHECK(
-      self.size(0) % blocksize[0] == 0 && self.size(1) % blocksize[1] == 0,
-      "Block sparse CSR Tensors must have a size that is an ",
-      "integral multiple of their block size. ",
-      "Got Tensor of size (",
-      self.size(0),
-      ", ",
-      self.size(1),
-      ") with block size (",
-      blocksize[0],
-      ", ",
-      blocksize[1],
-      ") instead.");
-
   auto input_values = self.values().contiguous();
   Tensor input_compressed_indices;
   Tensor input_plain_indices;
@@ -1650,27 +1772,14 @@ Tensor _compressed_to_block_compressed_cpu(const Tensor& self, IntArrayRef block
 }
 
 Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_compressed_to_sparse_bsr conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseBsr;
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse_bsr: unexpected same input and output layout");
+  _to_sparse_check_arguments("sparse_compressed_to_sparse_bsr", self, layout_to, blocksize, dense_dim_opt);
+
   if (self.layout() == kSparseBsc) {
-    const auto self_blocksize = at::sparse_csr::getBlockSize(self);
-    TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsr:",
-                "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsr,
-                "[blocksize=", DimVector(blocksize),"] is not implemented.");
     return sparse_compressed_to_flipped(self, blocksize, "to_sparse_bsr");
   }
-  if (self.layout() == kSparseBsr) {
-    const auto self_blocksize = at::sparse_csr::getBlockSize(self);
-    TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsr:",
-                "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsr,
-                "[blocksize=", blocksize,"] is not implemented.");
-    return sparse_compressed_clone(self, blocksize, "to_sparse_bsr");
-  }
   if (self.layout() == kSparseCsr) {
-    TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
-                "to_sparse_bsr: conversion from Csr to Bsr for batched inputs is not implemented.");
-
     if (self.device() != kCPU) {
       TORCH_WARN("sparse_compressed_to_sparse_bsr executing on the CPU device, the performance may be sub-optimal");
     }
@@ -1681,31 +1790,18 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
   }
 
   AT_ERROR("sparse_compressed_to_sparse_bsr: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
-  return self;
+  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_compressed_to_sparse_bsc conversion does not support specifying number of dense dimensions");
-  }
+  auto layout_to = kSparseBsc;
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse_bsc: unexpected same input and output layout");
+  _to_sparse_check_arguments("sparse_compressed_to_sparse_bsc", self, layout_to, blocksize, dense_dim_opt);
+
   if (self.layout() == kSparseBsr) {
-    const auto self_blocksize = at::sparse_csr::getBlockSize(self);
-    TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsc:",
-                "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsc,
-                "[blocksize=", blocksize,"] is not implemented.");
     return sparse_compressed_to_flipped(self, blocksize, "to_sparse_bsc");
   }
-  if (self.layout() == kSparseBsc) {
-    const auto self_blocksize = at::sparse_csr::getBlockSize(self);
-    TORCH_CHECK(self_blocksize == blocksize, "to_sparse_bsc:",
-                "conversion from ", self.layout(), "[blocksize=", self_blocksize, "] to ", kSparseBsc,
-                "[blocksize=", blocksize,"] is not implemented.");
-    return sparse_compressed_clone(self, blocksize, "to_sparse_bsc");
-  }
   if (self.layout() == kSparseCsc) {
-    TORCH_CHECK(self.dim() == 2 + self.dense_dim(),
-                "to_sparse_bsc: conversion from Csc to Bsc for batched inputs is not implemented.");
-
     if (self.device() != kCPU) {
       TORCH_WARN("sparse_compressed_to_sparse_bsc executing on the CPU device, the performance may be sub-optimal");
     }
@@ -1716,18 +1812,20 @@ Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize
   }
 
   AT_ERROR("sparse_compressed_to_sparse_bsc: expected SparseCsr, SparseCsc, SparseBsr or SparseBsc layout but got ", self.layout());
-  return self;
+  return Tensor{};
 }
 
 Tensor sparse_coo_to_sparse(const Tensor& self, const int64_t sparse_dim) {
-  TORCH_CHECK(
-     sparse_dim == self.sparse_dim(), "sparse dim argument for sparse_coo_to_sparse must not be different than sparse dim of original tensor");
-  return self;
+  auto layout_to = kSparse;
+  _to_sparse_check_arguments("sparse_coo_to_sparse", self, sparse_dim);
+
+  AT_ERROR("sparse_coo_to_sparse: ", self.layout(), " to ", layout_to, " conversion not supported");
+  return Tensor{};
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim) {
-  TORCH_CHECK(
-      sparse_dim == 2, "sparse dim argument must be 2 for sparse_compressed_to_sparse");
+  _to_sparse_check_arguments("sparse_compressed_to_sparse", self, sparse_dim);
+
   Layout layout = self.layout();
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
@@ -1775,17 +1873,12 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  Layout layout_ = layout.value_or(kSparse);
-  TORCH_CHECK(!blocksize.has_value() || layout_ == kSparseBsr || layout_ == kSparseBsc,
-              "to_sparse: ", self.layout(), " to ", layout_,
-              " conversion does not use the specified blocksize ", blocksize.value(), ".");
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_compressed_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support specifying number of dense dimensions");
-  }
-  if (self.layout() == layout_ && (!blocksize.has_value() || at::sparse_csr::getBlockSize(self) == *blocksize)) {
-    return self;
-  }
-  switch (layout_) {
+  auto layout_to = layout.value_or(kSparse);
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse: unexpected same input and output layout");
+  _to_sparse_check_arguments("sparse_compressed_to_sparse", self, layout_to, blocksize, dense_dim_opt);
+
+  auto blocksize_ = blocksize.value_or((self.layout() == kSparseBsr || self.layout() == kSparseBsc) ? at::sparse_csr::getBlockSize(self) : at::DimVector({1, 1}));
+  switch (layout_to) {
   case kStrided:
     return sparse_compressed_to_dense(self, /*dtype=*/c10::nullopt, /*masked_grad=*/c10::nullopt);
   case kSparse:
@@ -1795,65 +1888,94 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   case kSparseCsc:
     return sparse_compressed_to_sparse_csc(self, dense_dim_opt);
   case kSparseBsr:
-    if (blocksize.has_value()) {
-      return sparse_compressed_to_sparse_bsr(self, *blocksize, dense_dim_opt);
-    } else {
-      const auto blocksize_ = at::sparse_csr::getBlockSize(self);
-      TORCH_CHECK(blocksize_.size() == 2, "to_sparse: ", self.layout(), " to ", layout_,
-                  " conversion requires blocksize specified.");
-      return sparse_compressed_to_sparse_bsr(self, blocksize_, dense_dim_opt);
-    }
+    return sparse_compressed_to_sparse_bsr(self, blocksize_, dense_dim_opt);
   case kSparseBsc:
-    if (blocksize.has_value()) {
-      return sparse_compressed_to_sparse_bsc(self, *blocksize, dense_dim_opt);
-    } else {
-      const auto blocksize_ = at::sparse_csr::getBlockSize(self);
-      TORCH_CHECK(blocksize_.size() == 2, "to_sparse: ", self.layout(), " to ", layout_,
-                  " conversion requires blocksize specified.");
-      return sparse_compressed_to_sparse_bsc(self, blocksize_, dense_dim_opt);
-    }
+    return sparse_compressed_to_sparse_bsc(self, blocksize_, dense_dim_opt);
   default:
     break;
   }
-  AT_ERROR("to_sparse: ", self.layout(), " to ", layout_, " conversion not implemented.");
-  return Tensor();
+
+  AT_ERROR("sparse_compressed_to_sparse: ", self.layout(), " to ", layout_to, " conversion not supported");
+  return Tensor{};
 }
 
 Tensor sparse_coo_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
-  Layout layout_ = layout.value_or(kSparse);
-  TORCH_CHECK(!blocksize.has_value() || layout_ == kSparseBsr || layout_ == kSparseBsc,
-              "to_sparse: ", self.layout(), " to ", layout_,
-              " conversion does not use the specified blocksize ", blocksize.value(), ".");
-  if (dense_dim_opt.has_value()) {
-    AT_ERROR("sparse_coo_to_sparse for ", self.layout(), " to ", layout_, " conversion does not support specifying number of dense dimensions");
-  }
-  if (self.layout() == layout_) {
-    return self;
-  }
-  switch (layout_) {
+  auto layout_to = layout.value_or(kSparse);
+  TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_coo_to_sparse: unexpected same input and output layout");
+  _to_sparse_check_arguments("sparse_coo_to_sparse", self, layout_to, blocksize, dense_dim_opt);
+
+  switch (layout_to) {
   case kStrided:
     return self.to_dense(c10::nullopt, c10::nullopt);
-  case kSparse:
-    return self;
   case kSparseCsr:
     return self.to_sparse_csr(dense_dim_opt);
   case kSparseCsc:
     return self.to_sparse_csc(dense_dim_opt);
   case kSparseBsr:
-    TORCH_CHECK(blocksize.has_value(), "to_sparse: ", self.layout(), " to ", layout_,
-                " conversion requires blocksize specified.");
     return self.to_sparse_bsr(*blocksize, dense_dim_opt);
   case kSparseBsc:
-    TORCH_CHECK(blocksize.has_value(), "to_sparse: ", self.layout(), " to ", layout_,
-                " conversion requires blocksize specified.");
     return self.to_sparse_bsc(*blocksize, dense_dim_opt);
-    default:
-      break;
+  default:
+    break;
   }
-  AT_ERROR("to_sparse not implemented for ", self.layout(), " to ", *layout, " conversion");
-  return Tensor();
+
+  AT_ERROR("sparse_coo_to_sparse: ", self.layout(), " to ", layout_to, " conversion not supported");
+  return Tensor{};
 }
 
+Tensor to_sparse(const Tensor& self, const int64_t sparse_dim) {
+  auto layout_to = kSparse;
+  if (self.layout() == layout_to) {
+    _to_sparse_check_arguments("to_sparse", self, sparse_dim);
+    return self;
+  }
+  return self._to_sparse(sparse_dim);
+}
+
+Tensor to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = layout.value_or(kSparse);
+  if (self.layout() == layout_to) {
+    _to_sparse_check_arguments("to_sparse", self, layout, blocksize, dense_dim_opt);
+    return self;
+  }
+  return self._to_sparse(layout, blocksize, dense_dim_opt);
+}
+
+Tensor to_sparse_csr(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = kSparseCsr;
+  if (self.layout() == layout_to) {
+    _to_sparse_check_arguments("to_sparse_csr", self, layout_to, {}, dense_dim_opt);
+    return self;
+  }
+  return self._to_sparse_csr(dense_dim_opt);
+}
+
+Tensor to_sparse_csc(const Tensor& self, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = kSparseCsc;
+  if (self.layout() == layout_to) {
+    _to_sparse_check_arguments("to_sparse_csc", self, layout_to, {}, dense_dim_opt);
+    return self;
+  }
+  return self._to_sparse_csc(dense_dim_opt);
+}
+
+Tensor to_sparse_bsr(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = kSparseBsr;
+  if (self.layout() == layout_to) {
+    _to_sparse_check_arguments("to_sparse_bsr", self, layout_to, blocksize, dense_dim_opt);
+    return self;
+  }
+  return self._to_sparse_bsr(blocksize, dense_dim_opt);
+}
+
+Tensor to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+  auto layout_to = kSparseBsc;
+  if (self.layout() == layout_to) {
+    _to_sparse_check_arguments("to_sparse_bsc", self, layout_to, blocksize, dense_dim_opt);
+    return self;
+  }
+  return self._to_sparse_bsc(blocksize, dense_dim_opt);
+}
 
 // Sparse layout conversions End
 

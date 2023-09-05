@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -59,7 +60,18 @@ def build_triton(
     build_conda: bool = False,
     build_rocm: bool = False,
     py_version: Optional[str] = None,
+    release: bool = False,
 ) -> Path:
+    env = os.environ.copy()
+    if "MAX_JOBS" not in env:
+        max_jobs = os.cpu_count() or 1
+        env["MAX_JOBS"] = str(max_jobs)
+
+    if not release:
+        # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
+        # while release build should only include the version, i.e. 2.1.0
+        version = f"{version}+{commit_hash[:10]}"
+
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
@@ -74,13 +86,14 @@ def build_triton(
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(
-                    f"package:\n  name: torchtriton\n  version: {version}+{commit_hash[:10]}\n",
+                    f"package:\n  name: torchtriton\n  version: {version}\n",
                     file=meta,
                 )
                 print("source:\n  path: .\n", file=meta)
                 print(
                     "build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
                     "python setup.py install --single-version-externally-managed --record=record.txt\n",
+                    " script_env:\n   - MAX_JOBS\n",
                     file=meta,
                 )
                 print(
@@ -96,7 +109,7 @@ def build_triton(
 
             patch_init_py(
                 triton_pythondir / "triton" / "__init__.py",
-                version=f"{version}+{commit_hash[:10]}",
+                version=f"{version}",
             )
             if py_version is None:
                 py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -113,6 +126,7 @@ def build_triton(
                     ".",
                 ],
                 cwd=triton_basedir,
+                env=env,
             )
             conda_path = list(Path(tmpdir).glob("linux-64/torchtriton*.bz2"))[0]
             shutil.copy(conda_path, Path.cwd())
@@ -121,23 +135,26 @@ def build_triton(
         patch_setup_py(
             triton_pythondir / "setup.py",
             name=triton_pkg_name,
-            version=f"{version}+{commit_hash[:10]}",
+            version=f"{version}",
         )
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
-            version=f"{version}+{commit_hash[:10]}",
+            version=f"{version}",
         )
 
         if build_rocm:
             check_call("scripts/amd/setup_rocm_libs.sh", cwd=triton_basedir, shell=True)
+            print("ROCm libraries setup for triton installation...")
 
-        check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
+        check_call(
+            [sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir, env=env
+        )
 
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
 
         if build_rocm:
-            check_call(".github/scripts/fix_so.sh", cwd=triton_basedir, shell=True)
+            check_call("scripts/amd/fix_so.sh", cwd=triton_basedir, shell=True)
 
         return Path.cwd() / whl_path.name
 
@@ -146,12 +163,14 @@ def main() -> None:
     from argparse import ArgumentParser
 
     parser = ArgumentParser("Build Triton binaries")
+    parser.add_argument("--release", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--build-rocm", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
+
     build_triton(
         build_rocm=args.build_rocm,
         commit_hash=args.commit_hash
@@ -160,6 +179,7 @@ def main() -> None:
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
+        release=args.release,
     )
 
 

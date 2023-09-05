@@ -61,6 +61,8 @@ namespace {
     template <typename T>
     class QuantizationTests : public ::testing::Test {};
     template <typename T>
+    class Quantization8BitWithTailTests : public ::testing::Test {};
+    template <typename T>
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTestsReducedFloat : public ::testing::Test {};
@@ -68,6 +70,10 @@ namespace {
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    using Quantization8BitWithTailTestedTypes =
+        ::testing::Types<vqint8, vquint8>;
+#endif
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
@@ -100,6 +106,11 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    TYPED_TEST_SUITE(
+        Quantization8BitWithTailTests,
+        Quantization8BitWithTailTestedTypes);
+#endif
     TYPED_TEST_SUITE(FunctionalTests, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(FunctionalTestsReducedFloat, ReducedFloatTestedTypes);
     TYPED_TEST(Memory, UnAlignedLoadStore) {
@@ -1088,6 +1099,11 @@ namespace {
         AssertVectorized<vcomplex>(NAME_INFO(complex imag), expected3, actual3).check();
         AssertVectorized<vcomplex>(NAME_INFO(complex conj), expected4, actual4).check();
     }
+    TEST(ComplexTests, TestComplexConstructor) {
+        auto actual1 = vcomplex(1.0);
+        auto expected1 = vcomplex(Complex<float>(1.0));
+        AssertVectorized<vcomplex>(NAME_INFO(complex constructor), expected1, actual1).check();
+    }
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1130,6 +1146,75 @@ namespace {
             if (AssertVectorized<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
+#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    // This test case aims to test at::vec::QuantizeAvx512 and
+    // at::vec::QuantizeAVX2 which do not support CPU_CAPABILITY_DEFAULT case
+    TYPED_TEST(Quantization8BitWithTailTests, QuantizeTile) {
+      using vec = TypeParam;
+      using underlying = ValueType<vec>;
+      constexpr int trials = 4000;
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+      constexpr int min_val = std::numeric_limits<underlying>::min();
+      constexpr int max_val = std::numeric_limits<underlying>::max();
+      constexpr int el_count = vfloat::size();
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      CACHE_ALIGN float unit_float_vec[el_count];
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+      CACHE_ALIGN underlying expected_qint_vals[vec::size()];
+      CACHE_ALIGN underlying actual_qint_vals[vec::size()];
+      constexpr int tile_size = vec::size() - 1;
+      typename vec::float_vec_return_type float_ret;
+      auto seed = TestSeed();
+      // zero point
+      ValueGen<int> generator_zp(min_val, max_val, seed);
+      // scale
+      ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
+      // value
+      float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
+      float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
+      ValueGen<float> gen(minv, maxv, seed.add(2));
+      for (const auto i : c10::irange(trials)) {
+        (void)i; // Suppress unused variable warning
+        float scale = generator_sc.get();
+        float inv_scale = 1.0f / static_cast<float>(scale);
+        auto zero_point_val = generator_zp.get();
+        int index = 0;
+        for (int j = 0; j < vec::float_num_vecs(); j++) {
+          // generate vals
+          for (auto& v : unit_float_vec) {
+            v = gen.get();
+            expected_qint_vals[index] =
+                quantize_val<underlying>(scale, zero_point_val, v);
+            index++;
+          }
+          float_ret[j] = vfloat::loadu(unit_float_vec);
+        }
+#if defined(CPU_CAPABILITY_AVX512)
+        at::vec::QuantizeAvx512(
+            (float*)float_ret.data(),
+            actual_qint_vals,
+            tile_size,
+            inv_scale,
+            zero_point_val);
+#endif
+#if defined(CPU_CAPABILITY_AVX2)
+        at::vec::QuantizeAvx2(
+            (float*)float_ret.data(),
+            actual_qint_vals,
+            tile_size,
+            inv_scale,
+            zero_point_val);
+#endif
+        expected_qint_vals[tile_size] = 0;
+        actual_qint_vals[tile_size] = 0;
+        auto expected = vec::loadu(expected_qint_vals);
+        auto actual = vec::loadu(actual_qint_vals);
+        if (AssertVectorized<vec>(NAME_INFO(QuantizeTile), expected, actual)
+                .check())
+          return;
+      } // trials;
+    }
+#endif
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
@@ -1447,6 +1532,15 @@ namespace {
               << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
       }
+      // Map - For float32 in, reduced floating points out
+      for (int64_t len = 1; len <= N; len++) {
+        at::vec::map<RT>([](auto x) { return x; }, y_f, x_f1, len);
+        at::vec::map<VT>([](auto x) { return x; }, y_b, x_f1, len);
+        for (const auto i : c10::irange(len)) {
+          ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+              << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+        }
+      }
       // Map2
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map2<RT>([](auto x, auto y) { return x + y; }, y_f, x_f1, x_f2, len);
@@ -1473,6 +1567,29 @@ namespace {
            ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
                << "\nmap4, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
          }
+      }
+    }
+    TEST(HalfConversionTest, HalfFloat) {
+      float f32s[100];
+      for (const auto i : c10::irange(100)) {
+        f32s[i] = i + 0.3;
+      }
+      uint16_t u16;
+      float x;
+      for (const auto i : c10::irange(100)) {
+      #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
+          !defined(__APPLE__)
+        u16 = at::vec::float2half_scalar(f32s[i]);
+        x = at::vec::half2float_scalar(u16);
+      #else
+        u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
+        x = c10::detail::fp16_ieee_to_fp32_value(u16);
+      #endif
+
+        EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
+            << "Test failed for float to uint16 " << f32s[i] << "\n";
+        EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
+            << "Test failed for uint16 to float " << u16 << "\n";
       }
     }
 

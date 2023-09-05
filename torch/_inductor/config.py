@@ -27,10 +27,10 @@ size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 # enable loop reordering based on input orders
 pick_loop_orders = True
 
-# generate inplace computations
+# reuse a kernel input as the output
 inplace_buffers = True
 
-# allow reusing buffers for more efficient memory use
+# reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
 
 # codegen benchmark harness
@@ -48,8 +48,25 @@ pattern_matcher = True
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# enable pattern match with group fusion (using fbgemm)
+group_fusion = False
+
+# enable pattern match with batch fusion (using torch op)
+batch_fusion = True
+
 # enable reordering pass
 reordering = True
+
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
+# enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
+# Autotune will compare perf with normal cast->then->mm option
+use_mixed_mm = False
+
+# for pattern torch.mm(a, b.to(dtype)) with cuda tensors, always use
+# torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
+# Autotune will not compare with normal cast->then->mm option.
+# (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
+force_mixed_mm = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -60,8 +77,18 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+# Specify candidate backends for gemm autotune.
+# Possible choices are combinations of: ATen, Triton.
+# ATen: default Pytorch ATen kernels.
+# Triton: Triton templates defined in torch inductor.
+max_autotune_gemm_backends = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+).upper()
+
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
+save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
@@ -105,6 +132,10 @@ implicit_fallbacks = True
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# For each fused kernel in the wrapper, comment with the nodes that get fused.
+# Useful for debugging fusion.
+debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -126,13 +157,17 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 
-# Enable indirect_indexing asserts for decompositions and lowerings
-debug_index_asserts = False
-
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
+
+# constant folding on the joint graph
+# Turn off constant folding due to issue #108388
+joint_graph_constant_folding = not is_fbcode()
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -152,19 +187,30 @@ def decide_compile_threads():
     elif sys.platform == "win32" or is_fbcode():
         return 1
     else:
-        return min(
-            32,
+        cpu_count = (
             len(os.sched_getaffinity(0))
             if hasattr(os, "sched_getaffinity")
-            else os.cpu_count(),
+            else os.cpu_count()
         )
+        assert cpu_count
+        return min(32, cpu_count)
 
 
 compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    global_cache_dir = "fb/cache"
+    from libfb.py import parutil  # type: ignore[import]
+
+    try:
+        if __package__:
+            global_cache_dir = parutil.get_dir_path(
+                os.path.join(__package__.replace(".", os.sep), "fb/cache")
+            )
+        else:
+            global_cache_dir = parutil.get_dir_path("fb/cache")
+    except ValueError:
+        global_cache_dir = None
 else:
     global_cache_dir = None
 
@@ -197,7 +243,18 @@ _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
 
-disable_cpp_codegen = is_fbcode()
+# TODO: remove later
+disable_cpp_codegen = False
+
+
+# Freezing will attempt to inline weights as constants in optimization
+# and run constant folding and other optimizations on them. After freezing, weights
+# can no longer be updated.
+freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
+
+# Make freezing invalidate the eager Parameters of nn modules, to avoid memory overhead
+# of potentially keeping multiple copies of weights.
+freezing_discard_parameters: bool = False
 
 
 # config specific to codegen/cpp.py
@@ -248,6 +305,10 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # Make scatter_reduce fallback when reduce is sum to avoid performance regression
+    # using atomic_add.
+    fallback_scatter_reduce_sum = True
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -255,7 +316,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = True
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
@@ -342,6 +403,14 @@ class triton:
     inject_relu_bug_TESTING_ONLY = None
 
 
+class aot_inductor:
+    # AOTInductor output path
+    # If an absolute path is specified, the generated lib files will be stored under the directory;
+    # If a relative path is specified, it will be used as a subdirectory under the default caching path;
+    # If not specified, a temp directory will be created under the default caching path
+    output_path = ""
+
+
 # create a directory containing lots of debug information
 class trace:
     # master switch for all debugging flags below
@@ -369,7 +438,7 @@ class trace:
     output_code = True
 
     # SVG figure showing post-fusion graph
-    graph_diagram = False
+    graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

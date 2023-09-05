@@ -11,24 +11,20 @@ import subprocess
 import glob
 
 import torch.testing._internal.common_utils as common
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 from torch.testing._internal.common_utils import gradcheck
 import torch.multiprocessing as mp
+from torch.utils.cpp_extension import _TORCH_PATH, remove_extension_h_precompiler_headers, get_cxx_compiler, check_compiler_is_gcc
 
-
-TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = False
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None and ROCM_HOME is not None
-if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
-    CUDNN_HEADER_EXISTS = os.path.isfile(os.path.join(CUDA_HOME, "include/cudnn.h"))
-    TEST_CUDNN = (
-        TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
-    )
+TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
+TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
 TEST_MPS = torch.backends.mps.is_available()
 IS_WINDOWS = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith('linux')
 
 
 def remove_build_path():
@@ -129,8 +125,8 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         tensor_length = 100000
-        x = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
-        y = torch.zeros(tensor_length, device="cpu", dtype=torch.float32)
+        x = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
+        y = torch.randn(tensor_length, device="cpu", dtype=torch.float32)
 
         cpu_output = module.get_cpu_add_output(x, y)
         mps_output = module.get_mps_add_output(x.to("mps"), y.to("mps"))
@@ -154,17 +150,14 @@ class TestCppExtensionJIT(common.TestCase):
             err = err.decode("ascii")
 
             if not p.returncode == 0 or not err == '':
-                raise AssertionError("Flags: {}\nReturncode: {}\nStderr: {}\n"
-                                     "Output: {} ".format(flags, p.returncode,
-                                                          err, output))
+                raise AssertionError(f"Flags: {flags}\nReturncode: {p.returncode}\nStderr: {err}\n"
+                                     f"Output: {output} ")
 
             actual_arches = sorted(re.findall(r'sm_\d\d', output))
             expected_arches = sorted(['sm_' + xx for xx in expected_values])
             self.assertEqual(actual_arches, expected_arches,
-                             msg="Flags: {},  Actual: {},  Expected: {}\n"
-                                 "Stderr: {}\nOutput: {}".format(
-                                     flags, actual_arches, expected_arches,
-                                     err, output))
+                             msg=f"Flags: {flags},  Actual: {actual_arches},  Expected: {expected_arches}\n"
+                                 f"Stderr: {err}\nOutput: {output}")
 
         temp_dir = tempfile.mkdtemp()
         old_envvar = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
@@ -230,7 +223,7 @@ class TestCppExtensionJIT(common.TestCase):
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
-            '': (['{}{}'.format(capability[0], capability[1]) for capability in capabilities], None),
+            '': ([f'{capability[0]}{capability[1]}' for capability in capabilities], None),
             "Maxwell+Tegra;6.1": (['53', '61'], None),
             "Volta": (['70'], ['70']),
         }
@@ -246,6 +239,7 @@ class TestCppExtensionJIT(common.TestCase):
             self._run_jit_cuda_archflags(flags, expected)
 
     @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
+    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
         if IS_WINDOWS:
@@ -910,6 +904,58 @@ class TestCppExtensionJIT(common.TestCase):
         for fast_mode in (True, False):
             gradcheck(torch.ops.my.add, [a, b], eps=1e-2, fast_mode=fast_mode)
 
+    def test_custom_functorch_error(self):
+        # Test that a custom C++ Function raises an error under functorch transforms
+        identity_m = torch.utils.cpp_extension.load(
+            name="identity",
+            sources=["cpp_extensions/identity.cpp"],
+        )
+
+        t = torch.randn(3, requires_grad=True)
+
+        msg = r"cannot use C\+\+ torch::autograd::Function with functorch"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.func.vmap(identity_m.identity)(t)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.func.grad(identity_m.identity)(t)
+
+
+    def test_gen_extension_h_pch(self):
+        if not IS_LINUX:
+            return
+
+        source = """
+        at::Tensor sin_add(at::Tensor x, at::Tensor y) {
+            return x.sin() + y.sin();
+        }
+        """
+
+        head_file_pch = os.path.join(_TORCH_PATH, "include", "torch", "extension.h.gch")
+        head_file_signature = os.path.join(
+            _TORCH_PATH, "include", "torch", "extension.h.sign"
+        )
+
+        remove_extension_h_precompiler_headers()
+        pch_exist = os.path.exists(head_file_pch)
+        signature_exist = os.path.exists(head_file_signature)
+        self.assertEqual(pch_exist, False)
+        self.assertEqual(signature_exist, False)
+
+        torch.utils.cpp_extension.load_inline(
+            name="inline_extension_with_pch",
+            cpp_sources=[source],
+            functions=["sin_add"],
+            verbose=True,
+            use_pch=True,
+        )
+        pch_exist = os.path.exists(head_file_pch)
+        signature_exist = os.path.exists(head_file_signature)
+
+        compiler = get_cxx_compiler()
+        if check_compiler_is_gcc(compiler):
+            self.assertEqual(pch_exist, True)
+            self.assertEqual(signature_exist, True)
 
 if __name__ == "__main__":
     common.run_tests()

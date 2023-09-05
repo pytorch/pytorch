@@ -7,9 +7,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 
-namespace at {
-namespace native {
-namespace cpublas {
+namespace at::native::cpublas {
 
 namespace internal {
 void normalize_last_dims(
@@ -71,6 +69,15 @@ void gemm(
     const at::BFloat16 *b, int64_t ldb,
     float beta,
     at::BFloat16 *c, int64_t ldc);
+
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    const float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    const float beta,
+    float *c, int64_t ldc);
 
 void gemm(
     TransposeType transa, TransposeType transb,
@@ -161,4 +168,4 @@ void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy);
 void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy);
 void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy);
 
-}}}  // namespace at::native::cpublas
+}  // namespace at::native::cpublas

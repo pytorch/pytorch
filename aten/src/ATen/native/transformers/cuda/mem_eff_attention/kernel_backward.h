@@ -65,6 +65,7 @@
 
 using namespace gemm_kernel_utils;
 
+namespace PyTorchMemEffAttention {
 namespace {
 
 template <typename FragmentType, int32_t kNumThreads>
@@ -1262,8 +1263,7 @@ struct AttentionBackwardKernel {
     }
     TORCH_CHECK(
         kEnableSplitKeys || p.num_splits_key == 1, "SplitKeys is disabled");
-    TORCH_CHECK(
-        p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
+    TORCH_CHECK(p.num_splits_key > 0, "Invalid `num_splits_key` (expected >0)");
     TORCH_CHECK(
         p.num_splits_key <= cutlass::ceil_div(p.num_keys, kBlockSizeJ),
         "Invalid `num_splits_key` (",
@@ -2525,3 +2525,5 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
 template <typename AK>
 __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
     attention_kernel_backward_batched(typename AK::Params params);
+
+} // namespace PyTorchMemEffAttention

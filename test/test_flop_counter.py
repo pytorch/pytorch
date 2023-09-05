@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_TORCHDYNAMO
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 import torch.utils.flop_counter
 import torch.nn.functional as F
 import unittest
@@ -161,7 +161,7 @@ class TestFlopCounter(TestCase):
             T(4, 5).cos()
 
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_sdpa(self):
         batch_size = 4
         n_heads = 8
@@ -223,7 +223,18 @@ class TestFlopCounter(TestCase):
         self.assertEqual(flops_fw_bw_flash, flops_fw_bw_efficient)
         self.assertExpectedInline(str(flops_fw_bw_flash), """939524096""")
 
+    def test_hook_registration(self):
+        model = torch.nn.Linear(100, 100)
+        x = torch.randn(3, 100)
 
+        flop_counter = FlopCounterMode(model)
+        with flop_counter:
+            self.assertEqual(len(model._forward_pre_hooks), 1)
+            self.assertEqual(len(model._forward_hooks), 1)
+            model(x).sum().backward()
+
+        self.assertEqual(len(model._forward_pre_hooks), 0)
+        self.assertEqual(len(model._forward_hooks), 0)
 
 
 if __name__ == '__main__':

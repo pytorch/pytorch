@@ -5,7 +5,11 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
-from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed.fsdp._shard_utils import (
+    _create_chunk_dtensor,
+    _create_chunk_sharded_tensor,
+)
 
 
 class FSDPExtensions(ABC):
@@ -101,6 +105,22 @@ def _ext_chunk_tensor(
         world_size,
         num_devices_per_node,
         pg,
+    )
+
+
+def _ext_chunk_dtensor(
+    tensor: torch.Tensor,
+    rank: int,
+    device_mesh: DeviceMesh,
+) -> torch.Tensor:
+    # TODO: Address composability issue and remove the assertion.
+    assert (
+        _extensions is None
+    ), "Currently does not support composability when use_dtensor = True"
+    return _create_chunk_dtensor(
+        tensor,
+        rank,
+        device_mesh,
     )
 
 

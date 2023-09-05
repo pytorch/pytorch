@@ -1,12 +1,7 @@
 #pragma once
 
-#ifndef BUILD_LITE_INTERPRETER
 #include <torch/csrc/jit/runtime/interpreter.h>
-#endif
-#include <c10/core/Allocator.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
-#include <unordered_map>
 
 namespace torch {
 
@@ -35,12 +30,21 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   CapturedTraceback(const CapturedTraceback&) = delete;
   CapturedTraceback& operator=(const CapturedTraceback&) = delete;
   ~CapturedTraceback();
+
+  using visitproc = int (*)(void* self, void* arg);
+
   struct Python {
     virtual std::vector<PyFrame> gather() = 0;
     virtual void release(std::vector<PyFrame>& frames) = 0;
     virtual void appendSymbolized(
         const std::vector<PyFrame>& to_symbolize,
         SymbolizedTracebacks& st) = 0;
+    // tp_traverse/tp_clear implementations
+    virtual int traverse(
+        std::vector<PyFrame>& frames,
+        visitproc visit,
+        void* arg) = 0;
+    virtual int clear(std::vector<PyFrame>& frames) = 0;
     virtual ~Python() = default;
     Python* next_ = nullptr;
   };
@@ -49,12 +53,13 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   // p cannot be deleted once added.
   static void addPythonUnwinder(Python* p);
 
+  int traversePython(visitproc visit, void* arg);
+  int clearPython();
+
  private:
   std::vector<PyFrame> frames_;
   std::vector<void*> cpp_frames_;
-#ifndef BUILD_LITE_INTERPRETER
   std::vector<jit::StackEntry> script_frames_;
-#endif
   friend TORCH_API SymbolizedTracebacks
   symbolize(const std::vector<CapturedTraceback*>& to_symbolize);
 

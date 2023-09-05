@@ -195,18 +195,9 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    const bool requires_backend_transfers =
-        module_.attr("requires_backend_transfers", at::IValue(true)).toBool();
-    for (size_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_ && requires_backend_transfers) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_ || !requires_backend_transfers);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     auto output = [&]() {
       JITCallGuard guard;
@@ -225,18 +216,9 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     std::vector<at::IValue> inputs{};
     size_t n = jinputs->size();
     inputs.reserve(n);
-    const bool requires_backend_transfers =
-        module_.attr("requires_backend_transfers", at::IValue(true)).toBool();
-    for (size_t i = 0; i < n; i++) {
+    for (const auto i : c10::irange(n)) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      if (at::kVulkan == deviceType_ && requires_backend_transfers) {
-        inputs.push_back(
-            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
-                                : std::move(atIValue));
-      } else {
-        TORCH_CHECK(at::kCPU == deviceType_ || !requires_backend_transfers);
-        inputs.push_back(std::move(atIValue));
-      }
+      inputs.push_back(std::move(atIValue));
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {

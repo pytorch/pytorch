@@ -68,8 +68,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
   // Constructor.
   // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit BackendWithCompiler() {}
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~BackendWithCompiler() = default;
+  virtual ~BackendWithCompiler() override = default;
 
   bool is_available() override {
     return true;

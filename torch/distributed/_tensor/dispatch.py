@@ -1,30 +1,35 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import Callable, cast, Dict, List, Sequence, Tuple, Union
+from typing import cast, Dict, List, Sequence, Tuple
 
 import torch
 
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
+import torch.distributed._tensor.random as random
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
-    ArgsType,
-    KwargsType,
+    OpInfo,
     OpSchema,
     OutputSharding,
     OutputSpecType,
 )
 from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.distributed._tensor.random import (
-    _get_rng_offset,
-    is_rng_supported_mesh,
-    set_post_op_offset,
-    set_pre_op_offset,
-)
-from torch.distributed._tensor.redistribute import redistribute_dtensor
+from torch.distributed._tensor.random import is_rng_supported_mesh
+from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
 from torch.utils._pytree import tree_flatten, tree_unflatten
+
+
+def _is_random_op(op):
+    aten = torch.ops.aten
+    random_ops = [
+        aten.native_dropout.default,
+        aten.normal_.default,
+        aten.uniform_.default,
+    ]
+    return op in random_ops
 
 
 def wrap(res: object, spec: OutputSpecType) -> object:
@@ -67,37 +72,32 @@ def wrap(res: object, spec: OutputSpecType) -> object:
         return res
 
 
-def pack_args_kwargs_with_local_tensor(
-    args: Union[ArgsType, KwargsType],
-    args_schema: Union[ArgsType, KwargsType],
-    redistribute_with_schema: bool = False,
-) -> Union[ArgsType, KwargsType]:
-    flatten_args, args_tree_spec = tree_flatten(args)
-    flatten_args_schema, _ = tree_flatten(args_schema)
+def redistribute_local_args(
+    op_info: OpInfo,
+    suggested_input_schema: OpSchema,
+) -> None:
+    # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
 
-    for i, arg in enumerate(flatten_args):
-        if isinstance(arg, dtensor.DTensor):
-            if redistribute_with_schema:
-                target_spec = flatten_args_schema[i]
-                arg = redistribute_dtensor(
-                    arg, target_spec.mesh, target_spec.placements
+    # TODO: the op schema should probably just remain flattened so that we can avoid this tree flatten
+    # Need to fix all the ops before doing this.
+    flatten_args_schema_to_reshard = tree_flatten(suggested_input_schema.args_schema)[0]
+
+    new_flat_local_args: List[object] = []
+    for i, arg_spec in enumerate(op_info.flat_args_schema):
+        reshard_arg_spec = flatten_args_schema_to_reshard[i]
+        if isinstance(arg_spec, DTensorSpec):
+            local_tensor = cast(torch.Tensor, op_info.flat_local_args[i])
+            if arg_spec != reshard_arg_spec:
+                resharded_local_tensor = redistribute_local_tensor(
+                    local_tensor, arg_spec, reshard_arg_spec
                 )
+                new_flat_local_args.append(resharded_local_tensor)
+            else:
+                new_flat_local_args.append(local_tensor)
+        else:
+            new_flat_local_args.append(reshard_arg_spec)
 
-            # reuse the schema list and update it with local tensor
-            flatten_args_schema[i] = arg._local_tensor
-
-    return tree_unflatten(flatten_args_schema, args_tree_spec)
-
-
-def _reshape_alias(
-    x: torch.Tensor, shape: Tuple[int, ...], strides: Tuple[int, ...]
-) -> torch.Tensor:
-    return torch.ops.aten.view(x, shape)
-
-
-_CURRENT_DECOMPOSITION_TABLE: Dict[Callable[..., object], Callable[..., object]] = {
-    torch.ops.aten._reshape_alias.default: _reshape_alias,
-}
+    op_info.flat_local_args = new_flat_local_args
 
 
 def operator_dispatch(
@@ -116,17 +116,19 @@ def _operator_dispatch(
     kwargs: Dict[str, object],
     sharding_propagator: ShardingPropagator,
 ) -> Tuple[object, OpSchema, OutputSharding]:
-    # check that we are not getting mixed vanilla and Distributed tensors
-    arg_list, _ = tree_flatten(args)
+    # unwrap the op info from args/kwargs
+    flat_args_list, args_spec = tree_flatten(args)
+    flat_kwargs_list, kwargs_spec = tree_flatten(kwargs)
+    flat_args_schema: List[object] = []
+    flat_local_args: List[object] = []
+    flat_kwargs_schema: List[object] = []
+    flat_local_kwargs: List[object] = []
     mesh = None
-    for arg in arg_list:
-        if isinstance(arg, torch.Tensor) and not isinstance(arg, dtensor.DTensor):
-            raise RuntimeError(
-                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                " torch.Tensor to DTensor before calling distributed operators!"
-            )
 
+    for arg in flat_args_list:
         if isinstance(arg, dtensor.DTensor):
+            flat_args_schema.append(arg._spec)
+            flat_local_args.append(arg._local_tensor)
             if mesh is not None:
                 if mesh != arg.device_mesh:
                     raise NotImplementedError(
@@ -134,26 +136,53 @@ def _operator_dispatch(
                     )
             else:
                 mesh = arg.device_mesh
+        elif isinstance(arg, torch.Tensor):
+            raise RuntimeError(
+                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                " torch.Tensor to DTensor before calling distributed operators!"
+            )
+        else:
+            flat_args_schema.append(arg)
+            flat_local_args.append(arg)
 
-    # unwrap the args/kwargs schema
-    op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
+    for kwarg in flat_kwargs_list:
+        if isinstance(kwarg, dtensor.DTensor):
+            flat_kwargs_schema.append(kwarg._spec)
+            flat_local_kwargs.append(kwarg._local_tensor)
+            if mesh is not None:
+                if mesh != kwarg.device_mesh:
+                    raise NotImplementedError(
+                        f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                    )
+            else:
+                mesh = kwarg.device_mesh
+        elif isinstance(kwarg, torch.Tensor):
+            raise RuntimeError(
+                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
+                " torch.Tensor to DTensor before calling distributed operators!"
+            )
+        else:
+            flat_kwargs_schema.append(kwarg)
+            flat_local_kwargs.append(kwarg)
 
-    output_sharding = sharding_propagator.propagate(op_call, op_schema)
+    op_info = OpInfo(
+        op_call,
+        OpSchema(
+            op_call._schema,
+            tree_unflatten(flat_args_schema, args_spec),
+            tree_unflatten(flat_kwargs_schema, kwargs_spec),
+        ),
+        flat_args_schema,
+        flat_kwargs_schema,
+        flat_local_args,
+        flat_local_kwargs,
+        args_spec,
+        kwargs_spec,
+    )
 
-    # first we need to lift some private aten aliases to public calls
-    if op_call in _CURRENT_DECOMPOSITION_TABLE:
-        return (
-            _CURRENT_DECOMPOSITION_TABLE[op_call](*args, **kwargs),
-            op_schema,
-            output_sharding,
-        )
-
-    # if the schema suggestion from sharding prop is not the same instance as the
-    # input op_schema, it indicates a reshard, we need to redistribute the input
-    # tensors before calling the local op
-    assert output_sharding.schema_suggestions is not None
-    suggested_input_schema = output_sharding.schema_suggestions[0]
-    needs_redistribute = suggested_input_schema is not op_schema
+    sharding_propagator.propagate(op_info)
+    output_sharding = op_info.output_sharding
+    assert output_sharding is not None, "output sharding should not be None"
 
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
@@ -166,13 +195,7 @@ def _operator_dispatch(
         #   2. if the return type is Tensor or List[Tensor], return empty
         #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
-        ret_list = op_schema.func_schema.returns
-        if len(ret_list) != 1:
-            # returns list should only have one Argument
-            raise NotImplementedError(
-                f"function schema {str(op_schema.func_schema)} has"
-                f" return type that we currently don't support."
-            )
+        ret_list = op_info.schema.func_schema.returns
 
         if spec is None:
             # For a scalar return type, the non-participating device has None
@@ -208,40 +231,38 @@ def _operator_dispatch(
                         f"return type {ret_type} in DTensor op is not supported"
                     )
     else:
-        # compute locally with redistribute first if needed
-        local_tensor_args = pack_args_kwargs_with_local_tensor(
-            args,
-            suggested_input_schema.args_schema,
-            redistribute_with_schema=needs_redistribute,
-        )
-        local_tensor_kwargs = pack_args_kwargs_with_local_tensor(
-            kwargs,
-            suggested_input_schema.kwargs_schema,
-            redistribute_with_schema=needs_redistribute,
-        )
+        if output_sharding.needs_redistribute:
+            # compute locally with redistribute first if needed
+            assert output_sharding.schema_suggestions is not None
+            suggested_input_schema = output_sharding.schema_suggestions[0]
+            redistribute_local_args(op_info, suggested_input_schema)
 
-        aten = torch.ops.aten
-        random_ops = [
-            aten.native_dropout.default,
-            aten.normal_.default,
-            aten.uniform_.default,
-        ]
-        # before running local op computation, check if op is random op
-        # for random ops, set RNG offset
-        assert isinstance(mesh, DeviceMesh)
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            dtensor_arg = arg_list[0]
-            old_offset = _get_rng_offset(mesh)
-            set_pre_op_offset(dtensor_arg._spec)
+        local_tensor_args = tree_unflatten(
+            op_info.flat_local_args, op_info.args_tree_spec
+        )
+        local_tensor_kwargs = tree_unflatten(
+            op_info.flat_local_kwargs, op_info.kwargs_tree_spec
+        )
 
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-
-        # if op is a random op, adjust Philox RNG state to maintain synchronization
-        if op_call in random_ops and is_rng_supported_mesh(mesh):
-            set_post_op_offset(dtensor_arg._spec, old_offset)
+        assert isinstance(mesh, DeviceMesh)
+        if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
+            if not random._rng_tracker:
+                raise RuntimeError(
+                    "A CudaRNGStateTracker instance must be instantiated "
+                    "before executing a random op over a DTensor. "
+                    "Try calling random.manual_seed() or distribute_tensor() "
+                    "before executing a DTensor random op."
+                )
+            # For DTensor random operator, run it within a distribute region
+            with random._rng_tracker._distribute_region(
+                cast(DTensorSpec, flat_args_schema[0])
+            ):
+                local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
+        else:
+            local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
     # communicate the result to all ranks for some operators that return scalar value
     if output_sharding.output_spec is None:
@@ -252,12 +273,12 @@ def _operator_dispatch(
             # perform reduce on the collection with AND op
             local_results = functools.reduce(operator.and_, obj_list, True)
 
-    if suggested_input_schema.is_inplace:
+    if op_info.schema.is_inplace:
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
         self._spec = cast(DTensorSpec, output_sharding.output_spec)
-        return self, op_schema, output_sharding
-    elif suggested_input_schema.is_out_variant:
+        return self, op_info.schema, output_sharding
+    elif op_info.schema.is_out_variant:
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
             (output_sharding.output_spec,)
@@ -266,7 +287,7 @@ def _operator_dispatch(
         )
         out_dts = []
         spec_idx = 0
-        for arg in suggested_input_schema.func_schema.arguments:
+        for arg in op_info.schema.func_schema.arguments:
             if arg.is_out:
                 out_dt = cast(dtensor.DTensor, kwargs[arg.name])
                 out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])
@@ -276,12 +297,12 @@ def _operator_dispatch(
         assert len(out_dts) >= 1, "out variant should have at least one out arg"
         return (
             tuple(out_dts) if len(out_dts) > 1 else out_dts[0],
-            op_schema,
+            op_info.schema,
             output_sharding,
         )
     else:
         return (
             wrap(local_results, output_sharding.output_spec),
-            op_schema,
+            op_info.schema,
             output_sharding,
         )

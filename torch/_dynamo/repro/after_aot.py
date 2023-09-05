@@ -35,7 +35,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
+from torch.fx.experimental.symbolic_shapes import free_symbols, fx_placeholder_targets
 from torch.hub import tqdm
 
 from .. import config
@@ -251,6 +251,8 @@ def save_graph_repro(
     save_dir=None,
     command="run",
     accuracy=None,
+    tracing_mode=None,
+    check_str=None,
 ):
     fd.write(
         generate_compiler_repro_string(
@@ -262,14 +264,15 @@ def save_graph_repro(
     )
     if accuracy is None:
         accuracy = "_accuracy" in compiler_name
-    tracing_mode = "real"
-    if config.dynamic_shapes:
-        tracing_mode = "symbolic"
+    if tracing_mode is None:
+        tracing_mode = "real"
+        if any(free_symbols(a) for a in args):
+            tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
         f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}"
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
         ")\n"
     )
 
@@ -320,6 +323,8 @@ def isolate_fails(
     env=None,
     save_dir=None,
     accuracy=None,
+    tracing_mode=None,
+    check_str=None,
 ):
     if env is None:
         env = {}
@@ -336,6 +341,8 @@ def isolate_fails(
             save_dir=save_dir,
             command="minifier-query",
             accuracy=accuracy,
+            tracing_mode=tracing_mode,
+            check_str=check_str,
         )
     # with open(file_name, "r") as fd:
     #     print(fd.read())
@@ -377,7 +384,7 @@ def isolate_fails(
 def inductor_fails(fx_g, args, check_str=None):
     has_cuda = False
     for arg in args:
-        if arg.is_cuda:
+        if isinstance(arg, torch.Tensor) and arg.is_cuda:
             has_cuda = True
             break
 
@@ -489,7 +496,9 @@ ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
 
 def repro_minifier_query(options, mod, load_args):
     mod, args = repro_common(options, mod, load_args)
-    fail_fn = ACCURACY_FAILS[options.accuracy]
+    fail_fn = functools.partial(
+        ACCURACY_FAILS[options.accuracy], check_str=options.check_str
+    )
     if fail_fn(mod, args):
         sys.exit(1)
     else:
@@ -508,11 +517,12 @@ def repro_minify(options, mod, load_args):
     module_fails: Any
     if options.isolate:
         module_fails = functools.partial(
-            functools.partial(isolate_fails, accuracy=options.accuracy),
+            isolate_fails,
             env=env_variables,
             compiler_name=compiler_name,
             save_dir=options.save_dir,
             accuracy=options.accuracy,
+            tracing_mode=options.tracing_mode,
         )
     else:
         module_fails = ACCURACY_FAILS[options.accuracy]
@@ -520,7 +530,7 @@ def repro_minify(options, mod, load_args):
     minifier(
         mod,
         args,
-        module_fails=module_fails,
+        module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state, compiler_name=compiler_name
         ),
@@ -703,6 +713,7 @@ def run_repro(
     save_dir=None,
     tracing_mode=None,
     patch_code=None,
+    check_str=None,
     **kwargs,
 ):
     for k in kwargs:
@@ -732,6 +743,7 @@ default settings on this script:
   {accuracy=}
   {tracing_mode=}
   {save_dir=}
+  {check_str=}
 """,
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -857,6 +869,12 @@ divergences--you just might not end up with a useful repro in the end.""",
         default=None,
         help="start at this granularity and work down; must be power of 2",
     )
+    parser_minify.add_argument(
+        "--check-str",
+        type=str,
+        default=check_str,
+        help="require minified program to fail with error containing this string",
+    )
 
     parser_analyze = subparsers.add_parser(
         "analyze", help="run the accuracy analyzer on the repro"
@@ -888,6 +906,12 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minifier-query",
     )
     common_flags(parser_minifier_query)
+    parser_minifier_query.add_argument(
+        "--check-str",
+        type=str,
+        default=check_str,
+        help="require minified program to fail with error containing this string",
+    )
 
     args = None
     if len(sys.argv) <= 1:

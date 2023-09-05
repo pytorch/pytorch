@@ -19,6 +19,9 @@ const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) 
 }
 
 FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
+  auto alwaysCloneWithRealTypes = [&](const Argument& a) {
+    return a.cloneWithType(a.real_type());
+  };
   auto cloneWithRealTypes = [&](const Argument& a) {
     if (with_symint) {
       return a.cloneWithType(a.real_type());
@@ -39,7 +42,8 @@ FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
   };
   std::vector<Argument> new_arguments, new_returns;
   std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);
-  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), cloneWithRealTypes);
+  // NB: SymInt returns are always SymInt
+  std::transform(returns().begin(), returns().end(), std::back_inserter(new_returns), alwaysCloneWithRealTypes);
   return FunctionSchema(
     name(),
     overload_name(),

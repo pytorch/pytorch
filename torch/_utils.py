@@ -1,4 +1,5 @@
 import copyreg
+import functools
 import sys
 import traceback
 import warnings
@@ -46,6 +47,38 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
     if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
     return dtype(self.size()).copy_(self, non_blocking)
+
+
+def _hpu(self, device=None, non_blocking=False, **kwargs):
+    """Returns a copy of this object in HPU memory.
+
+    If this object is already in HPU memory and on the correct device, then
+    no copy is performed and the original object is returned.
+
+    Args:
+        device (int): The destination HPU id. Defaults to the current device.
+        non_blocking (bool): If ``True`` and the source is in pinned memory,
+            the copy will be asynchronous with respect to the host. Otherwise,
+            the argument has no effect.
+        **kwargs: For compatibility, may contain the key ``async`` in place of
+            the ``non_blocking`` argument.
+    """
+    non_blocking = _get_async_or_non_blocking("hpu", non_blocking, kwargs)
+    hpu = getattr(torch, "hpu", None)
+    assert hpu is not None, "HPU device module is not loaded"
+    if self.is_hpu:
+        if device is None:
+            device = hpu.current_device()
+        if self.get_device() == device:
+            return self
+    else:
+        if device is None:
+            device = -1
+    with hpu.device(device):
+        assert not self.is_sparse, "sparse storage is not supported for HPU tensors"
+        untyped_storage = torch.UntypedStorage(self.size(), device=torch.device("hpu"))
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
 
 
 def _cuda(self, device=None, non_blocking=False, **kwargs):
@@ -196,7 +229,7 @@ def _validate_loaded_sparse_tensors():
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size()
+                    t._indices(), t._values(), t.size(), t.is_coalesced()
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -221,7 +254,7 @@ def _validate_loaded_sparse_tensors():
                 )
             else:
                 raise NotImplementedError(
-                    "_validate_loaded_sparse_tensors for layout `%s`" % (t.layout)
+                    f"_validate_loaded_sparse_tensors for layout `{t.layout}`"
                 )
 
     finally:
@@ -243,9 +276,9 @@ def _rebuild_sparse_tensor(layout, data):
             is_coalesced = None
         else:
             indices, values, size, is_coalesced = data
-        result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
-        if is_coalesced is not None:
-            result._coalesced_(is_coalesced)
+        result = torch.sparse_coo_tensor(
+            indices, values, size, check_invariants=False, is_coalesced=is_coalesced
+        )
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -267,7 +300,7 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
+    raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
@@ -343,9 +376,7 @@ def _rebuild_qtensor(
             device=storage.device,
         )
     else:
-        raise RuntimeError(
-            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
-        )
+        raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -644,9 +675,7 @@ class ExceptionWrapper:
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = "Caught {} {}.\nOriginal {}".format(
-            self.exc_type.__name__, self.where, self.exc_msg
-        )
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -739,7 +768,7 @@ def _get_device_index(
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
-            raise ValueError("Expected a non cpu device, but got: {}".format(device))
+            raise ValueError(f"Expected a non cpu device, but got: {device}")
         device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device
@@ -756,8 +785,7 @@ def _get_device_index(
                 device_idx = _get_current_device_index()
         else:
             raise ValueError(
-                "Expected a torch.device with a specified index "
-                "or an integer, but got:{}".format(device)
+                f"Expected a torch.device with a specified index or an integer, but got:{device}"
             )
     return device_idx
 
@@ -812,3 +840,13 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
+
+
+@functools.lru_cache(2)
+def _get_device_module(device_type: str):
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
+        )
+    return device_module
