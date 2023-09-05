@@ -288,8 +288,8 @@ jobs:
 
           pushd "${RUNNER_TEMP}"/arm64
           # Copy header and share files, arm64 or x86_64 both work
-          cp -R include "${DEST_DIR}"/install
-          cp -R share "${DEST_DIR}"/install
+          cp -R install/include "${DEST_DIR}"/install
+          cp -R install/share "${DEST_DIR}"/install
           # The last dash is important to copy only files under src
           cp -R src "${DEST_DIR}"
           cp LICENSE "${DEST_DIR}"
