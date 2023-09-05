@@ -317,20 +317,14 @@ def geomspace(
     if axis != 0 or not endpoint:
         raise NotImplementedError
 
-    all_scalars = all(_dtypes_impl.is_scalar_or_symbolic(x) for x in [start, stop])
-    if all_scalars:
-        exp = math.exp
-        log = math.log
-    else:
-        exp = math.exp
-        log = torch.log
-
-    logbase = log(stop / start) / (num - 1)
-    base = exp(logbase)
+    # XXX: torch.logspace only accepts scalars,
+    # while np.logspace broadcasts array-like arguments
+    logbase = math.log(stop / start) / (num - 1)
+    base = math.exp(logbase)
 
     return torch.logspace(
-        log(start) / logbase,
-        log(stop) / logbase,
+        math.log(start) / logbase,
+        math.log(stop) / logbase,
         num,
         base=base,
         dtype=dtype
