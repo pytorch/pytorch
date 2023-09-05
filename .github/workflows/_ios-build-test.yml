@@ -364,9 +364,9 @@ jobs:
 
           ARTIFACT_NAME=libtorch
           if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
-            ARTIFACT_NAME="${NAME}_lite_ios"
+            ARTIFACT_NAME="${ARTIFACT_NAME}_lite_ios"
           else
-            ARTIFACT_NAME="${NAME}_ios"
+            ARTIFACT_NAME="${ARTIFACT_NAME}_ios"
           fi
 
           if [ "${IS_NIGHTLY}" == true ]; then
