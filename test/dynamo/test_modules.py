@@ -1898,6 +1898,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         print(f"Recorded Layers: {activations.keys()}\n\n")
         print(f"Expected Layers: {forward_handles.keys()}")
+        breakpoint()
         self.assertTrue(activations.keys() == forward_handles.keys())
 
     def test_hooks_allowed_modules(self):

@@ -217,8 +217,6 @@ class KeywordArg(PatternExpr):
         return f"KeywordArg({self.name!r})"
 
     def _match(self, node: NodeOrConstant, ctx: MatchContext):
-        if self.name == "beta":
-            breakpoint()
         return Match(self, kwargs={self.name: node})  # matches anything
 
 
@@ -987,8 +985,6 @@ def fx_to_pattern(
 
         def run_node(self, n):
             rv = super().run_node(n)
-            if n.op == "placeholder" and n.users == 0:
-                breakpoint()
             if n.op == "output" and isinstance(rv, tuple):
                 assert len(rv) == len(n.args[0])
                 for r, arg in zip(rv, n.args[0]):

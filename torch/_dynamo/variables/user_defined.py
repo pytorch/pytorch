@@ -426,9 +426,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 partial_kwargs[k] = kwarg_vt
 
             partial_kwargs.update(kwargs)
-            return variables.UserFunctionVariable(
-                self.value.func, **options
-            ).call_function(tx, partial_args, partial_kwargs)
+            return variables.UserFunctionVariable(self.value.func, **options)
         elif callable(self.value):
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)

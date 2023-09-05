@@ -646,9 +646,6 @@ class TensorVariable(VariableTracker):
                 **options,
             )
         elif name == "register_hook":
-            import os
-
-            gpu_id = int(os.environ.get("LOCAL_RANK", 0))
             # see [On tensor.register_hook]
             assert len(args) == 1
             fn_var = args[0]
@@ -696,8 +693,6 @@ class TensorVariable(VariableTracker):
                     )
             else:
                 fn_var.source = src
-            if gpu_id == 0:
-                print(f"Registering hook with source {self.source}, with fn {fn}")
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
 
