@@ -533,9 +533,11 @@ class GraphModuleSerializer:
                 attr = getattr(arg.graph.owning_module, arg.target)
 
                 if isinstance(attr, torch.Tensor):
-                    self.graph_state.constants[arg.name] = attr
-                    return Argument.create(as_tensor=TensorArgument(name=arg.name))
-                elif isinstance(attr, torch.fx.GraphModule):
+                    raise SerializeError(
+                        "Unsupported getattr on a tensor. Constant tensors "
+                        "should be lifted as buffers inside export."
+                    )
+                if isinstance(attr, torch.fx.GraphModule):
                     with self.save_graph_state():
                         graph = self.serialize_graph(attr)
                     return Argument.create(as_graph=GraphArgument(name=arg.target, graph=graph))
@@ -597,10 +599,10 @@ class GraphModuleSerializer:
                 arguments = []
                 for a in arg:
                     if a.op == "get_attr":
-                        assert isinstance(a.target, str)
-                        attr = getattr(a.graph.owning_module, a.target)
-                        assert isinstance(attr, torch.Tensor)
-                        self.graph_state.constants[a.name] = attr
+                        raise SerializeError(
+                            "Unsupported getattr on a tensor. Constant tensors "
+                            "should be lifted as buffers inside export."
+                        )
                     arguments.append(TensorArgument(name=a.name))
                 return Argument.create(as_tensors=arguments)
             elif all(isinstance(a, (torch.fx.Node, type(None))) for a in arg):
