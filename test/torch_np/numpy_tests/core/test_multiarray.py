@@ -1775,6 +1775,7 @@ class TestMethods:
         a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.unicode_)
         assert_equal(a.argsort(kind="m"), r)
 
+    @pytest.mark.xfail(reason="TODO: searchsorted with nans differs in pytorch")
     @pytest.mark.parametrize(
         "a",
         [

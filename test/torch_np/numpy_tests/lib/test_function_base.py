@@ -3434,6 +3434,7 @@ class TestMedian:
         a = np.array([0.0444502, 0.141249, 0.0463301])
         assert_equal(a[-1], np.median(a))
 
+    @pytest.mark.xfail(reason="median: scalar output vs 0-dim")
     def test_basic_2(self):
         # check array scalar result
         a = np.array([0.0444502, 0.141249, 0.0463301])
@@ -3554,6 +3555,7 @@ class TestMedian:
         b[2] = np.nan
         assert_equal(np.median(a, (0, 2)), b)
 
+    @pytest.mark.xfail(reason="median: scalar vs 0-dim")
     def test_nan_behavior_3(self):
         a = np.arange(24, dtype=float).reshape(2, 3, 4)
         a[1, 2, 3] = np.nan

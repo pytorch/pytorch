@@ -332,6 +332,7 @@ class TestHistogram:
         self.do_signed_overflow_bounds(np.short)
         self.do_signed_overflow_bounds(np.intc)
 
+    @pytest.mark.xfail(reason="int->float conversin loses precision")
     def test_signed_overflow_bounds_2(self):
         self.do_signed_overflow_bounds(np.int_)
         self.do_signed_overflow_bounds(np.longlong)

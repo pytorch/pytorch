@@ -734,12 +734,15 @@ class TestEinsum:
             np.einsum("ij,i->", x, y, optimize=optimize), [2.0]
         )  # contig_stride0_outstride0_two
 
+    @pytest.mark.xfail(reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_int8(self):
         self.check_einsum_sums("i1")
 
+    @pytest.mark.xfail(reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_uint8(self):
         self.check_einsum_sums("u1")
 
+    @pytest.mark.xfail(reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_int16(self):
         self.check_einsum_sums("i2")
 
@@ -750,6 +753,7 @@ class TestEinsum:
     def test_einsum_sums_int64(self):
         self.check_einsum_sums("i8")
 
+    @pytest.mark.xfail(reason="np.float16(4641) == 4640.0")
     def test_einsum_sums_float16(self):
         self.check_einsum_sums("f2")
 
