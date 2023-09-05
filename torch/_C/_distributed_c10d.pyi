@@ -130,6 +130,7 @@ class ReduceOptions:
 
 class AllGatherOptions:
     timeout: timedelta
+    recordStream: bool
 
 class GatherOptions:
     rootRank: int

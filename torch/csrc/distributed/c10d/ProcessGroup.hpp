@@ -247,11 +247,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
             .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                 at::Tensor&,
                 at::Tensor&,
+                bool,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
+        opts.recordStream,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this)));
   }
 

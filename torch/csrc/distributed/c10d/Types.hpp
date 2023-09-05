@@ -137,6 +137,7 @@ struct ReduceOptions {
 
 struct AllgatherOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool recordStream = true;
 };
 
 struct GatherOptions {

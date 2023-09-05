@@ -826,7 +826,8 @@ This class does not support ``__members__`` property.)");
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
+      .def_readwrite("recordStream", &::c10d::AllgatherOptions::recordStream);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())

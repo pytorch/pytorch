@@ -25,7 +25,7 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int timeout) -> (Tensor[][], __torch__.torch.classes.c10d.Work)");
   m.def(
-      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup process_group) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+      "_allgather_base_(Tensor output_tensor, Tensor input_tensor, bool record_stream, __torch__.torch.classes.c10d.ProcessGroup process_group) -> (Tensor, __torch__.torch.classes.c10d.Work)");
   m.def(
       "allgather_coalesced_(Tensor[][] output_lists, Tensor[] input_list, __torch__.torch.classes.c10d.ProcessGroup process_group) -> __torch__.torch.classes.c10d.Work");
   m.def(
@@ -231,9 +231,11 @@ IMPL_ALLGATHER(PrivateUse1)
   std::tuple<at::Tensor, c10::intrusive_ptr<Work>> _allgather_base_##DEV( \
       at::Tensor& output_tensor,                                          \
       at::Tensor& input_tensor,                                           \
+      bool record_stream,                                                  \
       const c10::intrusive_ptr<ProcessGroup>& process_group) {            \
+    AllgatherOptions opts = AllgatherOptions{std::chrono::milliseconds(-1), record_stream}; \
     auto work = process_group->getBackend(c10::DeviceType::DEV)           \
-                    ->_allgather_base(output_tensor, input_tensor);       \
+                    ->_allgather_base(output_tensor, input_tensor, opts); \
     return std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(              \
         output_tensor, work);                                             \
   }
