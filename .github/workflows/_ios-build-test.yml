@@ -233,11 +233,18 @@ jobs:
             sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" ${SETUP_DIR}/LibTorch.podspec
           fi
 
+          pushd "${SETUP_DIR}"
+          # NB: It's important to zip all the files before uploading because the GHA will upload
+          # all files sequentially which is both slow and has too many requests. More info is at
+          # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
+          zip -r "${IOS_ARCH}.zip" install src version.txt LICENSE *.podspec
+          popd
+
       - uses: actions/upload-artifact@v3
         with:
           name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
           if-no-files-found: error
-          path: ${{ runner.temp }}/${{ matrix.ios_arch }}
+          path: ${{ runner.temp }}/${{ matrix.ios_arch }}/${{ matrix.ios_arch }}.zip
 
   upload-ios-artifacts:
     # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
@@ -265,13 +272,27 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: pytorch-ios-build-artifacts-arm64
-          path: ${{ runner.temp }}/arm64
 
       - name: Download x86_64 artifacts
         uses: actions/download-artifact@v3
         with:
           name: pytorch-ios-build-artifacts-x86_64
-          path: ${{ runner.temp }}/x86_64
+
+      - name: Unzip arm64 and x86_64 artifacts
+        shell: bash
+        run: |
+          set -eux
+
+          for ARCH in "arm64" "x86_64"; do
+            TMP_DIR="${RUNNER_TEMP}/${ARCH}"
+            mkdir -p "${TMP_DIR}"
+
+            cp "${ARCH}.zip" "${TMP_DIR}"
+
+            pushd "${TMP_DIR}"
+            unzip -o "${ARCH}.zip"
+            popd
+          done
 
       - name: Prepare the final artifact
         env:
@@ -326,12 +347,6 @@ jobs:
           fi
           echo "BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v3
-        with:
-          name: pytorch-ios
-          if-no-files-found: error
-          path: ${{ runner.temp }}/ios
-
       - name: Set DRY_RUN
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         shell: bash
@@ -355,12 +370,15 @@ jobs:
           fi
 
           if [ "${IS_NIGHTLY}" == true ]; then
-            ARTIFACT_NAME="${NAME}_nightly_${PYTORCH_VERSION}.zip"
+            ARTIFACT_NAME="${ARTIFACT_NAME}_nightly_${PYTORCH_VERSION}.zip"
           else
-            ARTIFACT_NAME="${NAME}_${PYTORCH_VERSION}.zip"
+            ARTIFACT_NAME="${ARTIFACT_NAME}_${PYTORCH_VERSION}.zip"
           fi
 
           pushd "${DEST_DIR}"
+          # NB: It's important to zip all the files before uploading because the GHA will upload
+          # all files sequentially which is both slow and has too many requests. More info is at
+          # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
           zip -r ${ARTIFACT_NAME} install src version.txt LICENSE
           popd
 
@@ -372,6 +390,12 @@ jobs:
           fi
           ${AWS_S3_CP} "${ARTIFACT_NAME}" s3://ossci-ios-build/ --acl public-read
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios-artifacts
+          if-no-files-found: error
+          path: ${{ runner.temp }}/ios/${{ env.ARTIFACT_NAME }}
 
       - name: Upload the artifact to cocoapods
         shell: bash
