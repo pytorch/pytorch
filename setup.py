@@ -1072,6 +1072,50 @@ def configure_extension_build():
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
+def add_triton(install_requires, extras_require) -> None:
+    """
+    Add triton package as a dependency when it's needed
+    """
+    # NB: If the installation requirments list already includes triton dependency,
+    # there is no need to add it one more time as an extra dependency. In nightly
+    # or when release PyTorch, that is done by setting PYTORCH_EXTRA_INSTALL_REQUIREMENTS
+    # environment variable on pytorch/builder
+    has_triton = any("triton" in pkg for pkg in install_requires)
+    if has_triton:
+        return
+
+    cmake_cache_vars = get_cmake_cache_vars()
+    use_rocm = cmake_cache_vars["USE_ROCM"]
+    use_cuda = cmake_cache_vars["USE_CUDA"]
+
+    # Triton is only needed for CUDA or ROCm
+    if not use_rocm and not use_cuda:
+        return
+
+    if use_rocm:
+        triton_text_file = "triton-rocm.txt"
+        triton_package_name = "pytorch-triton-rocm"
+    else:
+        triton_text_file = "triton.txt"
+        triton_package_name = "pytorch-triton"
+    triton_pin_file = os.path.join(
+        cwd, ".ci", "docker", "ci_commit_pins", triton_text_file
+    )
+    triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
+
+    if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
+        with open(triton_pin_file) as f:
+            triton_pin = f.read().strip()
+        with open(triton_version_file) as f:
+            triton_version = f.read().strip()
+
+        if "dynamo" not in extras_require:
+            extras_require["dynamo"] = []
+        extras_require["dynamo"].append(
+            triton_package_name + "==" + triton_version + "+" + triton_pin[:10]
+        )
+
+
 # post run, warnings, printed at the end to make them more visible
 build_update_message = """
     It is no longer necessary to use the 'build' or 'rebuild' targets
@@ -1105,29 +1149,6 @@ def main():
         "fsspec",
     ]
 
-    extras_require = {"opt-einsum": ["opt-einsum>=3.3"]}
-    if platform.system() == "Linux":
-        cmake_cache_vars = get_cmake_cache_vars()
-        if cmake_cache_vars["USE_ROCM"]:
-            triton_text_file = "triton-rocm.txt"
-            triton_package_name = "pytorch-triton-rocm"
-        else:
-            triton_text_file = "triton.txt"
-            triton_package_name = "pytorch-triton"
-        triton_pin_file = os.path.join(
-            cwd, ".ci", "docker", "ci_commit_pins", triton_text_file
-        )
-        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
-        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
-            with open(triton_pin_file) as f:
-                triton_pin = f.read().strip()
-            with open(triton_version_file) as f:
-                triton_version = f.read().strip()
-            extras_require["dynamo"] = [
-                triton_package_name + "==" + triton_version + "+" + triton_pin[:10],
-                "jinja2",
-            ]
-
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1152,6 +1173,14 @@ def main():
     ) = configure_extension_build()
 
     install_requires += extra_install_requires
+
+    extras_require = {
+        "opt-einsum": ["opt-einsum>=3.3"],
+    }
+    # Triton is only available on Linux atm
+    if platform.system() == "Linux":
+        extras_require["dynamo"] = ["jinja2"]
+        add_triton(install_requires=install_requires, extras_require=extras_require)
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:

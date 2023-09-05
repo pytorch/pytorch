@@ -29,7 +29,11 @@ from torch.testing._internal.common_utils import (
 
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
-from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import (
+    SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_FUSED_ATTENTION
+)
 
 if TEST_FAIRSEQ:
     import fairseq.models.transformer as fairseq_transformer
@@ -1185,7 +1189,7 @@ class TestTransformers(NNTestCase):
                         torch.cuda.synchronize()
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not supposrt fused SDPA or pre-SM80 hardware"
     )
     def test_is_causal_gpu(self):
         device = 'cuda'
@@ -1206,9 +1210,9 @@ class TestSDPAFailureModes(NNTestCase):
     _do_cuda_non_default_stream = True
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM86or89Device,
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION or not isSM86or89Device,
                      "Does not support fused SDPA or not SM86+ hardware")
-    @parametrize("head_dim", [72, 96, 128])
+    @parametrize("head_dim", [193, 204, 256])
     def test_flash_backward_failure_sm86plus(self, device, head_dim: int):
         dtype = torch.float16
         make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
@@ -1246,11 +1250,11 @@ class TestSDPAFailureModes(NNTestCase):
                                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
         [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
-        if SM80OrLater
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION
         else [SDPBackend.EFFICIENT_ATTENTION],
     )
     def test_invalid_fused_inputs_dim_3(self, device, kernel: SDPBackend):
@@ -1266,11 +1270,11 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
         [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
-        if SM80OrLater
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION
         else [SDPBackend.EFFICIENT_ATTENTION],
     )
     def test_invalid_fused_inputs_broadcast(self, device, kernel: SDPBackend):
@@ -1286,9 +1290,9 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_sequence_lengths(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Passing in a q,k,v with 0 length sequences will error
@@ -1302,9 +1306,9 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
-                 SM80OrLater else [SDPBackend.EFFICIENT_ATTENTION])
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_last_dim_stride(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # Passing in a q,k,v with 0 length sequences will error
@@ -1318,24 +1322,24 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not flash_attention fused scaled dot product attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
     def test_invalid_fused_inputs_head_dim(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
             # The embed dim per head is not divisible by 8 for flash attention
             dtype = torch.float16
             make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=dtype)
-            size = (2, 2, 3, 9)
+            size = (2, 2, 3, 9) if kernel == SDPBackend.EFFICIENT_ATTENTION else (2, 2, 3, 257)
             q, k, v = make_tensor(size), make_tensor(size), make_tensor(size)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support fused scaled dot product attention")
     @parametrize(
         "kernel",
         [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]
-        if SM80OrLater
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION
         else [SDPBackend.EFFICIENT_ATTENTION],
     )
     def test_invalid_fused_inputs_invalid_dtype(self, device, kernel: SDPBackend):
@@ -1348,7 +1352,7 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused scaled dot product attention")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION])
     def test_invalid_fused_inputs_attn_mask_present(self, device, kernel: SDPBackend):
         with sdp_kernel(**backend_map[kernel]):
@@ -1362,7 +1366,7 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, mask, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_unaligned_tensors(self, device):
         # The alignment is depdent on arch so we specifiy SM80OrLater
         dtype = torch.float16
@@ -1374,7 +1378,7 @@ class TestSDPAFailureModes(NNTestCase):
                 q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support fused SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support fused SDPA or pre-SM80 hardware")
     def test_flash_fail_fp32(self, device):
         dtype = torch.float
         shape = (16, 16, 32, 32)
@@ -1386,7 +1390,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_autocast_fp32_float16(self, device):
         dtype = torch.float
         shape = (16, 16, 32, 32)
@@ -1398,7 +1402,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, False)
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_autocast_fp32_bfloat16(self, device):
         dtype = torch.float
         shape = (16, 16, 32, 32)
@@ -1440,7 +1444,7 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_error_cases(self, device):
         # one of k,v needs to be broadcasted and other has non consistent seq_len dim
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float32)
@@ -1462,7 +1466,21 @@ class TestSDPAFailureModes(NNTestCase):
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
     @onlyCUDA
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not isSM5xDevice, "Does not support fused SDPA or not SM50 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Fused SDPA was not built for this system")
+    def test_nested_fails_on_padding_head_dim(self, device):
+        dtype = torch.bfloat16
+        seq_len_list = [2, 4, 5, 6, 7]
+        shape = (5, seq_len_list, 8, 57)
+        make_tensor = partial(rand_sdpa_tensor, shape=shape, type="nested", device=device, dtype=dtype)
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+        with torch.backends.cuda.sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+            with self.assertWarnsRegex(UserWarning, "For NestedTensor inputs, Flash attention requires"):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, False))
+
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION or not isSM5xDevice, "Does not support fused SDPA or not SM50 hardware")
     def test_mem_efficient_fail_bfloat16_sm50(self, device):
         dtype = torch.bfloat16
         shape = (16, 16, 32, 32)
@@ -1472,6 +1490,50 @@ class TestSDPAFailureModes(NNTestCase):
             with self.assertWarnsRegex(UserWarning, "Expected query, key and value to all be of dtype: {Half, Float}"):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, False))
+
+def _get_block_size(device, head_dim, is_causal):
+    # This should match the block sizes in the CUDA kernel
+    # Mask is only interesting when we are setting dropout
+    is_dropout = True
+    assert head_dim <= 256
+    major, minor = torch.cuda.get_device_capability(device)
+    is_sm8x = major == 8 and minor > 0  # Only include sm86 and sm89, exclude sm80 (A100)
+    is_sm80 = major == 8 and minor == 0
+    is_sm90 = major == 9 and minor == 0
+    if head_dim <= 32:
+        return 128, 128
+    if head_dim <= 64:
+        return (128, 128) if not is_dropout else (128, 64)
+    elif head_dim <= 96:
+        return (64, 64) if (is_sm8x and is_causal) else (128, 64)
+    elif head_dim <= 128:
+        if is_sm8x:
+            return (64, 64) if (not is_dropout and is_causal) else (128, 32)
+        else:
+            return 128, (64 if not is_dropout else 32)
+    elif head_dim <= 160:
+        if is_sm8x:
+            return (128, 64) if not is_causal else (64, 64)
+        else:
+            return 128, 32
+    elif head_dim <= 192:
+        return (128, 64) if not is_dropout else (64, 64)
+    elif head_dim <= 224:
+        return (128, 64) if (is_sm80 or is_sm90) else (64, 64)
+    elif head_dim <= 256:
+        return (128, 64) if is_sm80 else (64, 64)
+
+
+def pad_last_dim(input_tensor, alignment_size, slice: bool = False):
+    last_dim_size = input_tensor.size(-1)
+    if (last_dim_size % alignment_size == 0):
+        return input_tensor, last_dim_size
+    pad_count = alignment_size - (last_dim_size % alignment_size)
+    padded_tensor = F.pad(input_tensor, (0, pad_count))
+    if slice:
+        return padded_tensor[..., :last_dim_size], last_dim_size
+    return padded_tensor, last_dim_size
+
 
 class TestSDPA(NNTestCase):
     """ Used to test generic functionality of scaled_dot_product_attention
@@ -1619,7 +1681,7 @@ class TestSDPACudaOnly(NNTestCase):
     Quarks:
         There is some trickiness with this function. It's runtime behavior
         is dependent on the CUDA architecture you are testing it on. See
-        `PLATFORM_SUPPORTS_FUSED_SDPA` at the top of the file.
+        `PLATFORM_SUPPORTS_FUSED_ATTENTION` at the top of the file.
         Summary:
             Math: always supported
             FlashAttention: Supported on sm80 or newer hardware
@@ -1635,45 +1697,43 @@ class TestSDPACudaOnly(NNTestCase):
             query_padding_mask: (batch_size, seqlen_q)
             key_padding_mask: (batch_size, seqlen_k)
         """
-        def _get_block_size(head_dim):
-            assert head_dim % 8 == 0 and head_dim <= 128
-            return 256 if head_dim <= 64 else 128
-        S_flat = S.view(S.shape[0], S.shape[1], S.shape[2] * S.shape[3])
-        seqlen_q, seqlen_k = S.shape[-2:]
-        block_size = _get_block_size(head_dim)
-        loop_steps = math.ceil(seqlen_k / block_size)
+        b, h, seqlen_q, seqlen_k = S.shape
         warps_n = 4
-        mmas_n = (seqlen_k // warps_n //
-                  16) if seqlen_k <= block_size else (block_size // warps_n // 16)
+        blocksize_m, blocksize_n = _get_block_size(S.device, head_dim, causal)
+        nblocks_m = (seqlen_q + blocksize_m - 1) // blocksize_m
+        nblocks_n = (seqlen_k + blocksize_n - 1) // blocksize_n
+        mmas_n = (blocksize_n + 16 - 1) // 16
 
-        S_converted = S_flat.view(S_flat.shape[0], S_flat.shape[1], loop_steps,
-                                  seqlen_q // 16, mmas_n, warps_n, 8, 4, 2, 2, 2)
-        S_converted = S_converted.permute(0, 1, 3, 8, 6, 2, 4, 5, 9, 7, 10)
-        S_converted = S_converted.reshape(S_flat.shape[0],
-                                          S_flat.shape[1], (seqlen_q // 16 * 2 * 8), (loop_steps * mmas_n * warps_n * 2 * 4 * 2))
-        # Need to zero out things not in attention_mask in case S was initialized with random values
-        # and some of those values aren't overwritten.
-        seqlen_q_og = query_padding_mask.shape[-1]
-        if seqlen_q_og < seqlen_q:
-            query_padding_mask = F.pad(
-                query_padding_mask, (0, seqlen_q - seqlen_q_og))
-        else:
-            query_padding_mask = query_padding_mask[:, :seqlen_q]
-        q_mask_fill = ~query_padding_mask.view(query_padding_mask.shape[0], 1, query_padding_mask.shape[1], 1)
-        S_converted = S_converted.masked_fill(q_mask_fill, 0.0)
-        seqlen_k_og = key_padding_mask.shape[-1]
-        if seqlen_k_og < seqlen_k:
-            key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k - seqlen_k_og))
-        else:
-            key_padding_mask = key_padding_mask[:, :seqlen_k]
-
-        k_mask_fill = ~key_padding_mask.view(key_padding_mask.shape[0], 1, 1, key_padding_mask.shape[1])
-        S_converted = S_converted.masked_fill(k_mask_fill, 0.0)
+        # Reshape S using PyTorch native functions
+        S_flat = S.view(b, h, nblocks_m, blocksize_m, nblocks_n, blocksize_n)
+        S_flat = S_flat.permute(0, 1, 2, 4, 3, 5)
+        S_flat = S_flat.reshape(b, h, nblocks_m, nblocks_n, (blocksize_m * blocksize_n))
+        S_converted = S_flat.view(b, h, nblocks_m, nblocks_n, mmas_n, -1, warps_n, 8, 4, 2, 2, 2)
+        S_converted = S_converted.permute(0, 1, 2, 5, 6, 10, 7, 3, 4, 9, 8, 11)
+        S_converted = S_converted.reshape(b, h, (nblocks_m * S_converted.size(3) *
+                                          warps_n * 2 * 8), (nblocks_n * mmas_n * 2 * 4 * 2))
 
         if causal:
-            causal_mask = torch.triu(torch.ones(
-                seqlen_q, seqlen_k, dtype=torch.bool, device=S.device), 1)
+            causal_mask = torch.triu(torch.ones(seqlen_q, seqlen_k, dtype=torch.bool, device=S.device), 1)
             S_converted.masked_fill_(causal_mask, 0.0)
+        # Need to zero out things not in attention_mask in case S was initialized with random values
+        # and some of those values aren't overwritten.
+        seqlen_q_og = query_padding_mask.shape[-1] if query_padding_mask is not None else seqlen_q
+        if query_padding_mask is not None:
+            if seqlen_q_og < seqlen_q:
+                query_padding_mask = F.pad(query_padding_mask, (0, seqlen_q - seqlen_q_og))
+            else:
+                query_padding_mask = query_padding_mask[:, :seqlen_q]
+            q_mask_fill = ~query_padding_mask.view(query_padding_mask.shape[0], 1, query_padding_mask.shape[1], 1)
+            S_converted = S_converted.masked_fill(q_mask_fill, 0.0)
+        seqlen_k_og = key_padding_mask.shape[-1] if key_padding_mask is not None else seqlen_k
+        if key_padding_mask is not None:
+            if seqlen_k_og < seqlen_k:
+                key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k - seqlen_k_og))
+            else:
+                key_padding_mask = key_padding_mask[:, :seqlen_k]
+            k_mask_fill = ~key_padding_mask.view(key_padding_mask.shape[0], 1, 1, key_padding_mask.shape[1])
+            S_converted = S_converted.masked_fill(k_mask_fill, 0.0)
         if seqlen_q_og < seqlen_q:
             S_converted = S_converted[:, :, :seqlen_q_og, :]
         else:
@@ -1691,7 +1751,7 @@ class TestSDPACudaOnly(NNTestCase):
         value_ref = value.clone().detach().to(dtype).requires_grad_(value.requires_grad)
         return query_ref, key_ref, value_ref
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attetntion_mask_variants(self, device, mask_dim: List[int]):
         dtype = torch.float16
@@ -1714,7 +1774,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_pad_mask(self, device, dtype):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype, requires_grad=True)
@@ -1728,7 +1788,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_non_contiguous_mask(self, device, dtype):
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=dtype, requires_grad=True)
@@ -1743,7 +1803,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
         if torch.cuda.get_device_properties('cuda').total_memory < 80 * 2**30:
@@ -1761,7 +1821,7 @@ class TestSDPACudaOnly(NNTestCase):
         out.sum().backward()
 
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     @parametrize("head_dims_match", [True, False])
@@ -1801,7 +1861,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, device, type: str, is_contiguous: bool):
@@ -1833,13 +1893,11 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_scaled_dot_product_attention_fused_kernels_packed_accuracy(self, device, type: str, fused_kernel: str):
-        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
-            return
-
         def rand_nt(shape):
             batch, seq_len, num_heads, head_dim = shape
             tensors = [6 * torch.rand((seq_len, 3 * num_heads * head_dim), device=device, dtype=torch.float32) - 3
@@ -1900,7 +1958,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Flash Attention was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
     def test_sdp_mem_efficient_grad_against_math(self, device, contiguous_inputs: bool, is_causal: bool):
@@ -1947,7 +2005,7 @@ class TestSDPACudaOnly(NNTestCase):
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Flash Attention was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -1999,38 +2057,38 @@ class TestSDPACudaOnly(NNTestCase):
         rtol = 7e-4 if dtype == torch.float16 else 7e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, device, type: str):
-        if PLATFORM_SUPPORTS_FUSED_SDPA:
-            batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
-            shape = (batch_size, seq_len, num_heads, head_dim)
-            make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True, requires_grad=True)
+        batch_size, seq_len, num_heads, head_dim = 2, 128, 8, 64
+        shape = (batch_size, seq_len, num_heads, head_dim)
+        make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float16, packed=True, requires_grad=True)
 
-            qkv = make_tensor(shape, type=type)
-            query, key, value = qkv.chunk(3, dim=-1)
+        qkv = make_tensor(shape, type=type)
+        query, key, value = qkv.chunk(3, dim=-1)
 
-            query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-            value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-            key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
 
-            if SM75OrLater and not type == "nested":
-                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
-            else:
-                assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
-
-            # Change dtype to float32 so that efficient attention should get chosen
-            make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float32, packed=True)
-
-            qkv = make_tensor(shape, type=type)
-            query, key, value = qkv.chunk(3, dim=-1)
-
-            query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-            value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-            key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
-
+        if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION
+        else:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
+        # Change dtype to float32 so that efficient attention should get chosen
+        make_tensor = partial(rand_sdpa_tensor, device=device, dtype=torch.float32, packed=True)
+
+        qkv = make_tensor(shape, type=type)
+        query, key, value = qkv.chunk(3, dim=-1)
+
+        query = query.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        value = value.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+        key = key.view(batch_size, -1, num_heads, head_dim).transpose(1, 2)
+
+        assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, device, warn_only):
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
@@ -2042,7 +2100,7 @@ class TestSDPACudaOnly(NNTestCase):
             with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=True):
                 assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Platform does not support fused SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_mem_eff_backwards_throws_determinism_warning(self, device, warn_only):
         batch_size, seq_len, num_heads, head_dim = 1, 64, 8, 64
@@ -2064,7 +2122,7 @@ class TestSDPACudaOnly(NNTestCase):
                     torch.nn.functional.scaled_dot_product_attention(query, key, value).sum().backward()
 
     @unittest.skip("This test is not behaving deterministaclly non-deterministaclly on CI/CD")
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Platform does not support fused SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Platform does not support fused SDPA")
     def test_mem_eff_backwards_determinism(self, device):
         # Need big seq_len to ensure that num_splits > 1
         dtype = torch.float32
@@ -2115,7 +2173,7 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertFalse(diff_anwser_once)
 
     # verified passing successfully on H100
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
@@ -2216,7 +2274,7 @@ class TestSDPACudaOnly(NNTestCase):
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Does not support SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 312, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 152, 256, 512])
     @parametrize("seq_len_k", [4, 8, 64, 65, 128, 256, 408, 512, 1024, 2048] if SM80OrLater else [4, 8, 37, 64, 128, 256, 512])
@@ -2333,11 +2391,11 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(attn_mask.grad, attn_mask_ref.grad.to(attn_mask.grad.dtype),
                          atol=grad_attn_mask_atol, rtol=grad_attn_mask_rtol)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128])
+    @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])
+    @parametrize("head_dim", [8, 16, 21, 32, 64, 72, 96, 128, 160, 192, 203, 256])
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
@@ -2346,6 +2404,8 @@ class TestSDPACudaOnly(NNTestCase):
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                scale: str):
 
+        if isSM86or89Device and head_dim in range(193, 256 + 1):
+            self.skipTest("Flash attention on sm86 and sm89 for headdim > 192 currently disabled")
         scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
@@ -2363,22 +2423,11 @@ class TestSDPACudaOnly(NNTestCase):
 
         is_dropout = dropout_p > 0.0
 
-        # Create real output
-        output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
-        out = output_tuple[0]
-        dbug_mask = output_tuple[-1]
-
-        query_padding_mask = torch.ones(
-            1, seq_len_q, device=device, dtype=torch.bool)
-        key_padding_mask = torch.ones(
-            1, seq_len_k, device=device, dtype=torch.bool)
-
-        softmax_mask = self.convert_flash_attn_S_to_softmax(
-            dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
-        dropout_mask = softmax_mask >= 0
-
         if not is_dropout:
+            # Problem: We pad sizes in the composite region of the top level SDPA. But we need the
+            # Debug mask when have dropout. So I am going to manualy pad up here when testing dropout
+            with sdp_kernel(enable_math=False, enable_flash=True, enable_mem_efficient=False):
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
@@ -2387,6 +2436,27 @@ class TestSDPACudaOnly(NNTestCase):
                 out_lp_ref = F.scaled_dot_product_attention(
                     query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
+            q_padded, q_og_size = pad_last_dim(query, 8)
+            k_padded, k_og_size = pad_last_dim(key, 8)
+            v_padded, v_og_size = pad_last_dim(value, 8)
+            # scale needs to be calculated on the og head_size
+            if scale is None:
+                scale = 1 / math.sqrt(q_og_size)
+            output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
+                q_padded, k_padded, v_padded, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=is_dropout)
+            out = output_tuple[0]
+            out = out[..., :v_og_size]
+            # Build dropout_mask
+            dbug_mask = output_tuple[-1]
+            query_padding_mask = torch.ones(
+                batch_size, seq_len_q, device=device, dtype=torch.bool)
+            key_padding_mask = torch.ones(
+                batch_size, seq_len_k, device=device, dtype=torch.bool)
+
+            softmax_mask = self.convert_flash_attn_S_to_softmax(
+                dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim,
+                causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
+            dropout_mask = softmax_mask >= 0
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
@@ -2398,7 +2468,7 @@ class TestSDPACudaOnly(NNTestCase):
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
         # backward for flash attention on sm86 and sm89 for headdim > 64 currently disabled
-        if isSM86or89Device and head_dim in range(65, 129):
+        if isSM86or89Device and head_dim in range(193, 256):
             self.assertRaises(RuntimeError, lambda: out.backward(upstream_grad))
             return
         out.backward(upstream_grad)
@@ -2406,15 +2476,16 @@ class TestSDPACudaOnly(NNTestCase):
         out_lp_ref.backward(upstream_grad.to(out_lp_ref.dtype))
 
         # See [Note] Fused Tolerances above
-        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref)
+        output_fudge_factor = 3 if head_dim % 8 != 0 else 1
+        output_ref_atol, output_ref_rtol = get_tolerances(out_ref, out_lp_ref, output_fudge_factor)
 
         # TODO: Investigate why grad_q needs larger tolerances
         query_fudge_factor = 4
         grad_q_ref_atol, grad_q_ref_rtol = get_tolerances(query_ref.grad, query_ref_lp.grad, query_fudge_factor)
 
         grad_k_ref_atol, grad_k_ref_rtol = get_tolerances(key_ref.grad, key_ref_lp.grad)
-
-        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad)
+        value_fudge_factor = 2
+        grad_v_ref_atol, grad_v_ref_rtol = get_tolerances(value_ref.grad, value_ref_lp.grad, value_fudge_factor)
 
         self.assertEqual(out, out_ref.to(out.dtype), atol=output_ref_atol, rtol=output_ref_rtol)
         self.assertEqual(query.grad, query_ref.grad.to(query.grad.dtype),
@@ -2424,7 +2495,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [256, 512, 1024])
     @parametrize("seq_len_k", [256, 512, 1024])
@@ -2455,11 +2526,12 @@ class TestSDPACudaOnly(NNTestCase):
                 return _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len,
                                               dropout_p, output_seed, output_offset, device=device)
             else:
-                dbug_mask = output[-1]
+                # Build dropout_mask
+                dbug_mask = output_tuple[-1]
                 query_padding_mask = torch.ones(
-                    1, seq_len_q, device="cuda", dtype=torch.bool)
+                    batch_size, seq_len_q, device=device, dtype=torch.bool)
                 key_padding_mask = torch.ones(
-                    1, seq_len_k, device="cuda", dtype=torch.bool)
+                    batch_size, seq_len_k, device=device, dtype=torch.bool)
 
                 softmax_mask = self.convert_flash_attn_S_to_softmax(
                     dbug_mask, query_padding_mask, key_padding_mask, head_dim=head_dim, causal=is_causal)
@@ -2494,7 +2566,7 @@ class TestSDPACudaOnly(NNTestCase):
             kwargs["compute_log_sumexp"] = True
             kwargs["attn_bias"] = None
         if fused_kernel == SDPBackend.FLASH_ATTENTION:
-            kwargs['return_debug_mask'] = True
+            kwargs['return_debug_mask'] = dropout_p > 0.0
         with torch.cuda.stream(s):
             # Create real output
             output_tuple = fused_op(query, key, value, **kwargs)
@@ -2582,11 +2654,10 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(value.grad, value_ref.grad.to(value.grad.dtype),
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_fused_kernels_seq_len_1_inputs(self, device, fused_kernel):
-        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
-            return
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
         seq_lens = torch.randint(low=1, high=32, size=(batch,))
@@ -2616,11 +2687,10 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
-    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_fused_kernels_seq_len_0_inputs(self, device, fused_kernel):
-        if (not SM80OrLater) and fused_kernel == SDPBackend.FLASH_ATTENTION:
-            return
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
         seq_lens = torch.randint(low=1, high=32, size=(batch,))
@@ -2643,8 +2713,9 @@ class TestSDPACudaOnly(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(
                     query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
-    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
+    @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     @parametrize("expand_q_batch", [True, False])
     @parametrize("expand_k_batch", [True, False])
     @parametrize("expand_v_batch", [True, False])
@@ -2662,8 +2733,6 @@ class TestSDPACudaOnly(NNTestCase):
         expand_k_num_heads,
         expand_v_num_heads,
     ):
-        if (not SM80OrLater) and kernel == SDPBackend.FLASH_ATTENTION:
-            return
         is_efficient = kernel == SDPBackend.EFFICIENT_ATTENTION
         dtype = torch.float32 if is_efficient else torch.float16
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=dtype)
@@ -2732,7 +2801,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_query_dense(self, device):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float32)
         batch, num_heads, head_dim, head_dim_v = 32, 16, 64, 96

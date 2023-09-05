@@ -50,6 +50,7 @@ tensor_dunder_fns = [
     torch.Tensor.__rmod__,
     torch.Tensor.__rpow__,
     torch.Tensor.__rsub__,
+    torch.Tensor.__rdiv__,
     torch._C._TensorBase.__radd__,
     torch._C._TensorBase.__rmul__,
     torch._C._TensorBase.__ror__,
@@ -452,6 +453,9 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.nn.Parameter:
             # https://github.com/pytorch/pytorch/issues/99569
             unimplemented("torch.nn.Parameter not supported")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
@@ -573,9 +577,10 @@ class TorchVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args[1:]]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
-            def fn_with_prim_types(x, **kwargs):
-                return self.value(x, *args_as_value, **kwargs)
+            def fn_with_prim_types(x):
+                return self.value(x, *args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             fn_with_prim_types.__name__ = "prim " + self.value.__name__
@@ -585,7 +590,7 @@ class TorchVariable(VariableTracker):
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_with_prim_types,
-                    *proxy_args_kwargs([args[0]], kwargs),
+                    *proxy_args_kwargs([args[0]], {}),
                 ),
                 **options,
             )
@@ -753,6 +758,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
+                    if (
+                        kwargs["out"] in tx.output.graphargs
+                        and kwargs["out"].size != tensor_variable.size
+                    ):
+                        # It's hard to get out variants with resizing on graph inputs work
+                        # properly across dynamo/aot/inductor, just fall back.
+                        unimplemented("out variants with resizing on graph inputs")
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
