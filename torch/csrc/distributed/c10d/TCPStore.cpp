@@ -71,6 +71,8 @@ std::unordered_map<std::string, double> Counter::observe() const {
   res["mean"] = mean_;
   if (count_ >= 2) {
     res["sample_variance"] = m2_ / (count_ - 1);
+  } else {
+    res["sample_variance"] = std::nan("1");
   }
   return res;
 }
@@ -390,7 +392,7 @@ int64_t TCPStore::add(const std::string& key, int64_t value) {
 }
 
 bool TCPStore::deleteKey(const std::string& key) {
-  detail::timing_guard tguard(clientCounters_["delete"]);
+  detail::timing_guard tguard(clientCounters_["deleteKey"]);
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::DELETE_KEY);
   buffer.appendString(keyPrefix_ + key);
@@ -495,7 +497,7 @@ void TCPStore::doWait(
       TORCH_CHECK(false, "wait_canceled response is expected");
     }
   }
-  TORCH_CHECK(false, "Socket Timeout");
+  C10_THROW_ERROR(DistStoreError, "Socket Timeout");
 }
 
 void TCPStore::append(

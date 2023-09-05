@@ -194,7 +194,6 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/index_propagation.py',
-    'torch/_inductor/dependencies.py',
     'torch/_inductor/coordinate_descent_tuner.py',
     'torch/_inductor/debug.py',
     'torch/_inductor/hooks.py',

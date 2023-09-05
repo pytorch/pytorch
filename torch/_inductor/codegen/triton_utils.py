@@ -42,7 +42,7 @@ def config_of(args):
         """
         if isinstance(x, TensorArg):
             if include_tensor:
-                return x.buffer not in V.graph.unaligned_buffers
+                return not V.graph.scheduler.is_unaligned_buffer(x.buffer)
             else:
                 return False
         if isinstance(x, SizeArg):

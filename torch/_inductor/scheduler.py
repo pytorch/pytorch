@@ -14,7 +14,7 @@ import torch
 from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
-from .codegen.common import get_scheduling_for_device
+from .codegen.common import get_scheduling_for_device, Kernel
 from .dependencies import StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
@@ -262,14 +262,17 @@ class BaseSchedulerNode:
     def has_side_effects(self):
         return False
 
-    def allocate(self):
+    def decide_inplace_update(self):
+        """
+        Decide if there should be inplace updates for the node
+        and record the decision in the active kernel.
+        """
         if not self.node.should_allocate():
             return
 
         if isinstance(self, (SchedulerNode,)) and (
             self.node.get_alias_names() or self.node.get_mutation_names()
         ):
-            V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
         if (
@@ -317,9 +320,6 @@ class BaseSchedulerNode:
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
-                        V.graph.wrapper_code.codegen_inplace_reuse(
-                            input_node.node, self.node
-                        )
                         # hacky check for if V.kernel is a real kernel or NullHandler
                         if hasattr(V.kernel, "args"):
                             # if there isn't a triton kernel, then we don't need to call triton-specific things.
@@ -338,8 +338,34 @@ class BaseSchedulerNode:
                             # update last usage of reused node
                             self.last_usage.discard(input_node.get_name())
 
-                        return
-        V.graph.wrapper_code.codegen_allocation(self.node)
+                            V.kernel.inplace_update_buffers[
+                                self.get_name()
+                            ] = input_node.get_name()
+                        break
+
+    def allocate(self):
+        if not self.node.should_allocate():
+            return
+
+        if isinstance(self, (SchedulerNode,)) and (
+            self.node.get_alias_names() or self.node.get_mutation_names()
+        ):
+            V.graph.wrapper_code.codegen_allocation(self.node)
+            return
+
+        # hacky check for if V.kernel is a real kernel or NullHandler
+        if (
+            hasattr(V.kernel, "args")
+            and self.get_name() in V.kernel.inplace_update_buffers
+        ):
+            V.graph.wrapper_code.codegen_inplace_reuse(
+                self.scheduler.name_to_node[
+                    V.kernel.inplace_update_buffers[self.get_name()]
+                ].node,
+                self.node,
+            )
+        else:
+            V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
         for use in self.users:
@@ -605,6 +631,7 @@ class SchedulerNode(BaseSchedulerNode):
         return isinstance(self.node, ir.TemplateBuffer)
 
     def run(self, *index_vars):
+        self.decide_inplace_update()
         self.mark_run()
         self.codegen(index_vars)
 
@@ -743,9 +770,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
-
-    def is_foreach(self):
-        return False
 
     def get_device(self):
         return self.group[0]
@@ -1653,7 +1677,7 @@ class Scheduler:
         # generate unique arg name.
         log.debug("remove_buffer(%r)", name)
         V.kernel.args.output_buffers[name] = "REMOVED"
-        V.graph.removed_buffers.add(name)
+        V.kernel.removed_buffers.add(name)
 
     def remove_inplace_buffer(self, name):
         log.debug("removing_inplace_buffer(%r)", name)
@@ -1661,7 +1685,7 @@ class Scheduler:
         V.kernel.args.inplace_buffers[name] = inner_name.replace(
             "in_out_ptr", "REMOVED"
         )
-        V.graph.removed_buffers.add(name)
+        V.kernel.removed_buffers.add(name)
 
     def flush(self):
         for backend in self.backends.values():
@@ -1670,7 +1694,13 @@ class Scheduler:
 
     def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
-        scheduler_node.allocate()
+        # 'decide_inplace_update' stores the inplace update decisions in
+        # the current kernel from where 'allocate' retrieve those decisions.
+        # We have to make sure there is a non-NULL kernel handler to store
+        # those inplace update decisions.
+        with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
+            scheduler_node.decide_inplace_update()
+            scheduler_node.allocate()
         node = scheduler_node.node
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
@@ -1759,6 +1789,17 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
+
+    def is_unaligned_buffer(self, buf_name):
+        if buf_name in V.graph.graph_inputs or buf_name in V.graph.constants:
+            # all graph inputs or constants are assumed to be aligned
+            return False
+        node = self.name_to_node[buf_name]
+        layout = node.node.get_layout()
+        if isinstance(layout, ir.AliasedLayout):
+            return not layout.maybe_guard_aligned()
+        else:
+            return False
 
 
 class BaseScheduling:
