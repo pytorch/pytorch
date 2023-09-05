@@ -1712,7 +1712,7 @@ Tensor asarray(
             device.value_or(tensor.device()),
             dtype.value_or(tensor.scalar_type()),
             /*non_blocking=*/false,
-            /*copy=*/true);
+            /*copy=*/force_copy);
       } else {
         tensor = tensor.clone();
       }
