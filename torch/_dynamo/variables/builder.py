@@ -22,7 +22,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
@@ -1295,8 +1295,8 @@ def wrap_fx_proxy_cls(
 
         # Handle recursive calls here
         elif (
-            isinstance(example_value, FakeTensor)
-            and example_value.fake_mode is tx.fake_mode
+            is_fake(example_value)
+            and maybe_get_fake_mode(example_value) is tx.fake_mode
         ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 
