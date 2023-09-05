@@ -2070,6 +2070,7 @@ if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )
+
     @register_meta(torch.ops.quantized.max_pool2d)
     def meta_quantized_max_pool2d(
         input,
@@ -2079,7 +2080,6 @@ if torch._C._has_mkldnn:
         dilation=(1,),
         ceil_mode=False,
     ):
-        print("---- hit meta qmaxpool2d ----", flush=True)
         (
             nInputPlane,
             outputHeight,
@@ -2094,11 +2094,11 @@ if torch._C._has_mkldnn:
         else:
             size = [nbatch, nInputPlane, outputHeight, outputWidth]
         return torch.empty(
-                size,
-                dtype=input.dtype,
-                device=input.device,
-                memory_format=memory_format,
-            )
+            size,
+            dtype=input.dtype,
+            device=input.device,
+            memory_format=memory_format,
+        )
 
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
@@ -5711,7 +5711,9 @@ def activate_meta():
             elif "onednn::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_onednn.impl(op_overload, fn)
             elif "quantized::" in op_overload.name():
-                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(op_overload, fn)
+                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(
+                    op_overload, fn
+                )
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 

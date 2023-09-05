@@ -5,12 +5,12 @@ import operator
 from typing import Any, Tuple
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
-from torch.fx.experimental.symbolic_shapes import free_symbols
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -777,10 +777,8 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
         )
 
         x_shape = qx.meta.get("tensor_meta").shape
-        print(":x_shape is: {}".format(x_shape), flush=True)
-        print(":free_symbols(x_shape) is: {}".format(free_symbols(x_shape)), flush=True)
         if free_symbols(x_shape):
-            # For dynamic shape case, we can't get activation shape before runtime.
+            # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
         with graph.inserting_before(conv_node):
@@ -944,9 +942,8 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
         bias = kwargs["b"] if "b" in kwargs else None
 
         x_shape = qx.meta.get("tensor_meta").shape
-        print("x_shape is: {}".format(x_shape), flush=True)
         if free_symbols(x_shape):
-            # For dynamic shape case, we can't get activation shape before runtime.
+            # For dynamic shape case, we can't get activation shape ahead of runtime.
             x_shape = None
         graph = match.graph
         with graph.inserting_before(linear_node):
