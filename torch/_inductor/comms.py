@@ -117,13 +117,14 @@ def get_descendants(node):
     return descendants
 
 
-def decide_global_ordering_for_comms(nodes: List["scheduler.BaseSchedulerNode"]):
+def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
     """
-    Just enforces the ordering that's in the input graph.
+    Decide global ordering of comms, by just enforcing the ordering that's in the input graph.
     TODO: Come up with a better approach
     """
     comm_nodes = [n for n in nodes if isinstance(n.node, ir.CollectiveKernel)]
     for i in range(1, len(comm_nodes)):
+        # Enforce ordering by making previous comm a dependency of the next comm
         comm_nodes[i].add_mutation_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
