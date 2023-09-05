@@ -110,10 +110,16 @@ VECTORIZABLE_RTYPES = {
 }
 
 PYTHON_TO_CPP = {
+    "Tensor": "at::Tensor",
     "int": "long",
     "float": "double",
     "bool": "bool",
+    "str": "std::string",
     "ScalarType": "c10::ScalarType",
+    "MemoryFormat": "at::MemoryFormat",
+    "Layout": "at::Layout",
+    "Device": "at::Device",
+    "number": "at::Scalar",
 }
 
 CONTAINER_PYTHON_TO_CPP = {
@@ -1465,7 +1471,9 @@ class CppVecKernel(CppKernel):
         dtype = V.graph.get_dtype(name)
         tiling_var = self.itervars[self.tiling_idx]
         is_broadcast = not index.has(tiling_var)
-        is_mask = dtype in [torch.bool, torch.uint8]
+        is_mask = (
+            dtype in [torch.bool, torch.uint8] and not opt_ctx.is_load_uint8_as_float
+        )
         load_mask = f"to_float_mask({self._load_mask})" if self._load_mask else None
         non_contiguous = (
             not is_broadcast
@@ -2633,6 +2641,7 @@ class CppKernelProxy(CppKernel):
                         node.run(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
+        V.graph.removed_buffers |= scalar_kernel.removed_buffers
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:

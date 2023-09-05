@@ -11,7 +11,7 @@ import typing
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union, Iterable
+from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
 
@@ -19,7 +19,7 @@ import torch
 import torch._export.exported_program as ep
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
-from torch.utils._pytree import pytree_to_str, str_to_pytree, tree_map_only
+from torch.utils._pytree import treespec_dumps, treespec_loads, tree_map_only
 
 from .schema import (  # type: ignore[attr-defined]
     _Union,
@@ -51,6 +51,7 @@ from .schema import (  # type: ignore[attr-defined]
     TensorArgument,
     TensorMeta,
     TensorValue,
+    TREESPEC_VERSION,
 )
 
 
@@ -189,15 +190,15 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
 
 def serialize_call_spec(call_spec: ep.CallSpec) -> CallSpec:
     return CallSpec(
-        in_spec=pytree_to_str(call_spec.in_spec) if call_spec.in_spec else "",
-        out_spec=pytree_to_str(call_spec.out_spec) if call_spec.out_spec else "",
+        in_spec=treespec_dumps(call_spec.in_spec, TREESPEC_VERSION) if call_spec.in_spec else "",
+        out_spec=treespec_dumps(call_spec.out_spec, TREESPEC_VERSION) if call_spec.out_spec else "",
     )
 
 
 def deserialize_call_spec(call_spec: CallSpec) -> ep.CallSpec:
     return ep.CallSpec(
-        in_spec=str_to_pytree(call_spec.in_spec) if call_spec.in_spec else None,
-        out_spec=str_to_pytree(call_spec.out_spec) if call_spec.out_spec else None,
+        in_spec=treespec_loads(call_spec.in_spec) if call_spec.in_spec else None,
+        out_spec=treespec_loads(call_spec.out_spec) if call_spec.out_spec else None,
     )
 
 
@@ -242,7 +243,7 @@ def deserialize_signature(sig: GraphSignature) -> ep.ExportGraphSignature:
     )
 
 
-def serialize_torch_artifact(artifact: Union[Dict[str, Any], Iterable[Any]]) -> bytes:
+def serialize_torch_artifact(artifact) -> bytes:
     buffer = io.BytesIO()
     # This is a workaround for backend's tensor deserialization problem:
     # unpickleTensor() always create a tensor on the device where it was originally saved
@@ -255,7 +256,7 @@ def serialize_torch_artifact(artifact: Union[Dict[str, Any], Iterable[Any]]) -> 
     return buffer.getvalue()
 
 
-def deserialize_torch_artifact(serialized: bytes) -> Union[Dict[str, torch.Tensor], List[torch.Tensor]]:
+def deserialize_torch_artifact(serialized: bytes):
     if len(serialized) == 0:
         return {}
     buffer = io.BytesIO(serialized)
@@ -329,6 +330,7 @@ class GraphState:
     sym_int_values: Dict[str, SymInt] = field(default_factory=dict)
     sym_bool_values: Dict[str, SymBool] = field(default_factory=dict)
     is_single_tensor_return: bool = False
+    constants: Dict[str, torch.Tensor] = field(default_factory=dict)
 
 
 class GraphModuleSerializer:
@@ -523,18 +525,35 @@ class GraphModuleSerializer:
         )
 
     def serialize_input(self, arg) -> Argument:
+        import torch._inductor.ir as inductor_ir
+
         if isinstance(arg, torch.fx.Node):
             if arg.op == "get_attr":
                 assert isinstance(arg.target, str)
-                with self.save_graph_state():
-                    graph = self.serialize_graph(getattr(arg.graph.owning_module, arg.target))
-                return Argument.create(as_graph=GraphArgument(name=arg.target, graph=graph))
+                attr = getattr(arg.graph.owning_module, arg.target)
+
+                if isinstance(attr, torch.Tensor):
+                    self.graph_state.constants[arg.name] = attr
+                    return Argument.create(as_tensor=TensorArgument(name=arg.name))
+                elif isinstance(attr, torch.fx.GraphModule):
+                    with self.save_graph_state():
+                        graph = self.serialize_graph(attr)
+                    return Argument.create(as_graph=GraphArgument(name=arg.target, graph=graph))
+                else:
+                    raise SerializeError(f"Unsupported getattr attribute {arg.target} with type: {type(attr)}")
             elif self.is_sym_int_arg(arg):
                 return Argument.create(as_sym_int=SymIntArgument.create(as_name=arg.name))
             elif self.is_sym_bool_arg(arg):
                 return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=arg.name))
             else:
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
+        elif isinstance(arg, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer)):
+            # Other branches are for arguments in fx node.
+            # This is a special branch for handling buffers (representing tensor arguments)
+            # for inductor's ExternalFallbackNode
+            # export_extern_kernel_node() is using this function to serialize arguments
+            assert arg.name is not None, "Input buffer must have valid name"
+            return Argument.create(as_tensor=TensorArgument(name=arg.name))
         elif isinstance(arg, bool):
             return Argument.create(as_bool=arg)
         elif isinstance(arg, str):
@@ -575,14 +594,38 @@ class GraphModuleSerializer:
                 return Argument.create(as_sym_bools=values)
             elif all(isinstance(a, torch.fx.Node) for a in arg):
                 # list of tensors
-                return Argument.create(
-                    as_tensors=[TensorArgument(name=a.name) for a in arg],
-                )
-            elif any(isinstance(a, torch.fx.Node) for a in arg):
+                arguments = []
+                for a in arg:
+                    if a.op == "get_attr":
+                        assert isinstance(a.target, str)
+                        attr = getattr(a.graph.owning_module, a.target)
+                        assert isinstance(attr, torch.Tensor)
+                        self.graph_state.constants[a.name] = attr
+                    arguments.append(TensorArgument(name=a.name))
+                return Argument.create(as_tensors=arguments)
+            elif all(isinstance(a, (torch.fx.Node, type(None))) for a in arg):
+                # list of optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
                         return OptionalTensorArgument.create(as_none=())
                     elif isinstance(a, torch.fx.Node):
+                        return OptionalTensorArgument.create(as_tensor=a.name)
+                    else:
+                        raise SerializeError(f"Unsupported list/tuple argument: {a}")
+                return Argument.create(
+                    as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
+                )
+            elif all(isinstance(a, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer)) for a in arg):
+                # list of tensors
+                return Argument.create(
+                    as_tensors=[TensorArgument(name=a.name) for a in arg],
+                )
+            elif all(isinstance(a, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer, type(None))) for a in arg):
+                # list of optional tensors
+                def serialize_optional_tensor_args(a):
+                    if a is None:
+                        return OptionalTensorArgument.create(as_none=())
+                    elif isinstance(a, torch._inductor.ir.InputBuffer):
                         return OptionalTensorArgument.create(as_tensor=a.name)
                     else:
                         raise SerializeError(f"Unsupported list/tuple argument: {a}")
@@ -613,7 +656,6 @@ class GraphModuleSerializer:
             # in the object containing a __getstate__ and __setstate__
             # serialize/deserialize function.
             blob = pickle.dumps(arg)
-            blob = base64.b64encode(blob).decode('utf-8')
             return Argument.create(as_custom_obj=CustomObjArgument(blob))
         else:
             raise SerializeError(f"Unsupported argument type: {type(arg)}")
@@ -645,8 +687,8 @@ class GraphModuleSerializer:
         return ModuleCallSignature(
             inputs=[serialize_argument(x) for x in module_call_signature.inputs],
             outputs=[serialize_argument(x) for x in module_call_signature.outputs],
-            in_spec=pytree_to_str(module_call_signature.in_spec),
-            out_spec=pytree_to_str(module_call_signature.out_spec),
+            in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
+            out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
         )
 
     def serialize_module_call_graph(self, module_call_graph: List[ep.ModuleCallEntry]) -> List[ModuleCallEntry]:
@@ -750,6 +792,11 @@ class GraphModuleSerializer:
             except Exception as e:
                 raise SerializeError(f"Failed serializing node {node} in graph:\n{graph_module.graph}") from e
 
+        serialized_constants = {
+            k: serialize_torch_artifact(v)
+            for k, v in self.graph_state.constants.items()
+        }
+
         return Graph(
             inputs=self.graph_state.inputs,
             nodes=self.graph_state.nodes,
@@ -758,6 +805,7 @@ class GraphModuleSerializer:
             sym_bool_values=self.graph_state.sym_bool_values,
             outputs=self.graph_state.outputs,
             is_single_tensor_return=self.graph_state.is_single_tensor_return,
+            constants=serialized_constants,
         )
 
     def serialize(self, graph_module: torch.fx.GraphModule) -> GraphModule:
@@ -789,9 +837,6 @@ class ExportedProgramSerializer:
         )
         serialized_range_constraints = serialize_range_constraints(exported_program.range_constraints)
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
-        serialized_original_arguments = base64.b64encode(
-            serialize_torch_artifact(exported_program.original_traced_arguments)
-        ).decode('utf-8')
 
         return (
             ExportedProgram(
@@ -800,7 +845,7 @@ class ExportedProgramSerializer:
                 range_constraints=serialized_range_constraints,
                 equality_constraints=serialized_equality_constraints,
                 schema_version=SCHEMA_VERSION,
-                original_traced_arguments=serialized_original_arguments,
+                example_inputs=None,
             ),
             serialize_torch_artifact(exported_program.state_dict),
         )
@@ -903,6 +948,15 @@ class GraphModuleDeserializer:
 
     def deserialize_graph_output(self, output) -> torch.fx.Node:
         if isinstance(output.value, TensorArgument):
+            if output.value.name in self.constants:
+                val = self.constants[output.value.name]
+                setattr(self.module, output.value.name, val)
+                node = self.graph.create_node(
+                    "get_attr",
+                    output.value.name,
+                    name=output.value.name,
+                )
+                return node
             return self.serialized_name_to_node[output.value.name]
         elif isinstance(output.value, (SymIntArgument, SymBoolArgument)):
             return self.serialized_name_to_node[output.value.as_name]
@@ -910,6 +964,11 @@ class GraphModuleDeserializer:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
     def deserialize_graph(self, serialized_graph: Graph) -> torch.fx.Graph:
+        self.constants: Dict[str, torch.Tensor] = {
+            k: deserialize_torch_artifact(base64.b64decode(v))
+            for k, v in serialized_graph.constants.items()
+        }
+
         # Handle the tensor metas.
         for name, tensor_value in serialized_graph.tensor_values.items():
             meta_val = self.deserialize_tensor_meta(tensor_value.meta, self.fake_tensor_mode)
@@ -1078,6 +1137,14 @@ class GraphModuleDeserializer:
         elif isinstance(value, Device):
             return deserialize_device(value)
         elif isinstance(value, TensorArgument):
+            if value.name in self.constants:
+                val = self.constants[value.name]
+                setattr(self.module, value.name, val)
+                return self.graph.create_node(
+                    "get_attr",
+                    value.name,
+                    name=value.name,
+                )
             return self.serialized_name_to_node[value.name]
         elif isinstance(value, (int, float, bool)):
             return value
@@ -1089,7 +1156,21 @@ class GraphModuleDeserializer:
             if len(value) == 0:
                 return []
             elif isinstance(value[0], TensorArgument):
-                return [self.serialized_name_to_node[arg.name] for arg in value]
+                result = []
+                for arg in value:
+                    if arg.name in self.constants:
+                        val = self.constants[arg.name]
+                        setattr(self.module, arg.name, val)
+                        result.append(
+                            self.graph.create_node(
+                                "get_attr",
+                                arg.name,
+                                name=arg.name,
+                            )
+                        )
+                    else:
+                        result.append(self.serialized_name_to_node[arg.name])
+                return result
             elif isinstance(value[0], (int, float, bool)):
                 # convert from serialized.python.types.List to python list
                 return list(value)
@@ -1246,8 +1327,8 @@ class GraphModuleDeserializer:
         return ep.ModuleCallSignature(
             inputs=[deserialize_argument(x) for x in module_call_signature.inputs],
             outputs=[deserialize_argument(x) for x in module_call_signature.outputs],
-            in_spec=str_to_pytree(module_call_signature.in_spec),
-            out_spec=str_to_pytree(module_call_signature.out_spec),
+            in_spec=treespec_loads(module_call_signature.in_spec),
+            out_spec=treespec_loads(module_call_signature.out_spec),
         )
 
     def deserialize_module_call_graph(self, module_call_graph: List[ModuleCallEntry]) -> List[ep.ModuleCallEntry]:
@@ -1311,9 +1392,6 @@ class ExportedProgramDeserializer:
 
         state_dict = deserialize_torch_artifact(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
-        original_traced_arguments = deserialize_torch_artifact(
-            base64.b64decode(serialized_exported_program.original_traced_arguments)
-        )
 
         exported_program = ep.ExportedProgram(
             graph_module,
@@ -1324,7 +1402,7 @@ class ExportedProgramDeserializer:
             range_constraints,
             equality_constraints,
             module_call_graph,
-            original_traced_arguments,  # type: ignore[arg-type]
+            None,  # type: ignore[arg-type]
         )
         return upgrader.upgrade(exported_program)
 
@@ -1373,6 +1451,8 @@ class EnumEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Enum):
             return obj.value
+        if isinstance(obj, bytes):
+            return base64.b64encode(obj).decode('utf-8')
         return super().default(obj)
 
 
@@ -1392,7 +1472,13 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
-    if isinstance(cls, type) and issubclass(cls, _Union):
+    if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
+        if data is None:
+            return None
+        ty_args = typing.get_args(cls)
+        assert len(ty_args) == 2
+        return _dict_to_dataclass(ty_args[0], data)
+    elif isinstance(cls, type) and issubclass(cls, _Union):
         obj = cls(**data)
         field_type = cls.__annotations__[obj.type]
         setattr(obj, obj.type, _dict_to_dataclass(field_type, obj.value))

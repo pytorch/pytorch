@@ -1,4 +1,5 @@
 import itertools
+import random
 import unittest
 from functools import partial
 from itertools import chain, product
@@ -933,7 +934,9 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
     # Samples do not need to be Hermitian, as we're using gradcheck_wrapper_hermitian_input
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
-        sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
+        # Note: we cannot use np.random.choice here as TorchDynamo
+        # does not support tensors of strings.
+        sample.kwargs = {"UPLO": random.choice(["L", "U"])}
         sample.output_process_fn_grad = out_fn
         yield sample
 
@@ -2406,6 +2409,11 @@ python_ref_db: List[OpInfo] = [
         "_refs.linalg.diagonal",
         torch_opinfo_name="linalg.diagonal",
         supports_out=False,
+        op_db=op_db,
+    ),
+    PythonRefInfo(
+        "_refs.linalg.vecdot",
+        torch_opinfo_name="linalg.vecdot",
         op_db=op_db,
     ),
     ReductionPythonRefInfo(
