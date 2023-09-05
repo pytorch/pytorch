@@ -112,3 +112,4 @@ Read More
    torch.compiler_custom_backends
    torch.compiler_transformations
    torch.compiler_ir
+   torch.compiler_ipex
