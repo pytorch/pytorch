@@ -1624,8 +1624,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
-    # https://github.com/pytorch/pytorch/issues/107460
     def test_dunder_new_function_inlining(self):
+        # https://github.com/pytorch/pytorch/issues/107460
         from torch._dynamo.utils import counters
 
         counters.clear()
