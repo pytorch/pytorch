@@ -3191,7 +3191,7 @@ def run(runner, args, original_dir=None):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
-        torch._dynamo.config.print_graph_breaks = True
+        torch._logging.set_logs(graph_breaks=True)
 
     if args.quiet:
         torch._logging.set_logs(dynamo=logging.ERROR)
