@@ -153,6 +153,7 @@ struct ScatterOptions {
 struct ReduceScatterOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  bool recordStream = true;
 };
 
 struct AllToAllOptions {

@@ -143,6 +143,7 @@ class ScatterOptions:
 class ReduceScatterOptions:
     reduceOp: ReduceOp
     timeout: timedelta
+    recordStream: bool
 
 class BarrierOptions:
     device_ids: List[int]

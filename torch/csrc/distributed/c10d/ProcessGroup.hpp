@@ -376,13 +376,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
-                int64_t)>();
+                int64_t,
+                bool)>();
     return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
-        opts.timeout.count()));
+        opts.timeout.count(),
+        opts.recordStream));
   }
 
   // This function is a coalesced version of `reduce_scatter_tensor` (currently
