@@ -128,7 +128,7 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
         comm_nodes[i].add_mutation_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
-def reorder_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List[fx.Node]:
+def reorder_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Sinks waits and raises comms to maximize overlap. Does not try to reorder compute.
     """
@@ -142,37 +142,15 @@ def debug_print(s=""):
         printd(s)
 
 
-def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List[fx.Node]:
+def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
-    Decides a global ordering of all nodes. Assumes that we already have a global ordering of communication nodes.
-    Overall strategy is:
-    Priority 1. Given that we've currently scheduled comm N, we now schedule all compute nodes that are required for comm N + 1, but do not depend on comm N.
-    Priority 2. Now, if all those compute nodes are sufficient to overlap comm N, we're done. Otherwise, we now need to look elsewhere to find compute that overlaps with comm N. We prioritize compute nodes that are needed sooner.
-    Priority 3. Now, we schedule the compute nodes dependent on comm N and required for comm N + 1.
-    Repeat.
+    Decides a global ordering of all compute and communication nodes. Assumes that we already have a global ordering of communication nodes.
+    Overall procedure is:
+        Step 1. Given that we've currently scheduled comm N, we now schedule all compute nodes that are required for comm N + 1 but do not depend on comm N.
+        Step 2. Now, if all those compute nodes are sufficient to overlap comm N, we're done. Otherwise, we now need to look elsewhere to find compute that overlaps with comm N. We prioritize compute nodes that are needed sooner.
+        Step 3. Now, we schedule the compute nodes dependent on comm N and required for comm N + 1.
+        Repeat this procedure for subsequent comm nodes.
     """
-
-    def get_name_set(nodes_or_snodes):
-        if len(nodes_or_snodes) == 0:
-            return set()
-        if isinstance(list(nodes_or_snodes)[0], str):
-            return set(nodes_or_snodes)
-        elif isinstance(list(nodes_or_snodes)[0], fx.Node):
-            return set([x.name for x in nodes_or_snodes])
-        else:
-            return set([x.get_name() for x in nodes_or_snodes])
-
-    def assert_equal_nodes_and_snodes(nodes, snodes):
-        assert len(nodes) == len(snodes), f"nodes: {nodes} \n len(nodes): {len(nodes)} \n snodes: {snodes} \n len(snodes): {len(snodes)} \n get_name_set(snodes) ^ get_name_set(nodes): {get_name_set(snodes) ^ get_name_set(nodes)}"
-        for node, snode in zip(tuple_sorted(nodes), tuple_sorted(snodes)):
-            if isinstance(node, str):
-                assert node == snode, f"node: {node} \n snode: {snode}"
-            else:
-                assert node.name == snode.get_name(), f"node.name: {node.name} \n snode.get_name(): {snode.get_name()}"
-
-    name_to_snode = {}
-    for snode in snodes:
-        name_to_snode[snode.get_name()] = snode
 
     comm_nodes = []
     for snode in snodes:
@@ -187,7 +165,6 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
         for user in snode.node_users:
             if user in indeg:
                 indeg[user] += 1
-    # breakpoint()
     free_nodes = set([node for node in snodes if indeg[node] == 0])
 
     result = []
