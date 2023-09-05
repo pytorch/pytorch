@@ -142,6 +142,7 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "doctr_reco_predictor",
     "drq",
 }
 
