@@ -116,15 +116,6 @@ def decide_global_ordering_of_comms(nodes: List["scheduler.BaseSchedulerNode"]):
         comm_nodes[i].add_mutation_dep(WeakDep(comm_nodes[i - 1].get_name()))
 
 
-def reorder_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
-    """
-    Sinks waits and raises comms to maximize overlap. Does not try to reorder compute.
-    """
-    snodes = sink_waits(snodes)
-    snodes = raise_comms(snodes)
-    return snodes
-
-
 def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
     assert not any(isinstance(snode.node, ir.CollectiveKernel) for snode in snodes)
 
@@ -255,24 +246,23 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
                 schedule_node(snode)
                 total_compute_runtime_cost += compute_runtime_cost
         rollable_compute_cost = total_compute_runtime_cost - priority1_runtime_cost
-        # The idea here is that if there are no compute nodes from Step 3, we
-        # can roll over the compute nodes in Step 2 to overlap with the next comm, since
-        # they're not required to finish before the next comm starts.
 
+        # Priority 3. Now, we schedule the compute nodes dependent on comm N and required for comm N + 1.
         is_comm_blocking = (
             len(comm_descendants[comm_nodes[idx - 1]] & comm_ancestors[comm_nodes[idx]])
             > 0
         )
+        # The idea here is that if there are no compute nodes from Priority 3, we
+        # can roll over the compute nodes in Priority 2 to overlap with the next comm, since
+        # they're not required to finish before the next comm starts.
         # TODO: We can extend our ability to roll over compute if we leverage low
         # priority streams here, since that would alleviate us from the requirement
-        # to finish priority 2 compute before the next comm starts.
+        # to finish Priority 2 compute before the next comm starts.
         if is_comm_blocking:
             rolled_over_compute_cost = 0
         else:
             rolled_over_compute_cost = rollable_compute_cost
-        debug_print(f"{comm_nodes[idx-1]} overlap: {total_compute_runtime_cost}/{prev_comm_runtime_cost}")
 
-        debug_print("priority 3")
         priority3 = unscheduled_nodes & comm_ancestors[comm_nodes[idx]]
         schedule_nodes(list(priority3) + [comm_nodes[idx]])
 
