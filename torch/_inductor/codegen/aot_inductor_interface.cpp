@@ -1,6 +1,8 @@
 #include <torch/csrc/inductor/aot_inductor_interface.h>
 #include <torch/csrc/inductor/aot_inductor_model_container.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <iostream>
+#include <torch/csrc/inductor/proxy_executor.h>
 #include <stdexcept>
 #include <vector>
 
@@ -49,7 +51,8 @@ AOTInductorError AOTInductorModelContainerRun(
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
-    AOTInductorStreamHandle stream_handle) {
+    AOTInductorStreamHandle stream_handle,
+    AOTInductorProxyExecutorHandle proxy_executor_handle) {
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
@@ -69,8 +72,11 @@ AOTInductorError AOTInductorModelContainerRun(
   }
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
+
+  torch::aot_inductor::ProxyExecutor* proxy_executor = reinterpret_cast<torch::aot_inductor::ProxyExecutor*>(proxy_executor_handle);
+
   CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { container->run(input_tensors, output_tensors, stream); })
+      { container->run(input_tensors, output_tensors, stream, proxy_executor); })
 }
 
 AOTInductorError AOTInductorModelContainerGetNumInputs(
@@ -94,6 +100,17 @@ AOTInductorError AOTInductorModelContainerGetInputName(
       { *input_name_out = container->input_name(input_idx); })
 }
 
+AOTInductorError AOTInductorModelContainerGetInputDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t input_idx,
+    const char** input_dtype_out) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *input_dtype_out = container->get_input_dtype(input_idx); })
+}
+
 AOTInductorError AOTInductorModelContainerGetNumOutputs(
     AOTInductorModelContainerHandle container_handle,
     size_t* num_outputs_out) {
@@ -113,6 +130,17 @@ AOTInductorError AOTInductorModelContainerGetOutputName(
           container_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *output_name_out = container->output_name(output_idx); })
+}
+
+AOTInductorError AOTInductorModelContainerGetOutputDtype(
+    AOTInductorModelContainerHandle container_handle,
+    size_t output_idx,
+    const char** output_dtype_out) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
+          container_handle);
+  CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { *output_dtype_out = container->get_output_dtype(output_idx); })
 }
 
 AOTInductorError AOTInductorModelContainerGetMaxInputShape(

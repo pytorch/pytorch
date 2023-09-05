@@ -218,16 +218,8 @@ def mean(
 ):
     dtype = _atleast_float(dtype, a.dtype)
 
-    is_half = dtype == torch.float16
-    if is_half:
-        # XXX revisit when the pytorch version has pytorch/pytorch#95166
-        dtype = torch.float32
-
     axis_kw = {} if axis is None else {"dim": axis}
     result = a.mean(dtype=dtype, **axis_kw)
-
-    if is_half:
-        result = result.to(torch.float16)
 
     return result
 
@@ -329,7 +321,7 @@ def average(
         if a.shape != weights.shape:
             if axis is None:
                 raise TypeError(
-                    "Axis must be specified when shapes of a and weights " "differ."
+                    "Axis must be specified when shapes of a and weights differ."
                 )
             if weights.ndim != 1:
                 raise TypeError(

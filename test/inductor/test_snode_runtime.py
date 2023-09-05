@@ -2,7 +2,6 @@
 
 
 import torch
-from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
@@ -11,8 +10,6 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 aten = torch.ops.aten
 
 
-# TODO(xmfan): remove this backend once we call from prod i.e. @torch.compile codepath
-@register_backend
 def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
@@ -22,7 +19,7 @@ def calculate_runtime(f, *args) -> float:
     Assumes all inputs are fp32
     """
     metrics.reset()
-    torch._dynamo.optimize("count_bytes_inductor")(f)(*args)
+    torch._dynamo.optimize(count_bytes_inductor)(f)(*args)
     print(metrics.node_runtimes)
 
     ret = 0.0

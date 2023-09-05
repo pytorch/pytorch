@@ -138,6 +138,7 @@ class SavePlanner(abc.ABC):
     >>>         for p in plan:
     >>>             if p.tensor_data is not None:
     >>>                 p.tensor_data.properties.dtype = torch.float16
+    >>>         return plan
     >>>
     >>>     def resolve_data(self, write_item):
     >>>         item = super().resolve_data(write_item)

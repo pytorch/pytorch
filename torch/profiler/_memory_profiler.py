@@ -1151,6 +1151,8 @@ class MemoryProfileTimeline:
         mt = self._coalesce_timeline(device)
         times, sizes = np.array(mt[0]), np.array(mt[1])
         stacked = np.cumsum(sizes, axis=1) / 1024**3
+        max_memory_allocated = torch.cuda.max_memory_allocated()
+        max_memory_reserved = torch.cuda.max_memory_reserved()
 
         # Plot memory timeline as stacked data
         fig = plt.figure(figsize=figsize, dpi=80)
@@ -1164,7 +1166,11 @@ class MemoryProfileTimeline:
         axes.set_xlabel("Time (us)")
         axes.set_ylabel("Memory (GB)")
         title = "\n\n".join(
-            ([title] if title else []) + [f"Max: {stacked[:, -1].max():.2f} GB"]
+            ([title] if title else [])
+            + [
+                f"Max memory allocated: {max_memory_allocated/(10**9):.2f} GB \n"
+                f"Max memory reserved: {max_memory_reserved/(10**9):.2f} GB"
+            ]
         )
         axes.set_title(title)
 
