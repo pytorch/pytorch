@@ -428,12 +428,16 @@ class TestStackDataset(TestCase):
         l = [1, 2, 3, 4]
 
         source = StackDataset(t, l)
-        self.assertEqual(t.data, source.__getitems__([0, 1, 2, 3])[0])
-        self.assertEqual(l, source.__getitems__([0, 1, 2, 3])[1])
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i][0])
+            self.assertEqual(l[i], batch[i][1])
 
         source = StackDataset(t=t, l=l)
-        self.assertEqual(t.data, source.__getitems__([0, 1, 2, 3])['t'])
-        self.assertEqual(l, source.__getitems__([0, 1, 2, 3])['l'])
+        batch = source.__getitems__([0, 1, 2, 3])
+        for i in range(4):
+            self.assertEqual(t[i], batch[i]['t'])
+            self.assertEqual(l[i], batch[i]['l'])
 
 
 @unittest.skipIf(
