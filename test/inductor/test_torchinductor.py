@@ -7009,10 +7009,8 @@ class CommonTemplate:
                 _, mul_buf, _ = nodes
                 self.assertTrue(
                     all(
-
                         V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
                         for buf in nodes
-
                     )
                 )
                 # before the fix, the wrong index expression
@@ -7707,7 +7705,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             def forward(self, x):
                 return self.gru(x)
-
 
         def test_rnn_compile_safe(self):
             device = torch.device("cuda")
