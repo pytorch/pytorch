@@ -197,7 +197,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
 
     if isinstance(desired, str) and isinstance(actual, str):
         assert actual == desired
-    return
+        return
 
     if isinstance(desired, dict):
         if not isinstance(actual, dict):
