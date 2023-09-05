@@ -4,6 +4,7 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/variable_info.h>
@@ -449,7 +450,6 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
     throw std::runtime_error(msg);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
