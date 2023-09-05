@@ -570,6 +570,12 @@ static PyObject* NNModuleGuard_call(
 }
 
 static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
+  // Uses a private tags introduced in PEP 509 - ma_version_tag to check if
+  // there are any changes in the dict.
+  // TODO(jansel,janimesh) Note that this ma_version_tag be removed/repurposed
+  // in Python 3.12 under PEP 699. We can rely on newly introduced dict watchers
+  // in 3.12 - https://docs.python.org/3.12/c-api/dict.html#c.PyDict_Watch
+
   NNModuleGuard* guard =
       (NNModuleGuard*)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
   if (guard == NULL) {

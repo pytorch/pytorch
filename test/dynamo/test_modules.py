@@ -1774,6 +1774,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         run_test_case("register_full_backward_hook", backward_hook, 6)
         run_test_case("register_full_backward_pre_hook", backward_pre_hook, 10)
 
+    def test_unspecialized_nn_module(self):
+        # This test is little confusing because of combination of
+        # nn_module_guard and unspecialized nn module variable.
+
+        # The graph break in forward causes two graphs
+        # 1) The first graph has self.relu which introduces a nn_module_guard
+        # 2) The second graph first assumes self to be NNModuleVariable, but the
+        # restarts the analysis with self mapping to
+        # UnSpecializedNNModuleVariable, on witnessing self.a += 1.
+
+        # Now, when we run the compiled mod the first time, it changes the value
+        # of self.a. This is fine for the first run. But, when we run the
+        # compiled module again, the first graph recompiles. This is because
+        # self.a has changed, changing the ma_version_tag, causing
+        # nn_module_guard to fail.
+
+        # At this point, we might feel that this is doomed as we will always
+        # keep recompiling on the first graph. But, then Dynamo has already
+        # marked the self to be UnspecializedNNModuleVariable (because of self.a
+        # in the second graph), and therefore during the recompilation, we do
+        # not introduce any nn_module_guard. So, in all we have just one
+        # recompilation.
+        class Mock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 5
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                z = self.relu(x)
+                torch._dynamo.graph_break()
+                self.a += 1
+                return z * self.a
+
+        mod = Mock()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(mod, backend=cnt)
+
+        for _ in range(5):
+            opt(torch.randn(4))
+
+        self.assertEqual(cnt.frame_count, 4)
+
     def test_hooks_outer(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
