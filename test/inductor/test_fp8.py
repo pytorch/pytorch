@@ -7,6 +7,7 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -24,8 +25,12 @@ torch.set_float32_matmul_precision("high")
 
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(
+        not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
+        "FP8 is only supported on H100+",
+    )
     @parametrize("dtype", (torch.float16, torch.bfloat16))
-    @unittest.skipIf(not isSM90orLaterDevice, "Requires SM90 device")
     def test_eager_fallback(self, dtype: torch.dtype):
         x_shape = (16, 16)
         weight_shape = (32, 16)

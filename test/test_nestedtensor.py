@@ -360,19 +360,17 @@ class TestNestedTensor(TestCase):
     @torch.inference_mode()
     def test_repr_string(self):
         a = torch.nested.nested_tensor([])
-        expected = "nested_tensor([" "\n\n])"
+        expected = "nested_tensor([\n\n])"
         self.assertEqual(str(a), expected)
         self.assertEqual(repr(a), expected)
 
         a = torch.nested.nested_tensor([torch.tensor(1.0)])
-        expected = "nested_tensor([" "\n  tensor(1.)" "\n])"
+        expected = "nested_tensor([\n  tensor(1.)\n])"
         self.assertEqual(str(a), expected)
         self.assertEqual(repr(a), expected)
 
         a = torch.nested.nested_tensor([torch.tensor([[1, 2]]), torch.tensor([[4, 5]])])
-        expected = (
-            "nested_tensor([" "\n  tensor([[1, 2]])" "," "\n  tensor([[4, 5]])" "\n])"
-        )
+        expected = "nested_tensor([\n  tensor([[1, 2]]),\n  tensor([[4, 5]])\n])"
         self.assertEqual(str(a), expected)
         self.assertEqual(repr(a), expected)
 
