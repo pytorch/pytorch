@@ -410,6 +410,31 @@ class TestStackDataset(TestCase):
             self.assertEqual(t[i], source[i]['a'])
             self.assertEqual(l[i], source[i]['b'])
 
+    def test_getitems(self):
+        class GetItemsDataset(Dataset):
+            def __init__(self):
+                self.data = torch.randn(4)
+
+            def __getitem__(self, item):
+                return self.data[item]
+
+            def __getitems__(self, items):
+                return self.data[items]
+
+            def __len__(self):
+                return 4
+
+        t = GetItemsDataset()
+        l = [1, 2, 3, 4]
+
+        source = StackDataset(t, l)
+        self.assertEqual(t.data, source.__getitems__([0, 1, 2, 3])[0])
+        self.assertEqual(l, source.__getitems__([0, 1, 2, 3])[1])
+
+        source = StackDataset(t=t, l=l)
+        self.assertEqual(t.data, source.__getitems__([0, 1, 2, 3])['t'])
+        self.assertEqual(l, source.__getitems__([0, 1, 2, 3])['l'])
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
