@@ -1649,7 +1649,9 @@ class Scheduler:
             elif node.is_extern():
                 # Insert marker info
                 if config.triton.descriptive_names:
-                    op_info = get_origin_op_info([node], config.triton.descriptive_names)
+                    op_info = get_origin_op_info(
+                        [node], config.triton.descriptive_names
+                    )
                     V.graph.wrapper_code.writeline(op_info)
                 self.codegen_extern_call(node)
             elif node.is_foreach():
