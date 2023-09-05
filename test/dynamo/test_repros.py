@@ -3017,13 +3017,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         def normalize(x):
             return x.cos()
 
-        @torch.compile(backend="eager", fullgraph=True)
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=False)
         def fn(x, normalize_img):
             lowres_cond_img = x.sin()
             lowres_cond_img = maybe(normalize_img)(lowres_cond_img)
             return lowres_cond_img
 
         self.assertEqual(fn(torch.ones([]), normalize), torch.ones([]).sin().cos())
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_functools_wraps(self):
         def cool_name(x):

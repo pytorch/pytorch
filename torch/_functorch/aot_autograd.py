@@ -2919,15 +2919,19 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             with TracingContext.report_output_strides() as fwd_output_strides:
                 kept_flat_args = []
                 kept_input_pos = []
+                unused_nodes = []
                 for i, node in enumerate(fw_module.graph.nodes):
                     if node.op == "placeholder":
-                        # This int check is weird, removing it fails
-                        if (len(node.users) == 0
-                                and not isinstance(adjusted_flat_args[i], (int, float))):
-                            fw_module.graph.erase_node(node)
+                        # workaround https://github.com/pytorch/pytorch/issues/97894
+                        if (len(node.users) == 0) and not isinstance(adjusted_flat_args[i], float):
+                            unused_nodes.append(node)
                         else:
                             kept_flat_args.append(adjusted_flat_args[i])
                             kept_input_pos.append(i)
+                for un in unused_nodes:
+                    # Note - we could do this inline, but this is far easier to debug and computationally the same.
+                    fw_module.graph.erase_node(un)
+
                 compiled_fw_func = aot_config.fw_compiler(
                     fw_module, kept_flat_args
                 )

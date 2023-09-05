@@ -183,9 +183,24 @@ class UserDefinedClassVariable(UserDefinedVariable):
             subargs_real_values = []
             subkwargs = {}
             for subarg in subargs:
-                subargs_real_values.append(subarg.value)
+                if isinstance(subarg, variables.UserFunctionVariable):
+                    subargs_real_values.append(subarg.fn)
+                elif isinstance(
+                    subarg,
+                    (variables.UserDefinedObjectVariable, variables.ConstantVariable),
+                ):
+                    subargs_real_values.append(subarg.value)
+                else:
+                    unimplemented("partial function call with non-constant arguments")
             for k, v in kwargs.items():
-                subkwargs[k] = v.value
+                if isinstance(v, variables.UserFunctionVariable):
+                    subkwargs[k] = v.fn
+                elif isinstance(
+                    v, (variables.UserDefinedObjectVariable, variables.ConstantVariable)
+                ):
+                    subkwargs[k] = v.value
+                else:
+                    unimplemented("partial function call with non-constant arguments")
 
             new_fn = functools.partial(args[0].fn, *subargs_real_values, **subkwargs)
             return variables.functions.UserFunctionVariable(new_fn, **options)

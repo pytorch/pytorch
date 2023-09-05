@@ -310,7 +310,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         comp_out[0].backward(torch.ones(4))
 
         self.assertEqual(cnts.frame_count, 1)
-        my_hook = my_hook2
+        my_hook = my_hook2  # noqa: F811
         self.assertEqual(x0.grad, x1.grad)
 
         eager_out = mod(x0)

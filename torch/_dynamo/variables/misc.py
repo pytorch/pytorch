@@ -20,6 +20,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
+from ..guards import GuardBuilder
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -790,6 +791,14 @@ class SkipFilesVariable(VariableTracker):
             return variables.lists.DequeVariable(
                 items, mutable_local=MutableLocal(), **options
             )
+        elif self.value is functools.partial:
+            guards = options.get("guards", set())
+            guards.add(self.source.make_guard(GuardBuilder.TYPE_MATCH))
+            return variables.UserDefinedClassVariable(
+                self.value,
+                source=self.source,
+                guards=guards,
+            ).call_function(tx, args, kwargs)
         else:
             try:
                 path = inspect.getfile(self.value)
