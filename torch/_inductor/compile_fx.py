@@ -861,12 +861,12 @@ def compile_fx_aot(
         else {**config_patches, "cpp_wrapper": True}
     )
     if (
-        "aot_inductor_output_path" not in config_patches
-        and not config.aot_inductor_output_path
+        "aot_inductor.output_path" not in config_patches
+        and not config.aot_inductor.output_path
     ):
         config_patches = {
             **config_patches,
-            "aot_inductor_output_path": code_hash(model_.code),
+            "aot_inductor.output_path": code_hash(model_.code),
         }
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
