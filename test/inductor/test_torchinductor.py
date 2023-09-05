@@ -604,24 +604,25 @@ class CommonTemplate:
 
         self.common(fn, (x, y, z))
 
+    # lowering operation tests
     def test_add_uint8_tensor(self):
             def fn(x):
                 return (x + x).to(torch.int16)
-            x = torch.tensor(128, dtype=torch.uint8)
+            x = torch.tensor([128], dtype=torch.uint8)
 
             self.common(fn, x)
 
     def test_add_int8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
-        x = torch.tensor(120, dtype=torch.int8)
+        x = torch.tensor([120], dtype=torch.int8)
 
         self.common(fn, x)
 
     def test_add_int8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
-        x = torch.tensor(120, dtype=torch.int8)
+        x = torch.tensor([120], dtype=torch.int8)
 
         self.common(fn, x)
 
@@ -629,29 +630,29 @@ class CommonTemplate:
         def fn(x):
             return (x + x).to(torch.int32)
 
-        x = torch.tensor(35000, dtype=torch.int16)
+        x = torch.tensor([35000], dtype=torch.int16)
 
         self.common(fn, x)
 
     def test_multiply_uint8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
-        x = torch.tensor(8, dtype=torch.uint8)
+        x = torch.tensor([8], dtype=torch.uint8)
 
         self.common(fn, x)
 
     def test_square_uint8_tensor(self):
         def fn(x):
             return (x ** 2).to(torch.int16)
-        x = torch.tensor(8, dtype=torch.uint8)
+        x = torch.tensor([8], dtype=torch.uint8)
 
         self.common(fn, x)
 
     #  issue https://github.com/pytorch/pytorch/issues/108520 raised for this
-    # def test_uint32_tensor(self):
+    # def test_int32_tensor(self):
     #     def fn(x):
     #         return (x + x).to(torch.int64)
-    #     x = torch.tensor( (2147483647), dtype=torch.int32)
+    #     x = torch.tensor( ([2147483647]), dtype=torch.int32)
     #     self.common(fn, x)
 
     def test_abs(self):
