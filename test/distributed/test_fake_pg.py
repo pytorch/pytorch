@@ -10,9 +10,19 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing import FileCheck
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed._tensor import DeviceMesh
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
+)
+from torch.distributed.tensor.parallel import (
+    PairwiseParallel,
+    SequenceParallel,
+    parallelize_module,
+)
+from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    MLPModule,
 )
 
 if not dist.is_available():
@@ -130,6 +140,72 @@ class TestFakePG(TestCase):
         output = torch.ones(3, 3)
         dist.scatter(output, None, src=1)
         self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_alltoall(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        output_list = [torch.ones(3, 3) for _ in range(2)]
+        input_list = [torch.ones(3, 3) for _ in range(2)]
+        dist.all_to_all(output_list, input_list)
+        self.assertEqual(len(output_list), 2)
+        for output in output_list:
+            self.assertEqual(tuple(output.shape), (3, 3))
+
+    def test_alltoall_base(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        out_tensor = torch.ones(3, 3)
+        in_tensor = torch.ones(3, 3)
+        output_split = [1, 1]
+        input_split = [1, 1]
+        dist.all_to_all_single(out_tensor, in_tensor, output_split, input_split)
+        self.assertEqual(tuple(out_tensor.shape), (3, 3))
+
+    def test_send(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        tensor = torch.ones(3, 3)
+        dist.send(tensor, 1)
+        self.assertEqual(tuple(tensor.shape), (3, 3))
+
+    def test_recv(self):
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        output = torch.ones(3, 3)
+        dist.recv(output, 1)
+        self.assertEqual(tuple(output.shape), (3, 3))
+
+    @unittest.skipIf(not HAS_CUDA or not enable_2d_with_fsdp(), "No CUDA or TP+FSDP")
+    def test_fsdp_tp_fake_e2e(self):
+        world_size = 4
+        tp_size = 2
+
+        store = dist.HashStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=world_size, store=store)
+
+        device_mesh = DeviceMesh(
+            "cuda", torch.arange(0, world_size).view(-1, tp_size)
+        )
+
+        for parallel_style in [SequenceParallel(), PairwiseParallel()]:
+
+            my_module = parallelize_module(MLPModule(device="cuda"), device_mesh, parallel_style, tp_mesh_dim=1)
+
+            sharded_module = FSDP(my_module, use_orig_params=True)
+            optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
+
+            for i in range(10):
+                dp_rank = dist.get_rank()
+                torch.manual_seed(i + dp_rank)
+                input = torch.randn(20, 10).cuda(dist.get_rank())
+                x = sharded_module(input)
+                loss = x.sum()
+                loss.backward()
+                optim.step()
 
 
 if __name__ == "__main__":
