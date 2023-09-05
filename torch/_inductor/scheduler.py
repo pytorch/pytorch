@@ -1073,14 +1073,12 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
+        comms.decide_global_ordering_of_comms(self.nodes)
         self.compute_predecessors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
 
-        comms.decide_global_ordering_of_comms(self.nodes)
-
-        self.compute_predecessors()
         self.num_orig_nodes = len(self.nodes)
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
