@@ -439,7 +439,7 @@ void SourceImporterImpl::importClass(
     switch (statement.kind()) {
       case TK_ASSIGN: {
         const auto assign = Assign(statement);
-        auto check_assign_values = [&assign](const std::string &name) {
+        auto check_assign_values = [&assign](const std::string& name) {
           TORCH_CHECK(
               assign.rhs().present(),
               "Malformed assignment statement: missing values to assign in ",
