@@ -3701,7 +3701,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
-        if V.graph.cpp_wrapper and self.args_default_value:
+        if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
             n_args = len(args)
             n_pos_args = len(self.args_default_value)
             # Some positional args are not provided, need to use their default value in cpp wrapper

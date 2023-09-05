@@ -353,6 +353,19 @@ class CPUReproTests(TestCase):
                     (v,),
                 )
 
+    def test_scaled_dot_product_flash_attention_cpu(self):
+        def fn(q, k, v):
+            return aten._scaled_dot_product_flash_attention(q, k, v, scale=0.125)[:2]
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+                torch.randn(4, 4, 36, 36),
+            ),
+        )
+
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
     @torch._dynamo.config.patch(dynamic_shapes=True)
