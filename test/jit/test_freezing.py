@@ -1995,8 +1995,8 @@ class TestFrozenOptimizations(JitTestCase):
         torch.set_default_dtype(torch.double)
 
     def tearDown(self):
-        torch.set_default_dtype(self.default_dtype)
         super().tearDown()
+        torch.set_default_dtype(self.default_dtype)
 
     def test_conv_bn_folding(self):
         conv_bias = [True, False]

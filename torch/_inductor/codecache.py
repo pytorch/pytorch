@@ -47,11 +47,15 @@ if config.is_fbcode():
     from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
+        log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
 else:
+
+    def log_global_cache_errors(*args, **kwargs):
+        pass
 
     def log_global_cache_stats(*args, **kwargs):
         pass
@@ -238,6 +242,7 @@ class PersistentCache(CacheBase):
 
         log_stats = partial(log_global_cache_stats, self.system, name, inputs)
         log_vals = partial(log_global_cache_vals, self.system, name, inputs)
+        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -263,12 +268,17 @@ class PersistentCache(CacheBase):
                 use_global_cache()
                 and check_cache(self.get_global_cache(), callback=log_stats)
             ):
-                # re-benchmark everything to try to get consistent numbers from the same machine
-                for choice in choices:
-                    timings[choice] = benchmark(choice)
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
-                    local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                try:
+                    # re-benchmark everything to try to get consistent numbers from the same machine
+                    for choice in choices:
+                        timings[choice] = benchmark(choice)
+                        local_cache.setdefault(name, {})
+                        local_cache[name].setdefault(inputs, {})
+                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                except RuntimeError as e:
+                    # catch and log autotuning failures
+                    log_errors(e)
+                    raise e
 
                 self.update_local_cache(local_cache)
 
@@ -654,6 +664,10 @@ def get_warning_all_flag(warning_all=True):
     return "-Wall" if warning_all else ""
 
 
+def get_glibcxx_abi_build_flags():
+    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
+
+
 def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
@@ -898,6 +912,7 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {get_glibcxx_abi_build_flags()}
             {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
@@ -918,7 +933,7 @@ class CudaKernelParamCache:
             cubin,
             "cubin",
             hash_type="cubin",
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
         params["cubin_path"] = path
         cls.cache[key] = params
@@ -933,7 +948,7 @@ class AotCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def compile(cls, graph, source_code, cuda):
+    def compile(cls, graph, source_code, serialized_extern_kernel_nodes, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         cpp_command = repr(
@@ -945,7 +960,7 @@ class AotCodeCache:
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -953,6 +968,13 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
+                # Currently, this only support serializing extern nodes in fbcode
+                # Eventually, we should also have a serializer for OSS.
+                if config.is_fbcode() and serialized_extern_kernel_nodes:
+                    output_json = os.path.splitext(input_path)[0] + ".json"
+                    with open(output_json, "w") as f:
+                        f.write(serialized_extern_kernel_nodes)
+
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):

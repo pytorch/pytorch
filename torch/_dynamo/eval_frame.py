@@ -12,7 +12,6 @@ import threading
 import traceback
 import types
 import warnings
-from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -95,15 +94,26 @@ DONT_WRAP_FILES = {
 }
 
 
-CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
-def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+def _debug_get_cache_entry_list(
+    code: Union[types.CodeType, Callable[..., Any]]
+) -> List[CacheEntry]:  # type: ignore[valid-type]
     """
-    Given a code object, retrieve the cache entries stored in this code.
+    Given a code object or a callable object, retrieve the cache entries
+     stored in this code.
     """
-    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    return list(map(CacheEntry._make, cache_list))
+    if callable(code):
+        code = code.__code__
+    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    cache_list = []
+    while cache_head is not None:
+        cache_list.append(cache_head)
+        cache_head = cache_head.next
+    return cache_list
 
 
 class OptimizedModule(torch.nn.Module):
@@ -478,9 +488,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
-                    hijacked_callback = convert_frame.convert_frame(
+                    assert hasattr(
+                        callback, "_clone_with_backend"
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    hijacked_callback = callback._clone_with_backend(
                         ddp_optimizer.compile_fn,
-                        hooks=hooks,
                     )
                     return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
@@ -814,45 +826,56 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    def produce_matching(source_args, candidate_args, loc):
+    def produce_matching(sources, candidates):
+        source_types = " or ".join(
+            [
+                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
+                for desc, args in sources.items()
+            ]
+        )
+        source_args = [arg for args in sources.values() for arg in args]
         matched_elements_positions = []
         dict_of_source_args = dict()
-        for i in range(0, len(source_args)):
-            element_id = id(source_args[i])
-            dict_of_source_args[element_id] = i
+        for i, arg in enumerate(source_args):
+            dict_of_source_args[id(arg)] = i
 
-        for i in range(0, len(candidate_args)):
-            arg = candidate_args[i]
-            # 1-element tensor arg can be unspec int/float
-            if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
-                if id(arg) in dict_of_source_args:
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
-                elif id(arg.item()) in dict_of_source_args:
-                    matched_elements_positions.append(
-                        dict_of_source_args[id(arg.item())]
-                    )
+        for candidate_desc, candidate_args in candidates.items():
+            for i, arg in enumerate(candidate_args):
+                # 1-element tensor arg can be unspec int/float
+                if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
+                    if id(arg) in dict_of_source_args:
+                        matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    elif id(arg.item()) in dict_of_source_args:
+                        matched_elements_positions.append(
+                            dict_of_source_args[id(arg.item())]
+                        )
+                    else:
+                        raise AssertionError(
+                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                        )
                 else:
-                    raise AssertionError(
-                        f"Dynamo {loc} is not consistent with traced {loc}"
-                    )
-            else:
-                assert (
-                    id(arg) in dict_of_source_args
-                ), f"Dynamo {loc} is a strict subset of traced {loc}"
-                matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    if id(arg) not in dict_of_source_args:
+                        raise AssertionError(
+                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                        )
+                    matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
     matched_input_elements_positions = produce_matching(
-        flat_args, graph_captured_input, "input"
+        sources={"original args": flat_args},
+        candidates={"graph-captured input": graph_captured_input},
     )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
-    flat_both = list(graph_captured_output) + flat_args
     matched_output_elements_positions = produce_matching(
-        flat_both, flat_results_traced, "output"
+        sources={
+            "graph-captured outputs": list(graph_captured_output),
+            "original args": flat_args,
+        },
+        candidates={"traced result": flat_results_traced},
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1353,11 +1376,6 @@ class TorchPatcher:
             torch.optim.LBFGS,
         }
         for opt in optimizer_classes:
-            # We disable `register_load_state_dict_pre_hook` to allow torch.compile to trace
-            # through the optimizer init without failing. See #107789
-            opt.register_load_state_dict_pre_hook = disable(
-                opt.register_load_state_dict_pre_hook
-            )
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 

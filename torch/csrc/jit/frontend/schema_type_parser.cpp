@@ -58,6 +58,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
                                           // use the custom class mechanism
                                           // instead. @jerryzh
       {"Device", c10::TypeFactory::get<DeviceObjType>()},
+      {"DeviceIndex", c10::TypeFactory::get<IntType>()},
       {"Stream", c10::TypeFactory::get<StreamObjType>()},
       {"Scalar", c10::TypeFactory::get<NumberType>()},
       {"str", c10::TypeFactory::get<StringType>()},
