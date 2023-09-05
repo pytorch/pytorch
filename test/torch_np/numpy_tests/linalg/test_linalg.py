@@ -784,7 +784,7 @@ class TestCond(CondCases):
             linalg.cond(A, p)
 
     @pytest.mark.xfail(
-        True, run=False, reason="Platform/LAPACK-dependent failure, " "see gh-18914"
+        True, run=False, reason="Platform/LAPACK-dependent failure, see gh-18914"
     )
     def test_nan(self):
         # nans should be passed through, not converted to infs
