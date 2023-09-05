@@ -20,6 +20,15 @@ def _fake_map(f, x, *args):
         zs.append(f(xp, *args))
     return _stack_pytree(zs)
 
+def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_field_name):
+    ret = []
+    for mod in gm.modules():
+        for node in mod.graph.nodes:
+            if node.name in node_names:
+                for field_name in meta_field_name:
+                    ret.append(node.meta.get(field_name))
+    return ret
+
 
 @skipIfNoDynamoSupport
 class TestControlFlow(TestCase):
@@ -1432,6 +1441,30 @@ def forward(self, arg0_1, arg1_1):
         self._expected_inline_normalized(gm.code, exp_graph)
         self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
 
+    def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
+
+        def true_fn(x):
+            return x + x.cos()
+
+        def false_fn(x):
+            return x * x.sin()
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+        inp = torch.randn([4, 3])
+        gm, _ = torch._dynamo.export(foo)(inp)
+
+        def run_with_interpreter(*args):
+            with torch.fx.traceback.preserve_node_meta():
+                return torch.fx.Interpreter(gm).run(*args)
+        new_gm = make_fx(run_with_interpreter)(inp)
+
+
+        checked_ops = {"add", "mul", "sin", "cos"}
+        checked_meta = ["source_fn", "stack_trace"]
+        all_source_fns = collect_meta_for_filtered_nodes(gm, checked_ops, checked_meta)
+        new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
+        self.assertEqual(all_source_fns, new_source_fns)
 
 if __name__ == '__main__':
     run_tests()
