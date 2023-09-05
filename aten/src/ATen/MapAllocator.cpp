@@ -1,13 +1,14 @@
 #include <ATen/MapAllocator.h>
 
 #include <atomic>
-#include <random>
 #include <string>
+#include <random>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Unicode.h>
 
 /* stuff for mapped files */
@@ -16,9 +17,9 @@
 #endif
 
 #if defined(HAVE_MMAP)
-#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #endif
 
 #if !defined(_MSC_VER) || defined(HAVE_MMAP)
@@ -27,29 +28,28 @@
 #elif defined(_MSC_VER)
 #include <c10/util/win32-headers.h>
 #endif
-#include <fmt/format.h>
 
 namespace at {
 
 static constexpr int64_t map_alloc_alignment = 64;
 
-std::string NewProcessWideShmHandle() {
+TORCH_API std::string NewProcessWideShmHandle()
+{
   static std::atomic<uint64_t> counter{0};
   static std::random_device rd;
+  std::string handle = "/torch_";
 #ifdef _MSC_VER
-  return fmt::format(
-      "/torch_{}_{}_{}",
-      GetCurrentProcessId(),
-      rd(),
-      counter.fetch_add(1, std::memory_order_relaxed));
+  handle += c10::guts::to_string(GetCurrentProcessId());
 #else
-  return fmt::format(
-      "/torch_{}_{}_{}",
-      getpid(),
-      rd(),
-      counter.fetch_add(1, std::memory_order_relaxed));
+  handle += c10::guts::to_string(getpid());
 #endif
+  handle += "_";
+  handle += c10::guts::to_string(rd());
+  handle += "_";
+  handle += c10::guts::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+  return handle;
 }
+
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
 namespace {
