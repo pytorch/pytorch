@@ -32,7 +32,7 @@ from unittest import mock
 import sympy
 
 import torch
-from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -225,10 +225,6 @@ def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
-
-
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 
 def precompute_method(obj: Any, method: str):
@@ -789,7 +785,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama
+        import colorama  # type: ignore[import]
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET

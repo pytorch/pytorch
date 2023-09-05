@@ -39,6 +39,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import ExternKernelNode
 from .pattern_matcher import clone_graph
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
@@ -166,6 +167,10 @@ def count_bytes_inner(
     **kwargs,
 ):
     shape_env = _shape_env_from_inputs(example_inputs)
+    fake_mode = fake_tensor_prop(gm, example_inputs)
+
+    with V.set_fake_mode(fake_mode):
+        post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):  # type: ignore[call-arg]
@@ -295,6 +300,7 @@ def compile_fx_inner(
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ):
     """
     Inductor API that compiles a single graph.
@@ -336,6 +342,7 @@ def compile_fx_inner(
         "is_inference": is_inference,
         "user_visible_outputs": user_visible_outputs,
         "layout_opt": layout_opt,
+        "extern_node_serializer": extern_node_serializer,
     }
 
     compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
@@ -489,6 +496,7 @@ def fx_codegen_and_compile(
     is_inference: bool = False,
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> CompiledFxGraph:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -545,6 +553,7 @@ def fx_codegen_and_compile(
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
+            extern_node_serializer=extern_node_serializer,
         )
         with V.set_graph_handler(graph):  # type: ignore[call-arg]
             graph.run(*example_inputs)
@@ -563,9 +572,6 @@ def fx_codegen_and_compile(
                     else:
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
-
-            if V.aot_compilation is True:
-                return compiled_fn
 
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
@@ -840,6 +846,9 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
+_in_aot_compilation = BoxedBool(False)
+
+
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -852,19 +861,24 @@ def compile_fx_aot(
         else {**config_patches, "cpp_wrapper": True}
     )
     if (
-        "aot_inductor_output_path" not in config_patches
-        and not config.aot_inductor_output_path
+        "aot_inductor.output_path" not in config_patches
+        and not config.aot_inductor.output_path
     ):
         config_patches = {
             **config_patches,
-            "aot_inductor_output_path": code_hash(model_.code),
+            "aot_inductor.output_path": code_hash(model_.code),
         }
 
-    with V.set_aot_compilation(True):
+    extern_node_serializer = config_patches.pop("extern_node_serializer", None)
+    with mock.patch.object(_in_aot_compilation, "value", True):
         return compile_fx(
             model_,
             example_inputs_,
-            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            inner_compile=functools.partial(
+                inner_compile,
+                aot_mode=True,
+                extern_node_serializer=extern_node_serializer,
+            ),
             config_patches=config_patches,
         )
 
@@ -935,7 +949,7 @@ def fw_compiler_freezing(
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
     # that drops constant-ified params
-    if V.aot_compilation is True:
+    if _in_aot_compilation:
         return optimized_function
 
     def wrapper(args):
@@ -1143,10 +1157,6 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
-
-    if config.from_export and V.aot_compilation is True:
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return inference_compiler(model_, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context

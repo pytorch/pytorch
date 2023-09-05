@@ -409,7 +409,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         counters.clear()
         args = [
@@ -420,7 +420,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -438,7 +438,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -462,6 +462,10 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_cumsum(self):
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -474,7 +478,15 @@ class TestPaternMatcher(TestCase):
             ).to(torch.int64)
             return torch.cumsum(ones, 1)
 
-        for fn in (fn1, fn2):
+        def fn3():
+            twos = torch.full([5, 4, 3], 2, dtype=torch.int64)
+            return torch.cumsum(twos, 0)
+
+        def fn4():
+            x = torch.full([100], 0.1, dtype=torch.float32)
+            return torch.cumsum(x, 0)
+
+        for fn in (fn1, fn2, fn3, fn4):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
