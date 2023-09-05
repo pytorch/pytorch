@@ -60,6 +60,8 @@ jobs:
       USE_PYTORCH_METAL: ${{ matrix.use_metal }}
       USE_COREML_DELEGATE: ${{ matrix.use_coreml }}
       CUSTOM_OP_LIST: ${{ matrix.use_custom_op_list }}
+      # TODO: Figure out a better way than hardcoding this here
+      PYTORCH_VERSION: 2.1.0
     timeout-minutes: 240
     steps:
       # [see note: pytorch repo ref]
@@ -214,10 +216,165 @@ jobs:
           fi
 
           # Copy license and version
-          cp "${GITHUB_WORKSPACE}/LICENSE" version.txt "${SETUP_DIR}"
+          cp "${GITHUB_WORKSPACE}/LICENSE" "${SETUP_DIR}"
+          echo "${PYTORCH_VERSION}" > "${SETUP_DIR}"/version.txt
+
+          # Save the podspec for the upload job later
+          if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
+            DATE=$(date -u +%Y%m%d)
+            cp ${GITHUB_WORKSPACE}/ios/LibTorch-Lite-Nightly.podspec.template ${SETUP_DIR}/LibTorch-Lite-Nightly.podspec
+            sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${PYTORCH_VERSION}.${DATE}/g" ${SETUP_DIR}/LibTorch-Lite-Nightly.podspec
+
+            cp ${GITHUB_WORKSPACE}/ios/LibTorch-Lite.podspec.template ${SETUP_DIR}/LibTorch-Lite.podspec
+            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" ${SETUP_DIR}/LibTorch-Lite.podspec
+          else
+            # NB: There is no nightly build without lite interpreter atm
+            cp ${GITHUB_WORKSPACE}/ios/LibTorch.podspec.template ${SETUP_DIR}/LibTorch.podspec
+            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" ${SETUP_DIR}/LibTorch.podspec
+          fi
 
       - uses: actions/upload-artifact@v3
         with:
           name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
           if-no-files-found: error
           path: ${{ runner.temp }}/${{ matrix.ios_arch }}
+
+  upload-ios-artifacts:
+    # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
+    # to create the fat iOS binaries for both x86_64 and arm64
+    runs-on: macos-12
+    needs: build
+    # NB: Only upload release build, if we need it, we could also turn on nightly here
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      # For awscli S3 upload
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: pip
+
+      # For cocoapods pod upload
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: pytorch-ios-build-artifacts-arm64
+          path: ${{ runner.temp }}/arm64
+
+      - name: Download x86_64 artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: pytorch-ios-build-artifacts-x86_64
+          path: ${{ runner.temp }}/x86_64
+
+      - name: Prepare the final artifact
+        env:
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        run: |
+          set -eux
+
+          DEST_DIR="${RUNNER_TEMP}"/ios
+          echo "DEST_DIR=${DEST_DIR}" >> "$GITHUB_ENV"
+
+          # Prepare all the sub directories
+          mkdir -p "${DEST_DIR}"/install/lib
+
+          pushd "${RUNNER_TEMP}"/arm64
+          # Copy header and share files, arm64 or x86_64 both work
+          cp -R include "${DEST_DIR}"/install
+          cp -R share "${DEST_DIR}"/install
+          # The last dash is important to copy only files under src
+          cp -R src "${DEST_DIR}"
+          cp LICENSE "${DEST_DIR}"
+
+          if [ "${IS_NIGHTLY}" == true ]; then
+            PYTORCH_VERSION=$(cat version.txt)
+            DATE=$(date -u +%Y%m%d)
+            echo "${PYTORCH_VERSION}.${DATE}" > "${DEST_DIR}"/version.txt
+          else
+            cp version.txt "${DEST_DIR}"
+          fi
+          PYTORCH_VERSION=$(cat "${DEST_DIR}"/version.txt)
+          echo "PYTORCH_VERSION=${PYTORCH_VERSION}" >> "$GITHUB_ENV"
+          popd
+
+          pushd "${RUNNER_TEMP}"/arm64/install/lib
+          # Get all library binaries
+          LIBRARIES=($(ls *.a))
+          popd
+
+          for LIB in "${LIBRARIES[@]}"; do
+            FROM_LIBS=("${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${RUNNER_TEMP}"/x86_64/install/lib/"${LIB}")
+            # Create a fat binary for both arm64 and x86_64
+            lipo -create "${FROM_LIBS[@]}" -o "${DEST_DIR}"/install/lib/"${LIB}"
+            # Print the info
+            lipo -i "${DEST_DIR}"/install/lib/"${LIB}"
+          done
+
+          BUILD_LITE_INTERPRETER=1
+          if [ -f "${RUNNER_TEMP}"/arm64/LibTorch.podspec ]; then
+            # If LibTorch.podspec is used instead of LibTorch-Lite.podspec, the artifact is built
+            # without lite interpreter
+            BUILD_LITE_INTERPRETER=0
+          fi
+          echo "BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios
+          if-no-files-found: error
+          path: ${{ runner.temp }}/ios
+
+      - name: Set DRY_RUN
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Upload the artifact to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        run: |
+          set -eux
+
+          ARTIFACT_NAME=libtorch
+          if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
+            ARTIFACT_NAME="${NAME}_lite_ios"
+          else
+            ARTIFACT_NAME="${NAME}_ios"
+          fi
+
+          if [ "${IS_NIGHTLY}" == true ]; then
+            ARTIFACT_NAME="${NAME}_nightly_${PYTORCH_VERSION}.zip"
+          else
+            ARTIFACT_NAME="${NAME}_${PYTORCH_VERSION}.zip"
+          fi
+
+          pushd "${DEST_DIR}"
+          zip -r ${ARTIFACT_NAME} install src version.txt LICENSE
+          popd
+
+          pip install -q awscli==1.29.40
+          DRY_RUN=${DRY_RUN:-enabled}
+          AWS_S3_CP="aws s3 cp --dryrun"
+          if [ "${DRY_RUN}" == "disabled" ]; then
+            AWS_S3_CP="aws s3 cp"
+          fi
+          ${AWS_S3_CP} "${ARTIFACT_NAME}" s3://ossci-ios-build/ --acl public-read
+          echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload the artifact to cocoapods
+        shell: bash
+        run: |
+          # TODO: Need to see how it works
+          echo "${ARTIFACT_NAME}"

@@ -1,10 +1,10 @@
 Pod::Spec.new do |s|
     s.name             = 'LibTorch-Lite'
-    s.version          = '1.13.0'
+    s.version          = 'IOS_BUILD_VERSION'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
-    s.source           = { :http => "https://ossci-ios.s3.amazonaws.com/libtorch_lite_ios_#{s.version}.zip" }
+    s.source           = { :http => "https://ossci-ios-build.s3.amazonaws.com/libtorch_lite_ios_#{s.version}.zip" }
     s.summary          = 'The PyTorch C++ library for iOS'
     s.description      = <<-DESC
         The PyTorch C++ library for iOS.
@@ -33,5 +33,5 @@ Pod::Spec.new do |s|
         'VALID_ARCHS' => 'x86_64 arm64'
     }
     s.library = ['c++', 'stdc++']
-    s.frameworks = 'Accelerate'
+    s.frameworks = 'Accelerate', 'MetalPerformanceShaders', 'CoreML'
 end
