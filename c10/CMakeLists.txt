@@ -55,6 +55,13 @@ if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
 endif()
 
+if(LINUX)
+  message(INFO "link to filesystem library stdc++fs")
+  target_link_options(c10 PUBLIC -lstdc++fs)
+  target_compile_options(c10 PUBLIC -lstdc++fs)
+  target_link_libraries(c10 PUBLIC stdc++fs)
+endif()
+
 option(C10_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
 if(C10_USE_IWYU)
   find_program(iwyu NAMES include-what-you-use)

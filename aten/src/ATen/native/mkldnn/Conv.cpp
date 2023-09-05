@@ -727,7 +727,7 @@ Tensor _mkldnn_convolution_transpose(
 
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias);
-    ideep::convolution_transpose_forward::compute(
+    ideep::convolution_transpose_forward::compute_v3(
         x,
         w,
         b,
@@ -738,9 +738,10 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding_expanded, output_padding_expanded),
         dilation.vec(),
         groups,
+        use_channels_last,
         op_attr);
   } else {
-    ideep::convolution_transpose_forward::compute(
+    ideep::convolution_transpose_forward::compute_v3(
         x,
         w,
         output_sizes,
@@ -750,6 +751,7 @@ Tensor _mkldnn_convolution_transpose(
         padding_r(padding_expanded, output_padding_expanded),
         dilation.vec(),
         groups,
+        use_channels_last,
         op_attr);
   }
   if (input.is_mkldnn()) {
@@ -988,7 +990,7 @@ Tensor mkldnn_convolution_transpose_backward_input(
     grad_input.resize_(input_size, memory_format);
     grad_x = itensor_from_tensor(grad_input);
   }
-  ideep::convolution_transpose_backward_data::compute(
+  ideep::convolution_transpose_backward_data::compute_v3(
       grad_y,
       w,
       input_size.vec(),
@@ -997,7 +999,8 @@ Tensor mkldnn_convolution_transpose_backward_input(
       padding.vec(),
       padding_r(padding, output_padding),
       dilation.vec(),
-      groups);
+      groups,
+      is_channels_last);
 
   if (grad_output.is_mkldnn()) {
     return MKLDNNTensor(grad_x, grad_output.options());
@@ -1024,7 +1027,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 
   ideep::tensor grad_w, grad_b;
   if (bias_defined) {
-    ideep::convolution_transpose_backward_weights::compute(
+    ideep::convolution_transpose_backward_weights::compute_v3(
         x,
         grad_y,
         weight_size.vec(),
@@ -1034,9 +1037,10 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         padding.vec(),
         padding_r(padding, output_padding),
         dilation.vec(),
-        groups);
+        groups,
+        is_channels_last);
   } else {
-    ideep::convolution_transpose_backward_weights::compute(
+    ideep::convolution_transpose_backward_weights::compute_v3(
         x,
         grad_y,
         weight_size.vec(),
@@ -1045,7 +1049,8 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         padding.vec(),
         padding_r(padding, output_padding),
         dilation.vec(),
-        groups);
+        groups,
+        is_channels_last);
   }
 
   if (!is_channels_last) {
@@ -1061,18 +1066,21 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
-    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,3> output_mask)
 {
-  bool is_channels_last = mkldnn_conv_use_channels_last(input, weight);
-  auto memory_format = mkldnn_convolution_memory_format(input.ndimension(), is_channels_last);
+  bool is_channels_last = mkldnn_conv_use_channels_last(input_t, weight_t);
+  auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   Tensor grad_output = grad_output_t.is_mkldnn() ? grad_output_t : grad_output_t.contiguous(memory_format);
+  auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
+  auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   int64_t dim = input.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", dim);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", dim);
   const auto output_padding_expanded = expand_param_if_needed(output_padding, "output_padding", dim);
+
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
     grad_input = mkldnn_convolution_transpose_backward_input(
