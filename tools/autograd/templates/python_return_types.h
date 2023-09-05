@@ -2,8 +2,12 @@
 
 namespace torch {
 namespace autograd {
+namespace generated {
 
-PyTypeObject* get_namedtuple(std::string name);
+${py_return_types_declarations}
+
+}
+
 void initReturnTypes(PyObject* module);
 
 } // namespace autograd
