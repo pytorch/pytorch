@@ -376,5 +376,6 @@ jobs:
       - name: Upload the artifact to cocoapods
         shell: bash
         run: |
+          pod trunk push --help
           # TODO: Need to see how it works
           echo "${ARTIFACT_NAME}"
