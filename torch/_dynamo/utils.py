@@ -63,7 +63,7 @@ from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map, TreeSpec, LeafSpec
+from torch.utils._pytree import LeafSpec, tree_map, TreeSpec
 
 
 counters = collections.defaultdict(collections.Counter)

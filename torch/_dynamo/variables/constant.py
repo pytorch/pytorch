@@ -4,7 +4,7 @@ from typing import Dict, List
 import torch
 
 from .. import variables
-from ..exc import UserError, UserErrorType, unimplemented
+from ..exc import unimplemented, UserError, UserErrorType
 from ..utils import istype, np
 from .base import typestr, VariableTracker
 

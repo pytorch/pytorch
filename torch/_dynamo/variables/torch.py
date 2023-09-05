@@ -597,7 +597,10 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
-        elif hasattr(self.value, "__module__") and self.value.__module__ == "torch.utils._pytree":
+        elif (
+            hasattr(self.value, "__module__")
+            and self.value.__module__ == "torch.utils._pytree"
+        ):
             if isinstance(self.value, types.FunctionType):
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(self.value, **options),

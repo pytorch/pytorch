@@ -2,13 +2,10 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Any, Dict, List, Tuple
+from typing import Dict, List
 
 import torch
 import torch.fx
-from torch.fx import _pytree as fx_pytree
-
-from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction

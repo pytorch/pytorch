@@ -1091,13 +1091,18 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if isinstance(obj, variables.ConstantVariable) and is_treespec_cls(obj.python_type()):
+        if isinstance(obj, variables.ConstantVariable) and is_treespec_cls(
+            obj.python_type()
+        ):
             value = obj.as_python_constant()
             if name == "type":
                 return variables.UserDefinedClassVariable(value=value.type)
             if name == "children_specs":
                 return variables.ListVariable(
-                    [variables.ConstantVariable(value=spec) for spec in value.children_specs]
+                    [
+                        variables.ConstantVariable(value=spec)
+                        for spec in value.children_specs
+                    ]
                 )
 
         if isinstance(obj, variables.NNModuleVariable):
