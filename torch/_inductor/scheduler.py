@@ -1078,7 +1078,7 @@ class Scheduler:
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
 
-        comms.decide_global_ordering_comms(self.nodes)
+        comms.decide_global_ordering_for_comms(self.nodes)
 
         self.compute_predecessors()
         self.num_orig_nodes = len(self.nodes)

@@ -117,7 +117,7 @@ def get_descendants(node):
     return descendants
 
 
-def decide_global_ordering_comms(nodes: List["scheduler.BaseSchedulerNode"]):
+def decide_global_ordering_for_comms(nodes: List["scheduler.BaseSchedulerNode"]):
     """
     Just enforces the ordering that's in the input graph.
     TODO: Come up with a better approach
