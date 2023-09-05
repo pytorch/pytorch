@@ -27,7 +27,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     SM53OrLater, SM60OrLater, SM80OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA
+    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_ATTENTION,
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -8675,6 +8675,18 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                    }
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'tanh',
@@ -8682,6 +8694,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {torch.complex64: tol(atol=5e-03, rtol=1e-04)}
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'sin',
@@ -12622,8 +12644,7 @@ op_db: List[OpInfo] = [
            aten_name='group_norm',
            aliases=('group_norm',),
            ref=reference_group_norm,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13501,9 +13522,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
             # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
@@ -13684,12 +13705,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
+                                            torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
@@ -13698,6 +13719,11 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
+        # tan(j * pi/2 * odd_number) is nan which also make tanhshrink nan.
+        reference_numerics_filter=NumericsFilter(
+            condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
+                                 if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+            safe_val=0)
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',
@@ -14778,6 +14804,10 @@ op_db: List[OpInfo] = [
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   decorators=(DecorateInfo(
+                               toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                               'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                               device_type='cuda'),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14809,7 +14839,11 @@ op_db: List[OpInfo] = [
                    ref=np.tanh,
                    aten_backward_name='tanh_backward',
                    aliases=('nn.functional.tanh',),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                   device_type='cuda'),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -18993,6 +19027,15 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
     ),
     PythonRefInfo(
+        "_refs.take_along_dim",
+        torch_opinfo_name="take_along_dim",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestCommon',
+                         'test_python_ref'),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.to",
         torch_opinfo_name="to",
     ),
@@ -19667,6 +19710,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tan",
         torch_opinfo_name="tan",
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+        ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -19690,6 +19738,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tanh",
         torch_opinfo_name="tanh",
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+        ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -19963,15 +20016,12 @@ python_ref_db = [
                          'test_reference_numerics_normal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                'TestUnaryUfuncs',),
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
+                                   torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128),
-                         active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128),
