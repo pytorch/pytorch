@@ -631,7 +631,7 @@ class CommonTemplate:
 
     def test_multiply_uint8_tensor(self):
         def fn(x):
-            return (x + x).to(torch.int16)
+            return (x * x).to(torch.int16)
 
         x = torch.tensor([8], dtype=torch.uint8)
 
