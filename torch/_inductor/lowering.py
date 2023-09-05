@@ -392,9 +392,9 @@ def make_pointwise(
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
             elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
-            
+
             # For cpu we need to ensure that types smaller than int32 are honoured for operations.
-            # Without this logic, the operations would be incorrectly performed with the larger int32 type.  
+            # Without this logic, the operations would be incorrectly performed with the larger int32 type.
             elif not is_cuda and dtype in (torch.uint8, torch.int8, torch.int16):
                 # ensure types are honoured properly.
                 return ops.to_dtype(fn(*[load(index) for load in loaders]), dtype)

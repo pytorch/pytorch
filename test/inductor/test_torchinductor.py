@@ -606,15 +606,17 @@ class CommonTemplate:
 
     # lowering operation tests
     def test_add_uint8_tensor(self):
-            def fn(x):
-                return (x + x).to(torch.int16)
-            x = torch.tensor([128], dtype=torch.uint8)
+        def fn(x):
+            return (x + x).to(torch.int16)
 
-            self.common(fn, x)
+        x = torch.tensor([128], dtype=torch.uint8)
+
+        self.common(fn, x)
 
     def test_add_int8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
+
         x = torch.tensor([120], dtype=torch.int8)
 
         self.common(fn, x)
@@ -622,6 +624,7 @@ class CommonTemplate:
     def test_add_int8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
+
         x = torch.tensor([120], dtype=torch.int8)
 
         self.common(fn, x)
@@ -637,13 +640,15 @@ class CommonTemplate:
     def test_multiply_uint8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
+
         x = torch.tensor([8], dtype=torch.uint8)
 
         self.common(fn, x)
 
     def test_square_uint8_tensor(self):
         def fn(x):
-            return (x ** 2).to(torch.int16)
+            return (x**2).to(torch.int16)
+
         x = torch.tensor([8], dtype=torch.uint8)
 
         self.common(fn, x)
@@ -7012,8 +7017,10 @@ class CommonTemplate:
                 _, mul_buf, _ = nodes
                 self.assertTrue(
                     all(
+
                         V.graph.sizevars.size_hints(buf.get_stride()) == (1, 2)
                         for buf in nodes
+
                     )
                 )
                 # before the fix, the wrong index expression
@@ -7068,7 +7075,9 @@ def copy_tests(
 
             setattr(other_cls, f"{name}_{suffix}", new_test)
 
+
 if HAS_CPU and not torch.backends.mps.is_available():
+
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
 
@@ -7707,6 +7716,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def forward(self, x):
                 return self.gru(x)
 
+
         def test_rnn_compile_safe(self):
             device = torch.device("cuda")
             model = RNNTest.Model().to(device)
@@ -7760,6 +7770,7 @@ if HAS_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
