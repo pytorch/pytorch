@@ -671,6 +671,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
             state_dict_config (Optional[StateDictConfig]): the configuration for the
                 target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the configuration
+                for the optimizer state dict.
+
         Returns:
             A StateDictSettings that include the previous state_dict type and
             configuration for the module.
