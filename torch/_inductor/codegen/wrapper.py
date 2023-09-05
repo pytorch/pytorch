@@ -507,9 +507,6 @@ class WrapperCodeGen(CodeGen):
             origin_info_list = None
             for line in self.lines:
                 if isinstance(line, MemoryPlanningLine):
-                    self.wrapper_call.writeline(
-                        f"# MemPlanning Type {type(line)} : Origin "
-                    )
                     line.codegen(self.wrapper_call)
                 elif isinstance(
                     line,

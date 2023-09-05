@@ -1648,8 +1648,9 @@ class Scheduler:
                 self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 # Insert marker info
-                op_info = get_origin_op_info([node], config.triton.descriptive_names)
-                V.graph.wrapper_code.writeline(op_info)
+                if config.triton.descriptive_names:
+                    op_info = get_origin_op_info([node], config.triton.descriptive_names)
+                    V.graph.wrapper_code.writeline(op_info)
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)
