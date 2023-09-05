@@ -120,7 +120,7 @@ def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
     assert not any(isinstance(snode.node, ir.CollectiveKernel) for snode in snodes)
 
 
-def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+def reorder_compute_for_overlap(result: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Decides a global ordering of all compute and communication nodes. Assumes that we already have a global ordering of communication nodes.
     Overall scheduling procedure is:
@@ -130,7 +130,6 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
         Step 4: We schedule comm N + 1,
         Repeat this for subsequent comm nodes.
     """
-
     comm_nodes = []
     for snode in snodes:
         if isinstance(snode.node, ir.CollectiveKernel):
@@ -148,8 +147,6 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
 
     unscheduled_nodes = set()
     unscheduled_nodes = set([snode for snode in snodes])
-
-    result: List["scheduler.BaseSchedulerNode"] = []
 
     def schedule_node(snode):
         """
@@ -266,6 +263,10 @@ def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNo
 
     schedule_nodes(unscheduled_nodes)
 
+
+def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
+    result: List["scheduler.BaseSchedulerNode"] = []
     result = sink_waits(result)
     result = raise_comms(result)
+    result = reorder_compute_for_overlap(result)
     return result
