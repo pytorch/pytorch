@@ -224,7 +224,6 @@ aten::expm1.out
 aten::expm1_
 aten::exponential
 aten::exponential.out
-aten::exponential_
 aten::flip
 aten::flip.out
 aten::floor

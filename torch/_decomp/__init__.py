@@ -246,6 +246,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.empty_like,
             aten._euclidean_dist.default,
             aten.expand_as,
+            aten.exponential_,
             aten.eye,
             aten.fill,
             aten.fill_,
