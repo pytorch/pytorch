@@ -869,7 +869,7 @@ class VariableBuilder:
         elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if not config.force_unspec_int_unbacked_size_like and (
+            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
@@ -1068,7 +1068,7 @@ class VariableBuilder:
             return self.tx.output.unspec_variable_map[self.name]
         else:
             shape_env = self.tx.output.shape_env
-            if torch._dynamo.config.force_unspec_int_unbacked_size_like and isinstance(
+            if TracingContext.get().force_unspec_int_unbacked_size_like and isinstance(
                 value, int
             ):
                 wrapped_value = shape_env.create_unbacked_symint()
