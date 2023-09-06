@@ -7,13 +7,14 @@ import re
 import sys
 import types
 import unittest
+from typing import Sequence, Union
 from unittest.mock import patch
 
 import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
 
-from . import config, eval_frame, optimize_assert, reset, utils
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -210,6 +211,32 @@ class CompileCounterWithBackend:
         return lookup_backend(self.backend)(gm, example_inputs)
 
 
+# Equivalent to backend="eager", but also records graphs that
+# we can assert on
+class EagerAndRecordGraphs:
+    def __init__(self):
+        self.graphs = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        return gm
+
+
+def strip_comment(code):
+    code = str(code)
+    return re.sub(r"(?m)^ *#.*\n?", "", code)
+
+
+def remove_trailing_space(code):
+    return "\n".join([line.rstrip() for line in code.split("\n")])
+
+
+def normalize_gm(gm_str):
+    # strip comments as comments have path to files which may differ from
+    # system to system.
+    return remove_trailing_space(strip_comment(gm_str))
+
+
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
     if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
@@ -258,38 +285,13 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     return f"{speedup:.3f}x p={pvalue:.2f}"
 
 
-@contextlib.contextmanager
-def trace_numpy() -> None:
-    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
-    try:
-        yield
-    finally:
-        config.numpy_ndarray_as_tensor = prev
-
-
-def requires_numpy_pytorch_interop(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
-            with trace_numpy():
-                return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
-
-    return _fn
-
-
-def requires_numpy(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if utils.HAS_NUMPY:
-            with trace_numpy():
-                return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires numpy")
-
-    return _fn
-
-
-def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
+def rand_strided(
+    size: Sequence[int],
+    stride: Sequence[int],
+    dtype: torch.dtype = torch.float32,
+    device: Union[str, torch.device] = "cpu",
+    extra_size: int = 0,
+):
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(size, stride))
         + 1

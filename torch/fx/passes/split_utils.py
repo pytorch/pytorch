@@ -1,13 +1,15 @@
+import copy
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
 
 import torch.fx
-from torch.fx.graph import map_arg
-from .tools_common import NodeList
 from torch.fx._compatibility import compatibility
-from torch.fx.passes.utils import lift_subgraph_as_module, HolderModule
+from torch.fx.graph import map_arg
+from torch.fx.passes.utils import HolderModule, lift_subgraph_as_module
 
-__all__ = ['getattr_recursive', 'setattr_recursive', 'Component', 'split_by_tags']
+from .tools_common import NodeList
+
+__all__ = ["getattr_recursive", "setattr_recursive", "Component", "split_by_tags"]
 
 @compatibility(is_backward_compatible=False)
 def getattr_recursive(obj, name):
@@ -205,14 +207,14 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
             # as a placeholder in current component's graph.
             if x not in comp.orig_inputs:
                 comp.orig_inputs.append(x)
+                placeholder = comp.graph.placeholder(x.name, type_expr=x.type)
+                placeholder.meta = copy.copy(x.meta)
                 comp.input_placeholders.append(
-                    comp.graph.placeholder(x.name, type_expr=x.type)
+                    placeholder
                 )
                 used_in_main[x] = None
 
-            return comp.input_placeholders[
-                next(i for i, y in enumerate(comp.orig_inputs) if x is y)
-            ]
+            return comp.input_placeholders[comp.orig_inputs.index(x)]
 
         n = comp.graph.node_copy(node, remap_func)
         n.tag = node.tag  # type: ignore[attr-defined]

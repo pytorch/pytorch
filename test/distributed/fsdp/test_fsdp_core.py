@@ -372,7 +372,7 @@ class TestHooks(FSDPTest):
             "torch.distributed.fsdp._runtime_utils._register_pre_backward_hooks",
             _register_pre_backward_hooks_with_count,
         ), mock.patch(
-            "torch.distributed.fsdp._runtime_utils._register_post_backward_hooks"
+            "torch.distributed.fsdp._runtime_utils._register_post_backward_hook"
         ) as register_post_bwd_mock:
             self.assertEqual(register_pre_backward_hooks_call_count, 0)
             self.assertFalse(register_post_bwd_mock.called)

@@ -14,7 +14,7 @@ using TypeResolver =
     std::function<c10::StrongTypePtr(const c10::QualifiedName&)>;
 
 using ObjLoader = std::function<
-    c10::intrusive_ptr<c10::ivalue::Object>(at::StrongTypePtr, IValue)>;
+    c10::intrusive_ptr<c10::ivalue::Object>(const at::StrongTypePtr&, IValue)>;
 
 class DeserializationStorageContext;
 
@@ -131,6 +131,7 @@ class TORCH_API Unpickler {
   }
   std::string readString();
   void readList(IValue list_ivalue);
+  void readListElements(IValue list_ivalue, size_t start);
   void setInput(size_t memo_id);
   void run();
 

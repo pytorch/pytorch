@@ -4,6 +4,16 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <torch/csrc/utils/python_compat.h>
+
+
+// Many APIs have changed/don't exist anymore
+#if IS_PYTHON_3_12_PLUS
+
+// Re-enable this some day
+
+#else
+
 #include "minpybind.h"
 #include <frameobject.h>
 #include <opcode.h>
@@ -12,7 +22,6 @@
 #include <iostream>
 #include <vector>
 //#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -880,7 +889,7 @@ mpy::obj<Tensor> Tensor::create_delayed(mpy::object op, mpy::vector_args args, S
     mpy::obj<Tensor> self = Tensor::create();
     self->capture_levels(levels);
     self->has_device_ = has_device;
-    self->delayed_ = std::make_unique<DelayedOperator>(op, args);
+    self->delayed_ = std::make_unique<DelayedOperator>(std::move(op), args);
     return self;
 }
 
@@ -1082,7 +1091,7 @@ PyObject* py_tree_flatten(PyObject *self,
 
 
 
-mpy::object tree_map(Arena& A, std::function<mpy::handle(mpy::handle)> fn, mpy::handle agg) {
+mpy::object tree_map(Arena& A, const std::function<mpy::handle(mpy::handle)>& fn, mpy::handle agg) {
     Slice<mpy::handle> elements;
     auto unflatten = tree_flatten(A, agg, elements);
     for (auto i : elements.enumerate()) {
@@ -3252,3 +3261,5 @@ PyObject* Dim_init() {
         return nullptr;
     }
 }
+
+#endif

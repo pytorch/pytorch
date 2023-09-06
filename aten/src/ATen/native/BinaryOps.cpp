@@ -1393,7 +1393,7 @@ Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& othe
 
 template <typename OutImpl>
 Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl) {
-  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  Tensor result = at::empty(self.sizes(), self.options().dtype(kBool).device(self.device()));
   return out_impl(result, self, other);
 }
 
