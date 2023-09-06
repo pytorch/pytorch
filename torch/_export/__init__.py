@@ -392,10 +392,10 @@ def export(
     if isinstance(f, torch.nn.Module):
         param_lookup: Dict[int, List[str]] = {}
         buffer_lookup: Dict[int, List[str]] = {}
-        for name, param in f.named_parameters():
-            param_lookup.get(id(param), []).append(name)
-        for name, buffer in f.named_buffers():
-            buffer_lookup.get(id(buffer), []).append(name)
+        for name, param in f.named_parameters(remove_duplicate=False):
+            param_lookup.setdefault(id(param), []).append(name)
+        for name, buffer in f.named_buffers(remove_duplicate=False):
+            buffer_lookup.setdefault(id(buffer), []).append(name)
         for dynamo_name, dynamo_param in gm_torch_level.named_parameters(remove_duplicate=False):
             assert dynamo_name not in param_buffer_table
             if id(dynamo_param) in param_lookup:
