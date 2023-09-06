@@ -261,7 +261,8 @@ class NegateSource(ChainedSource):
         return f"{self.base.name()}.__neg__()"
 
 
-class FromSymBoolSource(ChainedSource):
+@dataclasses.dataclass(frozen=True)
+class ConvertIntSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
 
