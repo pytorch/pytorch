@@ -1,7 +1,7 @@
 Control Flow - Cond
 ====================
 
-Export provides a `torch.ops.higher_order.cond` operator used to help specify if-else like control flow within
+Export supports the structured control flow operator `torch.ops.higher_order.cond`. It can be used to specify if-else like control flow within
 some code.
 
 torch.ops.higher_order.cond
