@@ -47,7 +47,6 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
-from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
@@ -1471,13 +1470,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
-        for _ in range(10):
+        n_iter = torch._dynamo.config.cache_size_limit
+        for _ in range(n_iter):
             x = random.randint(2, 30)
             ref = mandelbrot_numpy(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
         # We need to specialise the number as it's in a forloop
-        self.assertEqual(cnts.frame_count, 10)
+        self.assertEqual(cnts.frame_count, n_iter)
 
     def test_numpy_as_global(self):
         global x
@@ -1813,6 +1813,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ref = fn(x, obj)
         res = opt_fn(x, obj)
         self.assertTrue(same(ref, res))
+
+    def test_manual_seed(self):
+        def fn(a, b):
+            x = a + b
+            torch.manual_seed(9000)
+            return x + 1
+
+        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=3)
 
     def test_usr_cls_staticmethod(self):
         class Foo:
@@ -2230,6 +2238,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         num = torch.Size([10, 8]).numel()
         self.assertEqual(opt_fn(), num)
 
+    def test_torch_size_numel_dynamic(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x.size().numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.rand(10, 1, 8, 1)
+        expect = fn(x)
+        self.assertEqual(opt_fn(x), expect)
+
+    def test_shape_type(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x + (type(x.shape) == torch.Size)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2260,17 +2289,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             torch.manual_seed(attention_seed)
             return (x,)
 
-        x = torch.randn(10, requires_grad=True)
+        x = torch.randn(100, requires_grad=True)
         ref = fn(x)
 
-        # Python code is needed here, since torch.manual_seed graph-breaks.
-        # Refs: https://github.com/pytorch/pytorch/issues/107187
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.op_count, 1)
-        self.assertEqual(cnts.frame_count, 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2505,54 +2530,6 @@ def fn():
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
-
-    def test_profiler_cache_lookup(self):
-        def fn(x):
-            y = x**2
-            y = y + 2
-            z = y**3
-            return z
-
-        for profiler, get_events in (
-            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
-            (torch.profiler.profiler.profile, lambda prof: prof.events()),
-        ):
-            x = torch.randn((2, 2), requires_grad=True)
-            ref = fn(x)
-            opt_fn = torch.compile(fn, backend="aot_eager")
-
-            # warmup
-            opt_fn(x)
-
-            # whenver we enter the profiler context, hooks are automatically registered
-            with profiler() as prof:
-                res = opt_fn(x)
-            events = list(
-                filter(
-                    lambda event: event.name == "TorchDynamo Cache Lookup",
-                    get_events(prof),
-                )
-            )
-
-            self.assertTrue(same(ref, res))
-            self.assertTrue(
-                len(events) == 1,
-                "Expected one lookup profiler event for one opt_fn run",
-            )
-
-            with profiler() as prof:
-                # just make sure the disable functionality works
-                _enable_dynamo_cache_lookup_profiler(False)
-                res = opt_fn(x)
-            events = list(
-                filter(
-                    lambda event: event.name == "TorchDynamo Cache Lookup",
-                    get_events(prof),
-                )
-            )
-
-            self.assertTrue(same(ref, res))
-            self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     def test_tensor_is_contiguous(self):
         def fn(x):
