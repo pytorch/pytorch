@@ -336,11 +336,11 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             stream_ptr,
         )
         self.workspace_size = c_workspace_size.value
-        assert (
-            self.workspace_size == 0
-        ), "Autotune cache needs to be updated to support non-zero workspace_size!"
-        self.workspace = torch.empty(
-            self.workspace_size, dtype=torch.uint8, device="cuda"
+        # TODO: Support non-zero workspace_size.
+        assert self.workspace_size == 0, (
+            "Things need to be fixed to support non-zero workspace_size: "
+            "1) max autotune cache needs to store workspace size; "
+            "2) memory allocation needs to allocate / deallocate workspace correctly; "
         )
 
         # Generate partial function.
@@ -349,7 +349,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             *args,
             *self.extra_args,
             None,  # null workspace size ptr
-            c_void_p(self.workspace.data_ptr()),  # set workspace ptr
+            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
             stream_ptr,
         )
 

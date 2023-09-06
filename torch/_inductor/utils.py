@@ -33,6 +33,8 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.autograd import DeviceType
+from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
@@ -91,29 +93,34 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
         # Record clocks
         torch.cuda.synchronize()
 
-    log.debug("profiling time breakdown")
+    log.debug("raw events")
     log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
-    def _should_keep(key: str) -> bool:
-        if key.startswith("cuda"):
-            return False
-        if key in {
-            "Context Sync",
-            "cuLaunchKernel",
-            "Event Sync",
-            "Stream Wait Event",
-            "Stream Sync",
-            "Unknown Sync",
-        }:
-            return False
-        if key.startswith("void at::native::vectorized_elementwise_kernel"):
-            return False
-        return True
+    filtered_events = EventList(
+        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+    )
+    if len(filtered_events) % n_repeat != 0:
+        raise RuntimeError(
+            "Failed to divide all profiling events into #repeat groups. "
+            "#CUDA events: %d, #repeats: %s",
+            len(filtered_events),
+            n_repeat,
+        )
+    num_event_per_group = len(filtered_events) / n_repeat
+    actual_events = EventList(
+        [
+            event
+            for i, event in enumerate(filtered_events)
+            if i % num_event_per_group != 0
+        ]
+    )
+    actual_events._build_tree()
+    actual_events = actual_events.key_averages()
 
-    filtered_events = [event for event in p.key_averages() if _should_keep(event.key)]
-    log.debug("filtered events")
-    log.debug(filtered_events)
-    res = sum(event.cuda_time for event in filtered_events) / 1000.0
+    log.debug("profiling time breakdown")
+    log.debug(actual_events.table(row_limit=-1))
+
+    res = sum(event.cuda_time for event in actual_events) / 1000.0
     log.debug("profiling results: %s", res)
     return res
 
