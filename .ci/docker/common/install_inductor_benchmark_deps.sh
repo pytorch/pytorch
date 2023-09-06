@@ -13,9 +13,9 @@ function install_huggingface() {
 
 function install_timm() {
   local commit
-  version=$(get_pinned_commit timm)
+  commit=$(get_pinned_commit timm)
   pip_install pandas==2.0.3
-  pip_install "timm==${version}"
+  pip_install "git+https://github.com/huggingface/pytorch-image-models@${commit}"
   # Clean up
   conda_run pip uninstall -y cmake torch torchvision triton
 }
