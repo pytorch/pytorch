@@ -4,9 +4,9 @@ from . import ir
 
 def get_runtime_of_snode(snode: "BaseSchedulerNode"):
     """
-    Gets the runtime of Scheduler node. Currently somewhat of a placeholder, todo to be replaced by more sophisticated approaches.
+    Gets the runtime of Scheduler node. Currently somewhat of a placeholder.
 
-    TODO(yf225): potentially replace with a more sophisticated cost model (e.g. analytical)
+    TODO: replace with a more sophisticated cost model (e.g. analytical)
     """
     # print(f"get_runtime_of_snode: snode.node: {snode.node}")
     if isinstance(snode.node, ir.AllReduce):
