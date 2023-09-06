@@ -2207,13 +2207,30 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
+            if hasattr(func, "fn") and hasattr(func.fn, "_origin") and func.fn._origin in [
                 produce_trampoline_autograd_fwd,
                 produce_trampoline_autograd_apply,
                 produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
                 return
+
+
+            # Function returned by torch.autograd.function.once_differentiable is known sound
+            if (
+                isinstance(func, UserFunctionVariable) and
+                func.get_filename().endswith('torch/autograd/function.py') and
+                not func.fn.__module__.startswith('torch.autograd.function')
+            ):
+                return
+            # Function wrapped by torch.autograd.function.once_differentiable is known sound
+            if (
+                isinstance(func, NestedUserFunctionVariable) and
+                func.get_filename().endswith('torch/autograd/function.py') and
+                func.fn_name.value == 'once_differentiable.<locals>.wrapper.<locals>.<genexpr>'
+            ):
+                return
+
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
