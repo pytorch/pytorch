@@ -4,26 +4,13 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
+from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
-
-
-def from_fun(x):
-    if not isinstance(x, torch.Tensor):
-        return x
-    torch._sync(x)
-    return torch._from_functional_tensor(x)
-
-def to_fun(x):
-    if not isinstance(x, torch.Tensor):
-        return x
-    out = torch._to_functional_tensor(x)
-    torch._mirror_autograd_meta_to(x, out)
-    return out
 
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
