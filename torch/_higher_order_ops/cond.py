@@ -2,14 +2,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
-import torch.fx.traceback as fx_traceback
 import torch._subclasses.functional_tensor
+import torch.fx.traceback as fx_traceback
 
 import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo.exc import CondOpArgsMismatchError
-from torch._functorch.aot_autograd import from_fun, to_fun
 
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -312,6 +311,8 @@ def inner(pred, true_fn, false_fn, operands):
 
 @cond_op.py_impl(FunctionalTensorMode)
 def cond_functional_tensor_mode(pred, true_fn, false_fn, inputs):
+    from torch._functorch.aot_autograd import from_fun, to_fun
+
     unwrapped_inputs = pytree.tree_map_only(FunctionalTensor, from_fun, inputs)
     unwrapped_pred = pytree.tree_map_only(FunctionalTensor, from_fun, pred)
 
