@@ -37,7 +37,7 @@ class AOTInductorModelRunner:
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model.h>
+        #include <torch/csrc/inductor/aot_runtime/model.h>
 
         torch::aot_inductor::AOTInductorModel model;
 
