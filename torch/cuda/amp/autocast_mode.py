@@ -1,8 +1,5 @@
-from __future__ import annotations
-
 import collections
 import functools
-from typing import Literal, Optional
 
 import torch
 
@@ -28,7 +25,7 @@ class autocast(torch.amp.autocast_mode.autocast):
         enabled: bool = True,
         dtype: torch.dtype = torch.float16,
         cache_enabled: bool = True,
-    ) -> None:
+    ):
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = "cuda"
@@ -38,15 +35,15 @@ class autocast(torch.amp.autocast_mode.autocast):
             "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
 
-    def __enter__(self) -> Optional[autocast]:
+    def __enter__(self):
         if torch._jit_internal.is_scripting():
             return self
         return super().__enter__()
 
     # TODO: discuss a unified TorchScript-friendly API for autocast
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Optional[Literal[False]]:  # type: ignore[override]
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
-            return None
+            return
         return super().__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, func):
