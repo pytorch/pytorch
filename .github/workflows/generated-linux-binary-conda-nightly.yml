@@ -97,6 +97,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -157,6 +158,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -274,6 +276,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -334,6 +337,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -451,6 +455,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -511,6 +516,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -628,6 +634,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
@@ -688,6 +695,7 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     with:
+      runs-on: linux.24xlarge
       PYTORCH_ROOT: /pytorch
       BUILDER_ROOT: /builder
       PACKAGE_TYPE: conda
