@@ -1,7 +1,6 @@
 from torch.fx import GraphModule
 
 from .pt2e.prepare import prepare
-from .pt2e._propagate_annotation import propagate_annotation
 from .pt2e.qat_utils import (
     _fuse_conv_bn_qat,
     _fold_conv_bn_qat,
@@ -9,7 +8,6 @@ from .pt2e.qat_utils import (
 from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
-    _replace_dropout_for_eval,
 )
 from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
@@ -27,6 +25,10 @@ from torch.ao.quantization.quantizer import (  # noqa: F401
 from torch.ao.quantization.backend_config import BackendConfig
 
 from typing import Any, Tuple
+
+from torch.fx.passes.infra.pass_manager import PassManager
+from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
+from torch.ao.quantization.pt2e.port_metadata_pass import PortNodeMetaForQDQ
 
 __all__ = [
     "prepare_pt2e",
@@ -68,7 +70,6 @@ def prepare_pt2e(
     _fuse_conv_bn_(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    propagate_annotation(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
     model.meta.update(original_graph_meta)
     return model
@@ -81,7 +82,6 @@ def prepare_qat_pt2e(
     node_name_to_scope = _get_node_name_to_scope(model)
     quantizer.annotate(model)
     quantizer.validate(model)
-    propagate_annotation(model)
     # Perform fusion after annotate to avoid quantizing ops in the new
     # subgraph that don't need to be quantized
     # TODO: only fuse if conv and bn are both configured to be quantized
@@ -95,11 +95,13 @@ def convert_pt2e(
     use_reference_representation: bool = False,
 ) -> GraphModule:
     original_graph_meta = model.meta
-    # TODO: Handle this in export itself, outside of quantization
-    # See https://github.com/pytorch/pytorch/issues/103681.
-    _replace_dropout_for_eval(model)
     model = _convert_to_reference_decomposed_fx(model)
     model = _fold_conv_bn_qat(model)
+    pm = PassManager([DuplicateDQPass()])
+    model = pm(model).graph_module
+
+    pm = PassManager([PortNodeMetaForQDQ()])
+    model = pm(model).graph_module
     if use_reference_representation:
         model = reference_representation_rewrite(model)
 

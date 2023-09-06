@@ -1137,33 +1137,3 @@ def filter_nodes(nodes, fn):
         fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
     return [node for node in nodes if node.target in fns]
-
-
-def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same size/strides"""
-    val1 = node1.meta.get("val")
-    val2 = node2.meta.get("val")
-    return (
-        val1 is not None
-        and val2 is not None
-        and val1.size() == val2.size()
-        and val1.stride() == val2.stride()
-    )
-
-
-def remove_extra_clones(graph: torch.fx.Graph):
-    seen = set()
-    for node in reversed(graph.nodes):
-        if node.target is aten.clone.default:
-            src = node.args[0]
-            if (
-                isinstance(src, torch.fx.Node)
-                and src.op == "call_function"
-                and isinstance(src.target, torch._ops.OpOverload)
-                and not src.target.is_view
-                and not any(u in seen for u in src.users)
-                and same_layout(src, node)
-            ):
-                node.replace_all_uses_with(src)
-                graph.erase_node(node)
-        seen.add(node)
