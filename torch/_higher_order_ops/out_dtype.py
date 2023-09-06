@@ -21,7 +21,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor, dispatch_functionalize
-from torch._functorch.aot_autograd import from_fun, to_fun
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
@@ -208,6 +207,7 @@ def out_dtype_func1(op, output_dtype, *args):
 
 @out_dtype.py_impl(FunctionalTensorMode)
 def out_dtype_functional_tensor_mode(op, output_dtype, *args):
+    from torch._functorch.aot_autograd import from_fun, to_fun
     unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, args)
     # We can rely on the Functionalize key to detect cond branches that modify the input
     functional_op = dispatch_functionalize(op)
