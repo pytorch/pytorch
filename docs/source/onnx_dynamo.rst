@@ -93,14 +93,14 @@ Inspecting the ONNX model using GUI
 You can view the exported model using `Netron <https://netron.app/>`__.
 
 .. image:: _static/img/onnx/onnx_dynamo_mlp_model.png
-    :width: 50%
-    :alt: MLP model as viewed in Netron
+    :width: 40%
+    :alt: MLP model as viewed using Netron
 
 Note that each layer is represented in a rectangular box with a *f* icon in the top right corner.
 
 .. image:: _static/img/onnx/onnx_dynamo_mlp_model_function_highlight.png
-    :width: 50%
-    :alt: ONNX function highlighted
+    :width: 40%
+    :alt: ONNX function highlighted on MLP model
 
 By expanding it, the function body is shown.
 
