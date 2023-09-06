@@ -616,6 +616,11 @@ class RendezvousTCPTest(TestCase):
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
+    def test_tcp_store_url_with_libuv(self):
+        url = self.create_tcp_url()
+        gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
+        store0, rank0, size0 = next(gen0)
+        self.assertTrue(store0.libuvBackend)
 
 class DummyStore(dist.Store):
     def __init__(self):
