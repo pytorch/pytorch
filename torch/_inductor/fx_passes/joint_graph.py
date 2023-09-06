@@ -4,9 +4,6 @@ from typing import Set
 
 import torch
 import torch._guards
-from torch._inductor.constant_folding import ConstantFolder
-from torch.multiprocessing.reductions import StorageWeakRef
-
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -111,43 +108,19 @@ def remove_no_ops(
             replace_no_op(node, 0)
 
 
-class UniformValueConstantFolder(ConstantFolder):
-    """
-    Runs constant folding and replaces tensors that have a unifrom value
-    with a tensor constructor call: aten.full([shape], value, ...)
-    """
-
-    def __init__(self, gm, skip_constructors=False):
-        super().__init__(gm, skip_constructors)
-        self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
-        self.constant_data_ptrs: Counter[int, int] = Counter()
-
-    def insertable_tensor_check(self, t: torch.Tensor) -> bool:
-        # TODO - we could also Tensors which get replaced with arange here
-        return (
-            t.numel() != 0
-            and (t == t.flatten()[0]).all()
-            and torch._C._has_storage(t)
-            and t.layout == torch.strided
-        )
-
-    def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
-        self.node_replacements[node] = tensor.flatten()[0].item()
-        self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
-
-
 @torch.utils._python_dispatch._disable_current_modes()
 def constant_fold_uniform_value(gm):
     "Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."
     aten = torch.ops.aten
+    from torch._inductor.constant_folding import ConstantFolder
 
-    # Constant folding can leak memory, especially with repeated compilation, so we are only going to
-    # remove constants which can be replaced with a constructor.
-    cf = UniformValueConstantFolder(gm)
+    def is_uniform_valued_tensor(t):
+        return t.numel() != 0 and (t == t.flatten()[0]).all()
+
+    cf = ConstantFolder(gm, insertable_tensor_check=is_uniform_valued_tensor)
     cf.run()
 
     node_replacements = cf.node_replacements
-
     graph = gm.graph
 
     zeros = set()
@@ -155,20 +128,39 @@ def constant_fold_uniform_value(gm):
 
     # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
     # so just constant-ify if a Tensor is unaliased
-    constant_data_ptr_count = Counter()
+    constant_data_ptrs = Counter()
 
-    for node in cf.node_replacements:
-        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
+    for constant in node_replacements.values():
+        if (
+            constant.numel() != 0
+            and torch._C._has_storage(constant)
+            and constant.layout == torch.strided
+        ):
+            constant_data_ptrs[constant.untyped_storage().data_ptr()] += 1
 
-    for node, value in node_replacements.items():
+    for node, constant in node_replacements.items():
+        # Constant folding can leak memory, especially with repeated compilation, so we are only going to
+        # remove constants which can be replaced with a constructor.
+
+        # TODO - we could also Tensors which get replaced with arange here
+        if not is_uniform_valued_tensor(constant):
+            continue
+
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
-        fake_tensor = node.meta["val"]
-        if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
+        if (
+            not constant.is_contiguous(memory_format=torch.contiguous_format)
+            or not constant.layout == torch.strided
+        ):
             continue
 
-        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
+        if (
+            torch._C._has_storage(constant)
+            and constant_data_ptrs[constant.untyped_storage().data_ptr()] != 1
+        ):
             continue
+
+        value = constant.flatten()[0].item()
 
         with graph.inserting_after(node):
             # the conversion from tensor and back to value can be lossy, just use the original full ctor value
@@ -182,11 +174,11 @@ def constant_fold_uniform_value(gm):
             # zeros, and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
-                args=(list(fake_tensor.shape), value),
+                args=(list(constant.shape), value),
                 kwargs={
-                    "dtype": fake_tensor.dtype,
+                    "dtype": constant.dtype,
                     "layout": torch.strided,
-                    "device": fake_tensor.device,
+                    "device": constant.device,
                     "pin_memory": False,
                 },
             )

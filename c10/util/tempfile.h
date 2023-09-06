@@ -1,15 +1,24 @@
 #pragma once
 
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 #include <cerrno>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#if __has_include(<version>)
+#include <version>
+#endif
+
+#if __has_include(<filesystem>) || ( defined(__cpp_lib_filesystem) && __cpp_lib_filesystem >= 201703L)
+#include <filesystem>
+namespace stdfs = std::filesystem;
+#else
+#include <experimental/filesystem>
+namespace stdfs = std::experimental::filesystem;
+#endif
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
-#include <vector>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -21,77 +30,79 @@
 namespace c10 {
 namespace detail {
 // Creates the filename pattern passed to and completed by `mkstemp`.
-// Returns std::vector<char> because `mkstemp` needs a (non-const) `char*` and
-// `std::string` only provides `const char*` before C++17.
 #if !defined(_WIN32)
-inline std::vector<char> make_filename(std::string name_prefix) {
+inline std::string make_filename(std::string_view name_prefix) {
   // The filename argument to `mkstemp` needs "XXXXXX" at the end according to
   // http://pubs.opengroup.org/onlinepubs/009695399/functions/mkstemp.html
-  static const std::string kRandomPattern = "XXXXXX";
+  constexpr const char* kRandomPattern = "XXXXXX";
 
   // We see if any of these environment variables is set and use their value, or
   // else default the temporary directory to `/tmp`.
-  static const char* env_variables[] = {"TMPDIR", "TMP", "TEMP", "TEMPDIR"};
 
-  std::string tmp_directory = "/tmp";
-  for (const char* variable : env_variables) {
+  const char* tmp_directory = "/tmp";
+  for (const char* variable : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
     if (const char* path = getenv(variable)) {
       tmp_directory = path;
       break;
     }
   }
 
-  std::vector<char> filename;
-  filename.reserve(
-      tmp_directory.size() + name_prefix.size() + kRandomPattern.size() + 2);
+  stdfs::path filename(tmp_directory);
 
-  filename.insert(filename.end(), tmp_directory.begin(), tmp_directory.end());
-  filename.push_back('/');
-  filename.insert(filename.end(), name_prefix.begin(), name_prefix.end());
-  filename.insert(filename.end(), kRandomPattern.begin(), kRandomPattern.end());
-  filename.push_back('\0');
-
-  return filename;
+  filename /= name_prefix;
+  filename += kRandomPattern;
+  return filename.string();
+}
+#else
+inline std::string make_filename() {
+  char name[L_tmpnam_s]{};
+  auto res = tmpnam_s(name, L_tmpnam_s);
+  if (res != 0) {
+    TORCH_WARN("Error generating temporary file");
+    return "";
+  }
+  return name;
 }
 #endif // !defined(_WIN32)
 } // namespace detail
 
 struct TempFile {
-#if !defined(_WIN32)
-  TempFile() : fd(-1) {}
-  TempFile(std::string name, int fd) : fd(fd), name(std::move(name)) {}
+  TempFile(const stdfs::path& name, int fd = -1) noexcept
+      : fd(fd), name(name.string()) {}
   TempFile(const TempFile&) = delete;
   TempFile(TempFile&& other) noexcept
       : fd(other.fd), name(std::move(other.name)) {
-    other.fd = -1;
     other.name.clear();
+    other.fd = -1;
   }
 
   TempFile& operator=(const TempFile&) = delete;
   TempFile& operator=(TempFile&& other) noexcept {
     fd = other.fd;
-    name = std::move(other.name);
     other.fd = -1;
+    name = std::move(other.name);
     other.name.clear();
     return *this;
   }
 
   ~TempFile() {
-    if (fd >= 0) {
-      unlink(name.c_str());
-      close(fd);
+    if (!name.empty()) {
+      stdfs::remove(name);
+#if !defined(_WIN32)
+      if (fd >= 0) {
+        close(fd);
+      }
+#endif
     }
   }
 
   int fd;
-#endif // !defined(_WIN32)
-
   std::string name;
 };
 
 struct TempDir {
-  TempDir() = default;
-  explicit TempDir(std::string name) : name(std::move(name)) {}
+  TempDir() = delete;
+  explicit TempDir(stdfs::path name) noexcept : name(std::move(name)) {}
   TempDir(const TempDir&) = delete;
   TempDir(TempDir&& other) noexcept : name(std::move(other.name)) {
     other.name.clear();
@@ -106,15 +117,11 @@ struct TempDir {
 
   ~TempDir() {
     if (!name.empty()) {
-#if !defined(_WIN32)
-      rmdir(name.c_str());
-#else // defined(_WIN32)
-      RemoveDirectoryA(name.c_str());
-#endif // defined(_WIN32)
+      stdfs::remove_all(name);
     }
   }
 
-  std::string name;
+  stdfs::path name;
 };
 
 /// Attempts to return a temporary file or returns `nullopt` if an error
@@ -127,26 +134,31 @@ struct TempDir {
 /// `<name-prefix>` is the value supplied to this function, and
 /// `<random-pattern>` is a random sequence of numbers.
 /// On Windows, `name_prefix` is ignored and `tmpnam` is used.
-inline c10::optional<TempFile> try_make_tempfile(
-    std::string name_prefix = "torch-file-") {
+inline std::optional<TempFile> try_make_tempfile(
+    std::string_view name_prefix = "torch-file-") {
 #if defined(_WIN32)
-  return TempFile{std::tmpnam(nullptr)};
+  auto filename = detail::make_filename();
 #else
-  std::vector<char> filename = detail::make_filename(std::move(name_prefix));
+  auto filename = detail::make_filename(name_prefix);
+#endif
+  if (filename.empty()) {
+    return std::nullopt;
+  }
+#if defined(_WIN32)
+  return TempFile(std::move(filename));
+#else
   const int fd = mkstemp(filename.data());
   if (fd == -1) {
-    return c10::nullopt;
+    return std::nullopt;
   }
-  // Don't make the string from string(filename.begin(), filename.end(), or
-  // there will be a trailing '\0' at the end.
-  return TempFile(filename.data(), fd);
+  return TempFile(std::move(filename), fd);
 #endif // defined(_WIN32)
 }
 
 /// Like `try_make_tempfile`, but throws an exception if a temporary file could
 /// not be returned.
-inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
-  if (auto tempfile = try_make_tempfile(std::move(name_prefix))) {
+inline TempFile make_tempfile(std::string_view name_prefix = "torch-file-") {
+  if (auto tempfile = try_make_tempfile(name_prefix)) {
     return std::move(*tempfile);
   }
   TORCH_CHECK(false, "Error generating temporary file: ", std::strerror(errno));
@@ -162,27 +174,28 @@ inline TempFile make_tempfile(std::string name_prefix = "torch-file-") {
 /// `<name-prefix>` is the value supplied to this function, and
 /// `<random-pattern>` is a random sequence of numbers.
 /// On Windows, `name_prefix` is ignored and `tmpnam` is used.
-inline c10::optional<TempDir> try_make_tempdir(
-    std::string name_prefix = "torch-dir-") {
+inline std::optional<TempDir> try_make_tempdir(
+    std::string_view name_prefix = "torch-dir-") {
 #if defined(_WIN32)
-  while (true) {
-    const char* dirname = std::tmpnam(nullptr);
-    if (!dirname) {
-      return c10::nullopt;
+  for (int i = 0; i < 100; i++) {
+    auto dirname = detail::make_filename();
+    if (dirname.empty()) {
+      return std::nullopt;
     }
-    if (CreateDirectoryA(dirname, NULL)) {
+    std::error_code ec{};
+    if (stdfs::create_directories(dirname, ec)) {
       return TempDir(dirname);
     }
     if (GetLastError() != ERROR_ALREADY_EXISTS) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 #else
-  std::vector<char> filename = detail::make_filename(std::move(name_prefix));
+  auto filename = detail::make_filename(name_prefix);
   const char* dirname = mkdtemp(filename.data());
   if (!dirname) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return TempDir(dirname);
 #endif // defined(_WIN32)
@@ -190,8 +203,8 @@ inline c10::optional<TempDir> try_make_tempdir(
 
 /// Like `try_make_tempdir`, but throws an exception if a temporary directory
 /// could not be returned.
-inline TempDir make_tempdir(std::string name_prefix = "torch-dir-") {
-  if (auto tempdir = try_make_tempdir(std::move(name_prefix))) {
+inline TempDir make_tempdir(std::string_view name_prefix = "torch-dir-") {
+  if (auto tempdir = try_make_tempdir(name_prefix)) {
     return std::move(*tempdir);
   }
   TORCH_CHECK(
