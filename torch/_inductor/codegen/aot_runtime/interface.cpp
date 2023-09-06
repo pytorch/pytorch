@@ -1,8 +1,8 @@
-#include <torch/csrc/inductor/aot_inductor_interface.h>
-#include <torch/csrc/inductor/aot_inductor_model_container.h>
+#include <torch/csrc/inductor/aot_runtime/interface.h>
+#include <torch/csrc/inductor/aot_runtime/model_container.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <iostream>
-#include <torch/csrc/inductor/proxy_executor.h>
+#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 #include <stdexcept>
 #include <vector>
 
