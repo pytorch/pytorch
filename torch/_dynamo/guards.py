@@ -449,6 +449,7 @@ class GuardBuilder(GuardBuilderBase):
             # TorchDynamo graph breaks on LSTMs, but this is a way if user wants
             # to override it. LSTMs change the module state in every invocation,
             # leading to recompilations.
+            log.warning("Skipping nn module guard on LSTMs")
             return
         try:
             g = torch._C._dynamo.guards.nn_module_guard(val)
@@ -457,6 +458,9 @@ class GuardBuilder(GuardBuilderBase):
             # we might be trying to install a guard before a super().__init__() call when
             # the module is missing _parameters, _modules, and other attributes.
             # For now, we skip installing the guard.
+            log.warning(
+                "Skipping nn module guard because the module could be partially initialized"
+            )
             return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
         self._produce_guard_code(guard, [f"{name}({ref})"])
@@ -914,6 +918,7 @@ class CheckFunctionManager:
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
         self._extra_closure_vars: Dict[str, object] = {}
         self.output_graph = output_graph
+        self.extra_closure_vars_count = 0
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -1216,10 +1221,8 @@ class CheckFunctionManager:
         return None
 
     def add_extra_closure_var(self, name_hint, obj):
-        idx = 0
-        while f"{name_hint}_{idx}" in self._extra_closure_vars:
-            idx += 1
-        name = f"{name_hint}_{idx}"
+        name = f"{name_hint}_{self.extra_closure_vars_count}"
+        self.extra_closure_vars_count += 1
         self._extra_closure_vars[name] = obj
         return name
 

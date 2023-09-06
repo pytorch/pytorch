@@ -497,7 +497,9 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 typedef struct {
+  /* Dict for an attr of the nn module */
   PyDictObject* dict; // borrowed reference
+  /* version tag of the attr dict to watch mutations */
   uint64_t dict_version_tag;
 } AttrTag;
 
@@ -512,20 +514,21 @@ static const char* module_guard_attrs[] = {
 };
 
 typedef struct {
-  PyObject_HEAD PyObject* mod; // borrowed reference
+  PyObject_HEAD;
+  PyObject* mod; // borrowed reference
   unsigned int version_tag;
   uint64_t dict_version_tag;
   AttrTag attr_tags[sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0])];
 } NNModuleGuard;
 
 static void NNModuleGuard_dealloc(NNModuleGuard* self) {
-  self->mod = NULL;
+  self->mod = nullptr;
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
 static PyTypeObject NNModuleGuardType = {
     // NOLINTNEXTLINE
-    PyVarObject_HEAD_INIT(NULL, 0)};
+    PyVarObject_HEAD_INIT(nullptr, 0)};
 
 static PyObject* NNModuleGuard_call(
     PyObject* callable,
@@ -536,7 +539,7 @@ static PyObject* NNModuleGuard_call(
   if (PyTuple_GET_SIZE(args) != 1) {
     PyErr_SetString(
         PyExc_TypeError, "NNModuleGuardType: expected one argument");
-    return NULL;
+    return nullptr;
   }
 
   PyObject* mod = PyTuple_GET_ITEM(args, 0);
@@ -554,7 +557,7 @@ static PyObject* NNModuleGuard_call(
 
   // NOTE: we must check the dict version tag before we check the attributes,
   // because the attributes may be dead references if the dict has been updated.
-  PyObject* dict = PyObject_GenericGetDict(mod, NULL);
+  PyObject* dict = PyObject_GenericGetDict(mod, nullptr);
   if (((PyDictObject*)dict)->ma_version_tag != guard->dict_version_tag) {
     Py_DECREF(dict);
     Py_RETURN_FALSE;
@@ -578,16 +581,16 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
 
   NNModuleGuard* guard =
       (NNModuleGuard*)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
-  if (guard == NULL) {
-    return NULL;
+  if (guard == nullptr) {
+    return nullptr;
   }
 
   guard->mod = obj;
 
-  PyObject* dict = PyObject_GenericGetDict(obj, NULL);
-  if (dict == NULL) {
+  PyObject* dict = PyObject_GenericGetDict(obj, nullptr);
+  if (dict == nullptr) {
     Py_DECREF(guard);
-    return NULL;
+    return nullptr;
   }
   guard->dict_version_tag = ((PyDictObject*)dict)->ma_version_tag;
 
@@ -596,12 +599,14 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
     auto& tag = guard->attr_tags[idx];
 
     PyObject* key = PyUnicode_FromString(name);
-    if (key == NULL) {
-      return NULL;
+    if (key == nullptr) {
+      Py_DECREF(dict);
+      Py_DECREF(guard);
+      return nullptr;
     }
 
     PyObject* attr_obj = PyDict_GetItemWithError(dict, key);
-    if (attr_obj == NULL) {
+    if (attr_obj == nullptr) {
       if (!PyErr_Occurred()) {
         // this module doesn't have the specific attribute
         PyErr_Format(
@@ -612,7 +617,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
       }
       Py_DECREF(dict);
       Py_DECREF(guard);
-      return NULL;
+      return nullptr;
     }
 
     tag.dict = (PyDictObject*)attr_obj;
@@ -625,9 +630,9 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
     // The tp_version_tag may be lazily set on attribute access. If we don't
     // have a valid tag, perform a property lookup to force the tag to be set.
     PyObject* tmp = PyObject_GetAttrString(obj, "__dict__");
-    if (tmp == NULL) {
+    if (tmp == nullptr) {
       Py_DECREF(guard);
-      return NULL;
+      return nullptr;
     }
     Py_DECREF(tmp);
   }
@@ -636,7 +641,7 @@ static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
   if (guard->version_tag == 0) {
     Py_DECREF(guard);
     PyErr_SetString(PyExc_ValueError, "object has no version tag");
-    return NULL;
+    return nullptr;
   }
   return (PyObject*)guard;
 }
@@ -680,7 +685,7 @@ PyObject* torch_c_dynamo_guards_init() {
     return nullptr;
 
   if (PyType_Ready(&NNModuleGuardType) < 0)
-    return NULL;
+    return nullptr;
 
   m = PyModule_Create(&_module);
   if (m == NULL)
@@ -697,7 +702,7 @@ PyObject* torch_c_dynamo_guards_init() {
           m, "NNModuleGuardType", Py_NewRef(&NNModuleGuardType)) < 0) {
     Py_DECREF(&NNModuleGuardType);
     Py_DECREF(m);
-    return NULL;
+    return nullptr;
   }
 
   return m;
