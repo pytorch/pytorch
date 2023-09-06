@@ -5,11 +5,14 @@ import torch
 import os
 import numpy as np
 from enum import Enum
+from typing import List, Union
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
+from torch._decomp import _convert_out_params
 from torch._dispatch.python import enable_python_dispatcher
+from torch._prims_common.wrappers import out_wrapper
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -1326,6 +1329,53 @@ class TestMeta(TestCase):
             self.assertEqual(res.shape, rs)
             self.assertEqual(res.dtype, torch.float32)
             self.assertEqual(res.untyped_storage().data_ptr(), 0)
+
+    def test_meta_function_with_out(self):
+        # Make a dummy meta function and make sure the tensor is cloned
+        def dummy_meta(input: torch.Tensor,
+                       param: Union[List[int], int]) -> torch.Tensor:
+            return input.clone().resize_(param)
+
+        # Test both the default "out" paramter and a representative alternative
+        custom_out_name = "grad_input"
+        for custom_name in [True, False]:
+            original_annotations = dummy_meta.__annotations__
+
+            # Test only these two wrappers and not registration
+            if custom_name:
+                registered_and_wrapped = _convert_out_params(
+                    out_wrapper("grad_input")(dummy_meta))
+            else:
+                registered_and_wrapped = _convert_out_params(
+                    out_wrapper()(dummy_meta))
+
+            # The new annotation should match the original except for addition
+            # of out, which should remain a Tensor.
+            for k, v in registered_and_wrapped.__annotations__.items():
+                is_out_param = ((k == "out" and not custom_name) or
+                                (k == custom_out_name and custom_name))
+                if is_out_param:
+                    self.assertEqual(v, torch.Tensor)
+                else:
+                    self.assertEqual(v, original_annotations[k])
+
+            to_meta = MetaConverter()
+            sample_input = to_meta(torch.rand(2, 2, 2, 2))
+
+            # Call the function without out.
+            result = registered_and_wrapped(sample_input, (1, 2, 2, 1))
+
+            self.assertNotEqual(sample_input, result)
+
+            # Call the function with out and ensure the returned tensor and out
+            # are the same.
+            out = torch.empty_like(sample_input)
+            kwargs = {custom_out_name: out} if custom_name else {"out": out}
+            result = registered_and_wrapped(sample_input, (1, 2, 2, 1),
+                                            **kwargs)
+
+            self.assertNotEqual(sample_input, result)
+            self.assertEqual(out, result)
 
 instantiate_device_type_tests(TestMeta, globals())
 

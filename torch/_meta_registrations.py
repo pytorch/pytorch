@@ -1505,13 +1505,13 @@ def _pad1d_backward_common(grad_output, input, padding, *, is_reflection):
 
 
 @register_meta(aten.reflection_pad1d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_reflection_pad1d_backward(grad_output, input, padding):
     return _pad1d_backward_common(grad_output, input, padding, is_reflection=True)
 
 
 @register_meta(aten.replication_pad1d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_replication_pad1d_backward(grad_output, input, padding):
     return _pad1d_backward_common(grad_output, input, padding, is_reflection=False)
 
@@ -1589,7 +1589,7 @@ def meta_replication_pad2d(input, padding):
         aten.replication_pad2d_backward.grad_input,
     ]
 )
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
     dim_h = 1
@@ -1705,7 +1705,7 @@ def meta_replication_pad3d(input, padding):
         aten.replication_pad3d_backward.grad_input,
     ]
 )
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_pad3d_backward(grad_output, input, padding):
     torch._check(len(padding) == 6, lambda: "padding size is expected to be 6")
     assert input.ndim > 3
@@ -2417,7 +2417,7 @@ def meta_avg_pool3d(
 
 
 @register_meta(aten.avg_pool3d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_avg_pool3d_backward(
     grad_output,
     input,
@@ -2547,7 +2547,7 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
 
 
 @register_meta(aten._adaptive_avg_pool3d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta__adaptive_avg_pool3d_backward(grad_output, self):
     _adaptive_pool_empty_output_check(grad_output, "adaptive_avg_pool3d_backward")
     return torch.empty_like(self, memory_format=torch.legacy_contiguous_format)
@@ -2614,7 +2614,7 @@ def meta_adaptive_max_pool2d(input, output_size):
 
 
 @register_meta(aten.adaptive_max_pool2d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_adaptive_max_pool2d_backward(grad_output, input, indices):
     ndim = grad_output.ndim
     torch._check(
@@ -2678,7 +2678,7 @@ def meta_adaptive_max_pool3d(input, output_size):
 
 
 @register_meta(aten.adaptive_max_pool3d_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_adaptive_max_pool3d_backward(grad_output, input, indices):
     _adaptive_pool_empty_output_check(grad_output, "adaptive_max_pool3d_backward")
     return input.new_empty(input.shape)
@@ -4250,7 +4250,7 @@ def meta_max_pool3d_with_indices(
 
 
 @register_meta(aten.max_pool3d_with_indices_backward)
-@out_wrapper()
+@out_wrapper("grad_input")
 def meta_max_pool3d_with_indices_backward(
     grad_output,
     input,
