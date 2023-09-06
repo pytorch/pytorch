@@ -252,8 +252,10 @@ jobs:
     # to create the fat iOS binaries for both x86_64 and arm64
     runs-on: macos-12
     needs: build
+    # TODO: uncomment me
     # NB: Only upload release build, if we need it, we could also turn on nightly here
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    # environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    environment: ios-upload
     steps:
       - uses: actions/checkout@v3
 
