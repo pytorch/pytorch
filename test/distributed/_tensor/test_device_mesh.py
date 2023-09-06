@@ -173,15 +173,15 @@ class InitDeviceMeshTest(DTensorTestBase):
 
         # test init_device_mesh with mesh_dim_names
         mesh_dim_names = ("DP", "TP")
-        two_d_mesh = init_device_mesh(
+        mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
-        self.assertEqual(two_d_mesh, ref_mesh)
-        self.assertEqual(two_d_mesh.mesh_dim_names, mesh_dim_names)
+        self.assertEqual(mesh_2d, ref_mesh)
+        self.assertEqual(mesh_2d.mesh_dim_names, mesh_dim_names)
 
         # test init_device_mesh without mesh_dim_names
-        two_d_mesh = init_device_mesh(self.device_type, mesh_shape)
-        self.assertEqual(two_d_mesh, ref_mesh)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+        self.assertEqual(mesh_2d, ref_mesh)
 
     @with_comms
     def test_raises_duplicate_mesh_dim_names(self):
@@ -189,7 +189,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "Each mesh_dim_name must be uqique.",
         ):
-            mesn = init_device_mesh(
+            mesh = init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=["dp", "dp"],
@@ -241,37 +241,35 @@ class TestDeviceMeshGetItem(DTensorTestBase):
     def test_get_item(self):
         mesh_shape = (2, 4)
         mesh_dim_names = ("DP", "TP")
-        two_d_mesh = init_device_mesh(
+        mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
         pg_ranks_by_dim_name = {}
         for mesh_dim_name in mesh_dim_names:
             mesh_dim = mesh_dim_names.index(mesh_dim_name)
-            pg_ranks_by_dim_name[mesh_dim_name] = two_d_mesh.mesh.swapdims(
+            pg_ranks_by_dim_name[mesh_dim_name] = mesh_2d.mesh.swapdims(
                 -1, mesh_dim
-            ).reshape(-1, two_d_mesh.mesh.size(mesh_dim))
+            ).reshape(-1, mesh_2d.mesh.size(mesh_dim))
 
-        tp_mesh = two_d_mesh["TP"]
+        tp_mesh = mesh_2d["TP"]
         tp_group_idx = self.rank // 4
         self.assertEqual(tp_mesh.mesh, pg_ranks_by_dim_name["TP"][tp_group_idx])
 
-        dp_mesh = two_d_mesh["DP"]
+        dp_mesh = mesh_2d["DP"]
         dp_group_idx = self.rank % 4
-        self.assertEqual(
-            two_d_mesh["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx]
-        )
+        self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
     @with_comms
     def test_get_parent_mesh(self):
         mesh_shape = (2, 4)
         mesh_dim_names = ("DP", "TP")
-        two_d_mesh = init_device_mesh(
+        mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_resources.get_parent_mesh(two_d_mesh["DP"]), two_d_mesh)
-        self.assertEqual(mesh_resources.get_parent_mesh(two_d_mesh["TP"]), two_d_mesh)
+        self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
+        self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

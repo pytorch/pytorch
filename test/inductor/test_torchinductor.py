@@ -43,7 +43,11 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDNN
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM80OrLater,
+    TEST_CUDNN,
+)
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -6773,6 +6777,29 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
+    def test_scaled_dot_product_attention(self):
+        if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            raise unittest.SkipTest("Can't run flash attention on this platform")
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q.transpose(1, 2).contiguous(),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                scale=0.125,
+            )[:2]
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+            ),
+            atol=2e-4,  # to pass lowp check on GPU
+            rtol=1e-2,  # to pass lowp check on GPU
+        )
+
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
@@ -7197,11 +7224,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch._inductor
 
             def fn():
-                x = torch.empty([100])
-                for _ in range(10):
+                li = []
+                for i in range(10):
+                    x = torch.full([100], i)
                     x = x + 1
+                    li.append(x)
 
-                return x
+                return li
 
             mod = make_fx(fn)()
 
@@ -7219,19 +7248,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                             live_tensors[arg] = True
 
                     out = func(*args, **kwargs)
+                    if not isinstance(out, torch.Tensor):
+                        return out
 
                     live_tensors[out] = True
                     max_live_tensors = max(max_live_tensors, len(live_tensors))
-
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.constant_folding import ConstantFolder
+            from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
             with mode:
-                ConstantFolder(mod).run()
+                UniformValueConstantFolder(mod).run()
 
-            self.assertTrue(max_live_tensors == 2)
+            # there are a couple extra tensors created in `insertable_tensor_check`
+            self.assertTrue(max_live_tensors == 4)
 
         @skipIfRocm
         def test_neg_index(self):

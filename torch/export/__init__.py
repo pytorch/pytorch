@@ -4,7 +4,7 @@ import io
 import pathlib
 import typing
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
 
@@ -285,6 +285,39 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def state_dict(self):
         return self._state_dict
+
+    @compatibility(is_backward_compatible=False)
+    def parameters(self) -> Iterator[torch.nn.Parameter]:
+        """
+        Returns an iterator over original module's parameters.
+        """
+        for _, param in self.named_parameters():
+            yield param
+
+    @compatibility(is_backward_compatible=False)
+    def named_parameters(self) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Returns an iterator over original module parameters, yielding
+        both the name of the parameter as well as the parameter itself.
+        """
+        for param_name in self.graph_signature.parameters:
+            yield param_name, self.state_dict[param_name]
+
+    @compatibility(is_backward_compatible=False)
+    def buffers(self) -> Iterator[torch.Tensor]:
+        """Returns an iterator over original module buffers."""
+
+        for _, buf in self.named_buffers():
+            yield buf
+
+    @compatibility(is_backward_compatible=False)
+    def named_buffers(self) -> Iterator[Tuple[str, torch.Tensor]]:
+        """
+        Returns an iterator over original module buffers, yielding
+        both the name of the buffer as well as the buffer itself.
+        """
+        for buffer_name in self.graph_signature.buffers:
+            yield buffer_name, self.state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)

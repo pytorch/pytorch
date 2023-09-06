@@ -7,12 +7,13 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DTensor, Shard
+from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
     ShardedStateDictConfig,
+    ShardingStrategy,
     StateDictType,
 )
 from torch.testing._internal.common_utils import (
@@ -43,12 +44,33 @@ class TestDummyModel(torch.nn.Module):
         return self.net4(self.net3(self.net2(self.net1(x))))
 
     def get_input(self):
-        return torch.rand(8, 8, device="cuda")
+        return torch.rand(4, 8, device="cuda")
 
 
-class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
-    def _create_model(self, device_mesh=None):
-        model = FSDP(TestDummyModel().cuda(), device_mesh=device_mesh)
+# TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
+class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    def _create_model(self, use_device_mesh=True):
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        if use_device_mesh:
+            model = FSDP(
+                TestDummyModel().cuda(),
+                device_mesh=device_mesh,
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+            )
+        else:
+            intra_node_pg = device_mesh.get_dim_groups(mesh_dim=1)
+            inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
+            model = FSDP(
+                TestDummyModel().cuda(),
+                process_group=(intra_node_pg, inter_node_pg),
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+            )
+
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(model.get_input()).sum().backward()
         optim.step()
@@ -56,10 +78,11 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         return model, optim
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
-    def test_fsdp_init_with_device_mesh(self):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(device_mesh)
+    @skip_if_lt_x_gpu(4)
+    def test_hsdp_init_with_device_mesh(self):
+        mesh_tensor = torch.arange(self.world_size).view(2, -1)
+        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
+        model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
@@ -68,28 +91,26 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             optim_state_dict_config=ShardedOptimStateDictConfig(),
         )
         state_dict_type = model.get_state_dict_type(model)
+
         # If device_mesh is used when initializing FSDP, the field _use_dtensor will
         # automatically be set to True.
         self.assertEqual(state_dict_type.state_dict_config._use_dtensor, True)
         self.assertEqual(state_dict_type.optim_state_dict_config._use_dtensor, True)
 
         for v in model.state_dict().values():
-            self.assertEqual(len(v.placements), 1)
-            self.assertEqual(v.placements[0], (Shard(dim=0)))
+            self.assertEqual(v.placements, (Replicate(), Shard(0)))
             self.assertEqual(v.device_mesh, device_mesh)
 
         for v in optim.state_dict()["state"].values():
             if isinstance(v, DTensor):
-                self.assertEqual(len(v.placements), 1)
-                self.assertEqual(v.placements[0], (Shard(dim=0)))
+                self.assertEqual(v.placements, (Replicate(), Shard(0)))
                 self.assertEqual(v.device_mesh, device_mesh)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, offload_to_cpu):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(device_mesh)
+        model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
@@ -102,7 +123,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         dtensor_sd = model.state_dict()
         dtensor_osd = FSDP.optim_state_dict(model, optim)
 
-        ref_model, ref_optim = self._create_model()
+        ref_model, ref_optim = self._create_model(use_device_mesh=False)
         FSDP.set_state_dict_type(
             ref_model,
             StateDictType.SHARDED_STATE_DICT,
@@ -146,11 +167,10 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.assertEqual(v1.to_local().device, v2.local_tensor().device)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(device_mesh)
+        model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
@@ -196,11 +216,10 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 self.assertEqual(v1, v2)
 
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model, optim = self._create_model(device_mesh)
+        model, optim = self._create_model(use_device_mesh=True)
 
         FSDP.set_state_dict_type(
             model,
@@ -232,6 +251,6 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             self.assertEqual(v1, v2)
 
 
-instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)
+instantiate_parametrized_tests(TestHSDPWithDeviceMeshAndDTensor)
 if __name__ == "__main__":
     run_tests()
