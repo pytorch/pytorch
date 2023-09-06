@@ -435,6 +435,15 @@ class cuda:
     # Whether to use fast math.
     use_fast_math = False
 
+    # Path to the CUTLASS repo root directory.
+    # The default path only works under PyTorch local development environment.
+    cutlass_dir = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_DIR",
+        os.path.abspath(
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
+        ),
+    )
+
 
 # create a directory containing lots of debug information
 class trace:
