@@ -28,7 +28,6 @@
 #include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
-#include <iostream>
 #include <unordered_map>
 
 #include <ATen/ThreadLocalPythonObjects.h>
@@ -44,6 +43,7 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/api/include/torch/python/init.h>
+#include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
@@ -52,7 +52,6 @@
 #include <torch/csrc/autograd/python_linalg_functions.h>
 #include <torch/csrc/autograd/python_nested_functions.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
-#include <torch/csrc/autograd/python_return_types.h>
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -1388,7 +1387,13 @@ PyObject* initModule() {
         if (incref) {
           Py_INCREF(v);
         }
-        return PyModule_AddObject(module, name, v) == 0;
+
+        int ret = PyModule_AddObject(module, name, v);
+        if (ret != 0) {
+          Py_DECREF(v);
+        }
+
+        return ret == 0;
       };
 
 #if defined(USE_CUDNN) || defined(USE_ROCM)

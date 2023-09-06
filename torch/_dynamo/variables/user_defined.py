@@ -542,12 +542,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).add_options(self, result)
             except KeyError:
                 pass
-        if not self.source:
-            unimplemented("hasattr no source")
         options = VariableTracker.propagate(self)
-        options["guards"].add(
-            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
-        )
+        if self.source:
+            options["guards"].add(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
         if self._check_for_getattribute() or self._check_for_getattr():
             unimplemented("hasattr with custom __getattr__")
 

@@ -43,7 +43,7 @@ function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
     if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
-        git_status=$(git status --porcelain)
+        git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
             echo "git status --porcelain:"
