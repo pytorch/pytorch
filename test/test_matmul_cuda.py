@@ -263,7 +263,7 @@ class TestFP8MatmulCuda(TestCase):
             lambda: torch._scaled_mm(x, y, bias=bias, out_dtype=torch.float32),
         )
 
-    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0), 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0),
                      "This test is only for devices with compute capability < 9.0")
     def test_error_message_fp8_non_h100(self, device) -> None:
         (k, l, m) = (16, 48, 32)
