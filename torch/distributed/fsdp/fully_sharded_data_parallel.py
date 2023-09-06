@@ -1875,7 +1875,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 
@@ -2025,9 +2025,9 @@ def _get_param_to_fqn(
     """
     param_to_param_names = _get_param_to_fqns(model)
     for param_names in param_to_param_names.values():
-        assert len(param_names) > 0, (
-            "`_get_param_to_fqns()` " "should not construct empty lists"
-        )
+        assert (
+            len(param_names) > 0
+        ), "`_get_param_to_fqns()` should not construct empty lists"
         if len(param_names) > 1:
             raise RuntimeError(
                 "Each parameter should only map to one parameter name but got "
