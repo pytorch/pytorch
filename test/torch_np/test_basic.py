@@ -583,3 +583,10 @@ def test_f16_on_cuda():
 
     assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
     assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+    breakpoint()
+
+    run_tests()

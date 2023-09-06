@@ -203,3 +203,8 @@ def test_compare_ufuncs(name, scalar, array):
 
     finally:
         _np._set_promotion_state(state)
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
