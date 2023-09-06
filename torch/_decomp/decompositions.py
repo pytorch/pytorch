@@ -1193,8 +1193,8 @@ def split_with_sizes(
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check(
-            length >= 0,
+        torch._check_is_size(
+            length,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
         # We know this is true thanks to the sum, but this assertion helps
@@ -3968,7 +3968,7 @@ def scaled_dot_product_flash_attention(
         query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
     )
     return (
-        output,
+        output.transpose(1, 2),
         logsumexp,
         cum_seq_q,
         cum_seq_k,
