@@ -21,7 +21,7 @@ on:
       use_lite_interpreter:
         description: "Build iOS binaries with PyTorch lite interpreter support"
         type: string
-        default: 1
+        default: 0
       use_coreml:
         description: "Build iOS binaries with Apple Core ML"
         type: string
