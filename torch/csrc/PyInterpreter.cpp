@@ -598,28 +598,6 @@ static c10::optional<c10::SymIntArrayRef> maybe_get_cached_sym_attr(
   return c10::nullopt;
 }
 
-static c10::optional<c10::IntArrayRef> maybe_get_cached_attr(
-    const c10::TensorImpl* tensor,
-    const char* attr_name) {
-  c10::optional<PyObject*> mb_obj =
-      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  if (py::hasattr(mb_obj.value(), attr_name)) {
-    auto out = py::handle(mb_obj.value()).attr(attr_name);
-    void* out_pycapsule = PyCapsule_GetPointer(out.ptr(), nullptr);
-    auto out_int = reinterpret_cast<int64_t*>(out_pycapsule);
-    // See Note [Tensor Subclass custom size/stride caching strategy]
-    auto size_len_attr_name = std::string(attr_name) + std::string("_len");
-    TORCH_INTERNAL_ASSERT(
-        py::hasattr(mb_obj.value(), size_len_attr_name.c_str()));
-    auto len = py::cast<int64_t>(
-        py::handle(mb_obj.value()).attr(size_len_attr_name.c_str()));
-    return c10::IntArrayRef(out_int, len);
-  }
-  return c10::nullopt;
-}
-
 // See Note [Tensor Subclass custom size/stride caching strategy]
 // Given a base attribute name like _sym_size or _sym_stride,
 // This function reads off the tensor for an optional metadata_mutation_ctr
@@ -635,59 +613,6 @@ static c10::SymIntArrayRef get_set_cached_sym_attr(
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  //  auto _size_stride_counter = 0;
-  //  auto _size_stride_counter_buffer_name = "_size_stride_counter";
-  //  if (py::hasattr(mb_obj.value(), _size_stride_counter_buffer_name)) {
-  //    auto out = py::handle(mb_obj.value()).attr(attr_name);
-  //    _size_stride_counter = py::cast<int64_t>(out);
-  //  }
-  //  auto curr_buffer_attr = std::string(base_attr_name) +
-  //  std::to_string(_size_stride_counter); auto curr_buffer_capacity_attr =
-  //  std::string(base_attr_name) + std::to_string(_size_stride_counter) +
-  //  std::string("_capacity"); auto curr_buffer_len_attr =
-  //  std::string(base_attr_name) + std::to_string(_size_stride_counter) +
-  //  std::string("_len");
-  //
-  //  // Check to see if the current buffer exists (by checking if its
-  //  corresponding len buffer exists) int64_t curr_buffer_capacity = -1; if
-  //  (py::hasattr(mb_obj.value(), curr_buffer_capacity_attr.c_str())) {
-  //    auto curr_buffer_capacity_pyobj =
-  //    py::handle(mb_obj.value()).attr(curr_buffer_capacity_attr.c_str());
-  //    curr_buffer_capacity = static_cast<int64_t>(curr_buffer_capacity_pyobj);
-  //  }
-  //
-  //  // We will allocate a fresh buffer if either:
-  //  // (a) a buffer doesn't already exist
-  //  // (b) the existing buffer is too small
-  //  int64_t new_buffer_len = py::len(out);
-  //  if (curr_buffer_capacity < new_buffer_len) {
-  //      // Case 1: Need to allocate a fresh buffer.
-  //      // This is to faithfully replicate the TensorImpl::sizes() behavior:
-  //      // we allocate a SmallVector that starts out with 5 elements
-  //      auto updated_buffer_capacity = std::max(new_len, 5);
-  //      c10::SymInt* ptr = new c10::SymInt[updated_buffer_capacity];
-  //      auto capsule = py::capsule(
-  //          ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
-  //      int64_t idx = 0;
-  //      for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
-  //        ptr[idx] = py::cast<c10::SymInt>(*it);
-  //      }
-  //      // Set the buffer
-  //      set_tensor_attr_with_capsule(self, capsule, curr_buffer_attr.c_str());
-  //      // Set the len buffer
-  //      py::handle(mb_obj.value()).attr(len_attr_name.c_str()) =
-  //      new_buffer_len;
-  //      // Set the capacity buffer
-  //      py::handle(mb_obj.value()).attr(capacity.c_str()) = updated;
-  //      // Set the "version"
-  //      _size_stride_counter += 1;
-  //      py::handle(mb_obj.value()).attr(_size_stride_counter_buffer_name) =
-  //      _size_stride_counter;
-  //  } else {
-  //      // Case 2: Buffer already exists (and is the right size).
-  //      // We still need to fill in the buffer though, in case our values are
-  //      stale.
-  //  }
   auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
 
   int64_t curr_buffer_size = -1;
