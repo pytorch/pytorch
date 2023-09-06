@@ -33,7 +33,7 @@ from unittest import mock
 import sympy
 
 import torch
-from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -301,10 +301,6 @@ def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     return took
 
 
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
-
-
 def precompute_method(obj: Any, method: str):
     """Replace obj.method() with a new method that returns a precomputed constant."""
     result = getattr(obj, method)()
@@ -505,10 +501,11 @@ def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
-        "run_with_rng_state",
         "run_and_save_rng_state",
+        "run_with_rng_state",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -533,7 +530,9 @@ def has_incompatible_cudagraph_ops(gm):
 
 
 instance_descriptor = collections.namedtuple(
-    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+    "instance_descriptor",
+    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+    defaults=[tuple(), tuple(), tuple(), tuple()],
 )
 
 
@@ -860,7 +859,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama
+        import colorama  # type: ignore[import]
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
@@ -1104,6 +1103,25 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if any(s.free_symbols for s in t.data.get_size()):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size")
+            if any(s.free_symbols for s in t.get_size()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise ValueError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
 
 
 def is_linux() -> bool:
