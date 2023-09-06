@@ -271,28 +271,21 @@ class OnnxRegistry:
 
 
 class ExportOptions:
-    """Options to influence the TorchDynamo ONNX exporter."""
+    """Options to influence the TorchDynamo ONNX exporter.
+
+    Attributes:
+        dynamic_shapes: Shape information hint for input/output tensors.
+        op_level_debug: Whether to export the model with op-level debug information
+        diagnostic_options: The diagnostic options for the exporter.
+        fake_context: The fake context used for symbolic tracing.
+        onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
+    """
 
     dynamic_shapes: Optional[bool] = None
-    """Shape information hint for input/output tensors.
-
-    - ``None``: the exporter determines the most compatible setting.
-    - ``True``: all input shapes are considered dynamic.
-    - ``False``: all input shapes are considered static."""
-
     op_level_debug: Optional[bool] = None
-    """Whether to export the model with op-level debug information by evaluating
-    ops through ONNX Runtime."""
-
     diagnostic_options: DiagnosticOptions
-    """The diagnostic options for the exporter."""
-
     fake_context: Optional[ONNXFakeContext] = None
-    """The fake context used for symbolic tracing."""
-
     onnx_registry: Optional[OnnxRegistry] = None
-    """The ONNX registry used to register ATen operators to ONNX functions. Defaults to
-    opset18."""
 
     @_beartype.beartype
     def __init__(
@@ -304,6 +297,23 @@ class ExportOptions:
         onnx_registry: Optional[OnnxRegistry] = None,
         diagnostic_options: Optional[DiagnosticOptions] = None,
     ):
+        """Defines the export options with user-defined values.
+
+        Args:
+            dynamic_shapes: Shape information hint for input/output tensors.
+                When ``None``, the exporter determines the most compatible setting.
+                When ``True``, all input shapes are considered dynamic.
+                When ``False``, all input shapes are considered static.
+
+            op_level_debug: When True export the model with op-level debug running ops through ONNX Runtime.
+
+            diagnostic_options: The diagnostic options for the exporter.
+
+            fake_context: The fake context used for symbolic tracing.
+
+            onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
+        """
+
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.fake_context = fake_context

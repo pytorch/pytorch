@@ -49,35 +49,33 @@ They can be installed through `pip <https://pypi.org/project/pip/>`_:
 A simple example
 ----------------
 
-See below a demonstration of exporter API in action with a simple image classifier model as example:
+See below a demonstration of exporter API in action with a simple Multilayer Perceptron (MLP) as example:
 
 .. code-block:: python
 
   import torch
 
-  class MNISTModel(torch.nn.Module):
+  class MLPModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.conv1 = torch.nn.Conv2d(1, 32, 3, 1, bias=False)
-        self.conv2 = torch.nn.Conv2d(32, 64, 3, 1, bias=False)
-        self.fc1 = torch.nn.Linear(9216, 128, bias=False)
-        self.fc2 = torch.nn.Linear(128, 10, bias=False)
+        self.fc0 = nn.Linear(8, 8, bias=True)
+        self.fc1 = nn.Linear(8, 4, bias=True)
+        self.fc2 = nn.Linear(4, 2, bias=True)
+        self.fc3 = nn.Linear(2, 2, bias=True)
 
     def forward(self, tensor_x: torch.Tensor):
-        tensor_x = self.conv1(tensor_x)
-        tensor_x = torch.nn.functional.sigmoid(tensor_x)
-        tensor_x = self.conv2(tensor_x)
-        tensor_x = torch.nn.functional.sigmoid(tensor_x)
-        tensor_x = torch.nn.functional.max_pool2d(tensor_x, 2)
-        tensor_x = torch.flatten(tensor_x, 1)
+        tensor_x = self.fc0(tensor_x)
+        tensor_x = torch.sigmoid(tensor_x)
         tensor_x = self.fc1(tensor_x)
-        tensor_x = torch.nn.functional.sigmoid(tensor_x)
+        tensor_x = torch.sigmoid(tensor_x)
         tensor_x = self.fc2(tensor_x)
-        output = torch.nn.functional.log_softmax(tensor_x, dim=1)
+        tensor_x = torch.sigmoid(tensor_x)
+        output = self.fc3(tensor_x)
         return output
 
-  tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-  export_output = torch.onnx.dynamo_export(MNISTModel(), tensor_x)
+  model = MLPModel()
+  tensor_x = torch.rand((97, 8), dtype=torch.float32)
+  export_output = torch.onnx.dynamo_export(model, tensor_x)
 
 As the code above shows, all you need is to provide :func:`torch.onnx.dynamo_export` with an instance of the model and its input.
 The exporter will then return an instance of :class:`torch.onnx.ExportOutput` that contains the exported ONNX graph along with extra information.
@@ -87,26 +85,26 @@ The ONNX model be serialized into a `Protobuf file <https://protobuf.dev/>`_ usi
 
 .. code-block:: python
 
-  export_output.save("/path/to/mnist.onnx")
+  export_output.save("mlp.onnx")
 
 Inspecting the ONNX model using GUI
 -----------------------------------
 
 You can view the exported model using `Netron <https://netron.app/>`__.
 
-.. image:: _static/img/onnx/onnx_dynamo_mnist_model.png
+.. image:: _static/img/onnx/onnx_dynamo_mlp_model.png
     :width: 50%
-    :alt: MNIST model as viewed in Netron
+    :alt: MLP model as viewed in Netron
 
 Note that each layer is represented in a rectangular box with a *f* icon in the top right corner.
 
-.. image:: _static/img/onnx/onnx_dynamo_mnist_model_function_highlight.png
+.. image:: _static/img/onnx/onnx_dynamo_mlp_model_function_highlight.png
     :width: 50%
     :alt: ONNX function highlighted
 
 By expanding it, the function body is shown.
 
-.. image:: _static/img/onnx/onnx_dynamo_mnist_model_function_body.png
+.. image:: _static/img/onnx/onnx_dynamo_mlp_model_function_body.png
     :width: 50%
     :alt: ONNX function body
 
@@ -137,16 +135,29 @@ API Reference
 -------------
 
 .. autofunction:: torch.onnx.dynamo_export
+
+.. autoclass:: torch.onnx.ExportOptions
+    :members:
+    :special-members: __init__
+
 .. autofunction:: torch.onnx.enable_fake_mode
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
+.. autoclass:: torch.onnx.ExportOutput
+    :members:
+    :special-members: __init__
 
-    torch.onnx.DiagnosticOptions
-    torch.onnx.ExportOptions
-    torch.onnx.ExportOutput
-    torch.onnx.ExportOutputSerializer
-    torch.onnx.OnnxExporterError
-    torch.onnx.OnnxRegistry
+.. autoclass:: torch.onnx.ExportOutputSerializer
+    :members:
+    :special-members: __init__
+
+.. autoclass:: torch.onnx.OnnxExporterError
+    :members:
+    :special-members: __init__
+
+.. autoclass:: torch.onnx.OnnxRegistry
+    :members:
+    :special-members: __init__
+
+.. autoclass:: torch.onnx.DiagnosticOptions
+    :members:
+    :special-members: __init__
