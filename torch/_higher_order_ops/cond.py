@@ -3,11 +3,13 @@ from dataclasses import dataclass
 
 import torch
 import torch.fx.traceback as fx_traceback
+import torch._subclasses.functional_tensor
 
 import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo.exc import CondOpArgsMismatchError
+from torch._functorch.aot_autograd import from_fun, to_fun
 
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -17,6 +19,11 @@ from torch._functorch.eager_transforms import (
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import (
+    dispatch_functionalize,
+    FunctionalTensor,
+    FunctionalTensorMode,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
@@ -301,6 +308,21 @@ def inner(pred, true_fn, false_fn, operands):
             return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
         else:
             return cond_op(pred, true_fn, false_fn, operands)
+
+
+@cond_op.py_impl(FunctionalTensorMode)
+def cond_functional_tensor_mode(pred, true_fn, false_fn, inputs):
+    unwrapped_inputs = pytree.tree_map_only(FunctionalTensor, from_fun, inputs)
+    unwrapped_pred = pytree.tree_map_only(FunctionalTensor, from_fun, pred)
+
+    # We can rely on the Functionalize key to detect cond branches that modify the input
+    functional_true = dispatch_functionalize(true_fn)
+    functional_false = dispatch_functionalize(false_fn)
+
+    cond_return = cond_op(
+        unwrapped_pred, functional_true, functional_false, unwrapped_inputs
+    )
+    return pytree.tree_map_only(torch.Tensor, to_fun, cond_return)
 
 
 @cond_op.py_impl(FakeTensorMode)
