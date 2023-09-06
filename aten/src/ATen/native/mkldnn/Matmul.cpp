@@ -210,10 +210,10 @@ void mkldnn_matmul(
                  result.scalar_type() == mat1.scalar_type(), "mkldnn_matmul:  only enabled for bf16 and fp16 path");
   if (mat1.scalar_type() == at::kBFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
-    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
+    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq, or AWS Graviton3");
   } else {
     TORCH_CHECK(mkldnn_fp16_device_check(),
-    "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx512_fp16");
+    "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 #endif
 
