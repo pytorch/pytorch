@@ -60,9 +60,6 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
-        # not implemented on mps, but forward passes
-        'igamma': None,
-        'igammac': None,
 
         # precision issues
         'digamma': [torch.float32],
@@ -440,8 +437,8 @@ def mps_ops_modifier(ops):
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
         'i0': None,
-        # 'igamma': None, # grad not implemented
-        # 'igammac': None, # grad not implemented
+        'igamma': None,
+        'igammac': None,
         'index_copy': None,
         'index_reduce': None,
         'isin': None,
