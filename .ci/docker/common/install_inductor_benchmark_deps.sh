@@ -17,7 +17,7 @@ function install_timm() {
   pip_install pandas==2.0.3
   pip_install "timm==${version}"
   # Clean up
-  conda_run pip uninstall -y torch torchvision
+  conda_run pip uninstall -y cmake torch torchvision triton
 }
 
 # Pango is needed for weasyprint which is needed for doctr
