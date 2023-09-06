@@ -64,7 +64,7 @@ jobs:
             ios_platform: "OS",
             ios_arch: "arm64",
             use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
-            use_metal: ,
+            use_metal: 1,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
           }
