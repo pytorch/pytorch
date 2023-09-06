@@ -368,10 +368,8 @@ jobs:
           if [ "${IS_NIGHTLY}" == true ]; then
             ARTIFACT_NAME="${ARTIFACT_NAME}_nightly_${PYTORCH_VERSION}.zip"
             SPEC_NAME="${SPEC_NAME}-Nightly"
-            BUCKET_NAME="ossci-ios-build"
           else
             ARTIFACT_NAME="${ARTIFACT_NAME}_${PYTORCH_VERSION}.zip"
-            BUCKET_NAME="ossci-ios"
           fi
 
           SPEC_NAME_WITH_VERSION="${SPEC_NAME}-${PYTORCH_VERSION}.podspec"
@@ -385,9 +383,11 @@ jobs:
           # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
           zip -r "${ARTIFACT_NAME}" install src version.txt LICENSE
 
-          echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
-          echo "SPEC_NAME_WITH_VERSION=${SPEC_NAME_WITH_VERSION}" >> "$GITHUB_ENV"
-          echo "SPEC_NAME=${SPEC_NAME}" >> "$GITHUB_ENV"
+          {
+            echo "ARTIFACT_NAME=${ARTIFACT_NAME}"
+            echo "SPEC_NAME_WITH_VERSION=${SPEC_NAME_WITH_VERSION}"
+            echo "SPEC_NAME=${SPEC_NAME}"
+          } >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v3
         with:
@@ -411,6 +411,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ env.DEST_DIR }}
         run: |
@@ -424,6 +425,12 @@ jobs:
             AWS_S3_CP="aws s3 cp"
           fi
 
+          if [ "${IS_NIGHTLY}" == true ]; then
+            BUCKET_NAME="ossci-ios-build"
+          else
+            BUCKET_NAME="ossci-ios"
+          fi
+
           ${AWS_S3_CP} "${ARTIFACT_NAME}" "s3://${BUCKET_NAME}/" --acl public-read
           ${AWS_S3_CP} "${SPEC_NAME_WITH_VERSION}" "s3://${BUCKET_NAME}/" --acl public-read
 
@@ -432,7 +439,7 @@ jobs:
           # We need to set this secret to upload to cocoapods. However, we might want
           # to NOT set this for PROD release so that we can upload the artifacts manually
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN || '' }}
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly') && env.COCOAPODS_TRUNK_TOKEN != '' }}
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
