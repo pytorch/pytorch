@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
+import re
 
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
@@ -78,6 +79,18 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
+    def _generate_reference_quantized_model(self, mod, inputs):
+        export_model = capture_pre_autograd_graph(
+            mod,
+            inputs,
+        )
+        quantizer = X86InductorQuantizer()
+        quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+        prepare_model = prepare_pt2e(export_model, quantizer)
+        prepare_model(*inputs)
+        convert_model = convert_pt2e(prepare_model).eval()
+        return convert_model
+
     def _test_common(
         self,
         mod,
@@ -96,15 +109,7 @@ class TestPatternMatcherBase(TestCase):
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
             with torch.no_grad():
-                export_model = capture_pre_autograd_graph(
-                    mod,
-                    inputs,
-                )
-                quantizer = X86InductorQuantizer()
-                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-                prepare_model = prepare_pt2e(export_model, quantizer)
-                prepare_model(*inputs)
-                convert_model = convert_pt2e(prepare_model).eval()
+                convert_model = self._generate_reference_quantized_model(mod, inputs)
                 _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
@@ -128,15 +133,50 @@ class TestPatternMatcherBase(TestCase):
                 )
 
     def _test_code_common(
-        self, mod, inputs, include_ops, exclude_ops, atol=1e-5, rtol=1.3e-6
+        self,
+        mod,
+        inputs,
+        include_ops,
+        exclude_ops,
+        atol=1e-5,
+        rtol=1.3e-6,
+        check_quantization=False,
+        check_dynamic=False,
     ):
-        with torch.no_grad():
-            clone_inputs = self._clone_inputs(inputs)
-            expected = mod(*inputs)
-            actual, (source_code,) = run_and_get_code(
-                torch.compile(mod, fullgraph=True), *clone_inputs
+        def _check_has_dynamic_shape(source_code):
+            # Ref to https://github.com/pytorch/pytorch/blob/3fe8417643c8d6c2b3d95552cd90321d141b5d54
+            # /test/inductor/test_torchinductor_codegen_dynamic_shapes.py#L82-L95
+            for_loop_found = False
+            has_dynamic = False
+            lines = source_code.split("\n")
+            for line in lines:
+                if "for(" in line:
+                    for_loop_found = True
+                    if re.search(r";.*ks.*;", line) is not None:
+                        has_dynamic = True
+                        break
+            self.assertTrue(
+                has_dynamic,
+                msg=f"Failed to find dynamic for loop variable\n{source_code}",
             )
-            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+            self.assertTrue(for_loop_found, f"Failed to find for loop\n{source_code}")
+
+        clone_inputs = self._clone_inputs(inputs)
+        with torch.no_grad():
+            if check_quantization:
+                convert_model = self._generate_reference_quantized_model(mod, inputs)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(convert_model, fullgraph=True, dynamic=check_dynamic),
+                    *clone_inputs,
+                )
+                if check_dynamic:
+                    _check_has_dynamic_shape(source_code)
+            else:
+                expected = mod(*inputs)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(mod, fullgraph=True), *clone_inputs
+                )
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
             for op in include_ops:
                 self.assertIn(op, source_code)
             for op in exclude_ops:
@@ -1168,6 +1208,48 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             match_count = 8
             match_nodes = 12
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+
+    def test_qconv2d_maxpool2d_linear_dynamic(self):
+        r"""
+        This testcase will quantize a single Conv2d->Maxpool2d->Linear module
+        with dynamic batch size input.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 8, (2, 2), stride=(1, 1), padding=(1, 1))
+                self.relu = torch.nn.ReLU()
+                self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.linear = torch.nn.Linear(8, 16)
+
+            def forward(self, x):
+                temp = self.relu(self.conv(x))
+                temp = self.maxpool2d(temp)
+                temp = self.avgpool(temp)
+                temp = torch.flatten(temp, 1)
+                return self.linear(temp)
+
+        mod = M().eval()
+        v = torch.randn((2, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        include_ops = [
+            "torch.ops.onednn.qconv2d_pointwise",
+            "torch.ops.quantized.max_pool2d",
+            "torch.ops.onednn.qlinear_pointwise",
+        ]
+        exclude_ops = []
+        self._test_code_common(
+            mod,
+            (v,),
+            include_ops,
+            exclude_ops,
+            check_quantization=True,
+            check_dynamic=True,
+        )
 
 
 if __name__ == "__main__":
