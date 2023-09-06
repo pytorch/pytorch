@@ -46,6 +46,10 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 
+#ifdef FBCODE_CAFFE2
+#include <strobelight/symbolizer/Symbolizer.h>
+#endif
+
 struct UpgradeExclusive {
   UpgradeExclusive(std::shared_lock<std::shared_timed_mutex>& rdlock)
       : rdlock_(rdlock) {
@@ -399,11 +403,7 @@ struct Symbolizer {
   };
 };
 
-#ifdef FBCODE_CAFFE2
-// in CUDA binaries, we have to use the internal symbolizer because
-// addr2line seems to hang.
-__attribute__((weak))
-#endif
+#ifndef FBCODE_CAFFE2
 std::vector<Frame>
 symbolize(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
@@ -418,6 +418,32 @@ symbolize(const std::vector<void*>& frames) {
   }
   return results;
 }
+#else
+std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+  std::vector<Frame> results;
+  facebook::strobelight::Symbolizer symbolizer(
+      facebook::strobelight::Symbolizer::getSymbolizerFromName("LLVM"),
+      facebook::strobelight::Symbolizer::getKernelSymbolizerFromName("PROCFS"));
+  facebook::strobelight::Symbolizer::Request req;
+  pid_t p = getpid();
+  for (const auto& f : frames) {
+    req.add(p, (uint64_t)f);
+  }
+  auto symbols = symbolizer.symbolize(std::move(req));
+  for (const auto& f : frames) {
+    auto info = symbols.get(p, (uint64_t)f);
+    if (info.locs.empty()) {
+      results.emplace_back(Frame{"??", "??", 0});
+      continue;
+    }
+    auto demangle = facebook::strobelight::Symbolizer::demangleFunction(
+        info.locs.back().function);
+    results.emplace_back(
+        Frame{info.locs.back().file, demangle.first, info.locs.back().line});
+  }
+  return results;
+}
+#endif // FBCODE_CAFFE2
 
 Stats stats() {
   return unwind_cache.stats();
