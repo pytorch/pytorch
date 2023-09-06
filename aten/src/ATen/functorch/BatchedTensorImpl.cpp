@@ -86,6 +86,7 @@ void BatchedTensorImpl::checkInvariants() const {
 
 int64_t BatchedTensorImpl::size_custom(int64_t d) const {
   if (!value_.is_nested()) {
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     return sizes_default()[d];
   }
   // TODO: Error messages will mention the actualDim, which could be confusing; fix this
@@ -95,6 +96,7 @@ int64_t BatchedTensorImpl::size_custom(int64_t d) const {
 
 c10::SymInt BatchedTensorImpl::sym_size_custom(int64_t d) const {
   if (!value_.is_nested()) {
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     return sym_sizes_default()[d];
   }
   // TODO: Error messages will mention the actualDim, which could be confusing; fix this
