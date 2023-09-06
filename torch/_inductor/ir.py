@@ -28,11 +28,14 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer
 
+import torch._export.serde.schema as export_schema
+
 import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity
+from torch._export.serde.serialize import GraphModuleSerializer
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -54,6 +57,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_dynamic,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -2869,13 +2873,29 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        buffer_names = []
         for i in range(len(inputs)):
-            kernel.data.inputs.append(
-                cls.realize_into(
-                    inputs[i],
-                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
-                )
+            input_buffer = cls.realize_into(
+                inputs[i],
+                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
+
+            kernel.data.inputs.append(input_buffer)
+            if isinstance(inputs[i].data, BaseView):
+                input_unwrapped = inputs[i].data.unwrap_view()
+            else:
+                input_unwrapped = inputs[i].data
+
+            if (
+                input_unwrapped.is_input_buffer()
+                and inputs[i].get_device().type == "cuda"
+                and not is_dynamic(input_buffer)
+            ):
+                buffer_names.append(input_buffer.get_name())
+
+        if len(buffer_names) > 1:
+            V.graph.register_list(buffer_names)
+
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
@@ -3082,9 +3102,7 @@ class ExternKernel(InputsKernel):
             return x
         if isinstance(x, BaseView):
             x.realize()
-            if is_storage_and_layout(x.unwrap_view()) and not isinstance(
-                x.unwrap_view().data, ExternKernelAlloc
-            ):
+            if is_storage_and_layout(x.unwrap_view()):
                 try:
                     return cls.convert_to_reinterpret_view(x)
                 except NotImplementedError:
@@ -3569,6 +3587,12 @@ class DynamicScalar(IRNode):
 
 
 @dataclasses.dataclass
+class ExternKernelNode:
+    name: str
+    node: export_schema.Node
+
+
+@dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
         self,
@@ -3587,6 +3611,8 @@ class FallbackKernel(ExternKernelAlloc):
         )
         self.use_cpp_op_schema = False
 
+        self.op_overload = kernel
+
         op_overload_packet = (
             kernel._overloadpacket
             if isinstance(kernel, torch._ops.OpOverload)
@@ -3603,6 +3629,11 @@ class FallbackKernel(ExternKernelAlloc):
                 else f"aten.{kernel.__name__}"
             )
             if schema is not None:
+                self.args_default_value = [
+                    {"type": x.real_type, "value": x.default_value}
+                    for x in schema.arguments
+                    if not x.kwarg_only
+                ]
                 self.ordered_kwargs_for_cpp_kernel = [
                     x.name for x in schema.arguments if x.kwarg_only
                 ]
@@ -3661,6 +3692,24 @@ class FallbackKernel(ExternKernelAlloc):
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
 
+    def get_arg_default_value(self, pos):
+        assert hasattr(
+            self, "args_default_value"
+        ), "self.args_default_value has to be provided"
+        assert pos < len(
+            self.args_default_value
+        ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
+        v = self.args_default_value[pos]["value"]
+        if v is None:
+            arg_type = self.args_default_value[pos]["type"]
+            # TODO: extend the support here
+            assert (
+                str(arg_type) in default_value_map
+            ), f"unsupported default_value arg_type: {str(arg_type)}"
+            return default_value_map[str(arg_type)]()
+        else:
+            return v
+
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -3672,6 +3721,17 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+        if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
+            n_args = len(args)
+            n_pos_args = len(self.args_default_value)
+            # Some positional args are not provided, need to use their default value in cpp wrapper
+            if n_args < n_pos_args:
+                pos_args = [
+                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                ]
+                pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
+                args.extend(pos_args)
+
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)
         return args
@@ -3694,8 +3754,48 @@ class FallbackKernel(ExternKernelAlloc):
             return devices[0]
         return None
 
+    # ProxyExecutor Design Note
+    # We export the ExternFallbackNodes (for custom ops) into a serialized file
+    # and run it with a host side proxy executor to address the ABI problem
+    # This is currently only implemented for fbcode. Eventually, we will also make this work for OSS.
+    # Detailed design doc can be found at
+    # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
+    def export_extern_kernel_node(self):
+        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+        ordered_kwargs = [
+            kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
+        ]
+
+        serializer = GraphModuleSerializer(None, None, None)
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+
+        # TODO: only single output is supported
+        output_arguments = [
+            export_schema.Argument.create(
+                as_tensor=export_schema.TensorArgument(name=self.get_name())
+            )
+        ]
+
+        node = ExternKernelNode(
+            name=self.get_name(),
+            node=export_schema.Node(
+                target=self.kernel,
+                inputs=named_arguments,
+                outputs=output_arguments,
+                metadata={},
+            ),
+        )
+
+        V.graph.extern_kernel_nodes.append(node)
+
+        return [*args, *ordered_kwargs]
+
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
+            exported_args = None
+            if config.is_fbcode():
+                exported_args = self.export_extern_kernel_node()
+
             args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
@@ -3704,6 +3804,8 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
                 self.cpp_kernel_overlad_name,
+                self.op_overload,
+                exported_args,
             )
         else:
             super().codegen(wrapper)

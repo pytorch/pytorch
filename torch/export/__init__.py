@@ -379,8 +379,9 @@ class ExportedProgram:
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph Signature: {self.graph_signature}\n"
-            f"Symbol to range: {self.range_constraints}\n"
+            f"Graph signature: {self.graph_signature}\n"
+            f"Range constraints: {self.range_constraints}\n"
+            f"Equality constraints: {self.equality_constraints}\n"
         )
         return string
 
