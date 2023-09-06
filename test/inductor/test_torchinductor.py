@@ -6772,7 +6772,6 @@ class CommonTemplate:
                 torch.randn(4, 36, 4, 36),
                 torch.randn(4, 36, 4, 36),
             ),
-            check_lowp=False,
         )
 
     @skipIfRocm
