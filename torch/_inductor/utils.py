@@ -32,7 +32,7 @@ from unittest import mock
 import sympy
 
 import torch
-from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -225,10 +225,6 @@ def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
-
-
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 
 def precompute_method(obj: Any, method: str):
@@ -460,7 +456,9 @@ def has_incompatible_cudagraph_ops(gm):
 
 
 instance_descriptor = collections.namedtuple(
-    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+    "instance_descriptor",
+    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+    defaults=[tuple(), tuple(), tuple(), tuple()],
 )
 
 
@@ -787,7 +785,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama
+        import colorama  # type: ignore[import]
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
@@ -1031,3 +1029,28 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def has_free_symbols(itr):
+    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if has_free_symbols(t.data.get_size()) or (
+                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+            ):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False

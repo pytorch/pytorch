@@ -58,13 +58,17 @@ TEST(AotInductorTest, BasicTest) {
       reinterpret_cast<AOTInductorTensorHandle>(inputs.data());
   AOTInductorTensorHandle outputs_handle =
       reinterpret_cast<AOTInductorTensorHandle>(outputs.data());
+
+  AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+
   AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
       container_handle,
       inputs_handle,
       inputs.size(),
       outputs_handle,
       outputs.size(),
-      stream_handle));
+      stream_handle,
+      proxy_executor_handle));
 
   ASSERT_TRUE(torch::allclose(results_ref, outputs[0]));
   AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));

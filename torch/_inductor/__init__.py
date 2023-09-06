@@ -49,7 +49,13 @@ def aot_compile(
         gm,
         example_inputs,
         config_patches=options,
-    )()
+    )
+
+    # AOTInductor returns result as a string, not callable
+    # Maybe this check is not neded?
+    if callable(result):
+        result = result()
+
     lib_path = result[0] if isinstance(result, (list, tuple)) else result
     return lib_path
 
