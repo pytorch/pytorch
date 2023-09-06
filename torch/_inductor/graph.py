@@ -432,7 +432,7 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name].get_dtype()
-        m = re.match(r"as_strided\(([a-zA-Z0-9_]+),", buffer_name)
+        m = re.match(r"(as_strided|reinterpret_tensor)\(([a-zA-Z0-9_]+),", buffer_name)
         if m:
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
