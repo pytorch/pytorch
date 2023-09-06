@@ -582,6 +582,30 @@ class TracingContext:
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
         self.output_strides: Optional[List[Optional[List[int]]]] = None
+        # When this is True, whenever we encounter an int in Dynamo tracing,
+        # we will (1) force unspec it and (2) force it as a size-like unbacked
+        # integer.  This is currently used when processing certain lists of
+        # ints that are known to be size-like and may have 0/1 entries that we
+        # must not specialize on.
+        self.force_unspec_int_unbacked_size_like = False
+
+    @staticmethod
+    @contextmanager
+    def patch(**kwargs):
+        prior = {}
+        ctx = TracingContext.get()
+        assert ctx is not None
+
+        for key in kwargs.keys():
+            # KeyError on invalid entry
+            prior[key] = getattr(ctx, key)
+        for key, val in kwargs.items():
+            setattr(ctx, key, val)
+        try:
+            yield
+        finally:
+            for key, val in prior.items():
+                setattr(ctx, key, val)
 
     @staticmethod
     def extract_stack():

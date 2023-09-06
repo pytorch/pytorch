@@ -7,6 +7,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
 
+from torch._dynamo.testing import same
 from torch._dynamo.utils import dynamo_timed
 
 
@@ -90,6 +91,39 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 
         with torch.profiler.profile(record_shapes=True):
             opt_fn(*inputs)
+
+    def test_profiler_cache_lookup(self):
+        def fn(x):
+            y = x**2
+            y = y + 2
+            z = y**3
+            return z
+
+        for profiler, get_events in (
+            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
+            (torch.profiler.profiler.profile, lambda prof: prof.events()),
+        ):
+            x = torch.randn((2, 2), requires_grad=True)
+            ref = fn(x)
+            opt_fn = torch.compile(fn, backend="aot_eager")
+
+            # warmup
+            opt_fn(x)
+
+            with profiler() as prof:
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: "TorchDynamo Cache Lookup" in event.name,
+                    get_events(prof),
+                )
+            )
+
+            self.assertTrue(same(ref, res))
+            self.assertTrue(
+                len(events) == 1,
+                "Expected one lookup profiler event for one opt_fn run",
+            )
 
     def test_profiler_cache_lookup_profiler_step(self):
         def fn(x, y, z):
