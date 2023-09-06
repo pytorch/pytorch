@@ -702,43 +702,43 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Ten
   return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-// std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
-//     const Tensor& query,
-//     const Tensor& key,
-//     const Tensor& value,
-//     bool compute_log_sumexp,
-//     bool is_causal,
-//     c10::optional<double> scale) {
-//   // Used for tracking usage statistics
-//   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
-//   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
-//   // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
-//   // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
-//   Tensor q_t = query.transpose(1, 2);
-//   Tensor k_t = key.transpose(1, 2);
-//   Tensor v_t = value.transpose(1, 2);
+std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool compute_log_sumexp,
+    bool is_causal,
+    c10::optional<double> scale) {
+  // Used for tracking usage statistics
+  C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
+  // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
+  // Key   -> Key(Batch x KV_seq_len x Num_heads x Dim_per_head)
+  // Value -> Value(Batch x KV_seq_len x  Num_heads x Dim_per_head)
+  Tensor q_t = query.transpose(1, 2);
+  Tensor k_t = key.transpose(1, 2);
+  Tensor v_t = value.transpose(1, 2);
 
-//   sdp::CustomMaskType custom_mask_type = is_causal
-//       ? sdp::CustomMaskType::CausalFromTopLeft
-//       : sdp::CustomMaskType::NoCustomMask;
+  sdp::CustomMaskType custom_mask_type = is_causal
+      ? sdp::CustomMaskType::CausalFromTopLeft
+      : sdp::CustomMaskType::NoCustomMask;
 
-//   Tensor attention, log_sumexp;
-//   std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
-//       q_t,
-//       k_t,
-//       v_t,
-//       c10::nullopt,
-//       c10::nullopt,
-//       c10::nullopt,
-//       c10::nullopt,
-//       0.0 /*dropout_p*/,
-//       static_cast<int64_t>(custom_mask_type),
-//       compute_log_sumexp,
-//       scale);
+  Tensor attention, log_sumexp;
+  std::tie(attention, log_sumexp) = at::_efficient_attention_forward(
+      q_t,
+      k_t,
+      v_t,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      0.0 /*dropout_p*/,
+      static_cast<int64_t>(custom_mask_type),
+      compute_log_sumexp,
+      scale);
 
-//   attention = attention.transpose(1, 2);
-//   return std::make_tuple(std::move(attention), std::move(log_sumexp));
-// }
+  attention = attention.transpose(1, 2);
+  return std::make_tuple(std::move(attention), std::move(log_sumexp));
+}
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
@@ -801,264 +801,265 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _flash_attention_forward(
   return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
 }
 
-// std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
-//     const at::Tensor& query, // [b, seqlen, num_heads, K]
-//     const at::Tensor& key, // [b, seqlen, num_heads, K]
-//     const at::Tensor& value, // [b, seqlen, num_heads, Kv]
-//     const c10::optional<at::Tensor>& bias, // [b, num_heads, seqlen, seqlen]
-//     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
-//     // position of the first query token for batch $b
-//     const c10::optional<at::Tensor>& seqstart_q,
-//     // (Mode 1MHK only) [b+1]: cu_seqlen_k[b] contains the
-//     // position of the first key token for batch $b
-//     const c10::optional<at::Tensor>& seqstart_k,
-//     // (Mode 1MHK only) Maximum sequence length across batches
-//     const c10::optional<int64_t> max_seqlen_q_,
-//     double dropout_p, // attention matrix dropout probability
-//     int64_t custom_mask_type,
-//     bool compute_logsumexp,
-//     c10::optional<double> scale,
-//     const c10::optional<at::Tensor>& causal_diagonal,
-//     const c10::optional<at::Tensor>& seqlen_k) {
-// #if defined(USE_FLASH_ATTENTION)
-// // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
-// // machine that is >= 5.0. In practice, this is not a problem but since
-// // this would avoid runtime architecture checks, we should look into it
+std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
+    const at::Tensor& query, // [b, seqlen, num_heads, K]
+    const at::Tensor& key, // [b, seqlen, num_heads, K]
+    const at::Tensor& value, // [b, seqlen, num_heads, Kv]
+    const c10::optional<at::Tensor>& bias, // [b, num_heads, seqlen, seqlen]
+    // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
+    // position of the first query token for batch $b
+    const c10::optional<at::Tensor>& seqstart_q,
+    // (Mode 1MHK only) [b+1]: cu_seqlen_k[b] contains the
+    // position of the first key token for batch $b
+    const c10::optional<at::Tensor>& seqstart_k,
+    // (Mode 1MHK only) Maximum sequence length across batches
+    const c10::optional<int64_t> max_seqlen_q_,
+    double dropout_p, // attention matrix dropout probability
+    int64_t custom_mask_type,
+    bool compute_logsumexp,
+    c10::optional<double> scale,
+    const c10::optional<at::Tensor>& causal_diagonal,
+    const c10::optional<at::Tensor>& seqlen_k) {
+#if 0
+// defined(USE_FLASH_ATTENTION)
+// TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
+// machine that is >= 5.0. In practice, this is not a problem but since
+// this would avoid runtime architecture checks, we should look into it
 
-//   TORCH_CHECK(query.dim() == 4);
-//   TORCH_CHECK(key.dim() == 4);
-//   TORCH_CHECK(value.dim() == 4);
+  TORCH_CHECK(query.dim() == 4);
+  TORCH_CHECK(key.dim() == 4);
+  TORCH_CHECK(value.dim() == 4);
 
-//   // Batch sizes
-//   TORCH_CHECK(query.size(0) == key.size(0));
-//   TORCH_CHECK(query.size(0) == value.size(0));
+  // Batch sizes
+  TORCH_CHECK(query.size(0) == key.size(0));
+  TORCH_CHECK(query.size(0) == value.size(0));
 
-//   // Sequence length
-//   TORCH_CHECK(key.size(1) == value.size(1));
+  // Sequence length
+  TORCH_CHECK(key.size(1) == value.size(1));
 
-//   // Num heads
-//   TORCH_CHECK(query.size(2) == key.size(2));
-//   TORCH_CHECK(query.size(2) == value.size(2));
+  // Num heads
+  TORCH_CHECK(query.size(2) == key.size(2));
+  TORCH_CHECK(query.size(2) == value.size(2));
 
-//   // Embedding per head
-//   TORCH_CHECK(query.size(3) == key.size(3));
-//   // TODO_DRISS we should return max_seqlen_k;
-//   int64_t max_seqlen_q, max_seqlen_k;
-//   TORCH_CHECK(seqstart_q.has_value() == seqstart_k.has_value());
-//   if (seqstart_q.has_value()) {
-//     TORCH_CHECK(seqstart_q->scalar_type() == at::ScalarType::Int);
-//     TORCH_CHECK(seqstart_k->scalar_type() == at::ScalarType::Int);
-//     TORCH_CHECK(seqstart_q->dim() == 1 && seqstart_k->dim() == 1);
-//     //CHECK_NOSPARSE_CONTIGUOUS_CUDA((*seqstart_q));
-//     //CHECK_NOSPARSE_CONTIGUOUS_CUDA((*seqstart_k));
-//     TORCH_CHECK(seqstart_q->size(0) == seqstart_k->size(0));
-//     TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
-//     TORCH_CHECK(max_seqlen_q_.has_value());
-//     max_seqlen_q = *max_seqlen_q_;
-//     max_seqlen_k = 0; // Will be set inside the kernel
-//   } else {
-//     max_seqlen_q = query.size(1);
-//     max_seqlen_k = key.size(1);
-//   }
+  // Embedding per head
+  TORCH_CHECK(query.size(3) == key.size(3));
+  // TODO_DRISS we should return max_seqlen_k;
+  int64_t max_seqlen_q, max_seqlen_k;
+  TORCH_CHECK(seqstart_q.has_value() == seqstart_k.has_value());
+  if (seqstart_q.has_value()) {
+    TORCH_CHECK(seqstart_q->scalar_type() == at::ScalarType::Int);
+    TORCH_CHECK(seqstart_k->scalar_type() == at::ScalarType::Int);
+    TORCH_CHECK(seqstart_q->dim() == 1 && seqstart_k->dim() == 1);
+    //CHECK_NOSPARSE_CONTIGUOUS_CUDA((*seqstart_q));
+    //CHECK_NOSPARSE_CONTIGUOUS_CUDA((*seqstart_k));
+    TORCH_CHECK(seqstart_q->size(0) == seqstart_k->size(0));
+    TORCH_CHECK(query.size(0) == 1, "cu_seqlen only supports batch_size=1");
+    TORCH_CHECK(max_seqlen_q_.has_value());
+    max_seqlen_q = *max_seqlen_q_;
+    max_seqlen_k = 0; // Will be set inside the kernel
+  } else {
+    max_seqlen_q = query.size(1);
+    max_seqlen_k = key.size(1);
+  }
 
-//   //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(query);
-//   //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(key);
-//   //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(value);
+  //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(query);
+  //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(key);
+  //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(value);
 
-//   at::hip::HIPGuardMasqueradingAsCUDA device_guard(query.device());
-//   hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard(query.device());
+  hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
 
-//   int64_t B = query.size(0);
-//   int64_t M = query.size(1);
-//   int64_t N = key.size(1);
-//   int64_t num_heads = query.size(-2);
-//   int64_t K = query.size(-1);
-//   int64_t Kv = value.size(-1);
+  int64_t B = query.size(0);
+  int64_t M = query.size(1);
+  int64_t N = key.size(1);
+  int64_t num_heads = query.size(-2);
+  int64_t K = query.size(-1);
+  int64_t Kv = value.size(-1);
 
-//   at::Tensor res;
-//   at::Tensor logsumexp;
+  at::Tensor res;
+  at::Tensor logsumexp;
 
-//   const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
-//   at::PhiloxCudaState rng_engine_inputs;
-//   if (use_dropout) {
-//     at::HIPGeneratorImpl* gen =
-//         at::get_generator_or_default<at::HIPGeneratorImpl>(
-//             c10::nullopt, at::cuda::detail::getDefaultHIPGenerator());
+  const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
+  at::PhiloxCudaState rng_engine_inputs;
+  if (use_dropout) {
+    at::HIPGeneratorImpl* gen =
+        at::get_generator_or_default<at::HIPGeneratorImpl>(
+            c10::nullopt, at::cuda::detail::getDefaultHIPGenerator());
 
-//     std::lock_guard<std::mutex> lock(gen->mutex_);
-//     // if using dropout, we produce 1 random number for each element of the
-//     // attention tensor
-//     rng_engine_inputs = gen->philox_cuda_state(B * num_heads * M * N);
-//   }
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    // if using dropout, we produce 1 random number for each element of the
+    // attention tensor
+    rng_engine_inputs = gen->philox_cuda_state(B * num_heads * M * N);
+  }
 
-//   hipDeviceProp_t* p = at::cuda::getDeviceProperties(query.device().index());
-//   const int computeCapability = p->major * 10 + p->minor;
+  hipDeviceProp_t* p = at::cuda::getDeviceProperties(query.device().index());
+  const int computeCapability = p->major * 10 + p->minor;
 
-//   bool kernel_launched = false;
-//   const auto maxShmem = p->sharedMemPerBlock;
+  bool kernel_launched = false;
+  const auto maxShmem = p->sharedMemPerBlock;
 
-//   auto launchKernel = [&](auto _k, auto kernel_fn) {
-//     using Kernel = decltype(_k);
-//     using scalar_t = typename Kernel::scalar_t;
-//     (void)_k;
+  auto launchKernel = [&](auto _k, auto kernel_fn) {
+    using Kernel = decltype(_k);
+    using scalar_t = typename Kernel::scalar_t;
+    (void)_k;
 
-//     if (kernel_launched) {
-//       return;
-//     }
-//     // Check if this kernel is compatible
-//     if (!Kernel::kSupportsDropout && use_dropout) {
-//       return;
-//     }
-//     if (!Kernel::kSupportsBias && bias.has_value()) {
-//       return;
-//     }
+    if (kernel_launched) {
+      return;
+    }
+    // Check if this kernel is compatible
+    if (!Kernel::kSupportsDropout && use_dropout) {
+      return;
+    }
+    if (!Kernel::kSupportsBias && bias.has_value()) {
+      return;
+    }
 
-//     if (value.size(3) > Kernel::kMaxK || key.size(3) > Kernel::kMaxK) {
-//       return;
-//     }
-//     // Alignment
-//     if ((query.stride(2) % Kernel::kAlignmentQ) ||
-//         (key.stride(2) % Kernel::kAlignmentK) ||
-//         (value.stride(2) % Kernel::kAlignmentV)) {
-//       return;
-//     }
-//     // Uses too much shmem
-//     size_t smem_bytes = sizeof(typename Kernel::SharedStorage);
-//     if (smem_bytes > maxShmem) {
-//       return;
-//     }
-//     kernel_launched = true;
+    if (value.size(3) > Kernel::kMaxK || key.size(3) > Kernel::kMaxK) {
+      return;
+    }
+    // Alignment
+    if ((query.stride(2) % Kernel::kAlignmentQ) ||
+        (key.stride(2) % Kernel::kAlignmentK) ||
+        (value.stride(2) % Kernel::kAlignmentV)) {
+      return;
+    }
+    // Uses too much shmem
+    size_t smem_bytes = sizeof(typename Kernel::SharedStorage);
+    if (smem_bytes > maxShmem) {
+      return;
+    }
+    kernel_launched = true;
 
-//     res = at::empty(
-//         {B, M, num_heads, Kv},
-//         query.options().dtype(
-//             CutlassToAtenDtype<typename Kernel::output_t>::atScalarType()));
+    res = at::empty(
+        {B, M, num_heads, Kv},
+        query.options().dtype(
+            CutlassToAtenDtype<typename Kernel::output_t>::atScalarType()));
 
-//     // NOTE: Should be aligned (by padding) in case M is
-//     // not a good number for loading during backward
-//     constexpr decltype(M) kAlignLSE = Kernel::kAlignLSE;
-//     logsumexp = at::empty(
-//         {seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B,
-//          num_heads,
-//          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
-//         query.options().dtype(at::ScalarType::Float));
+    // NOTE: Should be aligned (by padding) in case M is
+    // not a good number for loading during backward
+    constexpr decltype(M) kAlignLSE = Kernel::kAlignLSE;
+    logsumexp = at::empty(
+        {seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B,
+         num_heads,
+         compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
+        query.options().dtype(at::ScalarType::Float));
 
-//     typename Kernel::Params p;
-//     p.query_ptr = (scalar_t*)query.data_ptr();
-//     p.key_ptr = (scalar_t*)key.data_ptr();
-//     p.value_ptr = (scalar_t*)value.data_ptr();
-//     p.logsumexp_ptr = compute_logsumexp
-//         ? (typename Kernel::lse_scalar_t*)logsumexp.data_ptr()
-//         : nullptr;
-//     at::Tensor output_accum;
-//     if (Kernel::kNeedsOutputAccumulatorBuffer) {
-//       output_accum = at::empty(
-//           {B, M, num_heads, Kv},
-//           query.options().dtype(
-//               CutlassToAtenDtype<
-//                   typename Kernel::output_accum_t>::atScalarType()));
-//       p.output_accum_ptr =
-//           (typename Kernel::output_accum_t*)output_accum.data_ptr();
-//     } else {
-//       p.output_accum_ptr = nullptr;
-//     }
-//     p.output_ptr = (typename Kernel::output_t*)res.data_ptr();
+    typename Kernel::Params p;
+    p.query_ptr = (scalar_t*)query.data_ptr();
+    p.key_ptr = (scalar_t*)key.data_ptr();
+    p.value_ptr = (scalar_t*)value.data_ptr();
+    p.logsumexp_ptr = compute_logsumexp
+        ? (typename Kernel::lse_scalar_t*)logsumexp.data_ptr()
+        : nullptr;
+    at::Tensor output_accum;
+    if (Kernel::kNeedsOutputAccumulatorBuffer) {
+      output_accum = at::empty(
+          {B, M, num_heads, Kv},
+          query.options().dtype(
+              CutlassToAtenDtype<
+                  typename Kernel::output_accum_t>::atScalarType()));
+      p.output_accum_ptr =
+          (typename Kernel::output_accum_t*)output_accum.data_ptr();
+    } else {
+      p.output_accum_ptr = nullptr;
+    }
+    p.output_ptr = (typename Kernel::output_t*)res.data_ptr();
 
-//     if (seqstart_q.has_value()) {
-//       p.seqstart_q_ptr = (int32_t*)seqstart_q->data_ptr();
-//       p.seqstart_k_ptr = (int32_t*)seqstart_k->data_ptr();
-//     }
+    if (seqstart_q.has_value()) {
+      p.seqstart_q_ptr = (int32_t*)seqstart_q->data_ptr();
+      p.seqstart_k_ptr = (int32_t*)seqstart_k->data_ptr();
+    }
 
-//     p.num_heads = num_heads;
-//     p.head_dim = query.size(3);
-//     p.head_dim_value = value.size(3);
-//     p.num_queries = max_seqlen_q;
-//     p.num_keys = max_seqlen_k;
-//     p.num_batches = seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
-//     p.custom_mask_type = custom_mask_type;
-//     p.causal_diagonal_ptr = nullptr;
-//     if (causal_diagonal.has_value()) {
-//       //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(causal_diagonal.value());
-//       TORCH_CHECK(causal_diagonal->scalar_type() == at::ScalarType::Int);
-//       p.causal_diagonal_ptr = (int32_t*)causal_diagonal->data_ptr();
-//     }
+    p.num_heads = num_heads;
+    p.head_dim = query.size(3);
+    p.head_dim_value = value.size(3);
+    p.num_queries = max_seqlen_q;
+    p.num_keys = max_seqlen_k;
+    p.num_batches = seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
+    p.custom_mask_type = custom_mask_type;
+    p.causal_diagonal_ptr = nullptr;
+    if (causal_diagonal.has_value()) {
+      //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(causal_diagonal.value());
+      TORCH_CHECK(causal_diagonal->scalar_type() == at::ScalarType::Int);
+      p.causal_diagonal_ptr = (int32_t*)causal_diagonal->data_ptr();
+    }
 
-//     p.seqlen_k_ptr = nullptr;
-//     if (seqlen_k.has_value()) {
-//       //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(seqlen_k.value());
-//       TORCH_CHECK(seqlen_k->scalar_type() == at::ScalarType::Int);
-//       p.seqlen_k_ptr = (int32_t*)seqlen_k->data_ptr();
-//     }
-//     p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.seqlen_k_ptr = nullptr;
+    if (seqlen_k.has_value()) {
+      //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(seqlen_k.value());
+      TORCH_CHECK(seqlen_k->scalar_type() == at::ScalarType::Int);
+      p.seqlen_k_ptr = (int32_t*)seqlen_k->data_ptr();
+    }
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 
-//     ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
-//     ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
-//     ASSIGN_CHECK_OVERFLOW(p.v_strideB, value.stride(0));
-//     ASSIGN_CHECK_OVERFLOW(p.q_strideM, query.stride(1));
-//     ASSIGN_CHECK_OVERFLOW(p.k_strideM, key.stride(1));
-//     ASSIGN_CHECK_OVERFLOW(p.v_strideM, value.stride(1));
-//     ASSIGN_CHECK_OVERFLOW(p.q_strideH, query.stride(2));
-//     ASSIGN_CHECK_OVERFLOW(p.k_strideH, key.stride(2));
-//     ASSIGN_CHECK_OVERFLOW(p.v_strideH, value.stride(2));
-//     ASSIGN_CHECK_OVERFLOW(p.o_strideM, res.stride(1));
+    ASSIGN_CHECK_OVERFLOW(p.q_strideB, query.stride(0));
+    ASSIGN_CHECK_OVERFLOW(p.k_strideB, key.stride(0));
+    ASSIGN_CHECK_OVERFLOW(p.v_strideB, value.stride(0));
+    ASSIGN_CHECK_OVERFLOW(p.q_strideM, query.stride(1));
+    ASSIGN_CHECK_OVERFLOW(p.k_strideM, key.stride(1));
+    ASSIGN_CHECK_OVERFLOW(p.v_strideM, value.stride(1));
+    ASSIGN_CHECK_OVERFLOW(p.q_strideH, query.stride(2));
+    ASSIGN_CHECK_OVERFLOW(p.k_strideH, key.stride(2));
+    ASSIGN_CHECK_OVERFLOW(p.v_strideH, value.stride(2));
+    ASSIGN_CHECK_OVERFLOW(p.o_strideM, res.stride(1));
 
-//     if (bias.has_value()) {
-//       //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA((*bias));
-//       TORCH_CHECK(
-//           bias->scalar_type() == CutlassToAtenDtype<scalar_t>::atScalarType(),
-//           "invalid dtype for bias - should match query's dtype");
-//       p.attn_bias_ptr = (scalar_t*)bias->data_ptr();
+    if (bias.has_value()) {
+      //CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA((*bias));
+      TORCH_CHECK(
+          bias->scalar_type() == CutlassToAtenDtype<scalar_t>::atScalarType(),
+          "invalid dtype for bias - should match query's dtype");
+      p.attn_bias_ptr = (scalar_t*)bias->data_ptr();
 
-//       // assign strides for bias, viewed as
-//       // (batch_sz, n_heads, n_queries, n_keys)
-//       const at::Tensor bias_4d_view =
-//           get_bias_4d_view(*bias, B, num_heads, M, N);
-//       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
-//       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
-//       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
-//     }
+      // assign strides for bias, viewed as
+      // (batch_sz, n_heads, n_queries, n_keys)
+      const at::Tensor bias_4d_view =
+          get_bias_4d_view(*bias, B, num_heads, M, N);
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
+    }
 
-//     p.use_dropout = use_dropout;
-//     if (p.use_dropout) {
-//       p.rng_engine_inputs = rng_engine_inputs;
-//       p.dropout_prob = dropout_p;
-//     }
+    p.use_dropout = use_dropout;
+    if (p.use_dropout) {
+      p.rng_engine_inputs = rng_engine_inputs;
+      p.dropout_prob = dropout_p;
+    }
 
-//     if (smem_bytes > 0xc000) {
-//       auto err = hipFuncSetAttribute(
-//           kernel_fn, hipFuncAttributeMaxDynamicSharedMemorySize, smem_bytes);
-//       TORCH_CHECK(
-//           err != hipErrorInvalidValue,
-//           "This GPU does not have enough shared-memory (kernel requires ",
-//           smem_bytes / 1024,
-//           " kb)");
-//       AT_CUDA_CHECK(err);
-//     }
-//     Kernel::check_supported(p);
-//     kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
-//   };
+    if (smem_bytes > 0xc000) {
+      auto err = hipFuncSetAttribute(
+          kernel_fn, hipFuncAttributeMaxDynamicSharedMemorySize, smem_bytes);
+      TORCH_CHECK(
+          err != hipErrorInvalidValue,
+          "This GPU does not have enough shared-memory (kernel requires ",
+          smem_bytes / 1024,
+          " kb)");
+      AT_CUDA_CHECK(err);
+    }
+    Kernel::check_supported(p);
+    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
+  };
 
-//   // Dispatch to the right kernel
-//   DISPATCH_TYPES(query, ([&]() {
-//                    dispatch_cutlassF<scalar_t>(launchKernel, computeCapability);
-//                  }));
-//   TORCH_CHECK(kernel_launched, "cutlassF: no kernel found to launch!");
-//   AT_CUDA_CHECK(hipGetLastError());
+  // Dispatch to the right kernel
+  DISPATCH_TYPES(query, ([&]() {
+                   dispatch_cutlassF<scalar_t>(launchKernel, computeCapability);
+                 }));
+  TORCH_CHECK(kernel_launched, "cutlassF: no kernel found to launch!");
+  AT_CUDA_CHECK(hipGetLastError());
 
-//   // !!TODO_DRISS: We are throwing this away for now and need to change how its done
-//   // uint64_t -> int64_t bitwise casting as PyTorch don't support uint64_t
-//   // so just fake it as a int64_t
-//   int64_t seed, offset;
-//   if (use_dropout) {
-//     std::memcpy(&seed, &rng_engine_inputs.seed_, sizeof(seed));
-//     std::memcpy(&offset, &rng_engine_inputs.offset_.val, sizeof(offset));
-//   }
+  // !!TODO_DRISS: We are throwing this away for now and need to change how its done
+  // uint64_t -> int64_t bitwise casting as PyTorch don't support uint64_t
+  // so just fake it as a int64_t
+  int64_t seed, offset;
+  if (use_dropout) {
+    std::memcpy(&seed, &rng_engine_inputs.seed_, sizeof(seed));
+    std::memcpy(&offset, &rng_engine_inputs.offset_.val, sizeof(offset));
+  }
 
-//   return std::make_tuple(res, logsumexp);
-// #endif
-//   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-//   return std::make_tuple(Tensor{}, Tensor{});
-// }
+  return std::make_tuple(res, logsumexp);
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return std::make_tuple(Tensor{}, Tensor{});
+}
 
 Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tensor& v, double dropout_p){
   TORCH_CHECK(false, "This operator should be overridden in python before use");
