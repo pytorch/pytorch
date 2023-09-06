@@ -525,6 +525,8 @@ class GraphModuleSerializer:
         )
 
     def serialize_input(self, arg) -> Argument:
+        import torch._inductor.ir as inductor_ir
+
         if isinstance(arg, torch.fx.Node):
             if arg.op == "get_attr":
                 assert isinstance(arg.target, str)
@@ -545,6 +547,13 @@ class GraphModuleSerializer:
                 return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=arg.name))
             else:
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
+        elif isinstance(arg, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer)):
+            # Other branches are for arguments in fx node.
+            # This is a special branch for handling buffers (representing tensor arguments)
+            # for inductor's ExternalFallbackNode
+            # export_extern_kernel_node() is using this function to serialize arguments
+            assert arg.name is not None, "Input buffer must have valid name"
+            return Argument.create(as_tensor=TensorArgument(name=arg.name))
         elif isinstance(arg, bool):
             return Argument.create(as_bool=arg)
         elif isinstance(arg, str):
@@ -594,11 +603,29 @@ class GraphModuleSerializer:
                         self.graph_state.constants[a.name] = attr
                     arguments.append(TensorArgument(name=a.name))
                 return Argument.create(as_tensors=arguments)
-            elif any(isinstance(a, torch.fx.Node) for a in arg):
+            elif all(isinstance(a, (torch.fx.Node, type(None))) for a in arg):
+                # list of optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
                         return OptionalTensorArgument.create(as_none=())
                     elif isinstance(a, torch.fx.Node):
+                        return OptionalTensorArgument.create(as_tensor=a.name)
+                    else:
+                        raise SerializeError(f"Unsupported list/tuple argument: {a}")
+                return Argument.create(
+                    as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
+                )
+            elif all(isinstance(a, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer)) for a in arg):
+                # list of tensors
+                return Argument.create(
+                    as_tensors=[TensorArgument(name=a.name) for a in arg],
+                )
+            elif all(isinstance(a, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer, type(None))) for a in arg):
+                # list of optional tensors
+                def serialize_optional_tensor_args(a):
+                    if a is None:
+                        return OptionalTensorArgument.create(as_none=())
+                    elif isinstance(a, torch._inductor.ir.InputBuffer):
                         return OptionalTensorArgument.create(as_tensor=a.name)
                     else:
                         raise SerializeError(f"Unsupported list/tuple argument: {a}")
@@ -1445,7 +1472,13 @@ def serialize(
 
 def _dict_to_dataclass(cls, data):
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
-    if isinstance(cls, type) and issubclass(cls, _Union):
+    if typing.get_origin(cls) == typing.Union and type(None) in typing.get_args(cls):
+        if data is None:
+            return None
+        ty_args = typing.get_args(cls)
+        assert len(ty_args) == 2
+        return _dict_to_dataclass(ty_args[0], data)
+    elif isinstance(cls, type) and issubclass(cls, _Union):
         obj = cls(**data)
         field_type = cls.__annotations__[obj.type]
         setattr(obj, obj.type, _dict_to_dataclass(field_type, obj.value))
