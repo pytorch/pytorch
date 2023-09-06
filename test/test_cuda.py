@@ -3186,6 +3186,61 @@ exit(2)
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_cuda_graph_error_options(self):
+        def fn():
+            x = torch.zeros([2000], device="cuda")
+            y = x + x + x
+            return y
+
+        mem = None
+
+        def raw_malloc():
+            global mem
+            mem = None
+            stream = torch.cuda.Stream()
+            try:
+                with torch.cuda.stream(stream):
+                    mem = torch.cuda.caching_allocator_alloc(1024)
+            except BaseException:
+                if mem is None:
+                    return
+            try:
+                torch.cuda.caching_allocator_delete(mem)
+                mem = None
+                return None
+            except BaseException:
+                pass
+
+        def throws_on_cuda_event(capture_error_mode):
+            graph = torch.cuda.CUDAGraph()
+            torch.cuda.synchronize()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                fn()
+            stream.synchronize()
+            torch.cuda.current_stream().wait_stream(stream)
+            torch.cuda.synchronize()
+            try:
+                with torch.cuda.graph(graph, stream=stream, capture_error_mode=capture_error_mode):
+                    out = fn()
+                    thread = threading.Thread(target=raw_malloc)
+                    thread.start()
+                    thread.join()
+            except Exception:
+                if mem is not None:
+                    torch.cuda.caching_allocator_delete(mem)
+                return True
+
+            return False
+
+        self.assertFalse(throws_on_cuda_event("thread_local"))
+        self.assertFalse(throws_on_cuda_event("relaxed"))
+
+        # Exception would Corrupt Process and make other tests fail
+        # self.assertTrue(throws_on_cuda_event("global"))
+
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
         mean, invstd = torch.batch_norm_gather_stats(
@@ -3289,6 +3344,9 @@ class TestCudaMallocAsync(TestCase):
         try:
             torch.cuda.memory.empty_cache()
             torch.cuda.memory._record_memory_history("state", stacks="python")
+            # make x the second block in a segment
+            torch.rand(2 * 311, 411, device='cuda')
+            unused = torch.rand(310, 410, device='cuda')
             x = torch.rand(311, 411, device='cuda')
 
             # create a bunch of tensors that all will tile into the
@@ -3311,6 +3369,7 @@ class TestCudaMallocAsync(TestCase):
                     if b['requested_size'] == 311 * 411 * 4:
                         self.assertTrue('test_cuda' in b['frames'][0]['filename'])
                         found_it = True
+                        self.assertEqual(x.untyped_storage().data_ptr(), b['address'])
             self.assertTrue(found_it)
 
             if not IS_WINDOWS:
@@ -3318,7 +3377,7 @@ class TestCudaMallocAsync(TestCase):
                     torch.cuda.memory._save_segment_usage(f.name)
                     with open(f.name) as f2:
                         self.assertTrue('test_cuda.py' in f2.read())
-
+            del unused
             del x
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
