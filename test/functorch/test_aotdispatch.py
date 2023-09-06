@@ -2171,12 +2171,18 @@ class <lambda>(torch.nn.Module):
         getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
         detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
         detach_2: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
+        detach_3: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
+        detach_4: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_3);  detach_3 = None
+        detach_5: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_6: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_5);  detach_5 = None
         ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, relu, 0);  expand = relu = None
+        detach_7: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_8: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
         getitem_6: f32[3] = native_batch_norm_backward[1]
@@ -2185,7 +2191,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0]
         getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
         getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
 
@@ -2215,7 +2221,8 @@ class <lambda>(torch.nn.Module):
         relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: f32[] = torch.ops.aten.sum.default(relu)
         detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        return (getitem_3, getitem_4, add, sum_1, detach)
+        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach);  detach = None
+        return (getitem_3, getitem_4, add, sum_1, detach_1)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
@@ -3152,6 +3159,27 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
+
+    # https://github.com/pytorch/pytorch/issues/105327
+    def test_lift_fresh_copy_in_graph(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                _tensor_constant0 = torch.tensor([1])
+                lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0)
+                y = x.mul(lift_fresh_copy)
+                return (y,)
+
+        mod = MyMod()
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = torch.ones(4, requires_grad=True)
+        inputs = [x]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        out_ref = mod(x)
+        out_test = compiled_f(x)
+        self.assertEqual(out_ref[0].detach(), out_test[0].detach())
 
     def test_inference_python_dispatcher(self):
         # Extracted from unet

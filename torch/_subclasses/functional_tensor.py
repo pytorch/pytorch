@@ -237,3 +237,43 @@ def maybe_disable_functional_mode():
     finally:
         if maybe_func_mode is not None:
             torch._C._set_dispatch_mode(maybe_func_mode)
+
+
+# This is similar to torch.func.functionalize, but:
+# - It uses FunctionalTensorMode, and FunctionalTensor (a python subclass).
+#   One important advantage to using this mode is that it will let us
+#   run functionalization underneath __torch_dispatch__,
+#   which we need in AOTAutograd.
+# - Doing so means that it does not automatically compose with other
+#   functorch transforms, since these transforms always run above __torch_dispatch__.
+#   That's why this util lives here, and not in functorch.
+def dispatch_functionalize(func):
+    from torch._functorch.aot_autograd import from_fun, to_fun
+
+    def inner(*args, **kwargs):
+        func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
+        func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+
+        flattened_wrapped_args, _ = pytree.tree_flatten(func_args)
+        flattened_wrapped_kwargs, _ = pytree.tree_flatten(func_kwargs)
+
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        with disable_above, FunctionalTensorMode():
+            func_outputs = func(*func_args, **func_kwargs)
+            outputs = pytree.tree_map_only(FunctionalTensor, func_outputs, from_fun)
+
+            # sync any input mutations
+            for a in flattened_wrapped_args + flattened_wrapped_kwargs:
+                if isinstance(a, torch.Tensor):
+                    torch._sync(a)
+
+            # For now, we will do nothing with input mutations.
+            # This API is only used by higher order, which ban input mutations.
+            # (Eventually we might want to relax this?)
+            if torch.Tag.inplace_view in func.tags:
+                assert isinstance(args[0], FunctionalTensor)
+            return outputs
+
+    return inner
