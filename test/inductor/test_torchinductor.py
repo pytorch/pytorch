@@ -3346,6 +3346,10 @@ class CommonTemplate:
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
 
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         foo_opt = torch.compile(matmul_with_op)
 
         # test no-op
@@ -6208,6 +6212,30 @@ class CommonTemplate:
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
+    @requires_cuda()
+    @torch._inductor.config.patch("layout_optimization", True)
+    def test_inductor_layout_optimization_input_mutations(self):
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+
+        def f(x):
+            x.mul_(2)
+            out = mod(x)
+            return out
+
+        f_compiled = torch.compile(f)
+        x_ref = torch.rand(2, 3, 128, 128, device="cuda")
+        x_test = x_ref.clone().detach()
+        with torch.no_grad():
+            out_ref = f(x_ref)
+            out_test = f_compiled(x_test)
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(out_ref.shape, out_test.shape)
+            # Importantly, since inductor._config.keep_output_stride is True,
+            # the outputs should have matching strides here.
+            self.assertEqual(out_ref.stride(), out_test.stride())
+            self.assertEqual(x_ref, x_test)
+
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x, i):
@@ -7169,11 +7197,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch._inductor
 
             def fn():
-                x = torch.empty([100])
-                for _ in range(10):
+                li = []
+                for i in range(10):
+                    x = torch.full([100], i)
                     x = x + 1
+                    li.append(x)
 
-                return x
+                return li
 
             mod = make_fx(fn)()
 
@@ -7191,19 +7221,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                             live_tensors[arg] = True
 
                     out = func(*args, **kwargs)
+                    if not isinstance(out, torch.Tensor):
+                        return out
 
                     live_tensors[out] = True
                     max_live_tensors = max(max_live_tensors, len(live_tensors))
-
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.freezing import ConstantFolder
+            from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
             with mode:
-                ConstantFolder(mod).run()
+                UniformValueConstantFolder(mod).run()
 
-            self.assertTrue(max_live_tensors == 2)
+            # there are a couple extra tensors created in `insertable_tensor_check`
+            self.assertTrue(max_live_tensors == 4)
 
         @skipIfRocm
         def test_neg_index(self):
