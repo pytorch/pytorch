@@ -1874,13 +1874,12 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
-        return f"reinterpret_tensor({self.get_name()}, {size}, {stride}, {offset})"
+        return V.graph.wrapper_code.codegen_reinterpret_view(
+            self.get_name(), self.layout.size, self.layout.stride, self.layout.offset
+        )
 
 
 class SliceView(View):
