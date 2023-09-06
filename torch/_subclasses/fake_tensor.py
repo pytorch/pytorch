@@ -200,8 +200,10 @@ def maybe_get_fake_mode(t):
     if isinstance(t, FakeTensor):
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
-        inner_tensors, _ = t.__tensor_flatten__()
-        modes = [maybe_get_fake_mode(x) for x in inner_tensors]
+        inner_tensor_names, _ = t.__tensor_flatten__()
+        modes = [
+            maybe_get_fake_mode(getattr(t, t_name)) for t_name in inner_tensor_names
+        ]
         m = modes[0]
         assert all(m is x for x in modes)
         return m
