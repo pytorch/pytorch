@@ -6,6 +6,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
+from torch._dynamo.exc import UnbackedSymIntError
 from torch._dynamo.utils import counters, detect_fake_mode
 from torch._subclasses import FakeTensor
 from torch.fx.experimental.optimization import (
@@ -86,7 +87,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     # Check if there is still unbacked SymInts after dyn_rewritten_pass.
     # Trigger RestartAnalysis to graph break since Inductor can't handle them.
     if has_unbacked_symint(gm, example_inputs):
-        raise RuntimeError("There is unbacked SymInt in the graph")
+        raise UnbackedSymIntError()
 
     return gm
 
@@ -99,8 +100,10 @@ def has_unbacked_symint(gm, example_inputs):
             and "example_value" in node.meta
             and isinstance(node.meta["example_value"], FakeTensor)
         ):
-            for x in node.meta["example_value"].shape:
-                if str(x).startswith("i"):
+            for x in torch.fx.experimental.symbolic_shapes.free_symbols(
+                node.meta["example_value"]
+            ):
+                if fake_mode.shape_env.is_unbacked_symint_or_symbool(x):
                     for i in fake_mode.shape_env.runtime_var_to_range.keys():
                         if str(i) == str(x):
                             return True

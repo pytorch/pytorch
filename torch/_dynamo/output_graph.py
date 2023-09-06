@@ -57,6 +57,7 @@ from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
     RestartAnalysis,
+    UnbackedSymIntError,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -1068,8 +1069,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
             if (
-                isinstance(e, RuntimeError)
-                and e.args[0] == "There is unbacked SymInt in the graph"
+                isinstance(e, UnbackedSymIntError)
             ) and torch._guards.CompileContext.get_capture_dynamic_output_shape_ops():
                 torch._guards.CompileContext.set_capture_dynamic_output_shape_ops(False)
                 raise RestartAnalysis() from None

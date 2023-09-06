@@ -2899,6 +2899,10 @@ class ShapeEnv:
 
         return SymFloat(SymNode(symbol, self, float, None, fx_node=fx_node))
 
+    def is_unbacked_symfloat(self, symbol):
+        assert isinstance(symbol, sympy.Symbol)
+        return str(symbol).startswith("f")
+
     @record_shapeenv_event()
     def create_unbacked_symint(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)

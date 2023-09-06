@@ -72,6 +72,11 @@ class BackendCompilerFailed(TorchDynamoException):
         super().__init__(msg)
 
 
+class UnbackedSymIntError(RuntimeError):
+    def __init__(self):
+        super().__init__("Unbacked SymInt in FX graph")
+
+
 class Unsupported(TorchDynamoException):
     def __init__(self, msg):
         super().__init__(msg)

@@ -547,8 +547,14 @@ class CompileContext:
 
     def __init__(self, compile_id):
         assert compile_id is None or isinstance(compile_id, CompileId)
+
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        # Whether or not we capture dynamic output shape ops in Dynamo.
+        # There is a dyn_rewritten_pass to rewrite these ops (e.g, boolean mask replacement)
+        # after Dynamo to make backend compilation work well.
+        # If there still has unbacked symint in the FX graph after dyn_rewritten_pass,
+        # it triggers RestartAnalysis and Dynamo will graph break on these ops during the second compilation.
         self.capture_dynamic_output_shape_ops = True
 
     @staticmethod
@@ -570,7 +576,7 @@ class CompileContext:
     def get_capture_dynamic_output_shape_ops():
         self = CompileContext.get()
         if self is None:
-            return None
+            raise AssertionError("No compile context available")
         return self.capture_dynamic_output_shape_ops
 
     @staticmethod
