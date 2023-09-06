@@ -17,6 +17,8 @@ def get_runtime_of_snode(snode: "BaseSchedulerNode"):
         return 0
     if isinstance(snode.node, ir.Wait):
         return 0
+    if isinstance(snode.node, ir.OutputBuffer):
+        return 0
     if isinstance(snode.node, ir.ExternKernel):
         return 10
     return 1
