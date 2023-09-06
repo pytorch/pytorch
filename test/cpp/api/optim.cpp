@@ -182,7 +182,8 @@ TEST(OptimTest, OptimizerAccessors) {
 
   // test for state() with non-const reference return
   auto& state_ = static_cast<AdagradParamState&>(
-      *(optimizer.state()[params_1[0].unsafeGetTensorImpl()]));
+      *(optimizer
+            .state()[c10::guts::to_string(params_1[0].unsafeGetTensorImpl())]));
   state_.step(state_.step() + 1);
 
   const auto& optimizer_ = Adagrad(params, options);

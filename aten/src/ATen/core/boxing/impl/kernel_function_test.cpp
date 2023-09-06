@@ -649,7 +649,7 @@ TEST(OperatorRegistrationTestFunctionBasedKernel, givenKernelWithOptionalInputs_
 }
 
 std::string concatKernel(const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-  return a + b + std::to_string(c);
+  return a + b + c10::guts::to_string(c);
 }
 
 void expectCallsConcatUnboxed(DispatchKey dispatch_key) {

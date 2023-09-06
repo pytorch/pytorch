@@ -6,7 +6,6 @@
 #include <torch/serialize/archive.h>
 #include <torch/types.h>
 
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -85,7 +84,8 @@ class TORCH_API Adagrad : public Optimizer {
             p.data(),
             defaults.initial_accumulator_value(),
             at::MemoryFormat::Preserve));
-        state_[p.unsafeGetTensorImpl()] = std::move(state);
+        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
+            std::move(state);
       }
     }
   }

@@ -1149,7 +1149,7 @@ class AOTInductorModelCache:
 
             # Use a utility function for easier benchmarking
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model.h>
+            #include <torch/csrc/inductor/aot_runtime/model.h>
 
             torch::aot_inductor::AOTInductorModel model;
 
@@ -3193,7 +3193,7 @@ def run(runner, args, original_dir=None):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
-        torch._dynamo.config.print_graph_breaks = True
+        torch._logging.set_logs(graph_breaks=True)
 
     if args.quiet:
         torch._logging.set_logs(dynamo=logging.ERROR)

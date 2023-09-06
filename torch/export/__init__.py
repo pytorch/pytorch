@@ -399,7 +399,7 @@ class ExportedProgram:
         )
 
         pm = PassManager(list(passes))
-        res = pm(copy.deepcopy(self.graph_module))
+        res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
