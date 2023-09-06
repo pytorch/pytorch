@@ -28,6 +28,7 @@ aspects of contributing to PyTorch.
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
   - [Previewing changes locally](#previewing-changes-locally)
+  - [Adding diagrams](#adding-diagrams)
   - [Previewing documentation on PRs](#previewing-documentation-on-prs)
   - [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with-py-spy)
@@ -185,6 +186,10 @@ Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
 into the repo directory.
 
 ## Codebase structure
+
+A diagram of the parts of the codebase showing at a high level picture, the frontend, backend, ATen and kernels. 
+![code base structure](simplified-codebase-structure.png)
+
 
 * [c10](c10) - Core library files that work everywhere, both server
   and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
@@ -559,6 +564,14 @@ mkdir -p build cpp/build
 rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
 rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 ```
+
+### Adding Diagrams
+
+Diagrams should be authored as [svg](https://en.wikipedia.org/wiki/SVG) files, so they can be updated by other users.
+A way to author svg files is to use [https://app.diagrams.net/](https://app.diagrams.net/).
+If the diagram is part of the documentation, then the svg file can be displayed as-is.
+If the diagram is part of a markdown file, then a [png](https://en.wikipedia.org/wiki/PNG) file should be created and referred to.
+In this case the svg file should also be put in git so that the changes can be made.
 
 ### Previewing documentation on PRs
 

@@ -1,6 +1,8 @@
-This directory contains the low-level tensor libraries for PyTorch,
-as well as the new ATen C++ bindings.
+# ATen (A tensor library)
 
+This directory contains the low-level tensor libraries for PyTorch, as well as the new ATen C++ bindings.
+
+## Low-level tensor libraries for PyTorch
 The low-level libraries trace their lineage from the original Torch.  There are
 multiple variants of the library, summarized here:
 
@@ -11,6 +13,38 @@ multiple variants of the library, summarized here:
 * THS = TorcH Sparse (now defunct)
 
 (You'll also see these abbreviations show up in symbol names.)
+
+## New ATen C++ bindings.
+
+The new ATen C++ bindings definitions are in the native folder.
+
+### Native folder
+
+#### The native functions yaml file
+
+The Native folder contains [native-functions.yaml](native-functions.yaml). This file contains definitions of the PyTorch operations, for example:
+
+`func: hardsigmoid(Tensor self) -> Tensor
+  structured_delegate: hardsigmoid.out
+  device_check: NoCheck   # TensorIterator
+  python_module: nn
+  dispatch:
+  QuantizedCPU: hardsigmoid_quantized_cpu`
+
+It defines operations and how they are dispatched, and other related information required to run the operations for each kernel.
+The frontend operations (what the PyTorch developer writes) are written without regard for which device operations will be run on.
+
+The yaml file is the way to map operations so they can be run on particualr kernels; it does this by declaring
+how each operation will be implemented; including which devices an operation can run on and how it will be dispatched.
+The yaml file is used as input to generate code by the [setup.py](../../setup.py). The code is generated in the ATen
+folder in the build folder.
+
+### Kernel implmentation specific folders
+There are folders per kernel implmentation; cpu, cuda, cudnn, metal, mps, mkl. These have kernel specific code that does not need to be generated.
+
+### Core
+This folder contains non kernel specific information; the intention is to move the contents of this folder to
+the [c10/core](../../c10/core), which does not contain kernel implementation information.
 
 ## Reference counting
 
