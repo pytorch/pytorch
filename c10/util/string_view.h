@@ -1,47 +1,19 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
-#include <c10/util/reverse_iterator.h>
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
-
-#if __cpp_lib_string_view
 #include <string_view>
-#define C10_HAS_STD_STRING_VIEW() 1
-#define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
-#elif defined(__has_include)
-#if __has_include(<experimental/string_view>)
-// libc++ 7.0 has experimental/string_view but it's just a #error
-#if !defined(_LIBCPP_VERSION) || (_LIBCPP_VERSION < 7000)
-#include <experimental/string_view>
-#endif
-#if __cpp_lib_experimental_string_view
-#define C10_HAS_STD_STRING_VIEW() 0
-#define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 1
-#endif
-#endif
-#endif
 
-#ifndef C10_HAS_STD_STRING_VIEW
-#define C10_HAS_STD_STRING_VIEW() 0
-#endif
-#ifndef C10_HAS_STD_EXPERIMENTAL_STRING_VIEW
-#define C10_HAS_STD_EXPERIMENTAL_STRING_VIEW() 0
-#endif
-
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wdeprecated")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated")
-#endif
+#include <c10/macros/Macros.h>
 
 namespace c10 {
 
 /**
- * Reimplementation of std::string_view for C++11.
+ * Port of std::string_view with methods from C++20.
  * Implemented following the interface definition in
  * https://en.cppreference.com/w/cpp/string/basic_string_view
  * See there for the API documentation.
@@ -60,7 +32,7 @@ class basic_string_view final {
   using const_reference = const CharT&;
   using const_iterator = const CharT*;
   using iterator = const_iterator;
-  using const_reverse_iterator = c10::reverse_iterator<const_iterator>;
+  using const_reverse_iterator = std::reverse_iterator<const_iterator>;
   using reverse_iterator = const_reverse_iterator;
   using size_type = std::size_t;
   using difference_type = std::ptrdiff_t;
@@ -142,8 +114,7 @@ class basic_string_view final {
     return C10_UNLIKELY(pos >= size_)
         ? (throw std::out_of_range(
                "string_view::operator[] or string_view::at() out of range. Index: " +
-               c10::guts::to_string(pos) +
-               ", size: " + c10::guts::to_string(size())),
+               std::to_string(pos) + ", size: " + std::to_string(size())),
            at_(0))
         : at_(pos);
 #else
@@ -183,7 +154,7 @@ class basic_string_view final {
     if (n > size()) {
       throw std::out_of_range(
           "basic_string_view::remove_prefix: out of range. PrefixLength: " +
-          c10::guts::to_string(n) + ", size: " + c10::guts::to_string(size()));
+          std::to_string(n) + ", size: " + std::to_string(size()));
     }
     begin_ += n;
     size_ -= n;
@@ -193,7 +164,7 @@ class basic_string_view final {
     if (n > size()) {
       throw std::out_of_range(
           "basic_string_view::remove_suffix: out of range. SuffixLength: " +
-          c10::guts::to_string(n) + ", size: " + c10::guts::to_string(size()));
+          std::to_string(n) + ", size: " + std::to_string(size()));
     }
     size_ -= n;
   }
@@ -208,8 +179,7 @@ class basic_string_view final {
     if (pos > size_) {
       throw std::out_of_range(
           "basic_string_view::copy: out of range. Index: " +
-          c10::guts::to_string(pos) +
-          ", size: " + c10::guts::to_string(size()));
+          std::to_string(pos) + ", size: " + std::to_string(size()));
     }
     size_type copy_length = std::min(count, size_ - pos);
     for (auto iter = begin() + pos, end = iter + copy_length; iter != end;) {
@@ -225,8 +195,7 @@ class basic_string_view final {
     return (pos > size_)
         ? (throw std::out_of_range(
                "basic_string_view::substr parameter out of bounds. Index: " +
-               c10::guts::to_string(pos) +
-               ", size: " + c10::guts::to_string(size())),
+               std::to_string(pos) + ", size: " + std::to_string(size())),
            substr_())
         : substr_(pos, count);
 #else
@@ -347,7 +316,6 @@ class basic_string_view final {
 
   constexpr size_type find(basic_string_view v, size_type pos = 0)
       const noexcept {
-#if __cpp_constexpr >= 201304
     // if we are in C++14, write it iteratively. This is faster.
     if (v.size() == 0) {
       return pos <= size() ? pos : npos;
@@ -362,16 +330,6 @@ class basic_string_view final {
       }
     }
     return npos;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (v.size() == 0)          ? (pos <= size() ? pos : npos)
-        : (pos + v.size() > size()) ? npos
-        : (v.at_(0) == at_(pos) &&
-           v.substr_(1).equals_(substr_(pos + 1, v.size() - 1)))
-        ? pos
-        : find(v, pos + 1);
-#endif
   }
 
   constexpr size_type find(CharT ch, size_type pos = 0) const noexcept {
@@ -509,18 +467,12 @@ class basic_string_view final {
 
  private:
   static constexpr size_type strlen_(const_pointer str) noexcept {
-#if __cpp_constexpr >= 201304
     // if we are in C++14, write it iteratively. This is faster.
     const_pointer current = str;
     while (*current != '\0') {
       ++current;
     }
     return current - str;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (*str == '\0') ? 0 : 1 + strlen_(str + 1);
-#endif
   }
 
   constexpr const_reference at_(size_type pos) const noexcept {
@@ -535,7 +487,6 @@ class basic_string_view final {
   template <class Condition>
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
-#if __cpp_constexpr >= 201304
     // if we are in C++14, write it iteratively. This is faster.
     if (pos + 1 <= size()) {
       for (size_type cur = pos; cur < size(); ++cur) {
@@ -545,14 +496,6 @@ class basic_string_view final {
       }
     }
     return npos;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (pos + 1 > size()) ? npos
-        : condition(at_(pos))
-        ? pos
-        : find_first_if_(pos + 1, std::forward<Condition>(condition));
-#endif
   }
 
   template <class Condition>
@@ -576,7 +519,7 @@ class basic_string_view final {
 #if defined(__GNUC__) && !defined(__CUDACC__)
     return size() == rhs.size() &&
         0 == __builtin_memcmp(data(), rhs.data(), size());
-#elif __cpp_constexpr >= 201304
+#else
     // if we are in C++14, write it iteratively. This is faster than the
     // recursive C++11 implementation below.
     if (size() != rhs.size()) {
@@ -593,13 +536,6 @@ class basic_string_view final {
       }
     }
     return true;
-#else
-    // if we are in C++11, we need to do it recursively because of constexpr
-    // restrictions.
-    return (size() != rhs.size())  ? false
-        : (size() == 0)            ? true
-        : (front() != rhs.front()) ? false
-                                   : (substr_(1).equals_(rhs.substr_(1)));
 #endif
   }
 
@@ -644,16 +580,8 @@ inline std::basic_ostream<CharT>& operator<<(
     std::basic_ostream<CharT>& stream,
     basic_string_view<CharT> sv) {
   // The rules for operator<< are quite complex, so lets defer to the
-  // STL implementation. The std::string fallback might be a bit
-  // slower, but is better than getting it wrong.
-
-#if C10_HAS_STD_STRING_VIEW()
+  // STL implementation.
   using std_string_type = ::std::basic_string_view<CharT>;
-#elif C10_HAS_STD_EXPERIMENTAL_STRING_VIEW()
-  using std_string_type = ::std::experimental::basic_string_view<CharT>;
-#else
-  using std_string_type = ::std::basic_string<CharT>;
-#endif
   return stream << std_string_type(sv.data(), sv.size());
 }
 
@@ -678,16 +606,8 @@ struct hash<::c10::basic_string_view<CharT>> {
     // existing STL type's hash function. The std::string fallback is probably
     // slow but the only way to be conformant.
 
-#if C10_HAS_STD_STRING_VIEW()
     using std_string_type = ::std::basic_string_view<CharT>;
-#elif C10_HAS_STD_EXPERIMENTAL_STRING_VIEW()
-    using std_string_type = ::std::experimental::basic_string_view<CharT>;
-#else
-    using std_string_type = ::std::basic_string<CharT>;
-#endif
     return ::std::hash<std_string_type>{}(std_string_type(x.data(), x.size()));
   }
 };
 } // namespace std
-
-C10_CLANG_DIAGNOSTIC_POP()
