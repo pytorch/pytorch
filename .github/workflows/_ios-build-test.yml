@@ -252,10 +252,8 @@ jobs:
     # to create the fat iOS binaries for both x86_64 and arm64
     runs-on: macos-12
     needs: build
-    # TODO: uncomment me
     # NB: Only upload release build, if we need it, we could also turn on nightly here
-    # environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
-    environment: ios-upload
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -297,10 +295,9 @@ jobs:
             popd
           done
 
-      - name: Prepare the final artifact
+      - name: Prepare the artifact
         env:
-          # TODO: uncomment me
-          IS_NIGHTLY: true # ${{ github.event.ref == 'refs/heads/nightly' }}
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
@@ -350,19 +347,9 @@ jobs:
           fi
           echo "BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" >> "$GITHUB_ENV"
 
-      - name: Set DRY_RUN
-        # TODO: uncomment me
-        # if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
-        shell: bash
-        run: |
-          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
-
-      - name: Upload the artifact to S3
+      - name: Prepare the podspec
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-          # TODO: uncomment me
-          IS_NIGHTLY: true # ${{ github.event.ref == 'refs/heads/nightly' }}
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ env.DEST_DIR }}
         run: |
@@ -398,15 +385,6 @@ jobs:
           # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
           zip -r "${ARTIFACT_NAME}" install src version.txt LICENSE
 
-          pip install -q awscli==1.29.40
-          DRY_RUN=${DRY_RUN:-enabled}
-          AWS_S3_CP="aws s3 cp --dryrun"
-          if [ "${DRY_RUN}" == "disabled" ]; then
-            AWS_S3_CP="aws s3 cp"
-          fi
-          ${AWS_S3_CP} "${ARTIFACT_NAME}" "s3://${BUCKET_NAME}/" --acl public-read
-          ${AWS_S3_CP} "${SPEC_NAME_WITH_VERSION}" "s3://${BUCKET_NAME}/" --acl public-read
-
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
           echo "SPEC_NAME_WITH_VERSION=${SPEC_NAME_WITH_VERSION}" >> "$GITHUB_ENV"
           echo "SPEC_NAME=${SPEC_NAME}" >> "$GITHUB_ENV"
@@ -415,19 +393,45 @@ jobs:
         with:
           name: pytorch-ios-artifacts
           if-no-files-found: error
-          path: ${{ runner.temp }}/ios/${{ env.ARTIFACT_NAME }}
+          path: ${{ env.DEST_DIR }}/${{ env.ARTIFACT_NAME }}
 
       - uses: actions/upload-artifact@v3
         with:
           name: pytorch-ios-podspec
           if-no-files-found: error
-          path: ${{ runner.temp }}/ios/${{ env.SPEC_NAME_WITH_VERSION }}
+          path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
+
+      - name: Set DRY_RUN
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Upload the artifact to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+        shell: bash
+        working-directory: ${{ env.DEST_DIR }}
+        run: |
+          set -eux
+
+          pip install -q awscli==1.29.40
+
+          DRY_RUN=${DRY_RUN:-enabled}
+          AWS_S3_CP="aws s3 cp --dryrun"
+          if [ "${DRY_RUN}" == "disabled" ]; then
+            AWS_S3_CP="aws s3 cp"
+          fi
+
+          ${AWS_S3_CP} "${ARTIFACT_NAME}" "s3://${BUCKET_NAME}/" --acl public-read
+          ${AWS_S3_CP} "${SPEC_NAME_WITH_VERSION}" "s3://${BUCKET_NAME}/" --acl public-read
 
       - name: Upload the artifact to cocoapods
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         env:
-          # TODO: We need to set this secret before this can be run on CI
+          # TODO: We need to set this secret before the upload can be run on CI
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) && env.COCOAPODS_TRUNK_TOKEN != '' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
