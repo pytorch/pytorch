@@ -2856,25 +2856,6 @@ def _check_foreach_binop_tensor_lists(self, other):
     )
 
 
-def _check_foreach_ternop_tensor_lists(self, other0, other1):
-    torch._check(
-        isinstance(self, List)
-        and isinstance(other0, List)
-        and isinstance(other1, List),
-        lambda: (
-            "The first three arguments of must be List[Tensor], "
-            f"but got {type(self)}, {type(other0)} and {type(other1)}."
-        ),
-    )
-    torch._check(
-        len(self) > 0 and len(self) == len(other0) and len(self) == len(other1),
-        lambda: (
-            "self and other0 and other1 must be non-empty and match in length, "
-            f"but got {len(self)}, {len(other0)} and {len(other1)}."
-        ),
-    )
-
-
 @register_meta(
     [
         aten._foreach_add.List,
@@ -2904,18 +2885,12 @@ def meta__foreach_binop__list(self, other, alpha=1):
     _check_foreach_binop_tensor_lists(self, other)
 
 
-@register_meta([aten._foreach_lerp_.List])
-def meta__foreach_ternop__list(self, other0, other1):
-    _check_foreach_ternop_tensor_lists(self, other0, other1)
-
-
 @register_meta(
     [
         aten._foreach_add_.Scalar,
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
         aten._foreach_div_.Scalar,
-        aten._foreach_maximum_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
