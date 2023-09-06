@@ -477,9 +477,6 @@ the output has the same batch dimensions.
              of the matrix.  For this reason, the loss function shall not depend on the phase of the
              eigenvectors, as this quantity is not well-defined.
              This is checked when computing the gradients of this function. As such,
-             when inputs are on a CUDA device, this function synchronizes that device with the CPU
-             when computing the gradients.
-             This is checked when computing the gradients of this function. As such,
              when inputs are on a CUDA device, the computation of the gradients
              of this function synchronizes that device with the CPU.
 

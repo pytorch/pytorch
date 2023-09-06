@@ -773,10 +773,10 @@ class TestBypassFailures(TestCase):
                 self.assertTrue(len(failed) == unrelated_failure_count)
 
     def test_ignore_current(self, *args: Any) -> None:
-        # Test various interactions of the failure classifier, mostly that
-        # ignore current checks takes precedence over classifications for flaky
-        # or broken trunk
-
+        # Test various interactions of the failure classifier to ensure that ignore
+        # current checks takes place after other classifications: flaky, unstable,
+        # or broken trunk. Only actual new failures should be kept in the list of
+        # ignore current checks to use to record force merge with actual failures
         flaky_rules = [
             FlakyRule("distributed", ["##\\[error\\]The operation was canceled."])
         ]
@@ -790,43 +790,57 @@ class TestBypassFailures(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 92863)
         checks = pr.get_checkrun_conclusions()
 
-        # No broken trunk or flaky rules
-        checks = get_classifications(checks, pr.last_commit()["oid"], None, [], [flaky])
-        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification is None)
-        _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=0
-        )
-        self.assertTrue(len(failed) == 1)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
-
-        # No flaky rules
+        # No broken trunk or flaky rules, then all failures are ignored when ic is used
         checks = get_classifications(
-            checks, pr.last_commit()["oid"], pr.get_merge_base(), [], [flaky]
+            checks, pr.last_commit()["oid"], None, [], [broken_trunk, flaky]
         )
         self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
-        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
+        self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
         _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=1
+            checks, list(checks.keys()), ok_failed_checks_threshold=2
         )
         self.assertTrue(len(failed) == 0)
-        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 2)
+        self.assertTrue(len(ignorable["FLAKY"]) == 0)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
-        # No broken_trunk
+        # Known flaky failure takes precedence over ignore current (need to set the
+        # merge base here to get the results from Rockset, and that categorize the
+        # broken trunk failure too
         checks = get_classifications(
             checks,
             pr.last_commit()["oid"],
             pr.get_merge_base(),
             flaky_rules,
-            [broken_trunk],
+            [broken_trunk, flaky],
         )
         self.assertTrue(checks[flaky].classification == "FLAKY")
-        self.assertTrue(checks[broken_trunk].classification == "IGNORE_CURRENT_CHECK")
+        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
         _, failed, ignorable = categorize_checks(
-            checks, list(checks.keys()), ok_failed_checks_threshold=1
+            checks, list(checks.keys()), ok_failed_checks_threshold=2
+        )
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
+
+        # Broken trunk takes precedence over ignore current (no flaky rule is set here)
+        checks = get_classifications(
+            checks,
+            pr.last_commit()["oid"],
+            pr.get_merge_base(),
+            [],
+            [broken_trunk, flaky],
+        )
+        self.assertTrue(checks[flaky].classification == "IGNORE_CURRENT_CHECK")
+        self.assertTrue(checks[broken_trunk].classification == "BROKEN_TRUNK")
+        _, failed, ignorable = categorize_checks(
+            checks, list(checks.keys()), ok_failed_checks_threshold=2
         )
         self.assertTrue(len(failed) == 0)
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 1)
+        self.assertTrue(len(ignorable["FLAKY"]) == 0)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 1)
 
     @mock.patch("trymerge.read_flaky_rules", side_effect=xla_is_flaky_rules)
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
