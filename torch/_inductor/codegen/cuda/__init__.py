@@ -12,7 +12,9 @@ log = logging.getLogger(__name__)
 
 HAS_CUTLASS = True
 
-_CUTLASS_PY_FULL_PATH = os.path.join(inductor_cuda_config.cutlass_dir, "tools/library/scripts")
+_CUTLASS_PY_FULL_PATH = os.path.join(
+    inductor_cuda_config.cutlass_dir, "tools/library/scripts"
+)
 _TMP_CUTLASS_PY_FULL_PATH = os.path.abspath(
     os.path.join(tempfile.gettempdir(), "torch_cutlass_script")
 )
