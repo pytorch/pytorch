@@ -22,8 +22,9 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -87,6 +88,7 @@ from .dicts import (
 from .distributed import (
     DeviceMeshVariable,
     PlacementClassVariable,
+    PlacementVariable,
     ProcessGroupVariable,
 )
 from .functions import (
@@ -187,6 +189,9 @@ class GraphArg:
 
     def erase(self):
         self._example = None
+
+    def __eq__(self, other):
+        return self.source.name() == other.source.name()
 
 
 @dataclasses.dataclass
@@ -408,7 +413,7 @@ class VariableBuilder:
             # store key variables in global location for reconstruction
             for key in value.keys():
                 if self.tensor_can_be_dict_key(key):
-                    self.tx.store_dict_key(global_key_name(key), key)
+                    self.tx.store_global_weakref(global_key_name(key), key)
 
             def index_source(key):
                 if self.tensor_can_be_dict_key(key):
@@ -666,6 +671,14 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return PlacementVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -856,7 +869,7 @@ class VariableBuilder:
         elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if (
+            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
@@ -1054,11 +1067,21 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            shape_env = self.tx.output.shape_env
+            if TracingContext.get().force_unspec_int_unbacked_size_like and isinstance(
+                value, int
+            ):
+                wrapped_value = shape_env.create_unbacked_symint()
+                _constrain_range_for_size(wrapped_value)
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(wrapped_value, self.source, None)
+                )
+
             # NB: We do not do float.  For motivation, see
             # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
-            if (
+            elif (
                 isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
@@ -1071,8 +1094,6 @@ class VariableBuilder:
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
-
-                shape_env = self.tx.output.shape_env
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
@@ -1283,8 +1304,8 @@ def wrap_fx_proxy_cls(
 
         # Handle recursive calls here
         elif (
-            isinstance(example_value, FakeTensor)
-            and example_value.fake_mode is tx.fake_mode
+            is_fake(example_value)
+            and maybe_get_fake_mode(example_value) is tx.fake_mode
         ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 
