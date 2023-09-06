@@ -254,8 +254,9 @@ void TCPStoreMasterDaemon::query(int socket) {
   uint32_t qPrefix;
   tcputil::recvBytes<uint32_t>(socket, &qPrefix, 1);
   if (qPrefix != detail::queryMagicNumber) {
-    C10D_DEBUG("torch.distributed.TCPStore: a miscellaneous query is detected.");
-    return;
+    TORCH_CHECK(
+        false, 
+        "TCPStore received an unexpected query magic number");
   }
 
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
