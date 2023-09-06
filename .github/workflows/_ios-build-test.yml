@@ -297,6 +297,7 @@ jobs:
 
       - name: Prepare the final artifact
         env:
+          # TODO: uncomment me
           IS_NIGHTLY: true # ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
@@ -348,7 +349,8 @@ jobs:
           echo "BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" >> "$GITHUB_ENV"
 
       - name: Set DRY_RUN
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        # TODO: uncomment me
+        # if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
@@ -357,6 +359,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          # TODO: uncomment me
           IS_NIGHTLY: true # ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ env.DEST_DIR }}
@@ -376,9 +379,17 @@ jobs:
           if [ "${IS_NIGHTLY}" == true ]; then
             ARTIFACT_NAME="${ARTIFACT_NAME}_nightly_${PYTORCH_VERSION}.zip"
             SPEC_NAME="${SPEC_NAME}-Nightly"
+            BUCKET_NAME="ossci-ios-build"
           else
             ARTIFACT_NAME="${ARTIFACT_NAME}_${PYTORCH_VERSION}.zip"
+            BUCKET_NAME="ossci-ios"
           fi
+
+          SPEC_NAME_WITH_VERSION="${SPEC_NAME}-${PYTORCH_VERSION}.podspec"
+          SPEC_NAME="${SPEC_NAME}.podspec"
+
+          # Also copy the spec file
+          cp "${RUNNER_TEMP}"/arm64/"${SPEC_NAME}" "${SPEC_NAME_WITH_VERSION}"
 
           # NB: It's important to zip all the files before uploading because the GHA will upload
           # all files sequentially which is both slow and has too many requests. More info is at
@@ -391,10 +402,12 @@ jobs:
           if [ "${DRY_RUN}" == "disabled" ]; then
             AWS_S3_CP="aws s3 cp"
           fi
-          ${AWS_S3_CP} "${ARTIFACT_NAME}" s3://ossci-ios-build/ --acl public-read
+          ${AWS_S3_CP} "${ARTIFACT_NAME}" "s3://${BUCKET_NAME}/" --acl public-read
+          ${AWS_S3_CP} "${SPEC_NAME_WITH_VERSION}" "s3://${BUCKET_NAME}/" --acl public-read
 
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> "$GITHUB_ENV"
-          echo "SPEC_NAME=${SPEC_NAME}.podspec" >> "$GITHUB_ENV"
+          echo "SPEC_NAME_WITH_VERSION=${SPEC_NAME_WITH_VERSION}" >> "$GITHUB_ENV"
+          echo "SPEC_NAME=${SPEC_NAME}" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v3
         with:
@@ -403,11 +416,14 @@ jobs:
           path: ${{ runner.temp }}/ios/${{ env.ARTIFACT_NAME }}
 
       - name: Upload the artifact to cocoapods
+        env:
+          # TODO: Need to set this secret before this can be run on CI
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
           set -eux
 
           gem install cocoapods
-          # Upload the spec to cocoapods
-          pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation "${SPEC_NAME}"
+          # Upload the spec to cocoapods, this is expected to failed atm without the proper credential
+          pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation "${SPEC_NAME}" || true
