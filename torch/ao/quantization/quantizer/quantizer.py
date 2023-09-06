@@ -120,6 +120,7 @@ class DerivedQuantizationSpec(QuantizationSpecBase):
     quant_min: Optional[int] = None
     quant_max: Optional[int] = None
     qscheme: Optional[torch.qscheme] = None
+    ch_axis: Optional[int] = None
 
 
 @dataclass

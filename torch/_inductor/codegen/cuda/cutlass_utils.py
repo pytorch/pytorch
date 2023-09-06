@@ -1,13 +1,17 @@
 import functools
 import logging
-from typing import Any, List
-
-# Import cutlass python scripts.
-import generator as cutlass_generator  # type: ignore[import]
-import library as cutlass_lib  # type: ignore[import]
-import manifest as cutlass_manifest  # type: ignore[import]
+from dataclasses import dataclass
+from typing import Any, List, Optional
 
 import sympy
+
+# Import cutlass python scripts.
+from . import HAS_CUTLASS
+
+if HAS_CUTLASS:
+    import cutlass_generator  # type: ignore[import]
+    import cutlass_library  # type: ignore[import]
+    import cutlass_manifest  # type: ignore[import]
 
 import torch
 
@@ -17,28 +21,36 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 
-class Args:
+@dataclass
+class CUTLASSArgs:
     """
     CUTLASS args used to initialize a CUTLASS Manifest.
     """
 
-    def __init__(self, cuda_arch, cuda_version):
-        self.operations = "all"
-        self.build_dir = ""
-        self.curr_build_dir = ""
-        self.generator_target = ""
-        self.architectures = cuda_arch
+    architectures: Optional[str] = None
+    cuda_version: Optional[str] = None
+
+    operations = "all"
+    build_dir = ""
+    curr_build_dir = ""
+    generator_target = ""
+    kernels = "all"
+    ignore_kernels = ""
+    kernel_filter_file = None
+    selected_kernel_list = None
+    interface_dir = None
+    filter_by_cc = True
+    disable_full_archs_compilation = False
+
+    def __post_init__(self):
+        if self.architectures is None or self.cuda_version is None:
+            raise RuntimeError(
+                f"{self.architectures=} or {self.cuda_version=} is None!"
+            )
         self._normalize_cuda_arch()
-        self.kernels = "all"
-        self.ignore_kernels = ""
-        self.cuda_version = cuda_version
-        self.kernel_filter_file = None
-        self.selected_kernel_list = None
-        self.interface_dir = None
-        self.filter_by_cc = True
-        self.disable_full_archs_compilation = False
 
     def _normalize_cuda_arch(self) -> None:
+        assert self.architectures is not None
         if int(self.architectures) >= 90:
             self.architectures = "90"
         elif int(self.architectures) >= 80:
@@ -61,14 +73,14 @@ def gen_ops() -> List[Any]:
     version = get_cuda_version()
     if arch is None or version is None:
         log.error(
-            "Cannot find cuda arch %s or cuda version %s. "
+            "Cannot detect cuda arch %s or cuda version %s. "
             "Will discard all cutlass ops. "
             "Please consider setting _inductor.cuda.arch and _inductor.cuda.version configs.",
             arch,
             version,
         )
         return list()
-    args = Args(arch, version)
+    args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)
 
     if arch == "90":
@@ -86,30 +98,18 @@ def gen_ops() -> List[Any]:
     return manifest.operations
 
 
-def torch_dtype_match(torch_dtype0: torch.dtype, torch_dtype1: torch.dtype) -> bool:
-    _MATCHED_DTYPES = [
-        {torch.float, torch.float32},
-        {torch.float16, torch.half},
-    ]
-
-    if torch_dtype0 == torch_dtype1:
-        return True
-    for matched_dtypes in _MATCHED_DTYPES:
-        if torch_dtype0 in matched_dtypes and torch_dtype1 in matched_dtypes:
-            return True
-    return False
-
-
-def dtype_match(torch_dtype: torch.dtype, cutlass_dtype: cutlass_lib.DataType) -> bool:
-    if torch_dtype == torch.float or torch_dtype == torch.float32:
+def dtype_match(
+    torch_dtype: torch.dtype, cutlass_dtype: cutlass_library.DataType
+) -> bool:
+    if torch_dtype == torch.float:
         return (
-            cutlass_dtype == cutlass_lib.DataType.f32
-            or cutlass_dtype == cutlass_lib.DataType.tf32
+            cutlass_dtype == cutlass_library.DataType.f32
+            or cutlass_dtype == cutlass_library.DataType.tf32
         )
-    elif torch_dtype == torch.float16 or torch_dtype == torch.half:
-        return cutlass_dtype == cutlass_lib.DataType.f16
+    elif torch_dtype == torch.half:
+        return cutlass_dtype == cutlass_library.DataType.f16
     elif torch_dtype == torch.bfloat16:
-        return cutlass_dtype == cutlass_lib.DataType.bf16
+        return cutlass_dtype == cutlass_library.DataType.bf16
     else:
         return False
 
@@ -123,7 +123,7 @@ def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
         return None
     torch_dtype = input_torch_dtypes[0]
     for dtype in input_torch_dtypes[1:]:
-        if not torch_dtype_match(torch_dtype, dtype):
+        if torch_dtype != dtype:
             raise RuntimeError(f"Unmatched input dtypes: {torch_dtype=}, {dtype=}")
     if torch_dtype in {torch.float16, torch.half}:
         if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
@@ -137,8 +137,8 @@ def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
 
 def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     """
-    Returns all possible number of elements for a dtype which forms valid cutlass alignments.
-    CUTLASS gemm / conv APIs support 16 bytes max alignment, and 2 bytes min alignment.
+    Returns all possible valid CUTLASS alignments in terms of the number of elements for a given dtype.
+    CUTLASS gemm / conv SM80 APIs support 16 bytes max alignment, and 2 bytes min alignment.
     """
 
     if torch_dtype in (torch.float16, torch.half, torch.bfloat16):
@@ -149,7 +149,7 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")
 
 
-def get_alignment(inductor_layout: Layout) -> int:
+def get_max_alignment(inductor_layout: Layout) -> int:
     """
     Returns the max alignment (in terms of number of elements) for a given Inductor Layout.
     """
