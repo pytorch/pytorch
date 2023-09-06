@@ -155,6 +155,7 @@
 #include <c10/util/quint2x4.h>
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
+#include <c10/util/reverse_iterator.h>
 #include <c10/util/safe_numerics.h>
 #include <c10/util/string_utils.h>
 #include <c10/util/string_view.h>

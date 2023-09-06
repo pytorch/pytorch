@@ -362,7 +362,7 @@ struct PythonPrintImpl {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      name = candidate + std::to_string(next_id[name]++);
+      name = candidate + c10::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
