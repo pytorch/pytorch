@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+import weakref
 
 from copy import deepcopy
 
@@ -181,6 +182,31 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
     # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
+
+    @requires_cuda()
+    def test_static_address_finalizer(self):
+        p_ref = None
+
+        def fn():
+            nonlocal p_ref
+            mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
+            for p in mod.parameters():
+                p.grad = torch.rand_like(p)
+
+            opt = torch.optim.Adam(mod.parameters(), lr=0.1)
+
+            def fn():
+                opt.step()
+
+            with torch.set_grad_enabled(False):
+                step_fn_compiled = torch.compile(fn)
+                step_fn_compiled()
+            p_ref = weakref.ref(p)
+            self.assertTrue(p_ref() is not None)
+
+        fn()
+
+        self.assertTrue(p_ref() is None)
 
 
 if __name__ == "__main__":
