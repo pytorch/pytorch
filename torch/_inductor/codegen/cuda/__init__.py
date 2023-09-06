@@ -6,14 +6,13 @@ import tempfile
 from typing import List
 
 import torch
+from ...config import cuda as inductor_cuda_config
 
 log = logging.getLogger(__name__)
 
 HAS_CUTLASS = True
 
-_TORCH_PATH = os.path.dirname(torch.__file__)
-_CUTLASS_PY_PATH = "../third_party/cutlass/tools/library/scripts/"
-_CUTLASS_PY_FULL_PATH = os.path.abspath(os.path.join(_TORCH_PATH, _CUTLASS_PY_PATH))
+_CUTLASS_PY_FULL_PATH = os.path.join(inductor_cuda_config.cutlass_dir, "tools/library/scripts")
 _TMP_CUTLASS_PY_FULL_PATH = os.path.abspath(
     os.path.join(tempfile.gettempdir(), "torch_cutlass_script")
 )
