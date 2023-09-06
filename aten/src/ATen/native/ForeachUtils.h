@@ -130,10 +130,10 @@ bool check_fast_path_restrictions(
   // strides.
   for (const auto& tensor_list : tensorLists) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
-      const auto& ref_size = tensorLists[0][j].sizes();
-      const auto& ref_stride = tensorLists[0][j].strides();
-      const auto& tensor_list_size = tensor_list[j].sizes();
-      const auto& tensor_list_stride = tensor_list[j].strides();
+      const auto& ref_sizes = tensorLists[0][j].sizes();
+      const auto& ref_strides = tensorLists[0][j].strides();
+      const auto& tensor_list_sizes = tensor_list[j].sizes();
+      const auto& tensor_list_strides = tensor_list[j].strides();
 
       if (ref_size != tensor_list_size) {
         return false;
