@@ -15,6 +15,24 @@ on:
     paths:
       - .github/workflows/build-ios-binaries.yml
       - .github/workflows/_ios-build-test.yml
+  workflow_call:
+    inputs:
+      use_lite_interpreter:
+        description: "Build iOS binaries with PyTorch lite interpreter support"
+        type: string
+        default: 1
+      use_metal:
+        description: "Build iOS binaries with Apple Metal"
+        type: string
+        default: 1
+      use_coreml:
+        description: "Build iOS binaries with Apple Core ML"
+        type: string
+        default: 1
+      use_custom_op_list:
+        description: "Specify the custom ops list to include in the binaries"
+        type: string
+        default: ""
   # NB: We can use this workflow dispatch to test and build iOS binaries manually
   workflow_dispatch:
     inputs:
