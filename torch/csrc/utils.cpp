@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstdarg>
+#include <cstring>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -263,12 +264,11 @@ char* tensor_repr(at::Tensor tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyObject* pytensor = nullptr;
   PyObject* repr = nullptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t bufsize;
+  Py_ssize_t bufsize = 0;
   const char* buf = nullptr;
   char* result = nullptr;
 
-  pytensor = THPVariable_Wrap(at::Tensor(std::move(tensor)));
+  pytensor = THPVariable_Wrap(std::move(tensor));
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
@@ -280,16 +280,16 @@ char* tensor_repr(at::Tensor tensor) {
   if (!buf)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
+  // account for the trailing \0
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  result =
-      static_cast<char*>(malloc(bufsize + 1)); // account for the trailing \0
+  result = static_cast<char*>(malloc(bufsize + 1));
   if (!result) {
     fmt::print(stderr, "cannot allocate memory for the result\n");
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
   }
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.strcpy)
-  strcpy(result, buf);
+  std::strncpy(result, buf, bufsize);
+  result[bufsize] = '\0';
   Py_XDECREF(pytensor);
   Py_XDECREF(repr);
   PyGILState_Release(gil);
