@@ -20,6 +20,7 @@ bool to_will_alias(
 Tensor to_meta(const Tensor& tensor);
 c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor);
 std::vector<Tensor> to_meta(at::ITensorListRef t_list);
+Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt);
 
 } // namespace native
 } // namespace at

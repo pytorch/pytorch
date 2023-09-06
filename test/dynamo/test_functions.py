@@ -797,6 +797,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return a - b
 
     @make_test
+    def test_set_contains(a, b):
+        vals = set(["a", "b", "c"])
+        if "a" in vals:
+            x = a + b
+        else:
+            x = a - b
+        if "d" in vals:
+            y = a + b
+        else:
+            y = a - b
+        return x, y
+
+    @make_test
     def test_tuple_iadd(a, b):
         output = (a, b)
         output += (a + b, a - b)
@@ -1132,6 +1145,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_numpy_random():
         x = np.random.randn(2, 2)
         return x - x
+
+    def test_manual_seed(self):
+        @torch.compile
+        def foo():
+            torch.manual_seed(3)
+            return torch.randint(0, 5, (5,))
+
+        self.assertEqual(foo(), foo())
+        self.assertEqual(foo(), foo())
 
 
 def global_func_with_default_tensor_args(
