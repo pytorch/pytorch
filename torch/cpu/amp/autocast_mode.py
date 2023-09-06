@@ -1,8 +1,13 @@
-from typing import Any
+from typing import Any, Callable, Literal, TypeVar, Optional
+
+from typing_extensions import ParamSpec, Self
 
 import torch
 
 __all__ = ["autocast"]
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class autocast(torch.amp.autocast_mode.autocast):
@@ -16,7 +21,7 @@ class autocast(torch.amp.autocast_mode.autocast):
         enabled: bool = True,
         dtype: torch.dtype = torch.bfloat16,
         cache_enabled: bool = True,
-    ):
+    ) -> None:
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = "cpu"
@@ -26,18 +31,18 @@ class autocast(torch.amp.autocast_mode.autocast):
             "cpu", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
 
-    def __enter__(self):
+    def __enter__(self) -> Optional[Self]:
         if torch._jit_internal.is_scripting():
             return self
         return super().__enter__()
 
     # TODO: discuss a unified TorchScript-friendly API for autocast
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Optional[Literal[False]]:  # type: ignore[override]
         if torch._jit_internal.is_scripting():
-            return
+            return None
         return super().__exit__(exc_type, exc_val, exc_tb)
 
-    def __call__(self, func):
+    def __call__(self, func: Callable[P, R]) -> Callable[P, R]:
         if torch._jit_internal.is_scripting():
             return func
         return super().__call__(func)

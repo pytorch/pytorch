@@ -1,17 +1,23 @@
+from __future__ import annotations
+
 import functools
 import warnings
+from typing import Any, Callable, Literal, Optional, TypeVar
 
-from typing import Any, Optional
+from typing_extensions import ParamSpec, Self
 
 import torch
 from torch.types import _dtype
 
 __all__ = ["autocast_decorator", "autocast"]
 
+P = ParamSpec("P")
+R = TypeVar("R")
 
-def autocast_decorator(autocast_instance, func):
+
+def autocast_decorator(autocast_instance: autocast, func: Callable[P, R]) -> Callable[P, R]:
     @functools.wraps(func)
-    def decorate_autocast(*args, **kwargs):
+    def decorate_autocast(*args: P.args, **kwargs: P.kwargs) -> R:
         with autocast_instance:
             return func(*args, **kwargs)
 
@@ -190,7 +196,7 @@ class autocast:
         dtype: Optional[_dtype] = None,
         enabled: bool = True,
         cache_enabled: Optional[bool] = None,
-    ):
+    ) -> None:
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
@@ -316,7 +322,7 @@ class autocast:
                 enabled = False
         self._enabled = enabled
 
-    def __enter__(self):
+    def __enter__(self) -> Optional[Self]:
         if torch._jit_internal.is_scripting():
             assert self.fast_dtype is not None
             return self
@@ -365,10 +371,11 @@ class autocast:
             torch.set_autocast_enabled(self._enabled)
             torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
+        return None
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> Optional[Literal[False]]:  # type: ignore[override]
         if torch._jit_internal.is_scripting():
-            return
+            return None
 
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
         if self.device == "cpu":
@@ -409,7 +416,7 @@ class autocast:
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 
-    def __call__(self, func):
+    def __call__(self, func: Callable[P, R]) -> Callable[P, R]:
         if torch._jit_internal.is_scripting():
             return func
         return autocast_decorator(self, func)
