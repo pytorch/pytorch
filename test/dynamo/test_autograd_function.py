@@ -399,7 +399,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
         output = opt_f(x)
-        gx, = torch.autograd.grad(output, x)
+        (gx,) = torch.autograd.grad(output, x)
         self.assertEqual(gx, torch.tensor(0.5))
 
     # I pulled all of these test cases from test_autograd.py

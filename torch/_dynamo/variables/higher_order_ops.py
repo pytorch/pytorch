@@ -151,7 +151,9 @@ def speculate_subgraph(
             )
 
             autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad) if enable_grad is not None else contextlib.nullcontext()
+                dynamo_enable_grad(tx, enable_grad)
+                if enable_grad is not None
+                else contextlib.nullcontext()
             )
 
             if restore_side_effects:
@@ -970,7 +972,9 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         # then the grad_mode is False during the backward pass.
         # torch.compile assumes that we only compute first-order gradients,
         # so we want to speculate the backward pass with the grad mode disabled.
-        enable_grad = False if self.value.__name__ == "trampoline_autograd_bwd" else None
+        enable_grad = (
+            False if self.value.__name__ == "trampoline_autograd_bwd" else None
+        )
 
         # TODO: Support kwargs
         (

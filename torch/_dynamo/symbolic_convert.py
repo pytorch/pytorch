@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo_utils import compiler_should_force_inline
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
@@ -2184,6 +2185,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
+        if compiler_should_force_inline(func):
+            return True
+
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2207,15 +2211,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func, "fn") and hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-            ]:
+            if (
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
+                and func.fn._origin
+                in [
+                    produce_trampoline_autograd_fwd,
+                    produce_trampoline_autograd_apply,
+                    produce_trampoline_autograd_bwd,
+                ]
+            ):
                 # Known sound
                 return
 
-
+            """
             # Function returned by torch.autograd.function.once_differentiable is known sound
             if (
                 isinstance(func, UserFunctionVariable) and
@@ -2229,7 +2238,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func.get_filename().endswith('torch/autograd/function.py') and
                 func.fn_name.value == 'once_differentiable.<locals>.wrapper.<locals>.<genexpr>'
             ):
-                return
+                retuorn
+            """
 
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"

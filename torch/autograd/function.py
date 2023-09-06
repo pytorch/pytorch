@@ -8,6 +8,7 @@ import torch._C as _C
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
+from torch._dynamo_utils import compiler_force_inline
 from torch._functorch.autograd_function import custom_function_call
 
 __all__ = [
@@ -550,7 +551,9 @@ class Function(_SingleLevelFunction):
 
 
 def once_differentiable(fn):
+    @compiler_force_inline
     @functools.wraps(fn)
+    @compiler_force_inline
     def wrapper(ctx, *args):
         with torch.no_grad():
             outputs = fn(ctx, *args)
