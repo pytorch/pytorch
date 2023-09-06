@@ -267,7 +267,6 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
-    @unittest.expectedFailure
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -313,7 +312,6 @@ class TestControlFlowTraced(TestCase):
         gm_functional = make_fx(torch.func.functionalize(gm_non_functional), tracing_mode="real")(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
-    @unittest.expectedFailure
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
             y = x.cos()
@@ -1216,7 +1214,6 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res, main(p, pred, xs, y))
         self.check_map_count(gm, 2)
 
-    @unittest.expectedFailure
     def test_cond_with_sym_pred(self):
         def true_fn(x):
             return x + x
