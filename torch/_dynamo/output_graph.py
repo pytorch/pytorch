@@ -271,7 +271,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # TrackedFake instances may have its metadata changed throughout
             # the program execution.
             tracked_fakes=self.tracked_fakes,
-            check_recorded_events=config.check_shape_env_recorded_events,
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
             co_fields=self.co_fields,
