@@ -416,6 +416,7 @@ jobs:
           path: ${{ runner.temp }}/ios/${{ env.ARTIFACT_NAME }}
 
       - name: Upload the artifact to cocoapods
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         env:
           # TODO: Need to set this secret before this can be run on CI
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
@@ -425,5 +426,7 @@ jobs:
           set -eux
 
           gem install cocoapods
+
+          pod trunk me
           # Upload the spec to cocoapods, this is expected to failed atm without the proper credential
-          pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation "${SPEC_NAME}" || true
+          pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation "${SPEC_NAME}"
