@@ -149,6 +149,10 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_export/constraints.py",
 }
 
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_higher_order_ops/cond.py",
+}
+
 # TODO (zhxchen17) Make exportdb importable here.
 FILENAME_ALLOWLIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
@@ -165,6 +169,7 @@ FILENAME_ALLOWLIST |= {
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
     _module_dir(torch) + "distributed/tensor/parallel/style.py",
+    _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
     _module_dir(torch) + "distributed/_tensor/api.py",
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }

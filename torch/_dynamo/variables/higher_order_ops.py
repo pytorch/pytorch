@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -7,17 +8,25 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
 
-from ..exc import unimplemented, Unsupported, UserError, UserErrorType
+from ..exc import (
+    UncapturedHigherOrderOpError,
+    unimplemented,
+    Unsupported,
+    UserError,
+    UserErrorType,
+)
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
 from ..utils import proxy_args_kwargs
 from .lists import ListVariable, TupleVariable
+from .nn_module import NNModuleVariable
 
 
 log = logging.getLogger(__name__)
@@ -312,34 +321,30 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
-            raise UserError(
-                UserErrorType.DYNAMIC_CONTROL_FLOW,
+            raise UncapturedHigherOrderOpError(
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
-            raise UserError(
-                UserErrorType.DYNAMIC_CONTROL_FLOW,
-                f"Expected pred to be bool/int or a tensor with single "
+            raise UncapturedHigherOrderOpError(
+                f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
             )
         tx.output.guards.update(args[0].guards)
 
         # operands
-        if type(args[3]) is not ListVariable:
-            raise UserError(
-                UserErrorType.DYNAMIC_CONTROL_FLOW,
-                f"Expected a list but got {args[3].python_type()}",
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
+            raise UncapturedHigherOrderOpError(
+                f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
             isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
         ):
-            raise UserError(
-                UserErrorType.DYNAMIC_CONTROL_FLOW,
-                "Expected a list of tensors but got {actual_args}".format(  # noqa: UP032
+            raise UncapturedHigherOrderOpError(
+                "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
                         if isinstance(operand, VariableTracker)
@@ -351,13 +356,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # branches
         assert isinstance(
-            args[1], (UserFunctionVariable, NestedUserFunctionVariable)
+            args[1],
+            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
         ), str(
             type(args[1])
         )  # true_fn
 
         assert isinstance(
-            args[2], (UserFunctionVariable, NestedUserFunctionVariable)
+            args[2],
+            (UserFunctionVariable, NestedUserFunctionVariable, NNModuleVariable),
         ), str(
             type(args[2])
         )  # false_fn
@@ -393,12 +400,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
-                raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e)) from e
+                raise UncapturedHigherOrderOpError(
+                    "Cond doesn't work unless it is captured completely with torch.compile"
+                ) from e
 
             if not isinstance(ret_val, TensorVariable):
-                raise UserError(
-                    UserErrorType.DYNAMIC_CONTROL_FLOW,
-                    "Expected branch out type to be a single tensor",
+                raise UncapturedHigherOrderOpError(
+                    "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
 
@@ -474,7 +482,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx=tx,
             proxy=tx.output.create_proxy(
                 "call_function",
-                self.value,
+                torch.ops.higher_order.cond,
                 args=tuple(p_args),
                 kwargs=p_kwargs,
             ),
@@ -906,9 +914,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # We compute the example_value by actually calling
         # `vmap` with FakeTensors.
-        fake_batched_fn_args = tuple(
-            arg.as_proxy().node.meta["example_value"] for arg in batch_input_args
-        ) + tuple(arg.node.meta["example_value"] for arg in body_lifted_freevars)
+        fake_batched_fn_args = itertools.chain(
+            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
+            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
+        )
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
@@ -916,7 +925,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # NOTE: `body_graph` might have operators which
         # will create new tensors. So it is required
         # that we run `vmap` under FakeMode.
-        with tx.fake_mode:
+        with tx.fake_mode, enable_python_dispatcher():
             example_value = torch._functorch.vmap.vmap_impl(
                 torch.fx.GraphModule(tx.output.nn_modules, body_graph),
                 actual_in_dims,
