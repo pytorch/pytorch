@@ -1073,7 +1073,8 @@ class Scheduler:
         self.compute_dependencies()
         self.topological_sort_schedule()
         self.dead_node_elimination()
-        comms.decide_global_ordering_of_comms(self.nodes)
+        if config.reorder_for_compute_comm_overlap:
+            comms.decide_global_ordering_of_comms(self.nodes)
         self.compute_predecessors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
