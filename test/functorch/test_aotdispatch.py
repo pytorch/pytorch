@@ -928,8 +928,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    return [view, mul, detach_1]""")
+    return [view, mul, detach]""")
 
     def test_output_aliases_intermediate_inplace_view(self):
         def f(a):
@@ -2170,18 +2169,12 @@ class <lambda>(torch.nn.Module):
         getitem_4: f32[3] = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
+        sum_1: f32[] = torch.ops.aten.sum.default(relu)
         detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu)
         detach_2: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        sum_1: f32[] = torch.ops.aten.sum.default(relu)
-        detach_3: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_4: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-        detach_5: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-        detach_6: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_5);  detach_5 = None
         ones_like: f32[] = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: f32[1, 3, 3, 3] = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_7: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_8: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, detach_8, 0);  expand = detach_8 = None
+        threshold_backward: f32[1, 3, 3, 3] = torch.ops.aten.threshold_backward.default(expand, relu, 0);  expand = relu = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: f32[1, 3, 3, 3] = native_batch_norm_backward[0]
         getitem_6: f32[3] = native_batch_norm_backward[1]
@@ -2190,7 +2183,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0]
         getitem_9: f32[3, 1, 1, 1] = convolution_backward[1]
         getitem_10: f32[3] = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_6, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
         """)  # noqa: B950
 
 
@@ -2220,8 +2213,7 @@ class <lambda>(torch.nn.Module):
         relu: f32[1, 3, 3, 3] = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: f32[] = torch.ops.aten.sum.default(relu)
         detach: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(relu);  relu = None
-        detach_1: f32[1, 3, 3, 3] = torch.ops.aten.detach.default(detach);  detach = None
-        return (getitem_3, getitem_4, add, sum_1, detach_1)
+        return (getitem_3, getitem_4, add, sum_1, detach)
         """)  # noqa: B950
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
