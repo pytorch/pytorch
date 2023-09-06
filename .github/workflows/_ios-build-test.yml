@@ -427,11 +427,12 @@ jobs:
           ${AWS_S3_CP} "${ARTIFACT_NAME}" "s3://${BUCKET_NAME}/" --acl public-read
           ${AWS_S3_CP} "${SPEC_NAME_WITH_VERSION}" "s3://${BUCKET_NAME}/" --acl public-read
 
-      - name: Upload the artifact to cocoapods
+      - name: Upload the artifact to cocoapods (nightly only)
         env:
-          # TODO: We need to set this secret before the upload can be run on CI
-          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN }}
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) && env.COCOAPODS_TRUNK_TOKEN != '' }}
+          # We need to set this secret to upload to cocoapods. However, we might want
+          # to NOT set this for PROD release so that we can upload the artifacts manually
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN || '' }}
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly') && env.COCOAPODS_TRUNK_TOKEN != '' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
