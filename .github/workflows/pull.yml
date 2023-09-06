@@ -247,12 +247,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-py3-clang7-mobile-custom-build-static:
-    name: linux-focal-py3-clang7-mobile-custom-build-static
+  linux-focal-py3-clang9-mobile-custom-build-static:
+    name: linux-focal-py3-clang9-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3-clang7-mobile-custom-build-static
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-mobile-custom-build-static
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       build-generates-artifacts: false
       test-matrix: |
         { include: [
@@ -317,23 +317,23 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
-    name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
+  linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single:
+    name: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit:
-    name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
+  linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
