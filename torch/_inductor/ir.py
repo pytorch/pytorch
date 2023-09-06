@@ -1710,9 +1710,7 @@ class View(GenericView):
 
             return cls(x, tuple(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x) and not isinstance(
-            x.data, ExternKernelAlloc
-        ):
+        elif is_contiguous_storage_and_layout(x):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
