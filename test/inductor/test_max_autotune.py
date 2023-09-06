@@ -286,8 +286,6 @@ class TestDoBench(TestCase):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    def test_max_autotune_addmm_cutlass_backend(self, max_autotune_gemm_backends):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -330,7 +328,6 @@ class TestDoBench(TestCase):
 
     @skipIfRocm
     def test_autotune_conv1x1(self):
-        # Define the 1x1 convolutional layer
         # Assuming input has 3 channels and we want to produce 16 channels as output
         conv1x1 = (
             torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)

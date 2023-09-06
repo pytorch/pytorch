@@ -27,7 +27,7 @@ class CUDAScheduling(TritonScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
             src_code = src_code.replace("KERNEL_NAME", kernel_name)
 
-            basename, _, kernel_path = get_path(code_hash(src_code), "py")
+            _, _, kernel_path = get_path(code_hash(src_code), "py")
 
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.cuda(r'''")

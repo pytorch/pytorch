@@ -194,7 +194,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    if use_triton_template(layout):
+    if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,

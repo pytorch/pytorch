@@ -833,7 +833,11 @@ class WrapperCodeGen(CodeGen):
     def codegen_allocation(self, buffer):
         assert (
             buffer.get_workspace_size() == 0
+<<<<<<< HEAD
+        ), "Only support zero workspace size for now!"
+=======
         ), "Only support zero size workspace size for now!"
+>>>>>>> 6ec81f27729 ([Inductor CUTLASS backend] Step 5: Gemm CUTLASS templates)
 
         name = buffer.get_name()
 
@@ -868,7 +872,11 @@ class WrapperCodeGen(CodeGen):
     def codegen_free(self, buffer):
         assert (
             buffer.get_workspace_size() == 0
+<<<<<<< HEAD
+        ), "Only support zero workspace size for now!"
+=======
         ), "Only support zero size workspace size for now!"
+>>>>>>> 6ec81f27729 ([Inductor CUTLASS backend] Step 5: Gemm CUTLASS templates)
 
         name = buffer.get_name()
 
