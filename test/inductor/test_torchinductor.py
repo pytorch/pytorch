@@ -44,7 +44,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FUSED_SDPA,
     SM80OrLater,
     TEST_CUDNN,
 )
@@ -6750,7 +6750,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(26),))
 
     def test_scaled_dot_product_attention(self):
-        if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+        if self.device == "cuda" and not PLATFORM_SUPPORTS_FUSED_SDPA:
             raise unittest.SkipTest("Can't run flash attention on this platform")
 
         def fn(q, k, v):
