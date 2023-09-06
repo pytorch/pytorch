@@ -18,7 +18,7 @@ Microsoft's `ONNX Runtime <https://www.onnxruntime.ai>`_.
 TorchDynamo-based ONNX Exporter
 -------------------------------
 
-*The TorchDynamo-based ONNX exporter is the newest (still and beta) **exporter for PyTorch 2.0 and newer**.
+*The TorchDynamo-based ONNX exporter is the newest (and Beta) exporter for PyTorch 2.0 and newer*
 
 TorchDynamo engine is leveraged to hook into Python's frame evaluation API and dynamically rewrite its
 bytecode into an FX Graph. The resulting FX Graph is then polished before it is finally translated into an
@@ -34,7 +34,7 @@ TorchScript-based ONNX Exporter
 
 *The TorchScript-based ONNX exporter is available since PyTorch 1.2.0*
 
-`TorchScript <https://pytorch.org/docs/stable/jit.html>`_ is leveraged to trace (through ``torch.jit.trace``)
+`TorchScript <https://pytorch.org/docs/stable/jit.html>`_ is leveraged to trace (through :func:`torch.jit.trace`)
 the model and capture a static computation graph.
 
 As a consequence, the resulting graph has a couple limitations:
@@ -44,7 +44,7 @@ As a consequence, the resulting graph has a couple limitations:
 * Does not truly handle dynamic inputs
 
 As an attempt to support the static tracing limitations, the exporter also supports TorchScript scripting
-(through ``torch.jit.script``), which adds support for data-dependent control-flow, for example. However, TorchScript
+(through :func:`torch.jit.script`), which adds support for data-dependent control-flow, for example. However, TorchScript
 itself is a subset of the Python language, so not all features in Python are supported, such as in-place operations.
 
 :doc:`Learn more about the TorchScript-based ONNX Exporter <onnx_torchscript>`

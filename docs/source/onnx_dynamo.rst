@@ -13,11 +13,11 @@ TorchDynamo-based ONNX Exporter
 Overview
 --------
 
-As mentioned before, the ONNX exporter leverages TorchDynamo engine to hook into Python's frame evaluation API
+The ONNX exporter leverages TorchDynamo engine to hook into Python's frame evaluation API
 and dynamically rewrite its bytecode into an FX Graph.
 The resulting FX Graph is then polished before it is finally translated into an ONNX graph.
 
-The main advantage of this approach is that the `FX graph <https://pytorch.org/docs/stable/fx.html>_` is captured using
+The main advantage of this approach is that the `FX graph <https://pytorch.org/docs/stable/fx.html>`_ is captured using
 bytecode analysis that preserves the dynamic nature of the model instead of using traditional static tracing techniques.
 
 The exporter is designed to be modular and extensible. It is composed of the following components:
@@ -34,16 +34,17 @@ The exporter is designed to be modular and extensible. It is composed of the fol
 Dependencies
 ------------
 
-The ONNX exporter depends on extra Python packages not available through PyTorchs's `requirements.txt` file:
+The ONNX exporter depends on extra Python packages:
 
   - `ONNX <https://onnx.ai>`_
   - `ONNX Script <https://onnxscript.ai>`_
 
-They can be installed through `pip <https://pypi.org/project/pip/>`_ utility as follows:
+They can be installed through `pip <https://pypi.org/project/pip/>`_:
 
+.. TODO: Replace with `onnxscript` when it is official
 .. code-block:: bash
 
-  pip install onnx onnxscript-preview    # TODO: Replace with `onnxscript` when it is official
+  pip install --upgrade onnx onnxscript-preview
 
 A simple example
 ----------------
@@ -78,11 +79,11 @@ See below a demonstration of exporter API in action with a simple image classifi
   tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
   export_output = torch.onnx.dynamo_export(MNISTModel(), tensor_x)
 
-As the code above shows, all you need is to provide ``torch.onnx.dynamo_export`` with an instance of the model and its input.
-The exporter will then return an instance of ``torch.onnx.ExportOutput`` that contains the exported ONNX graph along with extra information.
+As the code above shows, all you need is to provide :func:`torch.onnx.dynamo_export` with an instance of the model and its input.
+The exporter will then return an instance of :class:`torch.onnx.ExportOutput` that contains the exported ONNX graph along with extra information.
 
-The in-memory model (type: onnx.ModelProto) is available at ``export_output.model_proto`` following `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_,
-but the ONNX model can also be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the ``torch.onnx.ExportOutput.save`` API.
+The in-memory model available through ``export_output.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
+The ONNX model be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ExportOutput.save` API.
 
 .. code-block:: python
 
@@ -121,7 +122,7 @@ Visual Studio Code's `SARIF Viewer <https://marketplace.visualstudio.com/items?i
 
 The main advantages are:
 
-  - The diagnostics are emitted in machine parsable .
+  - The diagnostics are emitted in machine parseable `Static Analysis Results Interchange Format (SARIF) <https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html>`__.
   - A new clearer, structured way to add new and keep track of diagnostic rules.
   - Serve as foundation for more future improvements consuming the diagnostics.
 
