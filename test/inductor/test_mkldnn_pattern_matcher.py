@@ -1221,11 +1221,13 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 **kwargs,
             ):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 8, (2, 2), stride=(1, 1), padding=(1, 1))
+                self.conv = torch.nn.Conv2d(
+                    3, 16, (2, 2), stride=(1, 1), padding=(1, 1)
+                )
                 self.relu = torch.nn.ReLU()
                 self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
                 self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
-                self.linear = torch.nn.Linear(8, 16)
+                self.linear = torch.nn.Linear(16, 16)
 
             def forward(self, x):
                 temp = self.relu(self.conv(x))
