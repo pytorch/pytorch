@@ -917,9 +917,34 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
-            def indirect_indexing(index_var, size, check=True):
+            def indirect_indexing(var, size, check=True):
                 # Skip CSE since this doesn't return an expression
-                return self.indirect_indexing(index_var, size, check)  # type: ignore[attr-defined]
+
+                if var.bounds.lower < 0:
+                    new_bounds = ValueRanges.unknown()
+                    if var.bounds != ValueRanges.unknown() and isinstance(
+                        size, sympy.Number
+                    ):
+                        # Take the negative part of the bound and add size to it
+                        # Then take union of that and the positive part
+                        # This is a tighter bound than that of a generic ops.where, as we have info on the cond
+                        neg = var.bounds & ValueRanges(-sympy.oo, -1)
+                        new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                        # We don't have a good way of representing the empty range
+                        if var.bounds.upper >= 0:
+                            pos = var.bounds & ValueRanges(0, sympy.oo)
+                            new_bounds = new_bounds | pos
+
+                    stm = ops.add(var, self.rename_indexing(size))
+                    # Mixed negative and non-negative
+                    if var.bounds.upper >= 0:
+                        lt = ops.lt(var, "0")
+                        stm = ops.where(lt, stm, var)
+                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+
+                    new_var.update_on_args("index_wrap", (var,), {})
+                    var = new_var
+                return self.indirect_indexing(var, size, check)  # type: ignore[attr-defined]
 
             @staticmethod
             def load(name: str, index: sympy.Expr):

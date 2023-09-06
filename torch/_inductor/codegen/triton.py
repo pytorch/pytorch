@@ -1231,28 +1231,6 @@ class TritonKernel(Kernel):
             def _new_line(self, line):
                 return IndirectAssertLine(line, self.var, self.mask, self.size_map)
 
-        if var.bounds.lower < 0:
-            new_bounds = ValueRanges.unknown()
-            if var.bounds != ValueRanges.unknown() and isinstance(size, sympy.Number):
-                # Take the negative part of the bound and add size to it
-                # Then take union of that and the positive part
-                # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
-                # We don't have a good way of representing the empty range
-                if var.bounds.upper >= 0:
-                    pos = var.bounds & ValueRanges(0, sympy.oo)
-                    new_bounds = new_bounds | pos
-
-            stm = f"{var} + {self.index_to_str(size)}"
-            # Mixed negative and non-negative
-            if var.bounds.upper >= 0:
-                stm = f"tl.where({var} < 0, {stm}, {var})"
-            new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-
-            new_var.update_on_args("index_wrap", (var,), {})
-            var = new_var
-
         generate_assert = (
             (check or config.debug_index_asserts)
             and config.triton.assert_indirect_indexing
