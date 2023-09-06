@@ -3565,6 +3565,8 @@ class TestMPS(TestCaseMPS):
             helper((1, 5), (4, 0, 5), src_dtype, dst_dtype)
             helper((3, 1, 0), (3, 5, 0), src_dtype, dst_dtype)
             helper((0, 1, 0), (0, 5, 0), src_dtype, dst_dtype)
+        # Regression test for https://github.com/pytorch/pytorch/issues/107867
+        self.assertEqual(torch.tensor([[1]], device='mps').item(), 1.0)
 
     # See https://github.com/pytorch/pytorch/pull/84742
     # and https://github.com/pytorch/pytorch/pull/78319
@@ -10597,6 +10599,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.max_pool2d',
+        'nn.functional.gelu',
+        'nn.functional.glu',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10753,10 +10758,6 @@ class TestConsistency(TestCaseMPS):
             # allow_unused is needed in those cases.
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
-
-            if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
-                atol = 1e-3
-                rtol = 1e-3
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
