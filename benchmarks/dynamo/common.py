@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+import weakref
 from contextlib import contextmanager
 
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
@@ -1117,7 +1118,7 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, eager_forward):
-        key = id(model)
+        key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_outputs = eager_forward(
@@ -1136,8 +1137,9 @@ class AOTInductorModelCache:
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
-                torch.empty(
+                torch.empty_strided(
                     node.meta["val"].size(),
+                    node.meta["val"].stride(),
                     dtype=node.meta["val"].dtype,
                     layout=node.meta["val"].layout,
                     device=node.meta["val"].device,
@@ -3191,7 +3193,7 @@ def run(runner, args, original_dir=None):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
-        torch._dynamo.config.print_graph_breaks = True
+        torch._logging.set_logs(graph_breaks=True)
 
     if args.quiet:
         torch._logging.set_logs(dynamo=logging.ERROR)

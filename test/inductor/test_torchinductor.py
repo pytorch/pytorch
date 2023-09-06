@@ -7197,11 +7197,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch._inductor
 
             def fn():
-                x = torch.empty([100])
-                for _ in range(10):
+                li = []
+                for i in range(10):
+                    x = torch.full([100], i)
                     x = x + 1
+                    li.append(x)
 
-                return x
+                return li
 
             mod = make_fx(fn)()
 
@@ -7219,19 +7221,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                             live_tensors[arg] = True
 
                     out = func(*args, **kwargs)
+                    if not isinstance(out, torch.Tensor):
+                        return out
 
                     live_tensors[out] = True
                     max_live_tensors = max(max_live_tensors, len(live_tensors))
-
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.constant_folding import ConstantFolder
+            from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
             with mode:
-                ConstantFolder(mod).run()
+                UniformValueConstantFolder(mod).run()
 
-            self.assertTrue(max_live_tensors == 2)
+            # there are a couple extra tensors created in `insertable_tensor_check`
+            self.assertTrue(max_live_tensors == 4)
 
         @skipIfRocm
         def test_neg_index(self):
