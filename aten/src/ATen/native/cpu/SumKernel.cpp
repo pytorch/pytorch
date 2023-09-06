@@ -624,11 +624,9 @@ template <typename scalar_t>
 struct nansum_complex {
   void operator()(TensorIterator& iter) {
     scalar_t sum = scalar_t{0.};
-    cpu_kernel(iter, [&](scalar_t a) -> scalar_t{
+    cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
       if (!at::_isnan(a)) {
         sum += a;
-      } else {
-        sum += scalar_t{0.};
       }
       return sum;
     });

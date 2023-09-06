@@ -18265,6 +18265,12 @@ op_db: List[OpInfo] = [
             # possibly bad low precision reference in numpy
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
+            # Not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                         device_type='cpu', dtypes=[torch.chalf]),
+            # Not implemented for 'ComplexHalf'
+            DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
+                         device_type='cpu', dtypes=[torch.chalf]),
         ),
     ),
     OpInfo(
