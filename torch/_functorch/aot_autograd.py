@@ -677,7 +677,7 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
 def to_fun(t):
     if isinstance(t, Tensor):
         out = torch._to_functional_tensor(t)
-        torch._mirror_autograd_meta(t, out)
+        torch._mirror_autograd_meta_to(t, out)
         return out
     else:
         return t
@@ -730,7 +730,7 @@ def run_functionalized_fw_and_collect_metadata(
             if t in memo:
                 return memo[t]
             r = torch._to_functional_tensor(t)
-            torch._mirror_autograd_meta(t, r)
+            torch._mirror_autograd_meta_to(t, r)
             memo[t] = r
             return r
         else:

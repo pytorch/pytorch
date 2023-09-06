@@ -10,7 +10,6 @@ import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
-from torch._functorch.aot_autograd import to_fun
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
@@ -231,6 +230,12 @@ class GraphModule(torch.nn.Module):
         actual = normalize_gm(backend.graphs[1].print_readable(print_output=False))
         self.assertEqual(actual, expected)
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
+
+        # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
+        def to_fun(x):
+            x_functional = torch._to_functional_tensor(x)
+            torch._mirror_autograd_meta_to(x, x_functional)
+            return x_functional
 
         def aot_f_wrapper(func):
             @functools.wraps(func)
