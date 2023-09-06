@@ -202,7 +202,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=input.shape,
             dtype=input.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=input.requires_grad,
             stride=input.stride(),
         )
 
@@ -239,7 +239,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=grad_output.shape,
             dtype=grad_output.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=grad_output.requires_grad,
             stride=grad_output.stride(),
         )
 
