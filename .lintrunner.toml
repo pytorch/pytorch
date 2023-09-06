@@ -194,7 +194,6 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/index_propagation.py',
-    'torch/_inductor/dependencies.py',
     'torch/_inductor/coordinate_descent_tuner.py',
     'torch/_inductor/debug.py',
     'torch/_inductor/hooks.py',
@@ -233,8 +232,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/__init__.py',
     'torch/_inductor/fx_passes/group_batch_fusion.py',
     'torch/_inductor/fx_passes/pre_grad.py',
-    'torch/_inductor/fx_passes/quantization.py',
-    'torch/_inductor/fx_passes/mkldnn_fusion.py',
     'torch/_inductor/fx_passes/fuse_attention.py',
     'torch/_inductor/fx_passes/freezing_patterns.py',
 ]
