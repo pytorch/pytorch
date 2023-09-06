@@ -6,7 +6,6 @@ import logging
 import sys
 import warnings
 
-from functools import wraps
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
 
@@ -49,14 +48,7 @@ if config.is_fbcode():
 else:
     # no-op decorator
     def time_and_log(attr: str):
-        def wrap(old_func):
-            @wraps(old_func)
-            def newFunction(*args, **kwargs):
-                return old_func(*args, **kwargs)
-
-            return newFunction
-
-        return wrap
+        return dynamo_utils.identity
 
 
 log = logging.getLogger(__name__)
