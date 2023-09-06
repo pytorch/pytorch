@@ -415,6 +415,12 @@ jobs:
           if-no-files-found: error
           path: ${{ runner.temp }}/ios/${{ env.ARTIFACT_NAME }}
 
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios-podspec
+          if-no-files-found: error
+          path: ${{ runner.temp }}/ios/${{ env.SPEC_NAME_WITH_VERSION }}
+
       - name: Upload the artifact to cocoapods
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         env:
