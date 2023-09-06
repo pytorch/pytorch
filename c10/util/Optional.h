@@ -213,6 +213,9 @@ union constexpr_storage_t {
   constexpr constexpr_storage_t(Args&&... args)
       : value_(constexpr_forward<Args>(args)...) {}
 
+  constexpr constexpr_storage_t(const constexpr_storage_t&) noexcept = default;
+  constexpr constexpr_storage_t& operator=(
+      const constexpr_storage_t&) = default;
   ~constexpr_storage_t() = default;
 };
 
@@ -440,6 +443,11 @@ struct trivially_copyable_optimization_optional_base {
       Args&&... args)
       : init_(true), storage_(il, std::forward<Args>(args)...) {}
 
+  constexpr trivially_copyable_optimization_optional_base(
+      const trivially_copyable_optimization_optional_base&) = default;
+
+  constexpr trivially_copyable_optimization_optional_base& operator=(
+      const trivially_copyable_optimization_optional_base&) noexcept = default;
   ~trivially_copyable_optimization_optional_base() = default;
 
   constexpr bool initialized() const noexcept {
@@ -634,7 +642,7 @@ class optional : private OptionalBase<T> {
   constexpr optional(nullopt_t) noexcept : OptionalBase<T>(){};
 
   optional(const optional& rhs) = default;
-  optional(optional&& rhs) = default;
+  optional(optional&& rhs) noexcept = default;
 
   // see https://github.com/akrzemi1/Optional/issues/16
   // and https://en.cppreference.com/w/cpp/utility/optional/optional,
@@ -686,16 +694,17 @@ class optional : private OptionalBase<T> {
 
   optional& operator=(const optional& rhs) = default;
 
-  optional& operator=(optional&& rhs) = default;
+  optional& operator=(optional&& rhs) noexcept = default;
 
-  template <class U = T>
-  auto operator=(U&& v) -> typename std::enable_if<
-      std::is_constructible<T, U>::value &&
+  template <
+      class U = T,
+      typename = std::enable_if_t<
+          std::is_constructible<T, U>::value &&
           !std::is_same<typename std::decay<U>::type, optional<T>>::value &&
           (std::is_scalar<T>::value ||
            std::is_same<typename std::decay<U>::type, T>::value) &&
-          std::is_assignable<T&, U>::value,
-      optional&>::type {
+          std::is_assignable<T&, U>::value>>
+  optional& operator=(U&& v) {
     if (initialized()) {
       contained_val() = std::forward<U>(v);
     } else {
@@ -880,10 +889,11 @@ class optional<T&> {
   // return *this;
   // }
 
-  template <typename U>
-  auto operator=(U&& rhs) noexcept -> typename std::enable_if<
-      std::is_same<typename std::decay<U>::type, optional<T&>>::value,
-      optional&>::type {
+  template <
+      typename U,
+      typename = std::enable_if_t<
+          std::is_same_v<typename std::decay<U>::type, optional<T&>>>>
+  optional& operator=(U&& rhs) noexcept {
     ref = rhs.ref;
     return *this;
   }
