@@ -17,6 +17,10 @@ torch.export
 .. autoclass:: ExportedProgram
 
     .. automethod:: module
+    .. automethod:: buffers
+    .. automethod:: named_buffers
+    .. automethod:: parameters
+    .. automethod:: named_parameters
 
 .. autoclass:: ExportBackwardSignature
 .. autoclass:: ExportGraphSignature
