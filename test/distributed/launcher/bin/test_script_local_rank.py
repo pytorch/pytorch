@@ -19,7 +19,7 @@ def parse_args():
         "--local_rank",
         type=int,
         required=True,
-        help="The rank of the node for multi-node distributed " "training",
+        help="The rank of the node for multi-node distributed training",
     )
 
     return parser.parse_args()

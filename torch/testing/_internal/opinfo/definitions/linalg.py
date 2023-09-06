@@ -2411,6 +2411,11 @@ python_ref_db: List[OpInfo] = [
         supports_out=False,
         op_db=op_db,
     ),
+    PythonRefInfo(
+        "_refs.linalg.vecdot",
+        torch_opinfo_name="linalg.vecdot",
+        op_db=op_db,
+    ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",

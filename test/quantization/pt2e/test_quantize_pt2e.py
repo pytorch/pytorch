@@ -374,7 +374,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
-            model_pt2e.eval()
+            torch.ao.quantization.move_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
@@ -552,6 +552,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         quantizer: Quantizer,
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
+        fixed_output_tol: float = None,
         output_scale_idx: int = 3,
     ) -> torch.nn.Module:
         """ TODO: need to implement output checking based on output_scale once
@@ -581,17 +582,22 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
         pt2e_quant_output_copy = model_copy(*example_inputs)
 
-        idx = 0
-        for n in model_copy.graph.nodes:
-            if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
-                idx += 1
-                if idx == output_scale_idx:
-                    output_scale = n.args[1]
-        assert output_scale is not None
+
+        output_tol = None
+        if fixed_output_tol is not None:
+            output_tol = fixed_output_tol
+        else:
+            idx = 0
+            for n in model_copy.graph.nodes:
+                if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+                    idx += 1
+                    if idx == output_scale_idx:
+                        output_tol = n.args[1]
+            assert output_tol is not None
 
         # make sure the result is off by one at most in the quantized integer representation
         self.assertTrue(
-            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_scale + 1e-5)
+            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_tol + 1e-5)
         )
 
 @skipIfNoQNNPACK
@@ -1279,7 +1285,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -1306,7 +1312,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -2148,6 +2154,29 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             non_ref_node_occurrence={}
         )
 
+    def test_representation_dynamic_linear(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False, is_dynamic=True)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 5),)
+
+        self._test_representation(
+            M().eval(),
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={},
+            fixed_output_tol=1e-4,
+        )
+
     def test_representation_conv2d(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2338,6 +2367,39 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             ref_node_occurrence,
             non_ref_node_occurrence
         )
+
+    def test_move_model_to_eval(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dropout = torch.nn.Dropout(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        example_inputs = (torch.randn(1),)
+        m = M().train()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m.graph.eliminate_dead_code()
+        m.recompile()
+
+        # Assert that dropout op exists and is in train mode
+        dropout_node = None
+        for n in m.graph.nodes:
+            if n.target == torch.ops.aten.native_dropout.default:
+                dropout_node = n
+                break
+        self.assertTrue(dropout_node is not None)
+        self.assertTrue(dropout_node.args[2])
+
+        # Do the subgraph rewriting
+        torch.ao.quantization.move_model_to_eval(m)
+
+        # Assert that dropout op is now replaced with a clone op
+        targets = [n.target for n in m.graph.nodes]
+        self.assertTrue(torch.ops.aten.clone.default in targets)
+        self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):
