@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc)
 from torch._utils import is_compiling
 from typing import List, Optional
 
@@ -33,7 +33,7 @@ class ASGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        if not foreach and capturable:
+        if foreach is False and capturable:
             raise ValueError("Capturable not supported with single tensor ASGD")
 
         defaults = dict(
@@ -159,6 +159,7 @@ ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
+        {_capturable_doc} For ASGD, capturable is only supported when foreach is True.
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098

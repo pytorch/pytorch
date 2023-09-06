@@ -669,6 +669,9 @@ class TestOptim(TestCase):
             res, state = [], []
             for enabled in (False, True):
                 kwargs_clone = deepcopy(kwargs)
+                if optimizer_constructor.__name__ == "ASGD" and kwarg == "foreach" and not enabled:
+                    # single tensor ASGD does not support capturable
+                    kwargs_clone["capturable"] = False
                 kwargs_clone[kwarg] = enabled
 
                 params_clone = []
@@ -731,6 +734,9 @@ class TestOptim(TestCase):
                 )
                 model.to(dtype=torch.float64, device=device)
                 params_with_flags = deepcopy(params)
+                if optimizer_constructor.__name__ == "ASGD" and flag == "foreach" and not flag_value:
+                    # single tensor ASGD does not support capturable
+                    params_with_flags["capturable"] = False
                 params_with_flags[flag] = flag_value
 
                 # foreach/fused optimizers should be tested with a param_groups['params'] with
@@ -815,14 +821,12 @@ class TestOptim(TestCase):
                     optimizer_constructor.__name__ in ["Adadelta", "ASGD"]):
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
+                # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
                 nintermediates = 3
                 if optimizer_constructor.__name__ == "NAdam":
                     # with capturable in NAdam, we have 3 extra intermediates for the
                     # bias_correction, mus, and mu_nexts
                     nintermediates = 5
-                elif optimizer_constructor.__name__ == "ASGD":
-                    # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
-                    nintermediates = 4
 
             elif optimizer_constructor.__name__ in ["NAdam", "Adagrad", "RMSprop"]:
                 # NAdam uses two intermediates at the same time (grads & exp_avg_sq_sqrt)
