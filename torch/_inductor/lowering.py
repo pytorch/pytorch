@@ -23,7 +23,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
-    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
@@ -45,7 +44,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
+from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -419,6 +418,13 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
+        def is_dynamic(*args):
+            return any(
+                isinstance(t, TensorBox)
+                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
+                for t in args
+            )
+
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -2451,8 +2457,7 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
-    dtype = kwargs.get("dtype")
-    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
+    assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
