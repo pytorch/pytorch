@@ -35,7 +35,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .lists import ShapeVariable, SizeVariable
+from .lists import SizeVariable
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -228,7 +228,7 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            result = ShapeVariable(sizes, **options)
+            result = SizeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -627,9 +627,10 @@ class TensorVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
             def redistribute_fn_with_prim_types(x):
-                return x.redistribute(*args_as_value)
+                return x.redistribute(*args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
@@ -646,11 +647,7 @@ class TensorVariable(VariableTracker):
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
-            if (
-                name == "new"
-                and len(args) == 1
-                and isinstance(args[0], (SizeVariable, ShapeVariable))
-            ):
+            if name == "new" and len(args) == 1 and isinstance(args[0], SizeVariable):
                 name = "new_empty"
             return wrap_fx_proxy(
                 tx,
