@@ -978,6 +978,17 @@ void Unpickler::rebuildTensor(bool quantized) {
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
 
+    // Verify that sizes and strides are in bounds for the allocated storage.
+    auto expected_size = at::detail::computeStorageNbytes(
+        size, stride, result.dtype().itemsize());
+    TORCH_CHECK(
+        result.nbytes() >= expected_size,
+        "Unpickle tensor: mismatching storage and size/stride. Allocated storage is ",
+        result.nbytes(),
+        ", but unpickled sizes and strides requires ",
+        expected_size,
+        "bytes");
+
     // Handle if math_bits were pickled.
     // See `args` of _reduce_ex_internal
     // for a regular tensor (final else case).
