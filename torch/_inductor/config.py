@@ -138,6 +138,10 @@ implicit_fallbacks = True
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# For each fused kernel in the wrapper, comment with the nodes that get fused.
+# Useful for debugging fusion.
+debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -306,6 +310,10 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # Make scatter_reduce fallback when reduce is sum to avoid performance regression
+    # using atomic_add.
+    fallback_scatter_reduce_sum = True
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -313,7 +321,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = True
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True

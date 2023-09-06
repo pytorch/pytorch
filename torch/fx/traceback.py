@@ -4,8 +4,8 @@ from typing import List, Any, Dict
 from ._compatibility import compatibility
 
 __all__ = ['preserve_node_meta', 'has_preserved_node_meta',
-           'set_stack_trace', 'set_seq_nr', 'format_stack',
-           'set_current_meta', 'get_current_meta']
+           'set_stack_trace', 'set_grad_fn_seq_nr', 'reset_grad_fn_seq_nr',
+           'format_stack', 'set_current_meta', 'get_current_meta']
 
 current_meta: Dict[str, Any] = {}
 should_preserve_node_meta = False
@@ -33,15 +33,30 @@ def set_stack_trace(stack : List[str]):
 
 
 @compatibility(is_backward_compatible=False)
-def set_seq_nr(seq_nr, bwd=False):
+def set_grad_fn_seq_nr(seq_nr):
     global current_meta
 
     if should_preserve_node_meta:
-        # The seq_nr is captured by eager mode
-        # in the autograd::Node data structure
-        # while the network is being traced.
-        current_meta["seq_nr"] = seq_nr
-        current_meta["in_bwd"] = bwd
+        # The seq_nr is captured by eager mode in the grad_fn during forward
+        current_meta["prev_grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", None)
+        current_meta["prev_in_grad_fn"] = current_meta.get("in_grad_fn", None)
+        current_meta["grad_fn_seq_nr"] = seq_nr
+        current_meta["in_grad_fn"] = True
+
+
+@compatibility(is_backward_compatible=False)
+def reset_grad_fn_seq_nr():
+    # NB: reset state properly, this would be helpful towards supporting
+    #     reentrant autograd if we actually wanted to do that.
+    global current_meta
+
+    if should_preserve_node_meta:
+        if current_meta["prev_grad_fn_seq_nr"] is None:
+            assert current_meta["prev_in_grad_fn"] is None
+            del current_meta["grad_fn_seq_nr"]
+            del current_meta["in_grad_fn"]
+        current_meta["grad_fn_seq_nr"] = current_meta["prev_grad_fn_seq_nr"]
+        current_meta["in_grad_fn"] = current_meta["prev_in_grad_fn"]
 
 
 @compatibility(is_backward_compatible=False)
