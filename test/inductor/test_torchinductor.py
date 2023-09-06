@@ -6753,18 +6753,12 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
-    def test_scaled_dot_product_flash_attention(self):
+    def test_scaled_dot_product_attention(self):
         if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
             raise unittest.SkipTest("Can't run flash attention on this platform")
 
-        if self.device == "cuda":
-            # FlashAttention on GPU only supports fp16 and bf16 data type.
-            dtype = torch.float16
-        else:
-            dtype = torch.float32
-
         def fn(q, k, v):
-            return aten._scaled_dot_product_flash_attention(
+            return torch.nn.functional.scaled_dot_product_attention(
                 q.transpose(1, 2).contiguous(),
                 k.transpose(1, 2),
                 v.transpose(1, 2),
@@ -6774,9 +6768,9 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randn(4, 36, 4, 36).to(dtype),
-                torch.randn(4, 36, 4, 36).to(dtype),
-                torch.randn(4, 36, 4, 36).to(dtype),
+                torch.randn(4, 36, 4, 36),
+                torch.randn(4, 36, 4, 36),
+                torch.randn(4, 36, 4, 36),
             ),
             check_lowp=False,
         )

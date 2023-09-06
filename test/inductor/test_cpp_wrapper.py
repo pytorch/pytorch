@@ -193,7 +193,7 @@ if RUN_CPU:
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_scalar_input"),
-        BaseTest("test_scaled_dot_product_flash_attention"),
+        BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scatter1"),
         BaseTest("test_scatter2"),
         BaseTest("test_scatter3"),
@@ -265,8 +265,8 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_scalar_input"),
+        BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scaled_dot_product_efficient_attention"),
-        BaseTest("test_scaled_dot_product_flash_attention"),
         BaseTest("test_sort"),
         BaseTest("test_silu"),  # single input, single output
         BaseTest("test_sum_dtype"),  # float64
