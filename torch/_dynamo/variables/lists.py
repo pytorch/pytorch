@@ -726,7 +726,9 @@ def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListV
     return ListVariable(values, mutable_local=MutableLocal())
 
 
-pytree._register_pytree_node(ListVariable, _listvariable_flatten, _listvariable_unflatten)
+pytree._register_pytree_node(
+    ListVariable, _listvariable_flatten, _listvariable_unflatten
+)
 fx_pytree.register_pytree_flatten_spec(ListVariable, _listvariable_flatten)
 
 
@@ -743,7 +745,9 @@ def _tuplevariable_unflatten(
     return TupleVariable(values)
 
 
-pytree._register_pytree_node(TupleVariable, _tuplevariable_flatten, _tuplevariable_unflatten)
+pytree._register_pytree_node(
+    TupleVariable, _tuplevariable_flatten, _tuplevariable_unflatten
+)
 fx_pytree.register_pytree_flatten_spec(TupleVariable, _tuplevariable_flatten)
 
 

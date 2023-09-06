@@ -489,5 +489,10 @@ def _dictvariable_unflatten(
     )
 
 
-pytree._register_pytree_node(ConstDictVariable, _dictvariable_flatten, _dictvariable_unflatten)
-fx_pytree.register_pytree_flatten_spec(ConstDictVariable, _dictvariable_flatten,)
+pytree._register_pytree_node(
+    ConstDictVariable, _dictvariable_flatten, _dictvariable_unflatten
+)
+fx_pytree.register_pytree_flatten_spec(
+    ConstDictVariable,
+    _dictvariable_flatten,
+)
