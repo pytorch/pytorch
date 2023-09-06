@@ -117,7 +117,7 @@ class TestDataclasses(JitTestCase):
 
     def test_default_factories(self):
         @dataclass
-        class Foo(object):
+        class Foo:
             x: List[int] = field(default_factory=list)
 
         with self.assertRaises(NotImplementedError):
