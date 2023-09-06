@@ -22,10 +22,6 @@ on:
         description: "Build iOS binaries with PyTorch lite interpreter support"
         type: string
         default: 1
-      use_metal:
-        description: "Build iOS binaries with Apple Metal"
-        type: string
-        default: 1
       use_coreml:
         description: "Build iOS binaries with Apple Core ML"
         type: string
@@ -57,7 +53,7 @@ jobs:
             ios_platform: "SIMULATOR",
             ios_arch: "x86_64",
             use_lite_interpreter: ${{ inputs.use_lite_interpreter || 1 }},
-            use_metal: ${{ inputs.use_metal || 1 }},
+            use_metal: 0,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
           },
@@ -68,7 +64,7 @@ jobs:
             ios_platform: "OS",
             ios_arch: "arm64",
             use_lite_interpreter: ${{ inputs.use_lite_interpreter || 1 }},
-            use_metal: ${{ inputs.use_metal || 1 }},
+            use_metal: 1,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
           }

@@ -129,7 +129,7 @@ jobs:
             ios_platform: "SIMULATOR",
             ios_arch: "x86_64",
             use_lite_interpreter: 1,
-            use_metal: 1,
+            use_metal: 0,
             use_coreml: 1,
             use_custom_op_list: ""
           },
