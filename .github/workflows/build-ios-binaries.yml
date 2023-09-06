@@ -18,10 +18,6 @@ on:
   # NB: We can use this workflow dispatch to test and build iOS binaries manually
   workflow_dispatch:
     inputs:
-      use_lite_interpreter:
-        description: "Build iOS binaries with PyTorch lite interpreter support"
-        type: string
-        default: 1
       use_coreml:
         description: "Build iOS binaries with Apple Core ML"
         type: string
@@ -37,9 +33,8 @@ concurrency:
 
 jobs:
   # TODO: Figure out how to migrate this job to M1 runner
-  ios-build-test:
+  ios-build-test-lite-interpreter:
     name: ios-build-test
-    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * 1-5' || github.event.schedule == '45 4 * * 0,6'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-build-test
@@ -52,7 +47,7 @@ jobs:
             runner: "macos-12",
             ios_platform: "SIMULATOR",
             ios_arch: "x86_64",
-            use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
+            use_lite_interpreter: 1,
             use_metal: 0,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
@@ -63,7 +58,42 @@ jobs:
             runner: "macos-12",
             ios_platform: "OS",
             ios_arch: "arm64",
-            use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
+            use_lite_interpreter: 1,
+            use_metal: 1,
+            use_coreml: ${{ inputs.use_coreml || 1 }},
+            use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
+          }
+        ]}
+
+  # We have both LibTorch and LibTorch-Lite on cocoapods although the old jobs
+  # on CircleCI only builds and releases LibTorch-Lite, not quite sure this is
+  # needed here, but just include it for completeness
+  ios-build-test-no-lite-interpreter:
+    name: ios-build-test
+    uses: ./.github/workflows/_ios-build-test.yml
+    with:
+      build-environment: ios-build-test
+      sync-tag: ios-build-test
+      test-matrix: |
+        { include: [
+          { config: "default",
+            shard: 1,
+            num_shards: 1,
+            runner: "macos-12",
+            ios_platform: "SIMULATOR",
+            ios_arch: "x86_64",
+            use_lite_interpreter: 0,
+            use_metal: 0,
+            use_coreml: ${{ inputs.use_coreml || 1 }},
+            use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
+          },
+          { config: "default",
+            shard: 1,
+            num_shards: 1,
+            runner: "macos-12",
+            ios_platform: "OS",
+            ios_arch: "arm64",
+            use_lite_interpreter: 0,
             use_metal: 1,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
