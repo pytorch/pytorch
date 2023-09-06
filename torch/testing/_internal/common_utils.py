@@ -1074,6 +1074,11 @@ TEST_Z3 = _check_module_exists('z3')
 
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
+def split_if_not_empty(x: str):
+    return x.split(",") if len(x) != 0 else []
+
+NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
+
 # Python 2.7 doesn't have spawn
 TestEnvironment.def_flag("NO_MULTIPROCESSING_SPAWN", env_var="NO_MULTIPROCESSING_SPAWN")
 TestEnvironment.def_flag("TEST_WITH_ASAN", env_var="PYTORCH_TEST_WITH_ASAN")
