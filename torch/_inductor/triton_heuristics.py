@@ -399,7 +399,9 @@ class CachingAutotuner(KernelInterface):
                 self.precompile()
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
-
+        
+        # self.precompile()
+        # breakpoint()
         if (
             not getattr(self.launchers[0].config, "found_by_coordesc", False)
             and config.coordinate_descent_tuning
