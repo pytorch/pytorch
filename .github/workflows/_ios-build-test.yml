@@ -157,6 +157,8 @@ jobs:
           else
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
+            # And also trace the model for the later test as it doesn't exist yet
+            python trace_model.py
           fi
           popd
 
