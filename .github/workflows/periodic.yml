@@ -142,7 +142,7 @@ jobs:
             use_lite_interpreter: 1,
             use_metal: 1,
             use_coreml: 1,
-            use_custom_op_list: ""
+            use_custom_op_list: "mobilenetv2.yaml"
           }
         ]}
 

@@ -3,7 +3,6 @@ name: Build iOS binaries
 on:
   push:
     branches:
-      - main
       - nightly
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
