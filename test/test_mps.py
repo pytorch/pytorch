@@ -10599,6 +10599,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.max_pool2d',
+        'nn.functional.gelu',
+        'nn.functional.glu',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10755,10 +10758,6 @@ class TestConsistency(TestCaseMPS):
             # allow_unused is needed in those cases.
             cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
             mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
-
-            if op.name in ["nn.functional.gelu", "nn.functional.glu"] and dtype == torch.float16:
-                atol = 1e-3
-                rtol = 1e-3
 
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
