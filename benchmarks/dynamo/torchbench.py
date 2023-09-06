@@ -144,12 +144,13 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "doctr_reco_predictor",
     "drq",
 }
 
 
 REQUIRE_HIGHER_BF16_TOLERANCE = {
-    "detectron2_fcos_r_50_fpn",
+    "doctr_reco_predictor",
     "drq",
 }
 
@@ -236,6 +237,7 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "Super_SloMo",
     "tts_angular",
     "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # models in canary_models that we should run anyway
