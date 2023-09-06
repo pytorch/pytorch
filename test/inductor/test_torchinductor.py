@@ -6768,9 +6768,9 @@ class CommonTemplate:
         self.common(
             fn,
             (
-                torch.randn(4, 36, 4, 36),
-                torch.randn(4, 36, 4, 36),
-                torch.randn(4, 36, 4, 36),
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
             ),
         )
 
