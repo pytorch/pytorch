@@ -9,10 +9,7 @@ import torch.onnx.operators
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 
 from torch.nn import functional as F
-from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_SDPA,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 
 
 class CutomizedCtxManager:
@@ -288,7 +285,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_autocast_sdpa(self):
@@ -845,6 +842,53 @@ class GraphModule(torch.nn.Module):
         return (add_1,)
 """
         self.assertExpectedInline(actual, expected)
+
+    def test_disable_saved_tensors_hooks_graph_break(self):
+        def fn(x):
+            with torch.autograd.graph.disable_saved_tensors_hooks(
+                "This is not supported"
+            ):
+                y = x + 1
+                torch._dynamo.graph_break()
+                return y * 2
+
+        eager = EagerAndRecordGraphs()
+        torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
+
+        def check_graph(actual, expected):
+            self.assertExpectedInline(actual, expected)
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        add = l_x_ + 1;  l_x_ = None
+
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (add,)
+"""
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+        check_graph(actual, expected)
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_y_ : torch.Tensor):
+        l_y_ = L_y_
+
+        _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
+
+        mul = l_y_ * 2;  l_y_ = None
+
+        _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
+        return (mul,)
+"""
+        graph = eager.graphs[1]
+        actual = normalize_gm(graph.print_readable(False))
+        check_graph(actual, expected)
 
 
 if __name__ == "__main__":

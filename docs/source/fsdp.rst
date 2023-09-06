@@ -21,25 +21,25 @@ FullyShardedDataParallel
 .. autoclass:: torch.distributed.fsdp.StateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.FullStateDictConfig
   :members:
 
 .. autoclass:: torch.distributed.fsdp.ShardedStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.LocalStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.OptimStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.FullOptimStateDictConfig
   :members:
 
 .. autoclass:: torch.distributed.fsdp.ShardedOptimStateDictConfig
   :members:
 
-.. autoclass:: torch.distributed.fsdp.StateDictConfig
+.. autoclass:: torch.distributed.fsdp.LocalOptimStateDictConfig
   :members:
 
 .. autoclass:: torch.distributed.fsdp.StateDictSettings

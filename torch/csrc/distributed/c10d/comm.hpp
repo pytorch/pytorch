@@ -111,8 +111,7 @@ class TORCH_API CommHookInterface {
   // Returns the resulting tensor once the communication hook result is
   // ready. The resulting tensor will then be copied to the grads of
   // individual parameters.
-  virtual at::Tensor parseHookResult(
-      const c10::IValue& result) = 0;
+  virtual at::Tensor parseHookResult(const c10::IValue& result) = 0;
 };
 
 namespace detail {

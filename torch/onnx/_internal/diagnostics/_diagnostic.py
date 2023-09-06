@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import gzip
 from collections.abc import Generator
-from typing import List, Optional, Type
+from typing import List, Optional
 
 import torch
 
@@ -113,7 +113,6 @@ class ExportDiagnosticEngine:
         name: str,
         version: str,
         options: Optional[infra.DiagnosticOptions] = None,
-        diagnostic_type: Type[infra.Diagnostic] = infra.Diagnostic,
     ) -> infra.DiagnosticContext:
         """Creates a new diagnostic context.
 
@@ -127,7 +126,9 @@ class ExportDiagnosticEngine:
         """
         if options is None:
             options = infra.DiagnosticOptions()
-        context = infra.DiagnosticContext(name, version, options)
+        context: infra.DiagnosticContext[infra.Diagnostic] = infra.DiagnosticContext(
+            name, version, options
+        )
         self.contexts.append(context)
         return context
 
@@ -179,7 +180,6 @@ def create_export_diagnostic_context() -> (
     _context = engine.create_diagnostic_context(
         "torch.onnx.export",
         torch.__version__,
-        diagnostic_type=TorchScriptOnnxExportDiagnostic,
     )
     try:
         yield _context

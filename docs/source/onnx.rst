@@ -730,12 +730,14 @@ Preview: torch.onnx TorchDynamo Exporter
 
 .. autofunction:: torch.onnx.dynamo_export
 .. autofunction:: torch.onnx.enable_fake_mode
+.. autofunction:: torch.onnx.is_onnxrt_backend_supported
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
+    torch.onnx.DiagnosticOptions
     torch.onnx.ExportOptions
     torch.onnx.ExportOutput
     torch.onnx.ExportOutputSerializer
