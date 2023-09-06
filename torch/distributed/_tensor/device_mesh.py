@@ -369,7 +369,7 @@ def init_device_mesh(
     Kwargs:
         mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
         of the multi-dimensional array that describes the layout of devices. Its length must match the length
-        of `mesh_shape`.
+        of `mesh_shape`. Each string in mesh_dim_names must be unique.
 
     Returns:
         A :class:`DeviceMesh` object
@@ -381,8 +381,8 @@ def init_device_mesh(
         >>> # xdoctest: +SKIP
         >>> from torch.distributed._tensor.device_mesh import init_device_mesh
         >>>
-        >>> one_d_mesh = init_device_mesh("cuda", mesh_shape=(8,))
-        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+        >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
+        >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
     """
     if mesh_dim_names is not None:
         if len(set(mesh_dim_names)) != len(mesh_dim_names):
