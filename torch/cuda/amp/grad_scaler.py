@@ -209,14 +209,7 @@ class GradScaler:
             _MultiDeviceReplicator
         ] = []  # holds a reference that can be overwritten by apply_scale
 
-        def apply_scale(
-            val: Union[
-                torch.Tensor,
-                List[torch.Tensor],
-                Tuple[torch.Tensor, ...],
-                Iterable[torch.Tensor],
-            ]
-        ):
+        def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
             if isinstance(val, torch.Tensor):
                 assert val.is_cuda or val.device.type == "xla"
                 if len(stash) == 0:
