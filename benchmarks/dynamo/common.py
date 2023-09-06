@@ -1149,14 +1149,14 @@ class AOTInductorModelCache:
 
             # Use a utility function for easier benchmarking
             source = """
-            #include <torch/csrc/inductor/aot_runtime/model.h>
+            #include <torch/csrc/inductor/aot_runtime/model_container.h>
 
-            torch::aot_inductor::AOTInductorModel model;
+            torch::aot_inductor::AOTInductorModelContainer model(1);
 
             void run(
                     const std::vector<at::Tensor>& input_tensors,
                     std::vector<at::Tensor>& output_tensors) {
-                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
+                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream(), nullptr);
             }
             """
             module = torch.utils.cpp_extension.load_inline(
