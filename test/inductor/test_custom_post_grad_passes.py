@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import unittest
 
 import torch
 import torch._inductor.pattern_matcher as pattern_matcher
@@ -9,14 +8,8 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 
 from torch._inductor import config
-from torch._inductor import ir
 from torch._inductor.lowering import lowerings as L
-from torch._inductor.pattern_matcher import (
-    Arg,
-    CallFunction,
-    PatternMatcherPass,
-)
-from torch._inductor.virtualized import ops
+from torch._inductor.pattern_matcher import Arg, CallFunction, PatternMatcherPass
 
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -60,6 +53,7 @@ class TestPatternMatcherBase(TestCase):
 aten = torch.ops.aten
 mkldnn = torch.ops.mkldnn
 
+
 class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
     #  mkldnn fusion's pattern_matcher
     # (torch/_inductor/fx_passes/mkldnn_fusion.py),
@@ -68,37 +62,36 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
         # pattern
         def _mkldnn_conv_relu_pattern():
             return CallFunction(
-                       aten.relu,
-                       CallFunction(
-                           mkldnn._convolution_pointwise.default,
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           Arg(),
-                           _users=1),
-                   )
+                aten.relu,
+                CallFunction(
+                    mkldnn._convolution_pointwise.default,
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    Arg(),
+                    _users=1,
+                ),
+            )
 
         # utils of pattern matcher registration
         def _register_fusion_lowering(pattern, custom_pass_dict):
             def dummy_check(m):
                 return True
 
-            def register_custom_lowering_pattern(pattern, extra_check, custom_pass_dict):
+            def register_custom_lowering_pattern(
+                pattern, extra_check, custom_pass_dict
+            ):
                 return pattern_matcher.register_lowering_pattern(
                     pattern, extra_check, pass_dict=custom_pass_dict
                 )
 
-            @register_custom_lowering_pattern(
-                pattern,
-                dummy_check,
-                custom_pass_dict
-            )
+            @register_custom_lowering_pattern(pattern, dummy_check, custom_pass_dict)
             def fn(match, *args, **kwargs):
                 computation_args = list(args)[:-3] + ["relu", [], ""]
                 return L[mkldnn._convolution_pointwise.default](*computation_args)
@@ -107,7 +100,6 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
 
         _register_fusion_lowering(_mkldnn_conv_relu_pattern(), custom_pass_dict)
 
-
     # custom post grad pass
     class _CustomPass(PatternMatcherPass):
         def __init__(self):
@@ -115,7 +107,6 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
 
         def __call__(self, g: torch.fx.graph.Graph):
             self.apply(g)
-
 
     # case model
     class _ConvReLU(torch.nn.Module):
@@ -126,7 +117,6 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
         def forward(self, x):
             x1 = self.conv(x)
             return x1.relu()
-
 
     def test_custom_pre_pass(self):
         # leave custom pass only in post_grad_passes()
@@ -143,13 +133,14 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
 
         match_count = 1
         match_nodes = 2
-        other_match_count = 1 # conv prepack weight
-        other_match_nodes = 1 # conv prepack weight
-        self._test_common(mod, (x,), match_count + other_match_count, match_nodes + other_match_nodes)
+        other_match_count = 1  # conv prepack weight
+        other_match_nodes = 1  # conv prepack weight
+        self._test_common(
+            mod, (x,), match_count + other_match_count, match_nodes + other_match_nodes
+        )
 
         # restore default pattern_matcher
         config.pattern_matcher = dafault_pattern_matcher
-
 
     def test_custom_post_pass(self):
         # leave custom pass only in post_grad_passes()
@@ -166,9 +157,11 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
 
         match_count = 1
         match_nodes = 2
-        other_match_count = 1 # conv prepack weight
-        other_match_nodes = 1 # conv prepack weight
-        self._test_common(mod, (x,), match_count + other_match_count, match_nodes + other_match_nodes)
+        other_match_count = 1  # conv prepack weight
+        other_match_nodes = 1  # conv prepack weight
+        self._test_common(
+            mod, (x,), match_count + other_match_count, match_nodes + other_match_nodes
+        )
 
         # restore default pattern_matcher
         config.pattern_matcher = dafault_pattern_matcher

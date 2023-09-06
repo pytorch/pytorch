@@ -67,7 +67,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
-    if config.custom_pre_pass != None:
+    if config.custom_pre_pass is not None:
         config.custom_pre_pass(gm.graph)
 
     if config.pattern_matcher:
@@ -81,7 +81,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if is_inference:
             inference_patterns.apply(gm.graph)
 
-    if config.custom_post_pass != None:
+    if config.custom_post_pass is not None:
         config.custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
