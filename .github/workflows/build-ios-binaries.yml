@@ -18,6 +18,10 @@ on:
   # NB: We can use this workflow dispatch to test and build iOS binaries manually
   workflow_dispatch:
     inputs:
+      use_lite_interpreter:
+        description: "Build iOS binaries with PyTorch lite interpreter support"
+        type: string
+        default: 1
       use_coreml:
         description: "Build iOS binaries with Apple Core ML"
         type: string
