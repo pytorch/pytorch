@@ -4,7 +4,7 @@ import functools
 import warnings
 from typing import Any, Callable, Literal, Optional, TypeVar
 
-from typing_extensions import ParamSpec, Self
+from typing_extensions import ParamSpec
 
 import torch
 from torch.types import _dtype
@@ -324,7 +324,7 @@ class autocast:
                 enabled = False
         self._enabled = enabled
 
-    def __enter__(self) -> Optional[Self]:
+    def __enter__(self) -> Optional[autocast]:
         if torch._jit_internal.is_scripting():
             assert self.fast_dtype is not None
             return self

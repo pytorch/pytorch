@@ -1,8 +1,8 @@
+from __future__ import annotations
+
 import collections
 import functools
 from typing import Literal, Optional
-
-from typing_extensions import Self
 
 import torch
 
@@ -38,7 +38,7 @@ class autocast(torch.amp.autocast_mode.autocast):
             "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
 
-    def __enter__(self) -> Optional[Self]:
+    def __enter__(self) -> Optional[autocast]:
         if torch._jit_internal.is_scripting():
             return self
         return super().__enter__()
