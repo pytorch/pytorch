@@ -335,8 +335,8 @@ def map_only(ty: TypeAny) -> MapOnlyFn[FnAny[Any]]:
 
     You can also directly use 'tree_map_only'
     """
-    def deco(f: Any) -> Any:
-        def inner(x: Any) -> Any:
+    def deco(f: Callable[[T], Any]) -> Callable[[Any], Any]:
+        def inner(x: T) -> Any:
             if isinstance(x, ty):
                 return f(x)
             else:
