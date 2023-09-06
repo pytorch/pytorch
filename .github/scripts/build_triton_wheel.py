@@ -60,11 +60,17 @@ def build_triton(
     build_conda: bool = False,
     build_rocm: bool = False,
     py_version: Optional[str] = None,
+    release: bool = False,
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
+
+    if not release:
+        # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
+        # while release build should only include the version, i.e. 2.1.0
+        version = f"{version}+{commit_hash[:10]}"
 
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
@@ -80,7 +86,7 @@ def build_triton(
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(
-                    f"package:\n  name: torchtriton\n  version: {version}+{commit_hash[:10]}\n",
+                    f"package:\n  name: torchtriton\n  version: {version}\n",
                     file=meta,
                 )
                 print("source:\n  path: .\n", file=meta)
@@ -103,7 +109,7 @@ def build_triton(
 
             patch_init_py(
                 triton_pythondir / "triton" / "__init__.py",
-                version=f"{version}+{commit_hash[:10]}",
+                version=f"{version}",
             )
             if py_version is None:
                 py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
@@ -129,11 +135,11 @@ def build_triton(
         patch_setup_py(
             triton_pythondir / "setup.py",
             name=triton_pkg_name,
-            version=f"{version}+{commit_hash[:10]}",
+            version=f"{version}",
         )
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
-            version=f"{version}+{commit_hash[:10]}",
+            version=f"{version}",
         )
 
         if build_rocm:
@@ -157,12 +163,14 @@ def main() -> None:
     from argparse import ArgumentParser
 
     parser = ArgumentParser("Build Triton binaries")
+    parser.add_argument("--release", action="store_true")
     parser.add_argument("--build-conda", action="store_true")
     parser.add_argument("--build-rocm", action="store_true")
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
+
     build_triton(
         build_rocm=args.build_rocm,
         commit_hash=args.commit_hash
@@ -171,6 +179,7 @@ def main() -> None:
         version=args.triton_version,
         build_conda=args.build_conda,
         py_version=args.py_version,
+        release=args.release,
     )
 
 

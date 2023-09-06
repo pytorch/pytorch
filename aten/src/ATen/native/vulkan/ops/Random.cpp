@@ -14,9 +14,9 @@ using namespace api::utils;
 
 Tensor& uniform_(
     Tensor& self,
-    double from,
-    double to,
-    c10::optional<at::Generator> /* not implemented */) {
+    const double from,
+    const double to,
+    const c10::optional<at::Generator> /* not implemented */) {
   TORCH_CHECK(
       self.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -57,10 +57,25 @@ Tensor& uniform_(
   return self;
 }
 
+Tensor rand_like(
+    const at::Tensor& input_arg,
+    const c10::optional<c10::ScalarType> /* not implemented */,
+    const c10::optional<c10::Layout> /* not implemented */,
+    const c10::optional<c10::Device> /* not implemented */,
+    const c10::optional<bool> /* not implemented */,
+    const c10::optional<c10::MemoryFormat> /* not implemented */) {
+  // Returns a tensor with the same size as input that is filled with random
+  // numbers from a uniform distribution on the interval [0,1). To match the CPU
+  // implementation, we simplify the range to [0,1] and tolerate the small
+  // chance of 1 being sampled.
+  return input_arg.clone().detach().uniform_(0.0, 1.0);
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::uniform_"), TORCH_FN(uniform_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::rand_like"), TORCH_FN(rand_like));
 }
 
 #endif /* USE_VULKAN_API */
