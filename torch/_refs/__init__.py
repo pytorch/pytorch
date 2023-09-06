@@ -359,7 +359,7 @@ def handle_noncontiguous_outputs(input_tlist, output):
             break
 
     if not is_noncontiguous_supported(device):
-        output = output.new_empty(output.shape)
+        output = output.contiguous()
 
     return output
 

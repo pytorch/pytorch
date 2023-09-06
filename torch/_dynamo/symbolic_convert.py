@@ -1854,7 +1854,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             lookup_line=False,
         )
 
-    def store_dict_key(self, name, value):
+    def store_global_weakref(self, name, value):
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
