@@ -270,7 +270,7 @@ class TestInductorDynamic(TestCase):
 
     def test_full(self, device):
         def fn(a):
-            return torch.full((3,), a)
+            return torch.full((3,), a), torch.full((3,), torch.sym_float(a))
 
         cfn = self.compile_fn(fn)
         expect = fn(5)
