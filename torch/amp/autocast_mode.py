@@ -4,27 +4,24 @@ import functools
 import warnings
 from typing import Any, Callable, Literal, Optional, TypeVar
 
-from typing_extensions import ParamSpec, Self
+from typing_extensions import Self
 
 import torch
 from torch.types import _dtype
 
 __all__ = ["autocast_decorator", "autocast"]
 
-P = ParamSpec("P")
-R = TypeVar("R")
+CallableT = TypeVar("CallableT", bound=Callable[..., Any])
 
 
-def autocast_decorator(
-    autocast_instance: autocast, func: Callable[P, R]
-) -> Callable[P, R]:
+def autocast_decorator(autocast_instance: autocast, func: CallableT) -> CallableT:
     @functools.wraps(func)
-    def decorate_autocast(*args: P.args, **kwargs: P.kwargs) -> R:
+    def decorate_autocast(*args: Any, **kwargs: Any) -> Any:
         with autocast_instance:
             return func(*args, **kwargs)
 
     decorate_autocast.__script_unsupported = "@autocast() decorator is not supported in script mode"  # type: ignore[attr-defined]
-    return decorate_autocast
+    return decorate_autocast  # type: ignore[return-value]
 
 
 class autocast:
@@ -418,7 +415,7 @@ class autocast:
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 
-    def __call__(self, func: Callable[P, R]) -> Callable[P, R]:
+    def __call__(self, func: CallableT) -> CallableT:
         if torch._jit_internal.is_scripting():
             return func
         return autocast_decorator(self, func)

@@ -2,7 +2,7 @@ import collections
 import functools
 from typing import Callable, Literal, Optional, TypeVar
 
-from typing_extensions import ParamSpec, Self
+from typing_extensions import Self
 
 import torch
 
@@ -16,8 +16,7 @@ from typing import Any
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
-P = ParamSpec("P")
-R = TypeVar("R")
+CallableT = TypeVar("CallableT", bound=Callable[..., Any])
 
 
 class autocast(torch.amp.autocast_mode.autocast):
@@ -52,7 +51,7 @@ class autocast(torch.amp.autocast_mode.autocast):
             return None
         return super().__exit__(exc_type, exc_val, exc_tb)
 
-    def __call__(self, func: Callable[P, R]) -> Callable[P, R]:
+    def __call__(self, func: CallableT) -> CallableT:
         if torch._jit_internal.is_scripting():
             return func
         return super().__call__(func)
