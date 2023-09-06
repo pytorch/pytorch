@@ -159,7 +159,10 @@ class ShardedGradScaler(GradScaler):
         return apply_scale(outputs)
 
     def _foreach_non_finite_check_and_unscale_cpu_(
-        self, grads: Sequence[torch.Tensor], found_inf: torch.Tensor, inv_scale: torch.Tensor
+        self,
+        grads: Sequence[torch.Tensor],
+        found_inf: torch.Tensor,
+        inv_scale: torch.Tensor,
     ) -> None:
         if len(grads) == 0:
             return
