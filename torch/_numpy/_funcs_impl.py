@@ -307,8 +307,8 @@ def linspace(
 
 
 def geomspace(
-    start: ArrayLikeOrScalar,
-    stop: ArrayLikeOrScalar,
+    start,
+    stop,
     num=50,
     endpoint=True,
     dtype: Optional[DTypeLike] = None,
