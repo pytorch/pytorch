@@ -367,7 +367,6 @@ def _multi_tensor_asgd(
             torch._foreach_reciprocal_(new_etas)
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_copy_(grouped_etas, new_etas)
-            del new_etas
         else:
             step = grouped_state_steps[0].item()
             new_etas = []
