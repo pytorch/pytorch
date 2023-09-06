@@ -275,6 +275,9 @@ class ExportOptions:
 
     Attributes:
         dynamic_shapes: Shape information hint for input/output tensors.
+            When ``None``, the exporter determines the most compatible setting.
+            When ``True``, all input shapes are considered dynamic.
+            When ``False``, all input shapes are considered static.
         op_level_debug: Whether to export the model with op-level debug information
         diagnostic_options: The diagnostic options for the exporter.
         fake_context: The fake context used for symbolic tracing.
@@ -311,19 +314,6 @@ class ExportOptions:
         onnx_registry: Optional[OnnxRegistry] = None,
         diagnostic_options: Optional[DiagnosticOptions] = None,
     ):
-        """Defines the export options with user-defined values.
-
-        Args:
-            dynamic_shapes: Shape information hint for input/output tensors.
-                When ``None``, the exporter determines the most compatible setting.
-                When ``True``, all input shapes are considered dynamic.
-                When ``False``, all input shapes are considered static.
-            op_level_debug: When True export the model with op-level debug running ops through ONNX Runtime.
-            diagnostic_options: The diagnostic options for the exporter.
-            fake_context: The fake context used for symbolic tracing.
-            onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
-        """
-
         self.dynamic_shapes = dynamic_shapes
         self.op_level_debug = op_level_debug
         self.fake_context = fake_context
@@ -1133,19 +1123,59 @@ def dynamo_export(
     Returns:
         An in-memory representation of the exported ONNX model.
 
-    Example:
+    **Example 1 - Simplest export**
     ::
 
-        import torch.onnx
-        torch.onnx.dynamo_export(
-            my_nn_module,
-            torch.randn(2, 2, 2), # positional input 1
-            torch.randn(2, 2, 2), # positional input 2
-            my_nn_module_attribute="hello", # keyword input
-            export_options=ExportOptions(
-                dynamic_shapes=True,
-            )
-        ).save("my_model.onnx")
+        class MyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+            def forward(self, x, bias=None):
+                out = self.linear(x)
+                out = out + bias
+                return out
+        model = MyModel()
+        kwargs = {"bias": 3.}
+        args = (torch.randn(2, 2, 2),)
+        export_output = torch.onnx.dynamo_export(
+            model,
+            *args,
+            **kwargs).save("my_simple_model.onnx")
+
+    **Example 2 - Exporting with dynamic shapes**
+    ::
+
+        # The previous model can be exported with dynamic shapes
+        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
+        export_output = torch.onnx.dynamo_export(
+            model,
+            *args,
+            **kwargs,
+            export_options=export_options)
+        export_output.save("my_dynamic_model.onnx")
+
+
+    By printing input dynamic dimensions we can see the input shape is no longer (2,2,2)
+    ::
+
+        >>> print(export_output.model_proto.graph.input[0])
+        name: "arg0"
+        type {
+          tensor_type {
+            elem_type: 1
+            shape {
+              dim {
+                dim_param: "arg0_dim_0"
+              }
+              dim {
+                dim_param: "arg0_dim_1"
+              }
+              dim {
+                dim_param: "arg0_dim_2"
+              }
+            }
+          }
+        }
     """
 
     resolved_export_options = (

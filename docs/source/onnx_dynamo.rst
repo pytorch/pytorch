@@ -41,10 +41,9 @@ The ONNX exporter depends on extra Python packages:
 
 They can be installed through `pip <https://pypi.org/project/pip/>`_:
 
-.. TODO: Replace with `onnxscript` when it is official
 .. code-block:: bash
 
-  pip install --upgrade onnx onnxscript-preview
+  pip install --upgrade onnx onnxscript
 
 A simple example
 ----------------
@@ -138,26 +137,20 @@ API Reference
 
 .. autoclass:: torch.onnx.ExportOptions
     :members:
-    :special-members: __init__
 
 .. autofunction:: torch.onnx.enable_fake_mode
 
 .. autoclass:: torch.onnx.ExportOutput
     :members:
-    :special-members: __init__
 
 .. autoclass:: torch.onnx.ExportOutputSerializer
     :members:
-    :special-members: __init__
 
 .. autoclass:: torch.onnx.OnnxExporterError
     :members:
-    :special-members: __init__
 
 .. autoclass:: torch.onnx.OnnxRegistry
     :members:
-    :special-members: __init__
 
 .. autoclass:: torch.onnx.DiagnosticOptions
     :members:
-    :special-members: __init__
