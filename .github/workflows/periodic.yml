@@ -119,6 +119,7 @@ jobs:
     uses: ./.github/workflows/_ios-build-test.yml
     with:
       build-environment: ios-build-test
+      sync-tag: ios-build-test
       test-matrix: |
         { include: [
           { config: "default",
@@ -128,7 +129,7 @@ jobs:
             ios_platform: "SIMULATOR",
             ios_arch: "x86_64",
             use_lite_interpreter: 1,
-            use_metal: 0,
+            use_metal: 1,
             use_coreml: 1,
             use_custom_op_list: ""
           },
@@ -139,9 +140,9 @@ jobs:
             ios_platform: "OS",
             ios_arch: "arm64",
             use_lite_interpreter: 1,
-            use_metal: 0,
-            use_coreml: 0,
-            use_custom_op_list: "mobilenetv2.yaml"
+            use_metal: 1,
+            use_coreml: 1,
+            use_custom_op_list: ""
           }
         ]}
 
