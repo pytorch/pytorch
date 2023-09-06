@@ -1,6 +1,6 @@
 import collections
 import functools
-from typing import Callable, Literal, Optional, TypeVar
+from typing import Literal, Optional
 
 from typing_extensions import Self
 
@@ -15,8 +15,6 @@ except ModuleNotFoundError:
 from typing import Any
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
-
-CallableT = TypeVar("CallableT", bound=Callable[..., Any])
 
 
 class autocast(torch.amp.autocast_mode.autocast):
@@ -51,7 +49,7 @@ class autocast(torch.amp.autocast_mode.autocast):
             return None
         return super().__exit__(exc_type, exc_val, exc_tb)
 
-    def __call__(self, func: CallableT) -> CallableT:
+    def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
         return super().__call__(func)
