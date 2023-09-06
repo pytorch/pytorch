@@ -316,7 +316,6 @@ class basic_string_view final {
 
   constexpr size_type find(basic_string_view v, size_type pos = 0)
       const noexcept {
-    // if we are in C++14, write it iteratively. This is faster.
     if (v.size() == 0) {
       return pos <= size() ? pos : npos;
     }
@@ -467,7 +466,6 @@ class basic_string_view final {
 
  private:
   static constexpr size_type strlen_(const_pointer str) noexcept {
-    // if we are in C++14, write it iteratively. This is faster.
     const_pointer current = str;
     while (*current != '\0') {
       ++current;
@@ -487,7 +485,6 @@ class basic_string_view final {
   template <class Condition>
   constexpr size_type find_first_if_(size_type pos, Condition&& condition)
       const noexcept {
-    // if we are in C++14, write it iteratively. This is faster.
     if (pos + 1 <= size()) {
       for (size_type cur = pos; cur < size(); ++cur) {
         if (condition(at_(cur))) {
@@ -520,8 +517,6 @@ class basic_string_view final {
     return size() == rhs.size() &&
         0 == __builtin_memcmp(data(), rhs.data(), size());
 #else
-    // if we are in C++14, write it iteratively. This is faster than the
-    // recursive C++11 implementation below.
     if (size() != rhs.size()) {
       return false;
     }
@@ -570,10 +565,6 @@ class basic_string_view final {
   const_pointer begin_;
   size_type size_{};
 };
-
-template <class CharT>
-const typename basic_string_view<CharT>::size_type
-    basic_string_view<CharT>::npos;
 
 template <class CharT>
 inline std::basic_ostream<CharT>& operator<<(
