@@ -749,6 +749,27 @@ class TestSaveLoad(JitTestCase):
         loaded_output = loaded_ts(inp)
         self.assertEqual(ts_output, loaded_output)
 
+    def test_load_malformed_tensor_size(self):
+        """
+        Check that tensors have valid sizes/strides during model loading.
+        """
+
+        # Load default valid model.
+        test_file = os.path.realpath(sys.modules[self.__class__.__module__].__file__)
+        path = os.path.join(os.path.dirname(test_file), "../quantization/serialized")
+        def_model = os.path.join(path, "TestSerialization.test_conv2d_nobias_graph.scripted.pt")
+        loaded_model = io.BytesIO()
+        torch.jit.save(torch.jit.load(def_model), loaded_model)
+
+        # Modify raw bytes to change tensor metadata.
+        b = loaded_model.getvalue()
+        b_ = b[:718] + b'\x0c' + b[719:]
+        malformed_model = io.BytesIO(b_)
+
+        # Try to load model from binary data again.
+        with self.assertRaises(Exception) as context:
+            torch.jit.load(malformed_model)
+        self.assertTrue('Parse conv serialized state with corrupted tensor:' in str(context.exception))
 
 def script_module_to_buffer(script_module):
     module_buffer = io.BytesIO(
