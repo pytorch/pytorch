@@ -52,6 +52,7 @@ from ..source import (
     NumpyTensorSource,
     RandomValueSource,
     Source,
+    ToIntSource,
     TupleIteratorGetItemSource,
 )
 from ..utils import (
@@ -686,27 +687,31 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif isinstance(value, torch.SymInt):
-            val = value.node.require_hint()
-            assert isinstance(val, int) and val in (
-                0,
-                1,
-            ), "Currently only 0 or 1 SymInts are supported."
+        elif isinstance(value, torch.SymBool):
+            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
+            # user provided SymBool with a SymInt in dynamo.
 
+            # Concretely,
+            # 1. We created a SymInt in dynamo's shape_env, whose source is constructed as ToIntSource(self.source).
+            # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
+            # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
+            # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
+
+            new_source = ToIntSource(self.source)
             new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                val,
-                self.source,
-                dynamic_dim=DimDynamic.DYNAMIC,
+                value.__int__(),
+                new_source,
+                dynamic_dim=DimDynamic.STATIC,
             )
-
             new_symbool = new_symint == 1
+
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symbool),
-                source=self.source,
+                source=new_source,
             )
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
-                self.source,
+                new_source,
                 new_symbool,
                 False,
                 None,
@@ -714,12 +719,12 @@ class VariableBuilder:
                 example_strong_ref=new_symbool,
             )
             self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symbool, self.source, None)
+                TrackedFake(new_symbool, new_source, None)
             )
             return SymNodeVariable(
                 sym_node_proxy,
                 new_symbool,
-                source=self.source,
+                source=new_source,
             )
         else:
             result = UserDefinedObjectVariable(

@@ -27,7 +27,6 @@ from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
-    create_symint_from_symbool,
     DimDynamic,
     ShapeEnv,
 )
@@ -3139,30 +3138,35 @@ def forward(self, x):
 
         x = torch.randn([3, 4])
 
-        def test_symbool_guards(f, shape_env, size_tests, exp_graph, exp_guard_code):
-            dim_dynamic = DimDynamic.DYNAMIC
+        def test_symbool_guards(
+            f, size_tests, exp_graph, exp_guard_code, exp_shape_env_guards
+        ):
+            shape_env = ShapeEnv()
             with fake_tensor.FakeTensorMode(
                 shape_env=shape_env,
             ) as fake_mode:
                 fake_x = fake_mode.from_tensor(
-                    x, dynamic_dims=[dim_dynamic for _ in range(x.dim())]
+                    x, dynamic_dims=[DimDynamic.DYNAMIC for _ in range(x.dim())]
                 )
                 for i, size in enumerate(size_tests):
                     pred = fake_x.size(0) == size
-                    int_pred = create_symint_from_symbool(pred)
-                    gm, guards = torch._dynamo.export(f)(int_pred, x)
+                    gm, guards = torch._dynamo.export(f)(pred, x)
                     actual = normalize_gm(gm.print_readable(print_output=False))
                     self.assertExpectedInline(actual, exp_graph[i])
-                    shape_env_guards = [
+                    dynamo_shape_env_guards = [
                         guard for guard in guards if "SHAPE_ENV" in guard.guard_types
                     ]
-                    self.assertEqual(len(shape_env_guards), 1)
+                    self.assertEqual(len(dynamo_shape_env_guards), 1)
                     guard_code_on_predicate = [
                         code
-                        for code in shape_env_guards[0].code_list
+                        for code in dynamo_shape_env_guards[0].code_list
                         if "L['pred']" in code
                     ]
                     self.assertEqual(guard_code_on_predicate, exp_guard_code[i])
+                    outter_shape_env_guards = [
+                        str(guard.expr) for guard in shape_env.guards
+                    ]
+                    self.assertEqual(outter_shape_env_guards, exp_shape_env_guards[i])
 
         true_graph = """\
 class GraphModule(torch.nn.Module):
@@ -3178,21 +3182,19 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["L['pred'] == 1"]
-        false_guard_code = ["L['pred'] == 0"]
+        true_guard_code = ["L['pred'].__int__() == 1"]
+        false_guard_code = ["L['pred'].__int__() == 0"]
         test_symbool_guards(
             f,
-            ShapeEnv(),
-            [3, 3],
-            [true_graph, true_graph],
-            [true_guard_code, true_guard_code],
-        )
-        test_symbool_guards(
-            f,
-            ShapeEnv(),
-            [4, 5],
-            [false_graph, false_graph],
-            [false_guard_code, false_guard_code],
+            [3, 3, 4, 5],
+            [true_graph, true_graph, false_graph, false_graph],
+            [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
+            [
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+            ],
         )
 
     def test_invalid_input_global(self) -> None:

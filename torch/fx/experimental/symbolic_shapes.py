@@ -1999,10 +1999,6 @@ class DimConstraints:
 TLS = threading.local()
 
 
-def create_symint_from_symbool(symbool: torch.SymBool):
-    symint_expr = sympy.Piecewise((1, symbool.node.expr), (0, True))
-    return symbool.node.shape_env.create_symintnode(symint_expr, hint=None, source=None)
-
 class ShapeEnv:
     def __init__(
         self, *,
