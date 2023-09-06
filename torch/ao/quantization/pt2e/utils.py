@@ -14,7 +14,6 @@ from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noq
 
 from torch.ao.quantization.quantizer import QuantizationAnnotation
 
-import queue
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -36,19 +35,17 @@ _DEQUANTIZE_OPS = [
 ]
 
 
-def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
-    q: queue.Queue = queue.Queue()
-    for n in next_node.users.keys():
-        q.put(n)
-    while not q.empty():
-        node = q.get()
-        if node.op == "output":
-            return False
-        if node == target:
-            return True
-        for n in node.users.keys():
-            q.put(n)
-    return False
+def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
+    """
+    Assuming dest is one of the ops inserted by quant workflow, this function
+    finds if source and dest are connected. Assumption is that only quant workflow
+    inserted ops exist between source and dest
+    """
+    quant_workflow_ops = _QUANTIZE_OPS + _DEQUANTIZE_OPS
+    quant_workflow_ops.append(torch.ops.quantized_decomposed.choose_qparams.tensor)
+    while dest.target in quant_workflow_ops:
+        dest = dest.args[0]
+    return (dest == source)
 
 
 def _find_q_dq_node_for_user(
