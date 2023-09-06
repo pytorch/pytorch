@@ -69,18 +69,16 @@ from torch.testing._internal.jit_utils import JitTestCase
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
 
-# Specializes a test to run only if translation validation is either set to flag.
-def onlyIfTranslationValidationSetAs(flag: bool) -> typing.Callable:
-    def decorator(fn: typing.Callable) -> typing.Callable:
-        @functools.wraps(fn)
-        def wrapper(*args, **kwargs):
-            if torch._dynamo.config.translation_validation == flag:
-                return fn(*args, **kwargs)
-            raise unittest.SkipTest(f"only works when TV is {flag}")
+# Specializes a test to run only if translation validation is set.
+def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import torch.fx.experimental.validator
+        if torch.fx.experimental.validator.translation_validation_enabled():
+            return fn(*args, **kwargs)
+        raise unittest.SkipTest(f"only works when TV is True.")
 
-        return wrapper
-
-    return decorator
+    return wrapper
 
 
 class MyPickledModule(torch.nn.Module):
@@ -6773,11 +6771,13 @@ def ___make_guard_fn():
         replayed = replay_shape_env_events(shape_env.events)
         shape_env.check_equal(replayed)
 
+    @onlyIfTranslationValidation
     def test_shape_env_equal_empty(self):
         main, other = ShapeEnv(), ShapeEnv()
         main.check_equal(other)
         self._replay_and_check(main)
 
+    @onlyIfTranslationValidation
     def test_shape_env_equal_constructor(self):
         main, other = ShapeEnv(allow_scalar_outputs=False), ShapeEnv()
         self.assertExpectedRaisesInline(
@@ -6792,7 +6792,7 @@ ShapeEnv not equal: fields do not match:
         )
         self._replay_and_check(main)
 
-    @onlyIfTranslationValidationSetAs(False)
+    @onlyIfTranslationValidation
     def test_shape_env_equal_create_symbolic_sizes_strides_storage_offset(self):
         main, other = ShapeEnv(), ShapeEnv()
         main.create_symbolic_sizes_strides_storage_offset(
@@ -6804,6 +6804,12 @@ ShapeEnv not equal: fields do not match:
             """\
 ShapeEnv not equal: fields do not match:
 
+==> name_to_node: values don't match.
+  >  Self: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Other: {}
+==> source_to_symbol: values don't match.
+  >  Self: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
+  > Other: {}
 ==> val_to_var: values don't match.
   >  Self: {0: 0, 1: 1, 2: s1, 3: s0}
   > Other: {0: 0, 1: 1}
@@ -6819,7 +6825,7 @@ ShapeEnv not equal: fields do not match:
         )
         self._replay_and_check(main)
 
-    @onlyIfTranslationValidationSetAs(False)
+    @onlyIfTranslationValidation
     def test_shape_env_equal_unbacked(self):
         main, other = ShapeEnv(), ShapeEnv()
         main.create_unbacked_symint()
@@ -6831,6 +6837,9 @@ ShapeEnv not equal: fields do not match:
             """\
 ShapeEnv not equal: fields do not match:
 
+==> name_to_node: values don't match.
+  >  Self: {f0, i0, i1}
+  > Other: {}
 ==> unbacked_symfloat_counter: values don't match.
   >  Self: 1
   > Other: 0
@@ -6843,7 +6852,7 @@ ShapeEnv not equal: fields do not match:
         )
         self._replay_and_check(main)
 
-    @onlyIfTranslationValidationSetAs(False)
+    @onlyIfTranslationValidation
     def test_shape_env_equal_evaluate_expr_divisible(self):
         main, other = ShapeEnv(), ShapeEnv()
 
@@ -6872,82 +6881,15 @@ ShapeEnv not equal: fields do not match:
   > Other: {}
 ==> guards: values don't match.
   >  Self: [Eq(Mod(s0, 3), 0)]
-  > Other: []""",
+  > Other: []
+==> name_to_node: values don't match.
+  >  Self: {_assert, eq, mod, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Other: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}""",
         )
         self._replay_and_check(main)
 
-    @onlyIfTranslationValidationSetAs(False)
+    @onlyIfTranslationValidation
     def test_shape_env_equal_evaluate_expr_replacement(self):
-        main, other = ShapeEnv(), ShapeEnv()
-
-        # Call create_symbolic_sizes_strides_storage_offset on both of them.
-        r = main.create_symbolic_sizes_strides_storage_offset(
-            torch.randn(3, 2), ConstantSource("x")
-        )
-        other.create_symbolic_sizes_strides_storage_offset(
-            torch.randn(3, 2), ConstantSource("x")
-        )
-
-        # Create a guard: size[0] == 3 (only in the main ShapeEnv)
-        #   - +1 guard entry
-        #   - +1 replacement entry
-        size = r[0]
-        bool(size[0] == 3)
-
-        self.assertExpectedRaisesInline(
-            ShapeEnv.NotEqualError,
-            lambda: main.check_equal(other),
-            """\
-ShapeEnv not equal: fields do not match:
-
-==> guards: values don't match.
-  >  Self: [Eq(s0, 3)]
-  > Other: []
-==> replacements: values don't match.
-  >  Self: {s0: 3}
-  > Other: {}""",
-        )
-        self._replay_and_check(main)
-
-    @onlyIfTranslationValidationSetAs(False)
-    def test_shape_env_equal_evaluate_expr_refinement(self):
-        main, other = ShapeEnv(), ShapeEnv()
-
-        # Call create_symbolic_sizes_strides_storage_offset on both of them.
-        r = main.create_symbolic_sizes_strides_storage_offset(
-            torch.randn(3, 2), ConstantSource("x")
-        )
-        other.create_symbolic_sizes_strides_storage_offset(
-            torch.randn(3, 2), ConstantSource("x")
-        )
-
-        # Create a guard: size[0] >= 3 (only in the main ShapeEnv)
-        #   - +1 guard entry
-        #   - +1 var_to_guard entry
-        #   - Change: var_to_range
-        size = r[0]
-        bool(size[0] >= 3)
-
-        self.assertExpectedRaisesInline(
-            ShapeEnv.NotEqualError,
-            lambda: main.check_equal(other),
-            """\
-ShapeEnv not equal: fields do not match:
-
-==> guards: values don't match.
-  >  Self: [s0 >= 3]
-  > Other: []
-==> var_to_guards: values don't match.
-  >  Self: {s0: (s0 >= 3, None)}
-  > Other: {}
-==> var_to_range: values don't match.
-  >  Self: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
-  > Other: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}""",
-        )
-        self._replay_and_check(main)
-
-    @onlyIfTranslationValidationSetAs(True)
-    def test_shape_env_equal_evaluate_expr_replacement_TV(self):
         main, other = ShapeEnv(), ShapeEnv()
 
         # Call create_symbolic_sizes_strides_storage_offset on both of them.
@@ -6982,18 +6924,24 @@ ShapeEnv not equal: fields do not match:
         )
         self._replay_and_check(main)
 
-    @onlyIfTranslationValidationSetAs(False)
-    def test_shape_env_equal_runtime_assert(self):
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_evaluate_expr_refinement(self):
         main, other = ShapeEnv(), ShapeEnv()
 
-        # Call create_unbacked_symint on both of them.
-        r = main.create_unbacked_symint()
-        other.create_unbacked_symint()
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
 
-        # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
-        #   - +1 defferred_runtime_asserts entry
-        #   - Change: num_defferred_runtime_asserts
-        expect_true(r % 3 == 0)
+        # Create a guard: size[0] >= 3 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 var_to_guard entry
+        #   - Change: var_to_range
+        size = r[0]
+        bool(size[0] >= 3)
 
         self.assertExpectedRaisesInline(
             ShapeEnv.NotEqualError,
@@ -7001,17 +6949,23 @@ ShapeEnv not equal: fields do not match:
             """\
 ShapeEnv not equal: fields do not match:
 
-==> deferred_runtime_asserts: values don't match.
-  >  Self: {i0: [Eq(Mod(i0, 3), 0)]}
+==> guards: values don't match.
+  >  Self: [s0 >= 3]
+  > Other: []
+==> name_to_node: values don't match.
+  >  Self: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Other: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> var_to_guards: values don't match.
+  >  Self: {s0: (s0 >= 3, None)}
   > Other: {}
-==> num_deferred_runtime_asserts: values don't match.
-  >  Self: 1
-  > Other: 0""",
+==> var_to_range: values don't match.
+  >  Self: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  > Other: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}""",
         )
         self._replay_and_check(main)
 
-    @onlyIfTranslationValidationSetAs(True)
-    def test_shape_env_equal_runtime_assert_TV(self):
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_runtime_assert(self):
         main, other = ShapeEnv(), ShapeEnv()
 
         # Call create_unbacked_symint on both of them.
