@@ -67,6 +67,9 @@ class InvalidCxxCompiler(RuntimeError):
 
 class CppCompileError(RuntimeError):
     def __init__(self, cmd, output):
+        if isinstance(output, bytes):
+            output = output.decode("utf-8")
+
         super().__init__(
             textwrap.dedent(
                 """
@@ -80,5 +83,5 @@ class CppCompileError(RuntimeError):
                 """
             )
             .strip()
-            .format(cmd=" ".join(cmd), output=output.decode("utf-8"))
+            .format(cmd=" ".join(cmd), output=output)
         )

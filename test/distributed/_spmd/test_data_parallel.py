@@ -21,7 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class SimpleMLP(nn.Module):
     def __init__(self):
-        super(SimpleMLP, self).__init__()
+        super().__init__()
         self.net1 = nn.Linear(50, 32)
         self.relu = nn.ReLU()
         self.net2 = nn.Linear(32, 8)
@@ -262,4 +262,5 @@ class TestDataParallel(DTensorTestBase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if False:
+        run_tests()

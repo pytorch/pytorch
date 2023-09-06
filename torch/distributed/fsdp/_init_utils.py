@@ -1,5 +1,6 @@
 import collections
 import itertools
+import os
 import warnings
 from typing import (
     Any,
@@ -14,7 +15,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Type,
     Union,
 )
 
@@ -36,7 +36,6 @@ from torch.distributed.fsdp._common_utils import (
     TrainingState,
 )
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
-from torch.distributed.fsdp._wrap_utils import _get_fully_sharded_module_to_states
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
     CPUOffload,
@@ -48,12 +47,12 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.fsdp.flat_param import (
-    _HandlesKey,
+    _FSDP_USE_FULL_PREC_IN_EVAL,
     FlatParameter,
     FlatParamHandle,
     HandleShardingStrategy,
 )
-from torch.distributed.fsdp.wrap import _FSDPPolicy
+from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -79,10 +78,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -98,9 +97,10 @@ def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
-    policy: Optional[_FSDPPolicy],
+    policy: Optional[_Policy],
 ) -> _FSDPState:
-    if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+    is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
+    if is_hybrid_strategy:
         if process_group is None and policy is None:
             # Raise an error here, since this is manual wrapping with no process group
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
@@ -108,16 +108,24 @@ def _init_process_group_state(
             raise ValueError(
                 f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
             )
-        else:
-            state = _init_process_group_state_for_hybrid_shard(state, process_group)
+        state = _init_process_group_state_for_hybrid_shard(state, process_group)
     else:
         state.process_group = (
             process_group if process_group is not None else _get_default_group()
         )
-
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
-
+    data_parallel_world_size = state.world_size
+    if is_hybrid_strategy:
+        data_parallel_world_size *= state._inter_node_pg.size()
+    state._gradient_predivide_factor = (
+        default_hooks.DefaultState._get_gradient_predivide_factor(
+            data_parallel_world_size
+        )
+    )
+    state._gradient_postdivide_factor = (
+        data_parallel_world_size / state._gradient_predivide_factor
+    )
     return state
 
 
@@ -266,6 +274,10 @@ def _init_ignored_module_states(
         state._ignored_modules,
         ignored_parameters,
     )
+    state._ignored_buffer_names = _get_ignored_buffer_names(
+        module,
+        state._ignored_modules,
+    )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
     # however, FSDP still imposes some semantics on buffers (e.g. buffer mixed
@@ -395,6 +407,9 @@ def _init_core_state(
         torch._C._log_api_usage_once(
             f"torch.distributed.fsdp.mixed_precision.{str(state.mixed_precision)}"
         )
+    state._use_full_prec_in_eval = (
+        os.environ.get(_FSDP_USE_FULL_PREC_IN_EVAL, "") == "1"
+    )
     state.cpu_offload = cpu_offload or CPUOffload()
     state.limit_all_gathers = limit_all_gathers
     state._use_orig_params = use_orig_params
@@ -409,14 +424,12 @@ def _init_core_state(
     )
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handles: Dict[
-        nn.Module, List[FlatParamHandle]
-    ] = collections.defaultdict(list)
-    state._fully_sharded_module_to_handles = _fully_sharded_module_to_handles
+    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
+    state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
-    # handles in `state._handles`
-    _handles: List[FlatParamHandle] = []
-    state._handles = _handles
+    # handles in `state._handle`
+    _handle: FlatParamHandle = None
+    state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
     return state
@@ -433,12 +446,9 @@ def _init_runtime_state(
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
-    state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
-    state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
-    state._hook_registered = False
+    state._comm_hook = None
+    state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[_HandlesKey, bool] = {}
-    state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
 
@@ -450,14 +460,6 @@ def _init_prefetching_state(
 ) -> _FSDPState:
     state.backward_prefetch = backward_prefetch
     state.forward_prefetch = forward_prefetch
-    _handles_prefetched: Dict[_HandlesKey, bool] = {}
-    state._handles_prefetched = _handles_prefetched
-    # Used for guarding against mistargeted backward prefetches
-    _needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
-    state._needs_pre_backward_unshard = _needs_pre_backward_unshard
-    # Used for guarding against mistargeted forward prefetches
-    _needs_pre_forward_unshard: Dict[_HandlesKey, bool] = {}
-    state._needs_pre_forward_unshard = _needs_pre_forward_unshard
     # The data structures use tuples of handles to generalize over the case
     # where a module's forward involves multiple handles.
     return state
@@ -480,11 +482,9 @@ def _init_param_handle_from_module(
     device_id: Optional[Union[int, torch.device]],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
-    module_wrapper_cls: Type,
 ) -> _FSDPState:
     """
     Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
-    This is the module wrapper code path.
     """
     _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
     device_from_device_id = _get_device_from_device_id(device_id, state.rank)
@@ -499,7 +499,7 @@ def _init_param_handle_from_module(
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
-            check_fn=lambda k: not isinstance(k, module_wrapper_cls),
+            check_fn=lambda k: _get_module_fsdp_state(k) is None,
         )
     _move_module_to_device(
         fully_sharded_module, state._ignored_params, device_from_device_id
@@ -517,90 +517,6 @@ def _init_param_handle_from_module(
             fully_sharded_module, managed_params, state.process_group
         )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
-    return state
-
-
-@no_type_check
-def _init_param_handles_from_module(
-    state: _FSDPState,
-    root_module: nn.Module,
-    policy: _FSDPPolicy,
-    device_id: Optional[Union[int, torch.device]],
-    param_init_fn: Optional[Callable[[nn.Module], None]],
-    sync_module_states: bool,
-) -> _FSDPState:
-    """
-    Initializes all ``FlatParamHandle`` s from a module ``root_module``. This
-    is the non-module-wrapper code path. ``root_module`` is guaranteed to be
-    a fully sharded module, and some of its submodules may be as well,
-    depending on ``policy``. See [Note: Fully Sharded Module].
-    """
-    fully_sharded_module_to_states = _get_fully_sharded_module_to_states(
-        root_module,
-        policy,
-        state._ignored_modules,
-        state._ignored_params,
-    )
-    _check_single_device_module(root_module, state._ignored_params, device_id)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
-    # Initialize and shard `FlatParamHandle`s one by one following reverse
-    # depth-first order (i.e. reverse `.modules()` order), which represents a
-    # reverse topological sort order. This avoids increasing peak GPU memory
-    # usage when the unsharded model exists on CPU or meta device.
-    # NOTE: This order differs from that followed by the wrapper path when
-    # using auto wrapping, which also represents a valid reverse topological
-    # sort order, but the difference does not matter.
-    materialized_module = False
-    for fully_sharded_module, (params, buffers) in reversed(
-        fully_sharded_module_to_states.items()
-    ):
-        # Materialize the module if needed
-        is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
-            fully_sharded_module, state._ignored_params, state._ignored_modules
-        )
-        if is_meta_module or is_torchdistX_deferred_init:
-            materialized_module = True
-            # Save the parameter and buffer names to reacquire references after
-            # after materialization since their variables may change
-            param_names, buffer_names = _get_state_names_for_states(
-                fully_sharded_module, params, buffers
-            )
-        if (
-            is_meta_module or is_torchdistX_deferred_init
-        ) and param_init_fn is not None:
-            _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
-        elif is_meta_module:
-            _materialize_meta_module(fully_sharded_module, device_id)
-        elif is_torchdistX_deferred_init:
-            deferred_init.materialize_module(
-                root_module,
-                check_fn=lambda _: True,
-            )
-        if materialized_module:
-            # Reacquire references using the pre-computed state names
-            params = [
-                fully_sharded_module.get_parameter(param_name)
-                for param_name in param_names
-            ]
-            buffers = [
-                fully_sharded_module.get_buffer(buffer_name)
-                for buffer_name in buffer_names
-            ]
-        _move_states_to_device(params, buffers, device_from_device_id)
-        if state.compute_device is None:  # only need to set once
-            state.compute_device = _get_compute_device(
-                fully_sharded_module,
-                state._ignored_params,
-                device_from_device_id,
-                state.rank,
-            )
-        if sync_module_states:
-            _sync_module_states(params, buffers, state.process_group)
-        _init_param_handle_from_params(state, params, fully_sharded_module)
-    # Reverse `_handles` to preserve depth-first `.modules()` order for
-    # consistency with the wrapper path (namely, so that `_get_fsdp_handles()`
-    # returns the same ordering for both paths).
-    state._handles.reverse()
     return state
 
 
@@ -625,52 +541,13 @@ def _init_param_handle_from_params(
         state._use_orig_params,
     )
     handle.shard()
-    assert handle not in state._handles
+    assert not state._handle
     state.params.append(handle.flat_param)
-    state._handles.append(handle)
-    state._fully_sharded_module_to_handles[handle._fully_sharded_module].append(handle)
-    num_fully_sharded_module_handles = len(
-        state._fully_sharded_module_to_handles[handle._fully_sharded_module]
-    )
-    assert num_fully_sharded_module_handles == 1, (
-        "The current design assumes a module manages at most one "
-        f"`FlatParamHandle` but got {num_fully_sharded_module_handles}"
-    )
+    state._handle = handle
+    state._fully_sharded_module_to_handle[handle._fully_sharded_module] = handle
     cpu_device = torch.device("cpu")
     if state.cpu_offload.offload_params and handle.flat_param.device != cpu_device:
         handle.flat_param_to(cpu_device)
-
-
-def _get_state_names_for_states(
-    module: nn.Module,
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-) -> Tuple[List[str], List[str]]:
-    """
-    Returns the parameter and buffer names of the given ``params`` and
-    ``buffers``, where the names are prefixed starting from ``module``. This
-    function assumes that the parameters and buffers are in the module tree.
-    """
-    param_names: List[str] = []
-    buffer_names: List[str] = []
-    param_to_param_name = {
-        param: param_name
-        for param_name, param in _named_parameters_with_duplicates(module)
-    }
-    buffer_to_buffer_name = {
-        buffer: buffer_name for buffer_name, buffer in module.named_buffers()
-    }
-    for param in params:
-        assert (
-            param in param_to_param_name
-        ), f"Parameter not in the module tree:\n{module}\n{param}"
-        param_names.append(param_to_param_name[param])
-    for buffer in buffers:
-        assert (
-            buffer in buffer_to_buffer_name
-        ), f"Buffer not in the module tree:\n{module}\n{buffer}"
-        buffer_names.append(buffer_to_buffer_name[buffer])
-    return param_names, buffer_names
 
 
 def _get_ignored_modules(
@@ -760,6 +637,37 @@ def _get_ignored_params(
             all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
+
+
+def _get_ignored_buffer_names(
+    root_module: torch.nn.Module,
+    ignored_modules: Set[torch.nn.Module],
+) -> Set[str]:
+    """
+    Returns the cleaned buffer FQNs in ``ignored_modules``
+    """
+    all_ignored_buffer_names: Set[str] = set()
+
+    buffers_in_ignored_modules = {
+        buffer for m in ignored_modules for buffer in m.buffers()
+    }
+
+    all_ignored_buffer_names.update(
+        {
+            clean_tensor_name(buffer_name)
+            for buffer_name, buffer in root_module.named_buffers()
+            if buffer in buffers_in_ignored_modules
+        }
+    )
+
+    # Always include nested FSDP modules' ignored buffer names
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
+
+    return all_ignored_buffer_names
 
 
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:

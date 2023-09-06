@@ -346,20 +346,28 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
     ]
     share_qparams_ops = [
         F.adaptive_avg_pool2d,
+        F.elu,
         F.hardtanh,
         F.max_pool2d,
+        F.pad,
         F.relu,
         F.relu6,
         F.leaky_relu,
         F.leaky_relu_,
         torch.nn.AdaptiveAvgPool2d,
+        torch.nn.ConstantPad2d,
+        torch.nn.ELU,
         torch.nn.MaxPool2d,
         torch.nn.ReLU6,
         torch.nn.Hardtanh,
         torch.nn.LeakyReLU,
+        torch.clamp,
         torch.flatten,
         torch.mean,
+        torch.permute,
+        torch.permute_copy,
         torch.squeeze,
+        "clamp",
         "mean",
         "permute",
         "reshape",
@@ -405,6 +413,16 @@ def _get_cat_configs() -> List[BackendPatternConfig]:
     cat_configs = []
     cat_configs.append(
         BackendPatternConfig(torch.cat)
+        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
+        .set_dtype_configs(dtype_configs)
+    )
+    cat_configs.append(
+        BackendPatternConfig(torch.concat)
+        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
+        .set_dtype_configs(dtype_configs)
+    )
+    cat_configs.append(
+        BackendPatternConfig(torch.concatenate)
         .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT)
         .set_dtype_configs(dtype_configs)
     )

@@ -1,81 +1,140 @@
 import itertools
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import List, Tuple
 
 from .. import metrics
-from ..utils import ceildiv, sympy_product
+from ..utils import ceildiv
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_utils import config_of, signature_of
+from .triton_utils import config_of, signature_to_meta
+
+
+@dataclass
+class PartitionState:
+    partitions: List[Tuple]
+    cur_partition: List[Tuple]
+    cur_count: int
+
+    def finalize(self):
+        if self.cur_partition:
+            self.partitions.append(self.cur_partition)
 
 
 class ForeachKernel(Kernel):
     MAX_NUM_ARGS = 250  # number where I would no longer get triton errors
 
     @staticmethod
-    def horizontal_partition(nodes):
-        """Generates a list of list of nodes where each node sublist is
-        guaranteed to not exceed CUDA limits for number of args (read/writes)."""
-        assert len(nodes) >= 1
+    def _update_partition(partition_state, node_rw_count, node_info):
+        if partition_state.cur_count + node_rw_count > ForeachKernel.MAX_NUM_ARGS:
+            partition_state.partitions.append(partition_state.cur_partition)
+            partition_state.cur_partition = [node_info]
+            partition_state.cur_count = node_rw_count
+        else:
+            partition_state.cur_count += node_rw_count
+            partition_state.cur_partition.append(node_info)
 
-        cur_count = 0
-        partitions = []
-        cur_partition = []
-        for node in nodes:
+    @staticmethod
+    def horizontal_partition(subkernel_nodes, triton_scheduling):
+        """Generates a list of lists of node info tuples which consist of (fused_nodes, tiling, numel, rnumel)
+        for each subkernel node where each sublist is guaranteed to not exceed CUDA limits for number of args
+        (read/writes) and to have the same 2D or 1D blocking strategy."""
+        assert len(subkernel_nodes) >= 1
+
+        partition_state_1d = PartitionState([], [], 0)
+        yelem_to_partition_state_2d = defaultdict(lambda: PartitionState([], [], 0))
+
+        for node in subkernel_nodes:
+            fused_nodes = node.get_nodes()
+            _, (numel, rnumel) = max(
+                fused_nodes, key=lambda x: int(x.is_reduction())
+            ).group
+            tiled_groups = triton_scheduling.select_tiling(fused_nodes, numel, rnumel)
+            node_info = fused_nodes, tiled_groups, numel, rnumel
+
             read_writes = node.read_writes
             read_write_count = len(read_writes.reads) + len(read_writes.writes)
-            if cur_count + read_write_count > ForeachKernel.MAX_NUM_ARGS:
-                partitions.append(cur_partition)
-                cur_partition = [node]
-                cur_count = read_write_count
+
+            if tiled_groups[1] == 1:
+                ForeachKernel._update_partition(
+                    partition_state_1d, read_write_count, node_info
+                )
             else:
-                cur_count += read_write_count
-                cur_partition.append(node)
+                y_elem = tiled_groups[0]
+                partition_state_2d = yelem_to_partition_state_2d[y_elem]
+                ForeachKernel._update_partition(
+                    partition_state_2d, read_write_count, node_info
+                )
 
-        if cur_partition:
-            partitions.append(cur_partition)
+        partition_state_1d.finalize()
+        all_partitions = partition_state_1d.partitions
+        for partition_state_2d in yelem_to_partition_state_2d.values():
+            partition_state_2d.finalize()
+            all_partitions.extend(partition_state_2d.partitions)
 
-        return partitions
+        return all_partitions
 
     def __init__(self):
         super().__init__()
-        self.block_size = 1024  # Try tuning this value
+        self.blocking_2d = False
+        self.block_size_1d = 1024  # Try tuning this value
+        self.block_size_2d = 32
         self.num_warps = 8
         self.sub_kernels = []
         self.iter_vars_count = itertools.count()
-        self.block_count = 0
+        self.x_block_count = 0
+        self.y_block_count = 0
+
+    def get_block_size(self):
+        if self.blocking_2d:
+            return self.block_size_2d
+        else:
+            return self.block_size_1d
 
     @staticmethod
-    def _compute_num_blocks(tensor_elem_counts, block_size):
-        num_blocks = 0
-        for count in tensor_elem_counts:
-            num_blocks += ceildiv(count, block_size)
+    def codegen_pid_offsets(code, block_count, lower_bound, prefix):
+        if block_count == 0:
+            code.splice(f"{prefix}pid_offset = {prefix}pid")
+        else:
+            code.splice(f"{prefix}pid_offset = {prefix}pid - {lower_bound}")
 
-        return num_blocks
+    def codegen_pid_range(self, code, x_elems):
+        num_x_blocks = ceildiv(x_elems, self.get_block_size())
+        upper_bound_x_pid = self.x_block_count + num_x_blocks
+        lower_bound_x_pid = self.x_block_count
 
-    def codegen_pid_range(self, code, num_elems):
-        num_blocks = ceildiv(num_elems, self.block_size)
-        upper_bound_pid = self.block_count + num_blocks
-        lower_bound_pid = self.block_count
-        if self.block_count == 0:
+        if self.x_block_count == 0:
             cond = "if"
         else:
             cond = "elif"
-        code.splice(f"{cond} pid >= {lower_bound_pid} and pid < {upper_bound_pid}:")
+
+        x_pid_bounds_check = (
+            f"xpid >= {lower_bound_x_pid} and xpid < {upper_bound_x_pid}"
+        )
+        code.splice(f"{cond} {x_pid_bounds_check}:")
+
         with code.indent():
-            if self.block_count == 0:
-                code.splice("pid_offset = pid")
-            else:
-                code.splice(f"pid_offset = pid - {lower_bound_pid}")
-        self.block_count += num_blocks
+            ForeachKernel.codegen_pid_offsets(
+                code, num_x_blocks, lower_bound_x_pid, "x"
+            )
+            self.x_block_count += num_x_blocks
 
     def create_sub_kernel(self, *groups, index_dtype, mutations, reduction_hint):
         sub_kernel = TritonKernel(
             *groups,
             index_dtype=index_dtype,
             mutations=mutations,
-            pid_cache={"tl.program_id(0)": "pid_offset"},
+            pid_cache={
+                "tl.program_id(0)": "xpid_offset",
+                "tl.program_id(1)": "ypid",
+            },
             reduction_hint=reduction_hint,
         )
+        if self.blocking_2d:
+            assert len(groups) == 3
+
+        self.blocking_2d |= groups[1] != 1 and len(groups) == 3
         metrics.generated_kernel_count -= 1
         sub_kernel.args = self.args
         sub_kernel.iter_vars_count = self.iter_vars_count
@@ -84,10 +143,13 @@ class ForeachKernel(Kernel):
         return sub_kernel
 
     def jit_line(self):
+        can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
+        index_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": dict(enumerate(map(signature_of, signature))),
+            "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
             "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -98,8 +160,10 @@ class ForeachKernel(Kernel):
 
     def grid(self):
         return (
-            self.block_count,
-            1,
+            self.x_block_count,
+            ceildiv(int(self.sub_kernels[0].numels[0]), self.block_size_2d)
+            if self.blocking_2d
+            else 1,
             1,
         )
 
@@ -120,14 +184,26 @@ class ForeachKernel(Kernel):
         code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
 
         with code.indent():
-            code.splice("pid = tl.program_id(0)")
-            code.splice(f"XBLOCK: tl.constexpr = {self.block_size}")
+            code.splice("xpid = tl.program_id(0)")
+            if self.blocking_2d:
+                code.splice("ypid = tl.program_id(1)")
+                code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
+                code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
+            else:
+                code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
 
             for sub_kernel in self.sub_kernels:
-                num_elems = int(sympy_product(sub_kernel.numels))
-                self.codegen_pid_range(code, num_elems)
+                assert len(sub_kernel.numels) <= 3
+                # TODO mlazos: support dynamic shapes
+                numel_ind = 0 if not self.blocking_2d else 1
+                self.codegen_pid_range(code, int(sub_kernel.numels[numel_ind]))
                 with code.indent():
-                    code.splice(f"xnumel = {num_elems}")
+                    if self.blocking_2d:
+                        code.splice(f"ynumel = {sub_kernel.numels[0]}")
+                        code.splice(f"xnumel = {sub_kernel.numels[1]}")
+                    else:
+                        code.splice(f"xnumel = {sub_kernel.numels[0]}")
+
                     sub_kernel.codegen_body()
                     code.splice(sub_kernel.body)
 

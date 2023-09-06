@@ -33,6 +33,7 @@ set_bool(AT_BLAS_USE_CBLAS_DOT BLAS_USE_CBLAS_DOT)
 set_bool(AT_MAGMA_ENABLED USE_MAGMA)
 set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
 set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
+set_bool(AT_CUSPARSELT_ENABLED CAFFE2_USE_CUSPARSELT)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
@@ -159,6 +160,7 @@ file(GLOB native_utils_cpp "native/utils/*.cpp")
 
 # flash_attention sources
 file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
+file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
 #Mem_eff attention sources
@@ -168,8 +170,11 @@ file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention
 
 if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_cu})
+  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
+endif()
 
+if(USE_MEM_EFF_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_cu})
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${mem_eff_attention_cuda_cpp})
@@ -498,11 +503,6 @@ endif()
       endif($ENV{TH_BINARY_BUILD})
     endif(MSVC)
   endif(USE_MAGMA)
-
-# NB: We're relying on cmake/Dependencies.cmake to appropriately setup HIP dependencies.
-# In principle we could duplicate them, but handling the rocblas
-# dependency is nontrivial.  So better not to copy-paste.
-# Look for Note [rocblas cmake bug]
 
 # Include CPU paths for CUDA/HIP as well
 list(APPEND ATen_CUDA_INCLUDE ${ATen_CPU_INCLUDE})

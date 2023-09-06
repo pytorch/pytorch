@@ -18,23 +18,23 @@ concurrency:
 
 jobs:
   # Build PyTorch with BUILD_CAFFE2=ON
-  caffe2-linux-focal-py3_8-gcc7-build:
-    name: caffe2-linux-focal-py3.8-gcc7
+  caffe2-linux-jammy-py3_8-gcc11-build:
+    name: caffe2-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: caffe2-linux-focal-py3.8-gcc7
-      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      build-environment: caffe2-linux-jammy-py3.8-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-build:
-    name: linux-bionic-cuda12.1-py3.10-gcc9
+  linux-focal-cuda12_1-py3_10-gcc9-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       test-matrix: |
         { include: [
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -42,35 +42,35 @@ jobs:
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-bionic-cuda12_1-py3_10-gcc9-test:
-    name: linux-bionic-cuda12.1-py3.10-gcc9
+  linux-focal-cuda12_1-py3_10-gcc9-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda12_1-py3_10-gcc9-build
+    needs: linux-focal-cuda12_1-py3_10-gcc9-build
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9
-      docker-image: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
 
-  libtorch-linux-bionic-cuda12_1-py3_7-gcc9-debug-build:
-    name: libtorch-linux-bionic-cuda12.1-py3.7-gcc9-debug
+  libtorch-linux-focal-cuda12_1-py3_7-gcc9-debug-build:
+    name: libtorch-linux-focal-cuda12.1-py3.7-gcc9-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: libtorch-linux-bionic-cuda11.8-py3.7-gcc9
-      docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc9
+      build-environment: libtorch-linux-focal-cuda12.1-py3.7-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       build-generates-artifacts: false
-      runner: linux.2xlarge
+      runner: linux.4xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-bionic-cuda12_1-py3_10-gcc9-no-ops-build:
-    name: linux-bionic-cuda12.1-py3.10-gcc9-no-ops
+  linux-focal-cuda12_1-py3_10-gcc9-no-ops-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda12.1-py3.10-gcc9-no-ops
-      docker-image-name: pytorch-linux-bionic-cuda12.1-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-no-ops
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -175,11 +175,12 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" },
         ]}
 
-  linux-focal-rocm5_4_2-py3_8-build:
-    name: linux-focal-rocm5.4.2-py3.8
+  linux-focal-rocm5_6-py3_8-build:
+    if: github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')
+    name: linux-focal-rocm5.6-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.4.2-py3.8
+      build-environment: linux-focal-rocm5.6-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
@@ -189,14 +190,11 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-focal-rocm5_4_2-py3_8-test:
-    name: linux-focal-rocm5.4.2-py3.8
+  linux-focal-rocm5_6-py3_8-test:
+    name: linux-focal-rocm5.6-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_4_2-py3_8-build
+    needs: linux-focal-rocm5_6-py3_8-build
     with:
-      build-environment: linux-focal-rocm5.4.2-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.test-matrix }}
-    secrets:
-      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+      build-environment: linux-focal-rocm5.6-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_6-py3_8-build.outputs.test-matrix }}
