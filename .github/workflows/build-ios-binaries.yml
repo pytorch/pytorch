@@ -70,6 +70,6 @@ jobs:
             use_lite_interpreter: ${{ inputs.use_lite_interpreter || 1 }},
             use_metal: ${{ inputs.use_metal || 1 }},
             use_coreml: ${{ inputs.use_coreml || 1 }},
-            use_custom_op_list: ${{ inputs.use_custom_op_list || "" }}
+            use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
           }
         ]}
