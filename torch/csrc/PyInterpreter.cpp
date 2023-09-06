@@ -544,6 +544,27 @@ c10::Device ConcretePyInterpreterVTable::device(
   return toDevice(out.ptr());
 }
 
+// Note [Tensor Subclass custom size/stride caching strategy]
+// Tensor subclasses can use __torch_dispatch__ to override size/stride calls.
+// However, this presents a problem:
+// (1) When you return a custom (maybe symbolic) size/stride
+//     from python, we need to stash this fresh vector of ints/symints
+//     somewhere so that it has the same lifetime as the tensor.
+// (2) If the subclass experiences a metadata mutation,
+//     this stashed vector is no longer valid, so we need to allocate a fresh
+//     buffer to store the new sizes the next time someone asks for them.
+//
+// We handle this in two parts:
+// (1) We expect the subclass to store an attribute, `metadata_mutation_ctr`,
+// indicating
+//     how many times the tensor went through a metadata mutation
+//     (if the subclass does not do this then they will not handle metadata
+//     mutations)
+// (2) Whenever a user asks for a size, we check to see if a value is cached on
+//     getattr(t, f'_sym_size_buffer{metadata_mutation_ctr}'),
+//     and if not, we set it directly.
+//     When we set it, we also store the current number of dimensions at
+//     getattr(t, f'_sym_size_buffer{metadata_mutation_ctr}_len')
 static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
@@ -553,6 +574,238 @@ static void set_tensor_attr_with_capsule(
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   py::handle(mb_obj.value()).attr(attr_name) = capsule;
+}
+
+static c10::optional<c10::SymIntArrayRef> maybe_get_cached_sym_attr(
+    const c10::TensorImpl* tensor,
+    const char* sym_attr_name) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  if (py::hasattr(mb_obj.value(), sym_attr_name)) {
+    auto out = py::handle(mb_obj.value()).attr(sym_attr_name);
+    void* out_pycapsule = PyCapsule_GetPointer(out.ptr(), nullptr);
+    auto out_symint = reinterpret_cast<c10::SymInt*>(out_pycapsule);
+    // See Note [Tensor Subclass custom size/stride caching strategy]
+    auto size_len_attr_name = std::string(sym_attr_name) + std::string("_len");
+    TORCH_INTERNAL_ASSERT(
+        py::hasattr(mb_obj.value(), size_len_attr_name.c_str()));
+    auto len = py::cast<int64_t>(
+        py::handle(mb_obj.value()).attr(size_len_attr_name.c_str()));
+    return c10::SymIntArrayRef(out_symint, len);
+  }
+  return c10::nullopt;
+}
+
+static c10::optional<c10::IntArrayRef> maybe_get_cached_attr(
+    const c10::TensorImpl* tensor,
+    const char* attr_name) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  if (py::hasattr(mb_obj.value(), attr_name)) {
+    auto out = py::handle(mb_obj.value()).attr(attr_name);
+    void* out_pycapsule = PyCapsule_GetPointer(out.ptr(), nullptr);
+    auto out_int = reinterpret_cast<int64_t*>(out_pycapsule);
+    // See Note [Tensor Subclass custom size/stride caching strategy]
+    auto size_len_attr_name = std::string(attr_name) + std::string("_len");
+    TORCH_INTERNAL_ASSERT(
+        py::hasattr(mb_obj.value(), size_len_attr_name.c_str()));
+    auto len = py::cast<int64_t>(
+        py::handle(mb_obj.value()).attr(size_len_attr_name.c_str()));
+    return c10::IntArrayRef(out_int, len);
+  }
+  return c10::nullopt;
+}
+
+// See Note [Tensor Subclass custom size/stride caching strategy]
+// Given a base attribute name like _sym_size or _sym_stride,
+// This function reads off the tensor for an optional metadata_mutation_ctr
+// attr, Which indicates how many times the tensor's metadata has been mutated.
+// We return an actual attribute name, e.g. `_sym_size4`, indicating
+// the name of the attribute where the current set of sizes should be stored on
+// the tensor.
+static c10::SymIntArrayRef get_set_cached_sym_attr(
+    const c10::TensorImpl* tensor,
+    const char* base_attr_name,
+    py::object obj) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  //  auto _size_stride_counter = 0;
+  //  auto _size_stride_counter_buffer_name = "_size_stride_counter";
+  //  if (py::hasattr(mb_obj.value(), _size_stride_counter_buffer_name)) {
+  //    auto out = py::handle(mb_obj.value()).attr(attr_name);
+  //    _size_stride_counter = py::cast<int64_t>(out);
+  //  }
+  //  auto curr_buffer_attr = std::string(base_attr_name) +
+  //  std::to_string(_size_stride_counter); auto curr_buffer_capacity_attr =
+  //  std::string(base_attr_name) + std::to_string(_size_stride_counter) +
+  //  std::string("_capacity"); auto curr_buffer_len_attr =
+  //  std::string(base_attr_name) + std::to_string(_size_stride_counter) +
+  //  std::string("_len");
+  //
+  //  // Check to see if the current buffer exists (by checking if its
+  //  corresponding len buffer exists) int64_t curr_buffer_capacity = -1; if
+  //  (py::hasattr(mb_obj.value(), curr_buffer_capacity_attr.c_str())) {
+  //    auto curr_buffer_capacity_pyobj =
+  //    py::handle(mb_obj.value()).attr(curr_buffer_capacity_attr.c_str());
+  //    curr_buffer_capacity = static_cast<int64_t>(curr_buffer_capacity_pyobj);
+  //  }
+  //
+  //  // We will allocate a fresh buffer if either:
+  //  // (a) a buffer doesn't already exist
+  //  // (b) the existing buffer is too small
+  //  int64_t new_buffer_len = py::len(out);
+  //  if (curr_buffer_capacity < new_buffer_len) {
+  //      // Case 1: Need to allocate a fresh buffer.
+  //      // This is to faithfully replicate the TensorImpl::sizes() behavior:
+  //      // we allocate a SmallVector that starts out with 5 elements
+  //      auto updated_buffer_capacity = std::max(new_len, 5);
+  //      c10::SymInt* ptr = new c10::SymInt[updated_buffer_capacity];
+  //      auto capsule = py::capsule(
+  //          ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
+  //      int64_t idx = 0;
+  //      for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
+  //        ptr[idx] = py::cast<c10::SymInt>(*it);
+  //      }
+  //      // Set the buffer
+  //      set_tensor_attr_with_capsule(self, capsule, curr_buffer_attr.c_str());
+  //      // Set the len buffer
+  //      py::handle(mb_obj.value()).attr(len_attr_name.c_str()) =
+  //      new_buffer_len;
+  //      // Set the capacity buffer
+  //      py::handle(mb_obj.value()).attr(capacity.c_str()) = updated;
+  //      // Set the "version"
+  //      _size_stride_counter += 1;
+  //      py::handle(mb_obj.value()).attr(_size_stride_counter_buffer_name) =
+  //      _size_stride_counter;
+  //  } else {
+  //      // Case 2: Buffer already exists (and is the right size).
+  //      // We still need to fill in the buffer though, in case our values are
+  //      stale.
+  //  }
+  auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
+
+  int64_t curr_buffer_size = -1;
+  if (PyObject_HasAttrString(mb_obj.value(), buffer_len_attr_name.c_str())) {
+    auto buffer_pyobj =
+        py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str());
+    int64_t buffer_len = py::cast<int64_t>(buffer_pyobj);
+  }
+
+  int64_t new_buffer_len = py::len(obj);
+  if (curr_buffer_size != new_buffer_len) {
+    // If our current buffer is not the right size (eithr because we haven't
+    // allocated it yet, or there was a metadata mutation that changed the
+    // number of dims of the tensor), allocate a fresh buffer. Note that this
+    // will trash the previous buffer if there already was one, invalidating any
+    // existing SymIntArrayRef's from an old .sym_size() call.
+    c10::SymInt* ptr = new c10::SymInt[new_buffer_len];
+    auto capsule = py::capsule(
+        ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
+    int64_t idx = 0;
+    for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
+      ptr[idx] = py::cast<c10::SymInt>(*it);
+    }
+    // Set the buffer
+    set_tensor_attr_with_capsule(tensor, capsule, base_attr_name);
+    // Set the len buffer
+    py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str()) =
+        new_buffer_len;
+  } else {
+    auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
+    void* buffer_pycapsule =
+        PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
+    auto curr_buffer = reinterpret_cast<c10::SymInt*>(buffer_pycapsule);
+
+    // Overwrite the buffer with our new values, but only if any of them changed
+    // (due to a metadata mutation).
+    // This is technically not thread safe (maybe we should put the GIL here?),
+    // but *only* if we actually have to update, which only happens if there's a
+    // metadata mutation.
+    int64_t idx = 0;
+    for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
+      auto actual_val = py::cast<c10::SymInt>(*it);
+      if (curr_buffer[idx] != actual_val) {
+        curr_buffer[idx] = actual_val;
+      }
+    }
+  }
+
+  // The correct data is now stored at the buffer - read and return it.
+  auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
+  void* buffer_pycapsule =
+      PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
+  auto curr_buffer = reinterpret_cast<c10::SymInt*>(buffer_pycapsule);
+  return c10::SymIntArrayRef(curr_buffer, new_buffer_len);
+}
+
+static c10::IntArrayRef get_set_cached_attr(
+    const c10::TensorImpl* tensor,
+    const char* base_attr_name,
+    py::object obj) {
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
+
+  int64_t curr_buffer_size = -1;
+  if (PyObject_HasAttrString(mb_obj.value(), buffer_len_attr_name.c_str())) {
+    auto buffer_pyobj =
+        py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str());
+    int64_t buffer_len = py::cast<int64_t>(buffer_pyobj);
+  }
+
+  int64_t new_buffer_len = py::len(obj);
+  if (curr_buffer_size != new_buffer_len) {
+    // If our current buffer is not the right size (eithr because we haven't
+    // allocated it yet, or there was a metadata mutation that changed the
+    // number of dims of the tensor), allocate a fresh buffer. Note that this
+    // will trash the previous buffer if there already was one, invalidating any
+    // existing SymIntArrayRef's from an old .sym_size() call.
+    int64_t* ptr = new int64_t[new_buffer_len];
+    auto capsule = py::capsule(
+        ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
+    int64_t idx = 0;
+    for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
+      ptr[idx] = py::cast<int64_t>(*it);
+    }
+    // Set the buffer
+    set_tensor_attr_with_capsule(tensor, capsule, base_attr_name);
+    // Set the len buffer
+    py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str()) =
+        new_buffer_len;
+  } else {
+    auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
+    void* buffer_pycapsule =
+        PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
+    auto curr_buffer = reinterpret_cast<int64_t*>(buffer_pycapsule);
+
+    // Overwrite the buffer with our new values, but only if any of them changed
+    // (due to a metadata mutation).
+    // This is technically not thread safe (maybe we should put the GIL here?),
+    // but *only* if we actually have to update, which only happens if there's a
+    // metadata mutation.
+    int64_t idx = 0;
+    for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
+      auto actual_val = py::cast<int64_t>(*it);
+      if (curr_buffer[idx] != actual_val) {
+        curr_buffer[idx] = actual_val;
+      }
+    }
+  }
+
+  // The correct data is now stored at the buffer - read and return it.
+  auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
+  void* buffer_pycapsule =
+      PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
+  auto curr_buffer = reinterpret_cast<int64_t*>(buffer_pycapsule);
+  return c10::IntArrayRef(curr_buffer, curr_buffer_size);
 }
 
 c10::IntArrayRef ConcretePyInterpreterVTable::strides(
@@ -580,17 +833,8 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "strides must be a list or a tuple");
-
-  size_t len = py::len(out);
-  int64_t* ptr = new int64_t[len];
-  auto capsule =
-      py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
-  int64_t idx = 0;
-  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
-    ptr[idx] = py::cast<int64_t>(*it);
-  }
-  set_tensor_attr_with_capsule(self, capsule, "_sizes_capsule");
-  return c10::IntArrayRef(ptr, len);
+  auto updated_strides = get_set_cached_attr(self, "_strides_capsule", out);
+  return updated_strides;
 }
 
 c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
@@ -617,16 +861,9 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "sizes must be a list or a tuple");
-  size_t len = py::len(out);
-  int64_t* ptr = new int64_t[len];
-  auto capsule =
-      py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<int64_t*>(p); });
-  int64_t idx = 0;
-  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
-    ptr[idx] = py::cast<int64_t>(*it);
-  }
-  set_tensor_attr_with_capsule(self, capsule, "_sizes_capsule");
-  return c10::IntArrayRef(ptr, len);
+
+  auto updated_sizes = get_set_cached_attr(self, "_sizes_capsule", out);
+  return updated_sizes;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -652,16 +889,11 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "sym_size must be a list or a tuple");
-  size_t len = py::len(out);
-  c10::SymInt* ptr = new c10::SymInt[len];
-  auto capsule = py::capsule(
-      ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
-  int64_t idx = 0;
-  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
-    ptr[idx] = py::cast<c10::SymInt>(*it);
-  }
-  set_tensor_attr_with_capsule(self, capsule, "_sym_sizes_capsule");
-  return c10::SymIntArrayRef(ptr, len);
+
+  // See Note [Tensor Subclass custom size/stride caching strategy]
+  auto updated_sym_sizes =
+      get_set_cached_sym_attr(self, "_sym_sizes_capsule", out);
+  return updated_sym_sizes;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -760,16 +992,10 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
   TORCH_CHECK(
       py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
       "sym_strides must be a list or a tuple");
-  size_t len = py::len(out);
-  c10::SymInt* ptr = new c10::SymInt[len];
-  auto capsule = py::capsule(
-      ptr, [](void* p) { delete[] reinterpret_cast<c10::SymInt*>(p); });
-  int64_t idx = 0;
-  for (auto it = out.begin(); it != out.end(); ++it, ++idx) {
-    ptr[idx] = py::cast<c10::SymInt>(*it);
-  }
-  set_tensor_attr_with_capsule(self, capsule, "_sym_strides_capsule");
-  return c10::SymIntArrayRef(ptr, len);
+
+  auto updated_sym_strides =
+      get_set_cached_sym_attr(self, "_sym_strides_capsule", out);
+  return updated_sym_strides;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
