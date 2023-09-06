@@ -463,103 +463,66 @@ class ExportedProgram:
             }
             return range_constraints
 
-        def get_output_node_names(gm):
-            output_node = list(gm.graph.nodes)[-1]
-            assert output_node.op == "output"
-
-            return [str(arg) for arg in output_node.args[0]]
-
-        def get_input_node_names(gm):
-            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
-
-        def _generate_new_graph_signature(old_ep, new_gm):
+        def _get_updated_graph_signature(
+            old_signature: ExportGraphSignature,
+            new_gm: torch.fx.GraphModule,
+        ) -> ExportGraphSignature:
             """
-            Update graph_signature according to graph after transformation.
-            Transformations can lead to node name changes, which are used in
-            graph_signature to identify inputs and outputs. Therefore, after each
-            transformation, we need to update the graph_signature according to
-            new node names.
-
-            WARNING: This implementation makes a few assumptions
-                - The transformation doesn't change number of inputs/outputs
-                - Each input/output still has the same meaning.
-                    - For inputs, that means that the inputs in transformed
-                        graph map to the same lifted parameter/buffer or user
-                        input as the input of the same position in the graph
-                        before transformation.
-                    - Similarly for outputs, each output should correspond to the
-                        same mutated buffer or user output as the output value of
-                        the same position  in the graph before transformation.
-
-            It is difficult to programatically validate these assumptions, but they
-            should hold true most of the time as inputs/outputs of the graph rarely
-            need to be changed.
+            Update the graph signature's user_input/user_outputs.
             """
-            old_signature = old_ep.graph_signature
-            old_gm = old_ep.graph_module
-
-            old_graph_input_node_names = get_input_node_names(old_gm)
-            new_graph_input_node_names = get_input_node_names(new_gm)
-            assert len(old_graph_input_node_names) == len(
-                new_graph_input_node_names
-            ), f"""
-                Number of input nodes changed from {len(old_graph_input_node_names)}
-                to {len(new_graph_input_node_names)} after transformation. This
-                transformation is currently not supported.
-                """
-
-            old_graph_output_node_names = get_output_node_names(old_gm)
-            new_graph_output_node_names = get_output_node_names(new_gm)
-            assert len(old_graph_output_node_names) == len(
-                new_graph_output_node_names
-            ), f"""
-                Number of output values changed from {len(old_graph_output_node_names)}
-                to {len(new_graph_output_node_names)} after transformation. This
-                transformation is currently not supported.
-                """
-
-            node_names_mapping = dict(
-                zip(
-                    old_graph_input_node_names + old_graph_output_node_names,
-                    new_graph_input_node_names + new_graph_output_node_names,
-                )
+            new_graph_inputs = [
+                node.name for node in new_gm.graph.nodes if node.op == "placeholder"
+            ]
+            num_inputs = (
+                len(old_signature.parameters)
+                + len(old_signature.buffers)
+                + len(old_signature.user_inputs)
             )
 
-            new_signature = copy.deepcopy(old_signature)
-            new_signature.user_inputs = [
-                node_names_mapping[old_user_input]
-                for old_user_input in old_signature.user_inputs
+            assert len(new_graph_inputs) == num_inputs, (
+                f"Number of input nodes changed from {len(new_graph_inputs)} "
+                f"to {num_inputs} after transformation. This transformation "
+                "is currently not supported."
+            )
+            new_parameter_inputs = new_graph_inputs[: len(old_signature.parameters)]
+            num_param_buffers = len(old_signature.buffers) + len(
+                old_signature.parameters
+            )
+            new_buffer_inputs = new_graph_inputs[
+                len(old_signature.parameters) : num_param_buffers
             ]
-            new_signature.user_outputs = [
-                node_names_mapping[old_user_output]
-                for old_user_output in old_signature.user_outputs
-            ]
-            new_signature.inputs_to_parameters = {
-                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[
-                    old_input_name
-                ]
-                for old_input_name in old_signature.inputs_to_parameters.keys()
-            }
-            new_signature.inputs_to_buffers = {
-                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[
-                    old_input_name
-                ]
-                for old_input_name in old_signature.inputs_to_buffers.keys()
-            }
-            new_signature.buffers_to_mutate = {
-                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[
-                    old_output_name
-                ]
-                for old_output_name in old_signature.buffers_to_mutate.keys()
-            }
-            return new_signature
+            new_user_inputs = new_graph_inputs[num_param_buffers:]
 
-        new_graph_signature = _generate_new_graph_signature(self, transformed_gm)
+            output_node = list(new_gm.graph.nodes)[-1]
+            assert output_node.op == "output"
+            new_graph_outputs = [arg.name for arg in output_node.args[0]]
+
+            assert len(new_graph_outputs) == len(old_signature.buffers_to_mutate) + len(
+                old_signature.user_outputs
+            ), (
+                f"Number of output nodes changed from {len(new_graph_outputs)} "
+                f"to {len(old_signature.buffers_to_mutate) + len(old_signature.user_outputs)} "
+                "after transformation. This transformation is currently not supported."
+            )
+            new_user_outputs = new_graph_outputs[len(old_signature.buffers_to_mutate) :]
+
+            new_signature = ExportGraphSignature(
+                copy.deepcopy(old_signature.parameters),
+                copy.deepcopy(old_signature.buffers),
+                new_user_inputs,
+                new_user_outputs,
+                copy.deepcopy(old_signature.inputs_to_parameters),
+                copy.deepcopy(old_signature.inputs_to_buffers),
+                copy.deepcopy(old_signature.buffers_to_mutate),
+                copy.deepcopy(old_signature.backward_signature),
+                copy.deepcopy(old_signature.assertion_dep_token),
+            )
+            return new_signature
 
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            new_graph_signature,
+            _get_updated_graph_signature(self.graph_signature, transformed_gm),
             copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),
