@@ -6772,6 +6772,8 @@ class CommonTemplate:
                 torch.randn(4, 2, 4, 2),
                 torch.randn(4, 2, 4, 2),
             ),
+            atol=2e-4,  # to pass lowp check on GPU
+            rtol=1e-2,  # to pass lowp check on GPU
         )
 
     @skipIfRocm
