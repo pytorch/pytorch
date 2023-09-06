@@ -323,11 +323,7 @@ def geomspace(
     base = math.exp(logbase)
 
     return torch.logspace(
-        math.log(start) / logbase,
-        math.log(stop) / logbase,
-        num,
-        base=base,
-        dtype=dtype
+        math.log(start) / logbase, math.log(stop) / logbase, num, base=base, dtype=dtype
     )
 
 
