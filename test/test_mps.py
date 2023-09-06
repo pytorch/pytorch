@@ -60,6 +60,15 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
+        # not implemented on mps, but forward passes
+        'igamma': None,
+        'igammac': None,
+
+        # precision issues
+        'digamma': [torch.float32],
+        'special.polygammaspecial_polygamma_n_0': [torch.float16],
+        'polygammapolygamma_n_0': [torch.float16],
+
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
@@ -366,6 +375,20 @@ def mps_ops_modifier(ops):
         # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
         # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+
+        # Failure due to precision issues as well as non-standard behavior of cpu ops for the
+        # negative integers. Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
+        # - CPU output: tensor([102.668, 1.129e+15])
+        # - MPS output: tensor([102.6681, inf])
+        # In the latter case, inf is probably correct (this is what scipy does).
+        'polygamma': [torch.float32, torch.uint8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
     }
 
     # Those ops are not expected to work
@@ -418,8 +441,8 @@ def mps_ops_modifier(ops):
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
         'i0': None,
-        'igamma': None,
-        'igammac': None,
+        # 'igamma': None, # grad not implemented
+        # 'igammac': None, # grad not implemented
         'index_copy': None,
         'index_reduce': None,
         'isin': None,

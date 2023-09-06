@@ -29,18 +29,12 @@ static const char* GAMMA_OPS_TEMPLATE = R"METAL(
 using namespace metal;
 
 constant float EULER_MASCHERONI = 0.577215664901532860606512090;
-
 constant float HALF_LOG_TWO_PI = 0.91893853320467274178032973640562;
-
 constant float LOG_PI = 1.14472988584940017414342735135305;
-
 // More accurate than metal's M_PI_F and tanpi()
 constant float PI = 3.14159265358979323846264338327;
-
 constant float PI_SQUARED = 9.86960440108935861883449099987615;
-
 constant float MACHEP = 1.11022302462515654042E-16;
-
 constant float PSI_10 = 2.25175258906672110764;
 
 constant float DIGAMMA_COEF[7] =
@@ -60,13 +54,13 @@ constant float ZETA_EXPANSION[] = {{
       30240.0,
       -1209600.0,
       47900160.0,
-      -1.8924375803183791606e9, /*1.307674368e12/691*/
+      -1.8924375803183791606e9,
       7.47242496e10,
-      -2.950130727918164224e12, /*1.067062284288e16/3617*/
-      1.1646782814350067249e14, /*5.109094217170944e18/43867*/
-      -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
-      1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
-      -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
+      -2.950130727918164224e12,
+      1.1646782814350067249e14,
+      -4.5979787224074726105e15,
+      1.8152105401943546773e17,
+      -7.1661652561756670113e18
   }};
 
 // numerator coefficients for gamma approximation over the interval (1,2)
@@ -247,17 +241,49 @@ float calc_digamma_positive_domain(float x) {{
     return result + log(x) - (0.5 / x) - y;
 }}
 
-float calc_zeta(float x, float q) {{
 
-  if (x == 1) {{
+float calc_trigamma(float x) {{
+
+  float sign = 1.0f;
+  float result = 0.0f;
+
+  if (x < 0.0f) {{
+    sign = -1.0f;
+    float sin_pi_x = sin(PI * x);
+    result -= (PI_SQUARED) / (sin_pi_x * sin_pi_x);
+    x = 1.0f - x;
+  }}
+
+  else if (x == 0.0f) {{
     return INFINITY;
   }}
 
-  if (x < 1) {{
+  else if (x < 1.0f) {{
+    result += 1.0f / (x * x);
+    x += 1.0f;
+  }}
+
+  for (int i = 0; i < 6; ++i) {{
+    result += 1.0f / (x * x);
+    x += 1.0f;
+  }}
+
+  const float ixx = 1.0f / (x * x);
+  result += (1.0f + 1.0f / (2.0f * x) + ixx * ( (1.0f / 6.0f) - ixx * ( (1.0f / 30.0f) - ixx * (1.0f / 42.0f)))) / x;
+  return sign * result;
+}}
+
+float calc_zeta(float x, float q) {{
+
+  if (x == 1.0f) {{
+    return INFINITY;
+  }}
+
+  if (x < 1.0f) {{
     return NAN;
   }}
 
-  if (q <= 0) {{
+  if (q <= 0.0f) {{
     if (q == trunc(q)) {{
       return INFINITY;
     }}
@@ -269,10 +295,10 @@ float calc_zeta(float x, float q) {{
   float s = pow(q, -x);
   float a = q;
   int i = 0;
-  float b = 0.0;
-  while ((i < 9) || (a <= 9.0)) {{
+  float b = 0.0f;
+  while ((i < 9) || (a <= 9.0f)) {{
     i += 1;
-    a += 1;
+    a += 1.0f;
     b = pow(a, -x);
     s += b;
     if ((-MACHEP * s < b) && (b < MACHEP * s)) {{
@@ -281,11 +307,11 @@ float calc_zeta(float x, float q) {{
   }};
 
   float w = a;
-  s += b * w / (x - 1.0);
-  s -= 0.5 * b;
-  a = 1.0;
+  s += b * w / (x - 1.0f);
+  s -= 0.5f * b;
+  a = 1.0f;
   float t;
-  float k = 0.0;
+  float k = 0.0f;
   for (int i = 0; i < 12; i++) {{
     a *= x + k;
     b /= w;
@@ -295,57 +321,28 @@ float calc_zeta(float x, float q) {{
     if (t < MACHEP) {{
       return s;
     }}
-    k += 1.0;
+    k += 1.0f;
     a *= x + k;
     b /= w;
-    k += 1.0;
+    k += 1.0f;
   }}
   return s;
 }}
 
-float calc_trigamma(float x) {{
-  float sign = +1;
-  float result = 0;
-  if (x < 0.5) {{
-    sign = -1;
-    float sin_pi_x = sin(PI * x);
-    result -= (PI_SQUARED) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }}
-  for (int i = 0; i < 6; ++i) {{
-    result += 1 / (x * x);
-    x += 1;
-  }}
-  const float ixx = 1 / (x * x);
-  result += (1 + 1 / (2 * x) + ixx * ( (1 / 6) - ixx * ( (1 / 3) - ixx * (1 / 42)))) / x;
-  return sign * result;
-}}
-
-kernel void trigamma(device {0} *input [[buffer(0)]],
-                     device {1} *output [[buffer(1)]],
-                     uint id [[thread_position_in_grid]])
+kernel void lgamma(device {0} *input [[buffer(0)]],
+                   device {1} *output [[buffer(1)]],
+                   uint id [[thread_position_in_grid]])
 {{
-    float x = input[id];
-    output[id] = calc_trigamma(x);
+    output[id] = LogGamma(static_cast<float>(input[id]));
 }}
 
-kernel void polygamma(device {0} *input [[buffer(0)]],
-                     device {1} *output [[buffer(1)]],
-                     constant int64_t& order [[buffer(2)]],
-                     uint id [[thread_position_in_grid]]) {{
-  // already blocked if n <= 1
-  float x = input[id];
-  float n = order;
-  float sgn = ((order % 2) ? 1 : -1);
-  output[id] = sgn * Gamma(n + 1) * calc_zeta(n + 1, x);
-}}
 
 kernel void digamma (device {0} *input [[buffer(0)]],
                     device {1} *output [[buffer(1)]],
                     uint id [[thread_position_in_grid]])
 {{
     float x = input[id];
-    if (x < 0) {{
+    if (x < 0.0f) {{
         if (x == trunc(x)) {{
             // As per C++ standard for gamma related functions and SciPy,
             // If the argument is a negative integer, NaN is returned
@@ -357,10 +354,10 @@ kernel void digamma (device {0} *input [[buffer(0)]],
             // since both x and r are in radians and tan() has a periodicity of pi, in practice
             // the computation of pi * x is a source of error (when |x| > 1).
             float r = fract(x);
-            output[id] = calc_digamma_positive_domain(1 - x) - PI / tan(PI * r);
+            output[id] = calc_digamma_positive_domain(1.0f - x) - PI / tan(PI * r);
         }}
     }}
-    else if (x == 0) {{
+    else if (x == 0.0f) {{
         // As per C++ standard for gamma related functions and SciPy,
         // If the argument is ±0, ±∞ is returned
         output[id] = copysign(INFINITY, -x);
@@ -370,13 +367,26 @@ kernel void digamma (device {0} *input [[buffer(0)]],
     }}
 }}
 
-kernel void lgamma(device {0} *input [[buffer(0)]],
-                   device {1} *output [[buffer(1)]],
-                   uint id [[thread_position_in_grid]])
+
+kernel void trigamma(device {0} *input [[buffer(0)]],
+                     device {1} *output [[buffer(1)]],
+                     uint id [[thread_position_in_grid]])
 {{
-    output[id] = LogGamma(static_cast<float>(input[id]));
+    float x = input[id];
+    output[id] = calc_trigamma(x);
 }}
 
+
+kernel void polygamma(device {0} *input [[buffer(0)]],
+                     device {1} *output [[buffer(1)]],
+                     constant int64_t& order [[buffer(2)]],
+                     uint id [[thread_position_in_grid]]) {{
+  // already blocked if n <= 1
+  float x = input[id];
+  float n = order;
+  float sgn = ((order % 2) ? 1 : -1);
+  output[id] = sgn * Gamma(n + 1) * calc_zeta(n + 1, x);
+}}
 
 )METAL";
 
@@ -398,10 +408,10 @@ static id<MTLLibrary> compileGammaOpsLibrary(id<MTLDevice> device, const std::st
   return rc;
 }
 
-static<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
-                                            const std::string& t1,
-                                            const std::string& t2,
-                                            const std::string& fname) {
+static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
+                                               const std::string& t1,
+                                               const std::string& t2,
+                                               const std::string& fname) {
   auto key = t1 + t2 + fname;
   static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
   auto it = cplMap.find(key);
