@@ -1193,8 +1193,8 @@ def split_with_sizes(
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check_is_size(
-            length,
+        torch._check(
+            length >= 0,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
         # We know this is true thanks to the sum, but this assertion helps
