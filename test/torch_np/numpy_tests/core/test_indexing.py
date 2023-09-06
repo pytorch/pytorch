@@ -700,7 +700,7 @@ class TestMultiIndexingAutomated:
                 in_indices[i] = indx
             elif indx.dtype.kind != "b" and indx.dtype.kind != "i":
                 raise IndexError(
-                    "arrays used as indices must be of " "integer (or boolean) type"
+                    "arrays used as indices must be of integer (or boolean) type"
                 )
             if indx.ndim != 0:
                 no_copy = False
