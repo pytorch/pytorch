@@ -261,12 +261,12 @@ class NegateSource(ChainedSource):
         return f"{self.base.name()}.__neg__()"
 
 
-class ToIntSource(ChainedSource):
+class FromSymBoolSource(ChainedSource):
     def __post_init__(self):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        return self.base.reconstruct(codegen)
 
     def guard_source(self):
         return self.base.guard_source()

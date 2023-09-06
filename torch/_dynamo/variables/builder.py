@@ -45,6 +45,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    FromSymBoolSource,
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
@@ -52,7 +53,6 @@ from ..source import (
     NumpyTensorSource,
     RandomValueSource,
     Source,
-    ToIntSource,
     TupleIteratorGetItemSource,
 )
 from ..utils import (
@@ -692,12 +692,12 @@ class VariableBuilder:
             # user provided SymBool with a SymInt in dynamo.
 
             # Concretely,
-            # 1. We created a SymInt in dynamo's shape_env, whose source is constructed as ToIntSource(self.source).
+            # 1. We created a SymInt in dynamo's shape_env, whose source is constructed as FromSymBoolSource(self.source).
             # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
 
-            new_source = ToIntSource(self.source)
+            new_source = FromSymBoolSource(self.source)
             new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
                 value.__int__(),
                 new_source,
