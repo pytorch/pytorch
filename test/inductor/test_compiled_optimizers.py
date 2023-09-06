@@ -183,8 +183,12 @@ class CompiledOptimizerTests(TestCase):
     test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
-    test_asgd_recompile_single = make_recompile_test(ASGD, kernel_count=12, lr=0.01)
-    test_asgd_recompile_foreach = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
+    test_asgd_recompile_single = make_recompile_test(
+        ASGD, kernel_count=12, lr=0.01, foreach=False
+    )
+    test_asgd_recompile_foreach = make_recompile_test(
+        ASGD, kernel_count=2, lr=0.01, foreach=True
+    )
     # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
 
     @requires_cuda()
