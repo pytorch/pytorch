@@ -6,6 +6,7 @@
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/Logging.h>
+#include <sys/mman.h>
 
 // TODO: rename flag to C10
 C10_DEFINE_bool(
@@ -15,12 +16,33 @@ C10_DEFINE_bool(
 
 namespace c10 {
 
+namespace {
+bool shouldExcludeFromCoreDump() {
+  const char* env = getenv("PYTORCH_ALLOC_EXCLUDE_CORE_DUMP");
+  if (env != nullptr) {
+    const auto bind = std::strtoull(env, nullptr, 10);
+    return bind != 0;
+  }
+  return false;
+}
+} // namespace
+
 struct C10_API DefaultCPUAllocator final : at::Allocator {
-  DefaultCPUAllocator() = default;
+  DefaultCPUAllocator()
+      : exclude_from_core_dump_(shouldExcludeFromCoreDump()) {}
+
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = nullptr;
     try {
       data = c10::alloc_cpu(nbytes);
+      if (exclude_from_core_dump_ && data != nullptr) {
+        if (madvise(data, nbytes, MADV_DONTDUMP)) {
+          throw std::system_error(
+              errno,
+              std::system_category(),
+              "madvise failed to exclude memory from coredump");
+        }
+      }
     } catch (c10::Error& e) {
       profiledCPUMemoryReporter().OutOfMemory(nbytes);
       throw e;
@@ -40,6 +62,8 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
   at::DeleterFnPtr raw_deleter() const override {
     return &ReportAndDelete;
   }
+
+  const bool exclude_from_core_dump_ = false;
 };
 
 ProfiledCPUMemoryReporter& profiledCPUMemoryReporter() {

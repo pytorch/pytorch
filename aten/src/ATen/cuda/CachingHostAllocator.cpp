@@ -7,6 +7,7 @@
 
 #include <cuda_runtime_api.h>
 #include <stdint.h>
+#include <sys/mman.h>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -17,6 +18,15 @@
 
 namespace at::cuda {
 namespace {
+
+bool shouldExcludeFromCoreDump() {
+  const char* env = getenv("PYTORCH_ALLOC_EXCLUDE_CORE_DUMP");
+  if (env != nullptr) {
+    const auto bind = std::strtoull(env, nullptr, 10);
+    return bind != 0;
+  }
+  return false;
+}
 
 struct BlockSize {
   size_t size_{0};
@@ -142,6 +152,8 @@ struct BlockComparator {
  */
 class CUDAHostAllocator {
  public:
+  CUDAHostAllocator() : exclude_from_core_dump_(shouldExcludeFromCoreDump()) {}
+
   std::pair<void*, void*> allocate(size_t size) {
     if (size == 0) {
       return {nullptr, nullptr};
@@ -177,6 +189,14 @@ class CUDAHostAllocator {
     void* ptr = nullptr;
     C10_CUDA_CHECK(cudaHostAlloc(
         &ptr, c10::llvm::PowerOf2Ceil(size), cudaHostAllocDefault));
+    if (exclude_from_core_dump_) {
+      if (madvise(ptr, c10::llvm::PowerOf2Ceil(size), MADV_DONTDUMP)) {
+        throw std::system_error(
+            errno,
+            std::system_category(),
+            "madvise failed to exclude memory from coredump");
+      }
+    }
     auto block = new Block();
     block->size_ = c10::llvm::PowerOf2Ceil(size);
     block->ptr_ = ptr;
@@ -357,6 +377,8 @@ class CUDAHostAllocator {
 
   alignas(64) std::mutex cuda_events_mutex_;
   std::deque<std::pair<EventPool::Event, Block*>> cuda_events_;
+
+  const bool exclude_from_core_dump_ = false;
 };
 
 } // namespace
