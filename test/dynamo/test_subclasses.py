@@ -232,11 +232,10 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
         # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
-        # TODO: this test still breaks, needs more looking into.
         def to_fun(x):
             x_functional = torch._to_functional_tensor(x)
-            torch._mirror_autograd_meta(x, x_functional)
-            return x
+            torch._mirror_autograd_meta_to(x, x_functional)
+            return x_functional
 
         def aot_f_wrapper(func):
             @functools.wraps(func)

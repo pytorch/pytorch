@@ -5,6 +5,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
+    maybe_handle_decomp,
 )
 from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
@@ -19,6 +20,8 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor, dispatch_functionalize
+from torch._functorch.aot_autograd import from_fun, to_fun
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
@@ -90,6 +93,13 @@ out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
+    # NB: Long-term we should put the decomposition logic into
+    # ProxyTorchDispatchMode so that people do not need to call maybe_handle_decomp
+    # in all HigherOrderOp proxy implementations.
+    r = maybe_handle_decomp(proxy_mode, func_overload, (op, output_dtype, *args), {})
+    if r is not NotImplemented:
+        return r
+
     with disable_proxy_modes_tracing():
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
@@ -115,6 +125,24 @@ def out_dtype_dense(
     output_dtype: torch.dtype,
     *args
 ):
+    if is_int_mm(op, output_dtype, args):
+        return torch._int_mm(*args)
+    return out_dtype_fallback(op, output_dtype, *args)
+
+
+def is_int_mm(op, output_dtype, args):
+    return (
+        op == torch.ops.aten.mm.default and
+        output_dtype == torch.int32 and
+        len(args) == 2 and
+        args[0].dtype == torch.int8 and
+        args[1].dtype == torch.int8 and
+        args[0].is_cuda and
+        args[1].is_cuda
+    )
+
+
+def out_dtype_fallback(op, output_dtype, *args):
     flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
@@ -177,6 +205,15 @@ def out_dtype_func1(op, output_dtype, *args):
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
         res = out_dtype(op, output_dtype, *unwrapped_args)
     return _wrap_all_tensors_to_functional(res, level=0)
+
+@out_dtype.py_impl(FunctionalTensorMode)
+def out_dtype_functional_tensor_mode(op, output_dtype, *args):
+    unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, args)
+    # We can rely on the Functionalize key to detect cond branches that modify the input
+    functional_op = dispatch_functionalize(op)
+
+    res = out_dtype(functional_op, output_dtype, *unwrapped_args)
+    return pytree.tree_map_only(torch.Tensor, to_fun, res)
 
 
 @out_dtype.py_impl(torch._C._functorch.TransformType.Functionalize)

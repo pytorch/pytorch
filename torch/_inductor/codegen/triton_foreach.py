@@ -147,7 +147,7 @@ class ForeachKernel(Kernel):
         index_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
+            "signature": signature_to_meta(signature, size_dtype=index_dtype),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import map
+from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint
-from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export
+from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export, capture_pre_autograd_graph
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._export.utils import (
     get_buffer,
@@ -152,7 +152,7 @@ class TestExport(TestCase):
             preserve_module_call_signature=("foo.nested", "foo"),
         )
         ep._validate()
-        self.assertEqual(len(ep.module_call_graph), 2)
+        self.assertEqual(len(ep.module_call_graph), 3)
         # TODO(zhxchen17) unflattener
         # unflattened = unflatten(export_module)
         # self.compare_outputs(export_module, unflattened, inps)
@@ -1022,6 +1022,58 @@ class TestExport(TestCase):
             "torch.export.Constraint has no public constructor. Please use torch.export.dynamic_dim"
         ):
             _ = Constraint()
+
+    def test_train_eval_on_exported_preautograd_module(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x.cos()
+                return x.sin()
+
+        graph_module = capture_pre_autograd_graph(Foo(), (torch.ones(7, 5),))
+        with self.assertRaisesRegex(NotImplementedError, r"Calling train\(\) is not supported yet."):
+            graph_module.train()
+
+        with self.assertRaisesRegex(NotImplementedError, r"Calling eval\(\) is not supported yet."):
+            graph_module.eval()
+
+    def test_export_cond_preserve_stack_trace_for_subgraphs(self):
+        class MySubModule(torch.nn.Module):
+            def foo(self, x):
+                return x.cos()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        class CondBranchClassMethod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subm = MySubModule()
+
+            def bar(self, x):
+                return x.sin()
+
+            def forward(self, x):
+                return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
+
+
+        from torch._export import capture_pre_autograd_graph
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = CondBranchClassMethod()
+        m.eval()
+        gm = capture_pre_autograd_graph(m, example_inputs)
+
+        actual_source_fns = []
+        for mod in gm.modules():
+            for node in mod.graph.nodes:
+                if node.name in {"sin", "cos"}:
+                    actual_source_fns.append(node.meta.get("source_fn", None))
+        exp_source_fns = [("cos", "cos"), ("sin", "sin")]
+        self.assertEqual(actual_source_fns, exp_source_fns)
 
 
 if __name__ == '__main__':
