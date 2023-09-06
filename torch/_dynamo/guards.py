@@ -1114,6 +1114,10 @@ class CheckFunctionManager:
             convert_frame.initial_torch_function_state
             == torch._C._is_torch_function_enabled()
         ), "dynamo tracing should not mutate global state"
+        assert (
+            convert_frame.initial_global_state is not None
+            and convert_frame.initial_global_state.check()
+        ), "dynamo tracing should not mutate global state"
 
         closure_vars = collections.OrderedDict(
             [

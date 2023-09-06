@@ -106,6 +106,7 @@ output_codes = Tracker()
 initial_grad_state = None
 initial_deterministic_algorithms_state = None
 initial_torch_function_state = None
+initial_global_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -355,6 +356,9 @@ def convert_frame_assert(
 
         global initial_torch_function_state
         initial_torch_function_state = torch._C._is_torch_function_enabled()
+
+        global initial_global_state
+        initial_global_state = torch._C._dynamo.guards.GlobalStateGuard()
 
         global FRAME_COUNTER
         if "_id" not in frame_state:

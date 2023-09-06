@@ -438,11 +438,12 @@ typedef struct {
 
   inline bool check() {
     auto& ctx = at::globalContext();
-    return (_grad_mode == at::GradMode::is_enabled() &&
-                _torch_function == torch::torch_function_enabled() &&
-                _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-                _allow_tf32 == ctx.allowTF32CuBLAS() &&
-                _num_threads == at::get_num_threads(););
+    return (
+        _grad_mode == at::GradMode::is_enabled() &&
+        _torch_function == torch::torch_function_enabled() &&
+        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+        _allow_tf32 == ctx.allowTF32CuBLAS() &&
+        _num_threads == at::get_num_threads());
   }
 
  private:
