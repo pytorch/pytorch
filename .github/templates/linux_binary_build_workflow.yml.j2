@@ -57,6 +57,8 @@ jobs:
       {%- if "aarch64" in build_environment %}
       runs_on: linux.t4g.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
+      {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
+      runs_on: linux.24xlarge
       {%- endif %}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
