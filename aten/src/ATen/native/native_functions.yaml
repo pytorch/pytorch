@@ -5961,6 +5961,21 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
+# Assumes self is compliant for a contiguous NestedTensor
+- func: _nested_view_from_buffer_cont(Tensor(a) self, Tensor nested_size) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  dispatch:
+    CPU, CUDA: _nested_view_from_buffer_cont
+
+- func: _nested_view_from_buffer_cont_copy(Tensor self, Tensor nested_size) -> Tensor
+  variants: function
+  device_check: NoCheck
+  tags: view_copy
+  dispatch:
+    CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_cont_copy
+  autogen: _nested_view_from_buffer_cont_copy.out
+
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
     # calls unsqueeze

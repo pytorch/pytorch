@@ -42,6 +42,12 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor nested_strides,
       at::Tensor storage_offsets);
 
+  // This constructor is used creating view tensors from nested tensors assumed contiguous
+  explicit NestedTensorImpl(
+      c10::TensorImpl::ImplType impl_type,
+      const at::Tensor& base_tensor,
+      at::Tensor nested_sizes);
+
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
