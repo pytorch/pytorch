@@ -5,7 +5,7 @@ set -eux -o pipefail
 source /env
 
 # Because most Circle executors only have 20 CPUs, using more causes OOMs w/ Ninja and nvcc parallelization
-MEMORY_LIMIT_MAX_JOBS=8
+MEMORY_LIMIT_MAX_JOBS=4
 NUM_CPUS=$(( $(nproc) - 2 ))
 
 # Defaults here for **binary** linux builds so they can be changed in one place
