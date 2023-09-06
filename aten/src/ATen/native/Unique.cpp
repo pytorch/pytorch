@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
 #include <c10/util/Load.h>
 
@@ -206,7 +207,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
 
   // we can parallel on [1, numel) but we need to make sure it has
   // the same parallel scope with the next loop
-  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
+  const int64_t grain_size = at::internal::GRAIN_SIZE;
+  at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
     if (begin == 0) { begin += 1; }
     for (const auto i : c10::irange(begin, end)) {
       mask_acc[i] = input_sorted_data[i] != input_sorted_data[i - 1];
@@ -221,15 +223,19 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     int64_t firstnan_index = std::distance(input_sorted_data, firstnan);
 
     mask_acc[firstnan_index] = true;
+    // in case we have more than 1 NaN in the sequence,
+    // mask the first one as true and the rest as false
     if (firstnan_index + 1 < numel) {
-      for (const auto i : c10::irange(firstnan_index + 1, numel)) {
-        mask_acc[i] = false;
-      }
+      at::parallel_for(firstnan_index + 1, numel, grain_size, [&](int64_t begin, int64_t end) {
+        for (const auto i : c10::irange(begin, end)) {
+          mask_acc[i] = false;
+        }
+      });
     }
   }
 
   // calculate unique count from each thread
-  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
+  at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
     for (const auto i : c10::irange(begin, end)) {
       if (mask_acc[i]) {
@@ -266,7 +272,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     unique_index_data[unique_count] = numel;
   }
 
-  at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
+  at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
     int64_t offset = offset_thread[tid];
 
@@ -289,7 +295,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
 
   if (return_counts) {
     // do diff to get count
-    at::parallel_for(0, unique_count, 0, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, unique_count, grain_size, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
         counts_data[i] = unique_index_data[i + 1] - unique_index_data[i];
       }
