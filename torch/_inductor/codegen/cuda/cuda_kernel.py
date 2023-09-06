@@ -14,12 +14,16 @@ cexpr = CppPrinter().doprint
 
 
 def _normalize_idx(index: int, total_length: int) -> int:
-    return index if index >= 0 else index + total_length
+    res = index if index >= 0 else index + total_length
+    assert (
+        res >= 0 and res < total_length
+    ), f"normalize_idx failed: {index=}, {total_length=}"
+    return res
 
 
 class CUDAKernel(Kernel):
     """
-    Kernels defined by the CUDA language.
+    Kernels defined by C++ CUDA.
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
@@ -27,7 +31,7 @@ class CUDAKernel(Kernel):
 
 class CUDATemplateKernel(CUDAKernel):
     """
-    Template kernels defined by the CUDA language.
+    Template kernels defined by C++ CUDA.
     """
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
