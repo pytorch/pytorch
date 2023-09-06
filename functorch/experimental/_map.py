@@ -84,7 +84,10 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     else:
                         # clone of a functional tensor produces a functional tensor
                         # but we want to avoid it so we clone a non-functional version
-                        maybe_unfunc_t = torch._functorch.aot_autograd.from_fun(t)
+                        maybe_unfunc_t = t
+                        if torch._is_functional_tensor(t):
+                            torch._sync(t)
+                            maybe_unfunc_t = torch._from_functional_tensor(t)
                         return maybe_unfunc_t.clone()
                 return t
 
