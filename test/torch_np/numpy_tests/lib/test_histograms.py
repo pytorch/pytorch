@@ -566,7 +566,7 @@ class TestHistogramOptimBinNums:
             assert_equal(
                 len(a),
                 numbins,
-                err_msg=f"{estimator} estimator, " "No Variance test",
+                err_msg=f"{estimator} estimator, No Variance test",
             )
 
     def test_limited_variance(self):

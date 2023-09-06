@@ -4,7 +4,6 @@ from collections.abc import Iterable
 from typing import Set
 
 import torch
-from functorch.experimental import control_flow
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
@@ -61,7 +60,7 @@ class Verifier:
     def valid_builtin_funcs(self):
         return [
             operator.getitem,
-            control_flow.cond,
+            torch.ops.higher_order.cond,
             torch.ops.map_impl,
         ]
 

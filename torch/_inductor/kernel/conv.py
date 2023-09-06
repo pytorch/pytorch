@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import List, TypedDict
+from typing import cast, List, Tuple, TypedDict
 
 import torch
 from .. import config, ir
@@ -44,18 +44,35 @@ def conv_grid(n, c, h, w, meta):
     )
 
 
+# List of dictionaries to store the kernel configs. Configs that evaluate to true
+# will be utilised on the target platform
+kernel_configs = [
+    # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+    {"config": (64, 256, 16, 2, 4), "cond": True},
+    {"config": (256, 64, 16, 2, 4), "cond": True},
+    {"config": (1024, 16, 16, 1, 8), "cond": True},
+    {"config": (128, 128, 32, 2, 8), "cond": True},
+    {"config": (64, 64, 32, 2, 4), "cond": True},
+    {"config": (64, 256, 32, 2, 8), "cond": True},
+    {"config": (256, 64, 32, 2, 8), "cond": True},
+]
+
+# Create filtered list of configs based on conv
+platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in kernel_configs
+    if config["cond"]
+)
+
+# On ROCm convert num_stages to 1 as pipelining provides no benefit
+if torch.version.hip:
+    platform_configs = tuple(
+        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
+    )
+
 conv_configs = functools.partial(
     filtered_configs,
-    configs=(
-        # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
-        (64, 256, 16, 2, 4),
-        (256, 64, 16, 2, 4),
-        (1024, 16, 16, 1, 8),
-        (128, 128, 32, 2, 8),
-        (64, 64, 32, 2, 4),
-        (64, 256, 32, 2, 8),
-        (256, 64, 32, 2, 8),
-    ),
+    configs=platform_configs,
 )
 
 LOOP_BODY = """

@@ -4,8 +4,11 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 # import cutlass libs
-import gemm_operation as cutlass_gemm_op  # type: ignore[import]
-import library as cutlass_lib  # type: ignore[import]
+from . import HAS_CUTLASS
+
+if HAS_CUTLASS:
+    import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
+    import cutlass_library as cutlass_lib  # type: ignore[import]
 
 from ...ir import Buffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
@@ -191,7 +194,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def set_alignment(torch_layout, op_element) -> bool:
-        alignment = cutlass_utils.get_alignment(torch_layout)
+        alignment = cutlass_utils.get_max_alignment(torch_layout)
         if alignment < op_element.alignment:
             return False
         else:
