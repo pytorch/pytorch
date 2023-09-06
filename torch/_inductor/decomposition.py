@@ -7,9 +7,18 @@ import typing
 import torch
 import torch._decomp as decomp
 import torch.ao.quantization.fx._decomposed
-from torch._decomp import core_aten_decompositions, get_decompositions
-from torch._decomp.decompositions import pw_cast_for_opmath
+from torch._decomp import (
+    core_aten_decompositions,
+    get_decompositions,
+    remove_decompositions,
+)
+from torch._decomp.decompositions import (
+    _grid_sampler_2d as decomp_grid_sampler_2d,
+    pw_cast_for_opmath,
+)
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._higher_order_ops.out_dtype import out_dtype
+from torch._prims_common import type_to_dtype
 
 from . import config
 
@@ -47,6 +56,7 @@ inductor_decompositions = get_decompositions(
         aten.sqrt_,
         aten.std,
         aten.std_mean,
+        out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
@@ -55,6 +65,15 @@ inductor_decompositions = get_decompositions(
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
+
+# Remove unwanted decompositions included via the core ATen decompositions from
+# the Inductor decomp table.
+decomps_to_exclude = [
+    aten._unsafe_index,
+    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+]
+
+remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(ops):
@@ -83,6 +102,11 @@ def functional_assert_async_msg_decomp(tensor, msg):
     return
 
 
+@register_decomposition([aten.sym_constrain_range_for_size.default])
+def sym_constrain_range_for_size(symbol, *, min=None, max=None):
+    return
+
+
 @register_decomposition([aten.clamp])
 @pw_cast_for_opmath
 def clamp(x, min=None, max=None):
@@ -91,6 +115,15 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+@register_decomposition([aten.full])
+def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, fill_value, **kwargs)
+    return NotImplemented
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
@@ -190,6 +223,11 @@ def bmm(self, batch2):
 
 @register_decomposition([aten.mm])
 def mm(self, input2):
+    # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
+    # todo: Look into why and fix it (hopefully)
+    if config.coordinate_descent_tuning:
+        if self.shape[0] == 1 or input2.shape[1] == 1:
+            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device == "cpu":
         if (
             self.size(-1) == 1
@@ -207,8 +245,19 @@ def mm(self, input2):
 
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
-    if len(tensors) == 1:
+    def non_empty_tensor(x):
+        # special case for cat'ing with an empty tensor -
+        # just drop the 'empty' inputs so they don't confuse the logic below.
+        return len(x.shape) > 1 or x.shape[0] > 0
+
+    filtered_tensors = list(filter(non_empty_tensor, tensors))
+
+    if len(filtered_tensors) == 1:
         return tensors[0].clone()
+    elif 1 < len(filtered_tensors) < len(tensors):
+        # on the first call, when we remove empty tensors, we redispatch recursively
+        return aten.cat.default(filtered_tensors, dim)
+    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 
@@ -313,7 +362,7 @@ def full_like(
         dtype=dtype or self.dtype,
         layout=layout or self.layout,
         device=device or self.device,
-        requires_grad=requires_grad or self.requires_grad,
+        requires_grad=requires_grad,
     )
 
 
@@ -402,6 +451,37 @@ def dequantize_per_tensor_tensor_decomp_impl(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return (input.to(torch.float32) - zero_point) * scale
+
+
+@register_decomposition([aten.grid_sampler_2d])
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: torch.Tensor,
+    grid: torch.Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> torch.Tensor:
+    # We do not expand the grid (_expand_grid=False) on cpu for performance reasons
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
+    _expand_grid = not (
+        a.device == torch.device("cpu")
+        and interpolation_mode == 0
+        and a.is_contiguous(memory_format=torch.contiguous_format)
+    )
+
+    output = decomp_grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+        _expand_grid=_expand_grid,
+    )
+    return output
 
 
 @register_decomposition(aten._foreach_addcmul.Scalar)

@@ -889,6 +889,166 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(ValueError, "Expected allow_unused to be True or not passed when"):
             torch.autograd.grad(y, x, allow_unused=False, materialize_grads=True)
 
+    def test_post_accumulate_grad_hook_on_non_leaf(self):
+        def hook(tensor):
+            tensor.sub_(1.)
+        leaf = torch.rand(3, requires_grad=True)
+        non_leaf = 2. * leaf
+
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "post accumulate grad hooks cannot be registered on non-leaf tensors"):
+            non_leaf.register_post_accumulate_grad_hook(hook)
+
+    def test_post_accumulate_grad_hook_multiple_hooks(self):
+        def hook1(tensor):
+            tensor.sub_(tensor.grad)
+
+        def hook2(tensor):
+            tensor.mul_(4.)
+        tensor = torch.rand(3, requires_grad=True)
+        tensor_ref = tensor.clone().detach()
+        tensor.register_post_accumulate_grad_hook(hook1)
+        tensor.register_post_accumulate_grad_hook(hook2)
+        sum = tensor.sum()
+        sum.backward()
+        # both hooks should be called, in order
+        self.assertEqual(4. * (tensor_ref - 1.), tensor)
+
+    def test_post_accumulate_grad_hook_multiple_tensors(self):
+        def hook(tensor):
+            tensor.sub_(tensor.grad)
+        tensor1 = torch.rand(3, requires_grad=True)
+        tensor1_ref = tensor1.clone().detach()
+        tensor2 = torch.rand(5, requires_grad=True)
+        tensor2_ref = tensor2.clone().detach()
+        tensor1.register_post_accumulate_grad_hook(hook)
+        tensor2.register_post_accumulate_grad_hook(hook)
+        tensor1.sum().backward()
+        tensor2.sum().backward()
+        # both tensors should have been modified
+        self.assertEqual(tensor1_ref - 1., tensor1)
+        self.assertEqual(tensor2_ref - 1., tensor2)
+
+    def test_post_accumulate_grad_hook_returns_not_None(self):
+        def bad_hook(tensor):
+            return tensor.grad
+        tensor = torch.rand(2, 3, requires_grad=True)
+        tensor.register_post_accumulate_grad_hook(bad_hook)
+        # should error!
+        with self.assertRaisesRegex(RuntimeError, "hooks should return None."):
+            tensor.sum().backward()
+
+    def test_post_accumulate_grad_hook_e2e(self):
+        def setup_optim_in_bwd(model):
+            optims = {}
+            handles = []
+
+            def optim_step_hook(param):
+                optims[param].step()
+                optims[param].zero_grad()
+
+            for p in model.parameters():
+                optims[p] = torch.optim.Adam([p])
+                handles.append(p.register_post_accumulate_grad_hook(optim_step_hook))
+
+            return handles
+
+        model = torch.nn.Linear(3, 2)
+        input = torch.rand(2, 3)
+        handles = setup_optim_in_bwd(model)
+
+        # make a copy for reference
+        model_copy = deepcopy(model)
+        optim_copy = torch.optim.Adam(model_copy.parameters())
+
+        iters = 5
+
+        for _ in range(iters):
+            loss = model(input).sum()
+            loss.backward()
+
+            loss_copy = model_copy(input).sum()
+            loss_copy.backward()
+            optim_copy.step()
+            optim_copy.zero_grad()
+
+        params_copy = []  # freeze a copy of the params to compare later
+        for p_reference, p in zip(model_copy.parameters(), model.parameters()):
+            self.assertEqual(p_reference, p)
+            params_copy.append(p_reference.clone().detach())
+
+        # After removing the handle, the model should no longer update.
+        for h in handles:
+            h.remove()
+
+        for _ in range(iters):
+            loss = model(input).sum()
+            loss.backward()
+
+            loss_copy = model_copy(input).sum()
+            loss_copy.backward()
+            optim_copy.step()
+            optim_copy.zero_grad()
+
+        for p_static, p_reference, p in zip(params_copy, model_copy.parameters(), model.parameters()):
+            self.assertEqual(p_static, p)
+            self.assertNotEqual(p_reference, p)
+
+    def test_post_accumulate_grad_hook_gets_cleaned_up(self):
+
+        def fun_stuff_with_hook():
+            thing_to_put_in_hook = torch.rand(3)
+
+            def hook(tensor):
+                tensor.sub_(tensor.grad)
+                tensor.add_(thing_to_put_in_hook)
+
+            tensor = torch.rand(3, requires_grad=True)
+            tensor.register_post_accumulate_grad_hook(hook)
+            tensor.sum().backward()
+            ref = weakref.ref(thing_to_put_in_hook)
+            gc.collect()
+            return tensor, ref
+
+        with disable_gc():
+            tensor, ref = fun_stuff_with_hook()
+            self.assertIsNotNone(ref())  # thing_to_put_in_hook should be kept alive by tensor
+
+            del tensor
+            gc.collect()
+            self.assertIsNone(ref())  # thing_to_put_in_hook should be cleaned
+
+    def test_post_accumulate_grad_hook_ordering(self):
+        tensor = torch.rand(3, requires_grad=True)
+
+        def pre_hook(grad):
+            return grad.sub(2.)
+
+        def acc_grad_node_pre_hook(grad_out):
+            return (grad_out[0].div(5.),)
+
+        def post_acc_grad_hook(tensor):
+            tensor.grad.add_(0.5)
+
+        def acc_grad_node_post_hook(grad_in, grad_out):
+            tensor.grad = grad_out[0].mul(10)
+
+        acc_grad = tensor.view_as(tensor).grad_fn.next_functions[0][0]
+        tensor.register_hook(pre_hook)
+        acc_grad.register_prehook(acc_grad_node_pre_hook)
+        tensor.register_post_accumulate_grad_hook(post_acc_grad_hook)
+        acc_grad.register_hook(acc_grad_node_post_hook)
+        tensor.sum().backward()
+
+        # the hooks should run in the order of:
+        #   1. tensor prehook
+        #   2. acc_grad prehook
+        #   3. tensor post acc_grad hook
+        #   4. acc_grad posthook
+        # so that would be ((1 - 2) / 5 + 0.5) * 10 = 3
+        self.assertEqual(torch.tensor([3., 3., 3.]), tensor.grad)
+
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
         class MyHookClass:
@@ -1972,24 +2132,37 @@ class TestAutograd(TestCase):
         with torch.no_grad():
             w = x + y
 
-        @torch.no_grad()
         def adder(x, y):
             return x + y
 
-        z = adder(x, y)
+        adders = [torch.no_grad()(adder), torch.no_grad(adder)]
 
-        self.assertFalse(w.requires_grad)
-        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
-        self.assertIsNone(w.grad_fn)
-        self.assertFalse(z.requires_grad)
-        self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
-        self.assertIsNone(z.grad_fn)
+        for adder in adders:
+            z = adder(x, y)
+
+            self.assertFalse(w.requires_grad)
+            self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+            self.assertIsNone(w.grad_fn)
+            self.assertFalse(z.requires_grad)
+            self.assertRaises(RuntimeError, lambda: z.backward(torch.ones(5, 5)))
+            self.assertIsNone(z.grad_fn)
 
         # test nested decorator and with-statement on no_grad
         with torch.no_grad():
             self.assertFalse(torch.is_grad_enabled())
             w = adder(x, y)
             self.assertFalse(torch.is_grad_enabled())
+
+    def test_enable_grad_decorator_no_paren(self):
+        x = torch.ones(1, requires_grad=True)
+
+        @torch.enable_grad
+        def doubler(x):
+            return x * 2
+
+        with torch.no_grad():
+            z = doubler(x)
+        self.assertTrue(z.requires_grad)
 
     def test_set_grad_generator_functions(self):
         @torch.no_grad()
@@ -10160,15 +10333,25 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(torch.is_inference_mode_enabled())
 
     def test_inference_mode_decorator(self):
-        for mode in (True, False):
-            @torch.inference_mode(mode)
-            def func(x):
-                self.assertEqual(torch.is_inference_mode_enabled(), mode)
-                return x * x
+        def func(x):
+            self.assertEqual(torch.is_inference_mode_enabled(), mode)
+            return x * x
+        for mode, use_kwarg in product((True, False, None), (True, False)):
+            if mode is None:
+                if use_kwarg:
+                    decorated = torch.inference_mode(mode=func)
+                else:
+                    decorated = torch.inference_mode(func)
+                mode = True
+            else:
+                if use_kwarg:
+                    decorated = torch.inference_mode(mode=mode)(func)
+                else:
+                    decorated = torch.inference_mode(mode)(func)
 
             for requires_grad in (True, False):
                 c = torch.ones(1, 2, 3, requires_grad=requires_grad)
-                d = func(c)
+                d = decorated(c)
                 self.assertTrue(not mode or torch.is_inference(d))
                 self.assertEqual(d.requires_grad, requires_grad and not mode)
 

@@ -39,6 +39,7 @@ from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
+from .ir import ExternKernelNode
 from .pattern_matcher import clone_graph
 from .utils import get_dtype_size, has_incompatible_cudagraph_ops
 from .virtualized import V
@@ -166,13 +167,18 @@ def count_bytes_inner(
     **kwargs,
 ):
     shape_env = _shape_env_from_inputs(example_inputs)
+    fake_mode = fake_tensor_prop(gm, example_inputs)
+
+    with V.set_fake_mode(fake_mode):
+        post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph):
+    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):  # type: ignore[call-arg]
         graph.run(*example_inputs)
-        num_bytes, nodes_num_elem = graph.count_bytes()
+        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
         metrics.nodes_num_elem += nodes_num_elem
+        metrics.node_runtimes += node_runtimes
     return make_boxed_func(gm.forward)
 
 
@@ -196,7 +202,7 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
             kwargs_patched = {**kwargs, "cpp_wrapper": True}
             return inner_compile(gm, example_inputs, **kwargs_patched)
         else:
-            with config.patch(
+            with config.patch(  # type: ignore[attr-defined]
                 {
                     "triton.store_cubin": True,
                 }
@@ -213,11 +219,6 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                 compiled = inner_compile(
                     clone_graph(gm), example_inputs, **kwargs_patched
                 )
-                if (
-                    torch._guards.TracingContext.get()
-                    and torch._guards.TracingContext.get().output_strides
-                ):
-                    torch._guards.TracingContext.get().output_strides.clear()
 
                 def materialize(x):
                     if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -227,10 +228,14 @@ def inner_compile_with_cpp_wrapper(inner_compile: Callable[..., Any]):
                         assert not isinstance(x, FakeTensor)
                         return x
 
-                if torch._guards.TracingContext.get():
+                tracing_context = torch._guards.TracingContext.get()
+                if tracing_context:
+                    if tracing_context.output_strides:
+                        tracing_context.output_strides.clear()
+
                     params_flat = [
                         param
-                        for param in torch._guards.TracingContext.get().params_flat
+                        for param in tracing_context.params_flat  # type: ignore[union-attr]
                         if param is not None
                     ]
                     real_inputs = [
@@ -295,6 +300,7 @@ def compile_fx_inner(
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ):
     """
     Inductor API that compiles a single graph.
@@ -336,6 +342,7 @@ def compile_fx_inner(
         "is_inference": is_inference,
         "user_visible_outputs": user_visible_outputs,
         "layout_opt": layout_opt,
+        "extern_node_serializer": extern_node_serializer,
     }
 
     compiled_graph: CompiledFxGraph = fx_codegen_and_compile(
@@ -489,6 +496,7 @@ def fx_codegen_and_compile(
     is_inference: bool = False,
     user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
+    extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> CompiledFxGraph:
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -531,12 +539,12 @@ def fx_codegen_and_compile(
     # on node.meta["val"]. if in the future we rely on these being
     # correct we will need to fix.
 
-    with V.set_fake_mode(fake_mode):
+    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
-    with V.set_fake_mode(fake_mode):
+    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
@@ -545,8 +553,9 @@ def fx_codegen_and_compile(
             cpp_wrapper=cpp_wrapper,
             aot_mode=aot_mode,
             user_visible_outputs=user_visible_outputs,
+            extern_node_serializer=extern_node_serializer,
         )
-        with V.set_graph_handler(graph):
+        with V.set_graph_handler(graph):  # type: ignore[call-arg]
             graph.run(*example_inputs)
             context = torch._guards.TracingContext.get()
             if context is not None and context.output_strides is not None:
@@ -556,16 +565,13 @@ def fx_codegen_and_compile(
                 for out in graph.graph_outputs:
                     if hasattr(out, "layout"):
                         context.output_strides.append(
-                            tuple(
+                            tuple(  # type: ignore[arg-type]
                                 V.graph.sizevars.size_hint(s) for s in out.layout.stride
                             )
                         )
                     else:
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
-
-            if _in_aot_compilation:
-                return compiled_fn
 
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
@@ -578,7 +584,7 @@ def fx_codegen_and_compile(
                 device_types=graph.device_types,
                 device_idxs=graph.device_idxs,
                 mutated_inputs=graph.mutated_inputs,
-                mutated_input_idxs=graph.mutated_input_idxs,
+                mutated_input_idxs=set(graph.mutated_input_idxs),
             )
     return compiled_graph
 
@@ -773,7 +779,7 @@ def cudagraphify_impl(
 
     # record
     graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream):
+    with torch.cuda.graph(graph, stream=stream, capture_error_mode="thread_local"):
         static_outputs = model(list(static_inputs))
     if not isinstance(static_outputs, (list, tuple)):
         static_outputs = (static_outputs,)
@@ -855,19 +861,24 @@ def compile_fx_aot(
         else {**config_patches, "cpp_wrapper": True}
     )
     if (
-        "aot_inductor_output_path" not in config_patches
-        and not config.aot_inductor_output_path
+        "aot_inductor.output_path" not in config_patches
+        and not config.aot_inductor.output_path
     ):
         config_patches = {
             **config_patches,
-            "aot_inductor_output_path": code_hash(model_.code),
+            "aot_inductor.output_path": code_hash(model_.code),
         }
 
+    extern_node_serializer = config_patches.pop("extern_node_serializer", None)
     with mock.patch.object(_in_aot_compilation, "value", True):
         return compile_fx(
             model_,
             example_inputs_,
-            inner_compile=functools.partial(inner_compile, aot_mode=True),
+            inner_compile=functools.partial(
+                inner_compile,
+                aot_mode=True,
+                extern_node_serializer=extern_node_serializer,
+            ),
             config_patches=config_patches,
         )
 
@@ -915,7 +926,10 @@ def fw_compiler_freezing(
     ]
 
     # constant params will be real tensors, not fake
-    params_flat = torch._guards.TracingContext.get().params_flat
+    tracing_context = torch._guards.TracingContext.get()
+    assert tracing_context is not None
+    params_flat = tracing_context.params_flat
+    assert params_flat is not None
     for i in range(len(params_flat)):
         if i not in preserved_arg_indices:
             params_flat[i] = None
@@ -957,17 +971,17 @@ def compile_fx(
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
-        with config.patch(config_patches):
+        with config.patch(config_patches):  # type: ignore[attr-defined]
             return compile_fx(
                 model_,
                 example_inputs_,
                 # need extra layer of patching as backwards is compiled out of scope
-                inner_compile=config.patch(config_patches)(inner_compile),
+                inner_compile=config.patch(config_patches)(inner_compile),  # type: ignore[attr-defined]
                 decompositions=decompositions,
             )
 
     if config.cpp_wrapper:
-        with config.patch(
+        with config.patch(  # type: ignore[attr-defined]
             {
                 "cpp_wrapper": False,
                 "triton.autotune_cublasLt": False,
@@ -975,7 +989,9 @@ def compile_fx(
                 # CudaWrapperCodeGen relies on kernel name to find the autotuned cubin file
                 "triton.unique_kernel_names": True,
             }
-        ), V.set_real_inputs(example_inputs_):
+        ), V.set_real_inputs(
+            example_inputs_
+        ):  # type: ignore[call-arg]
             return compile_fx(
                 model_,
                 example_inputs_,
@@ -1141,11 +1157,8 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
-    if _in_aot_compilation:
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
-            return fw_compiler(model_, example_inputs_)
 
-    with V.set_fake_mode(fake_mode), torch._guards.tracing(
+    with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context
     ), compiled_autograd.disable():
         return aot_autograd(
@@ -1160,8 +1173,8 @@ def compile_fx(
 
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None):
-    with config.patch(config_patches):
-        return config.get_config_copy()
+    with config.patch(config_patches):  # type: ignore[attr-defined]
+        return config.get_config_copy()  # type: ignore[attr-defined]
 
 
 def _shape_env_from_inputs(inputs: List[torch.Tensor]):
