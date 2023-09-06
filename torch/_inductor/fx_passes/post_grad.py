@@ -140,10 +140,12 @@ def register_lowering_pattern(pattern, extra_check=_return_true, pass_number=1):
 #   - order patterns are defined in
 ################################################################################
 
+
 def is_valid_mm_plus_mm(match: Match):
     mm_nodes = filter_nodes(match.nodes, aten.mm)
     # The dim of matrix multiplication should not match for passthrough
     return get_arg_value(mm_nodes, 2, "dim") != get_arg_value(mm_nodes, 1, "dim")
+
 
 @register_lowering_pattern(
     CallFunction(
@@ -151,7 +153,7 @@ def is_valid_mm_plus_mm(match: Match):
         CallFunction(aten.mm, Arg(), Arg()),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
-    extra_check=is_valid_mm_plus_mm
+    extra_check=is_valid_mm_plus_mm,
 )
 def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
