@@ -1064,8 +1064,7 @@ def compile_fx(
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
-            # See Note [User Outputs in the inductor graph]
-            if context is not None and context.fw_metadata and not is_inference:
+            if context is not None and context.fw_metadata:
                 original_output_start_index = context.fw_metadata.num_mutated_inputs
             else:
                 original_output_start_index = 0
@@ -1082,7 +1081,6 @@ def compile_fx(
 
             assert num_orig_model_outputs <= num_model_outputs
 
-            # Note [User Outputs in the inductor graph]
             # We makes the following assumption
             # For inference
             #   len(orig_model_outputs) == len(model_outputs)
@@ -1095,14 +1093,13 @@ def compile_fx(
             # module's output.
             # To make things safe, we'll use original_output_start_index field
             # set by AOTAutograd to decide where the original module outputs start.
-            orig_output_end_idx = original_output_start_index + num_orig_model_outputs
-            # Sanity chec: we are about to splice out the "user" outputs from the full set
-            # of "graph" outputs. Make sure we're within bounds.
-            assert orig_output_end_idx <= num_model_outputs
 
             user_visible_outputs = {
                 n.name
-                for n in model_outputs[original_output_start_index:orig_output_end_idx]
+                for n in model_outputs[
+                    original_output_start_index : original_output_start_index
+                    + num_orig_model_outputs
+                ]
                 if isinstance(n, torch.fx.Node)
             }
 

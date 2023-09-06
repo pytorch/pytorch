@@ -1137,7 +1137,7 @@ TestEnvironment.def_flag("TEST_WITH_TORCHDYNAMO", env_var="PYTORCH_TEST_WITH_DYN
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 8
+    torch._dynamo.config.cache_size_limit = 8
     # TODO: Remove this; this is grandfathered in because we suppressed errors
     # on test suite previously
     torch._dynamo.config.suppress_errors = True

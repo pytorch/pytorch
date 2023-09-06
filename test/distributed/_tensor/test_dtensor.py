@@ -530,15 +530,13 @@ class DTensorMeshTest(DTensorTestBase):
             ),
         ]
 
-        from torch.distributed._tensor._utils import (
-            compute_local_shape_and_global_offset,
-        )
+        from torch.distributed._tensor._utils import compute_local_offset
 
         # loop through all sharding specs and check local shard offsets
         logical_tensor = torch.randn(tensor_shape)
         for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
-            _, offset = compute_local_shape_and_global_offset(
+            offset = compute_local_offset(
                 dtensor.shape, device_mesh, dtensor.placements
             )
             self.assertEqual(expected_shard_offsets, offset)

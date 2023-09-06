@@ -106,8 +106,7 @@ class TestFSDPHybridShard(FSDPTest):
     def test_raises_manual_wrap_hybrid_shard_when_none_policy(self):
         model = MyModel().cuda()
         err_ctx = self.assertRaisesRegex(
-            ValueError,
-            "requires explicit specification of process group or device_mesh.",
+            ValueError, "requires explicit specification of process group"
         )
 
         with err_ctx:
