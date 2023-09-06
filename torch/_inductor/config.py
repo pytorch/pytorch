@@ -435,11 +435,20 @@ class cuda:
     # Whether to use fast math.
     use_fast_math = False
 
+    # Path to the CUTLASS repo root directory.
+    # The default path only works under PyTorch local development environment.
+    cutlass_dir = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_DIR",
+        os.path.abspath(
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
+        ),
+    )
+
     # Path to CUDA NVCC.
-    # NVCC search priority:
+    # NVCC search order:
     # 1) cuda_cxx set in this config
-    # 2）CUDACXX env
-    # 3）CUDA_HOME env
+    # 2）CUDACXX environment variable
+    # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx = None
 

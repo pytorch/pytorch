@@ -1272,9 +1272,7 @@ def _cuda_compiler() -> str:
 
 
 def _cutlass_include_paths() -> List[str]:
-    from torch.utils import cpp_extension
-
-    cutlass_path = os.path.join(cpp_extension._TORCH_PATH, "../third_party/cutlass")
+    cutlass_path = config.cuda.cutlass_dir
     return [
         os.path.join(cutlass_path, "include"),
         os.path.join(cutlass_path, "tools/library/include"),
@@ -1302,7 +1300,9 @@ def _cuda_lib_options() -> List[str]:
         extra_ldflags.append("-lcuda")
         extra_ldflags.append("-lcudart")
     else:
-        raise NotImplementedError("Unsupported env, failed to find cuda libs!")
+        raise NotImplementedError(
+            "Unsupported env, failed to find cuda libs! Currently only Linux is supported."
+        )
     return extra_ldflags
 
 
