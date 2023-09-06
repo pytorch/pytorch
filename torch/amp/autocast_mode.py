@@ -15,7 +15,9 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-def autocast_decorator(autocast_instance: autocast, func: Callable[P, R]) -> Callable[P, R]:
+def autocast_decorator(
+    autocast_instance: autocast, func: Callable[P, R]
+) -> Callable[P, R]:
     @functools.wraps(func)
     def decorate_autocast(*args: P.args, **kwargs: P.kwargs) -> R:
         with autocast_instance:

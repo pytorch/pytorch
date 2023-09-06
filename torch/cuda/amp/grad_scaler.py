@@ -2,7 +2,7 @@ import inspect
 import warnings
 from collections import abc, defaultdict
 from enum import Enum
-from typing import Any, Dict, List, Iterable, Optional, Tuple, Union, cast, overload
+from typing import Any, cast, Dict, Iterable, List, Optional, overload, Tuple, Union
 
 import torch
 from .common import amp_definitely_not_available
@@ -139,9 +139,13 @@ class GradScaler:
             self._init_growth_tracker = 0
             # self._growth_tracker will be lazily initialized during the first call to scale()
             self._growth_tracker: Optional[torch.Tensor] = None
-            self._per_optimizer_states: Dict[int, Dict[str, Any]] = defaultdict(_refresh_per_optimizer_state)
+            self._per_optimizer_states: Dict[int, Dict[str, Any]] = defaultdict(
+                _refresh_per_optimizer_state
+            )
 
-    def _check_scale_growth_tracker(self, funcname: str) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _check_scale_growth_tracker(
+        self, funcname: str
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         fix = "This may indicate your script did not use scaler.scale(loss or outputs) earlier in the iteration."
         assert self._scale is not None, (
             f"Attempted {funcname} but _scale is None.  " + fix
@@ -203,7 +207,14 @@ class GradScaler:
             _MultiDeviceReplicator
         ] = []  # holds a reference that can be overwritten by apply_scale
 
-        def apply_scale(val: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...], Iterable[torch.Tensor]]):
+        def apply_scale(
+            val: Union[
+                torch.Tensor,
+                List[torch.Tensor],
+                Tuple[torch.Tensor, ...],
+                Iterable[torch.Tensor],
+            ]
+        ):
             if isinstance(val, torch.Tensor):
                 assert val.is_cuda or val.device.type == "xla"
                 if len(stash) == 0:
@@ -342,7 +353,9 @@ class GradScaler:
             retval = optimizer.step(*args, **kwargs)
         return retval
 
-    def step(self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any) -> Optional[float]:
+    def step(
+        self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
+    ) -> Optional[float]:
         """
         :meth:`step` carries out the following two operations:
 

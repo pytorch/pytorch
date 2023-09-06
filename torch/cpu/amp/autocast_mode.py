@@ -1,4 +1,4 @@
-from typing import Any, Callable, Literal, TypeVar, Optional
+from typing import Any, Callable, Literal, Optional, TypeVar
 
 from typing_extensions import ParamSpec, Self
 
