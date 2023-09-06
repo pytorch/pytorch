@@ -33,6 +33,9 @@ class ASGD(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
+        if not foreach and capturable:
+            raise ValueError("Capturable not supported with single tensor ASGD")
+
         defaults = dict(
             lr=lr,
             lambd=lambd,
@@ -197,6 +200,8 @@ def asgd(
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_asgd
     else:
+        if capturable and not is_compiling():
+            raise RuntimeError("Capturable not supported with single tensor ASGD")
         func = _single_tensor_asgd
 
     func(
@@ -297,8 +302,8 @@ def _multi_tensor_asgd(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
-    for ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
-         grouped_etas, grouped_state_steps), _) in grouped_tensors.values():
+    for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
+         grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
@@ -331,6 +336,7 @@ def _multi_tensor_asgd(
         # => param - param * lambd * eta - eta * grad
         # => param - eta * intermediate
         torch._foreach_addcmul_(grouped_params, intermediate, grouped_etas, value=-1)
+        del intermediate
 
         # update grouped_axs
         # averaging: ax = ax + mu * (param - ax)
@@ -342,6 +348,7 @@ def _multi_tensor_asgd(
         # and faster solution
         intermediate = torch._foreach_sub(grouped_params, grouped_axs)
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
+        del intermediate
 
         if capturable:
             # update grouped_mus
@@ -349,6 +356,7 @@ def _multi_tensor_asgd(
             torch._foreach_maximum_(new_mus, 1.0)
             torch._foreach_reciprocal_(new_mus)
             torch._foreach_copy_(grouped_mus, new_mus)
+            del new_mus
 
             # update eta = lr / (1 + lambd * lr * step^alpha)
             new_etas = torch._foreach_pow(grouped_state_steps, alpha)
@@ -358,6 +366,7 @@ def _multi_tensor_asgd(
             torch._foreach_reciprocal_(new_etas)
             torch._foreach_mul_(new_etas, lr)
             torch._foreach_copy_(grouped_etas, new_etas)
+            del new_etas
         else:
             step = grouped_state_steps[0].item()
             new_etas = []
@@ -365,10 +374,10 @@ def _multi_tensor_asgd(
 
             for i in range(len(grouped_mus)):
                 new_eta = _to_tensor(
-                    lr / (1 + lambd * lr * step ** alpha), device=grouped_etas[i].device
+                    lr / (1 + lambd * lr * step ** alpha), device=device
                 )
                 new_etas.append(new_eta)
-                new_mu = _to_tensor(1 / max(1, step - t0), device=grouped_mus[i].device)
+                new_mu = _to_tensor(1 / max(1, step - t0), device=device)
                 new_mus.append(new_mu)
 
             torch._foreach_copy_(grouped_etas, new_etas)

@@ -779,7 +779,12 @@ class TestOptim(TestCase):
             max_mems = []
             for flag_value in (False, True):
                 kwargs_with_flags = deepcopy(kwargs)
-                kwargs_with_flags['foreach'] = flag_value
+                if optimizer_constructor.__name__ == "ASGD" and kwargs_with_flags.get("capturable", False) and not flag_value:
+                    # single tensor ASGD does not support capturable
+                    kwargs_with_flags["capturable"] = False
+
+                kwargs_with_flags["foreach"] = flag_value
+
 
                 # The 128 is critical here! Our CUDACachingAllocator allocates in blocks of 512,
                 # meaning any tensor that occupies <512 bytes of memory will allocate a whole
