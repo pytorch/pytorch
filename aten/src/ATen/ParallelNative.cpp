@@ -144,15 +144,17 @@ void invoke_parallel(
   const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
-  size_t num_tasks = 0, chunk_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t num_tasks, chunk_size;
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct {
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
     std::mutex mutex;
-    volatile size_t remaining{0};
+    volatile size_t remaining;
     std::condition_variable cv;
   } state;
 

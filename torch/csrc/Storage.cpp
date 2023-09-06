@@ -66,7 +66,6 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
   // be created. If you need to create a storageimpl object of a subclass, you
   // need to pass in the device information.
   if (allocator_opt.has_value()) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
     allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
   } else if (device_opt.has_value()) {
     at::Device device = device_opt.value();
@@ -85,7 +84,6 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     } else if (device.type() == at::kMPS) {
       allocator = at::mps::GetMPSAllocator();
 #endif
-      // NOLINTBEGIN(bugprone-branch-clone)
     } else if (device.type() == at::DeviceType::XPU) {
       allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::HPU) {
@@ -94,8 +92,8 @@ c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
       allocator = c10::GetAllocator(device.type());
     } else if (device.type() == at::DeviceType::PrivateUse1) {
       allocator = c10::GetAllocator(device.type());
+
     } else {
-      // NOLINTEND(bugprone-branch-clone)
       TORCH_CHECK(
           false,
           THPStorageStr,
@@ -203,6 +201,7 @@ static PyObject* THPStorage_pynew(
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
         item = PySequence_GetItem(sequence, i);
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         uint8_t value = THPByteUtils_unpackReal(item.get());
         const auto& storage = THPStorage_Unpack(self);
         if (allocator == c10::GetDefaultCPUAllocator()) {
@@ -229,24 +228,25 @@ static PyObject* THPStorage_pynew(
 
 static Py_ssize_t THPStorage_length(THPStorage* self) {
   HANDLE_TH_ERRORS
-  return static_cast<Py_ssize_t>(THPStorage_Unpack(self).nbytes());
+  return THPStorage_Unpack(self).nbytes();
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
   HANDLE_TH_ERRORS
   const auto& storage = THPStorage_Unpack(self);
-  int64_t len = static_cast<int64_t>(storage.nbytes());
   /* Integer index */
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
-      nindex += len;
-    if (nindex < 0 || nindex >= len) {
+      nindex += storage.nbytes();
+    if (nindex < 0 || nindex >= static_cast<int64_t>(storage.nbytes())) {
       PyErr_SetString(
           PyExc_IndexError,
           fmt::format(
-              "index {} out of range for storage of size {}", nindex, len));
+              "index {} out of range for storage of size {}",
+              nindex,
+              storage.nbytes()));
       return nullptr;
     }
     uint8_t value = storage_get(storage, nindex);
@@ -255,10 +255,10 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
-    if (PySlice_Unpack(index, &start, &stop, &step) < 0) {
+    int64_t len = storage.nbytes();
+    if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
+        0)
       return nullptr;
-    }
-    slicelength = PySlice_AdjustIndices(len, &start, &stop, step);
     if (step != 1) {
       THPUtils_setError(
           "Trying to slice with a step of %lld, but only a step of "
@@ -318,12 +318,11 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, step;
-    Py_ssize_t len = static_cast<Py_ssize_t>(storage.nbytes());
-    if (PySlice_Unpack(index, &start, &stop, &step) < 0) {
+    Py_ssize_t start, stop, slicelength, step;
+    int64_t len = storage.nbytes();
+    if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
+        0)
       return -1;
-    }
-    PySlice_AdjustIndices(len, &start, &stop, step);
     if (step != 1) {
       THPUtils_setError(
           "Trying to slice with a step of %lld, but only a step of "
