@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import inspect
 import warnings
 from collections import abc, defaultdict
