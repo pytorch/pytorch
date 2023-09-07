@@ -23,11 +23,13 @@ class TestBench(TestCase):
 
     def test_do_bench(self):
         res = do_bench(self._bench_fn)
-        log.error("do_bench result: %s", res)
+        log.warning("do_bench result: %s", res)
+        self.assertGreater(res, 0)
 
     def test_do_bench_using_profiling(self):
         res = do_bench_using_profiling(self._bench_fn)
-        log.error("do_bench_using_profiling result: %s", res)
+        log.warning("do_bench_using_profiling result: %s", res)
+        self.assertGreater(res, 0)
 
 
 if __name__ == "__main__":
