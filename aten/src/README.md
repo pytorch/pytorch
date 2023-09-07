@@ -22,7 +22,7 @@ The new ATen C++ bindings definitions are in the native folder.
 
 #### The native functions yaml file
 
-The Native folder contains [native-functions.yaml](native-functions.yaml). This file contains definitions of the PyTorch operations, for example:
+The Native folder contains [native-functions.yaml](ATen/native/native-functions.yaml). This file contains definitions of the PyTorch operations, for example:
 
 `func: hardsigmoid(Tensor self) -> Tensor
   structured_delegate: hardsigmoid.out
@@ -34,17 +34,16 @@ The Native folder contains [native-functions.yaml](native-functions.yaml). This 
 It defines operations and how they are dispatched, and other related information required to run the operations for each kernel.
 The frontend operations (what the PyTorch developer writes) are written without regard for which device operations will be run on.
 
-The yaml file is the way to map operations so they can be run on particualr kernels; it does this by declaring
+The yaml file is the way to map operations, so they can be run on particular kernels; it does this by declaring
 how each operation will be implemented; including which devices an operation can run on and how it will be dispatched.
 The yaml file is used as input to generate code by the [setup.py](../../setup.py). The code is generated in the ATen
 folder in the build folder.
 
-### Kernel implmentation specific folders
-There are folders per kernel implmentation; cpu, cuda, cudnn, metal, mps, mkl. These have kernel specific code that does not need to be generated.
+### Kernel implementation specific folders
+There are folders per kernel implementation; cpu, cuda, cudnn, metal, mps, mkl. These have kernel specific code that does not need to be generated.
 
 ### Core
-This folder contains non kernel specific information; the intention is to move the contents of this folder to
-the [c10/core](../../c10/core), which does not contain kernel implementation information.
+The intention is to move the contents of aten to the [c10/core](../../c10/core), which does not contain kernel implementation information.
 
 ## Reference counting
 
