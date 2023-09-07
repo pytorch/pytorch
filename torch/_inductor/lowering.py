@@ -2759,11 +2759,10 @@ def masked_scatter_with_index(self, mask, source_idx, source):
     def inner_fn(idx):
         self_val = self_loader(idx)
         mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
-        # source_idx_val = source_idx_loader(idx)
 
         def load_source_val():
             source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source_numel)
+            i = ops.indirect_indexing(source_idx_val, source)
             return source_loader([i])
 
         source_val = ops.masked(mask_val, load_source_val, 0)
