@@ -733,13 +733,15 @@ def is_big_gpu(index):
     return True
 
 
+def use_max_autotune() -> bool:
+    return (
+        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+    )
+
+
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
-        (
-            config.max_autotune
-            or config.max_autotune_gemm
-            or config.search_autotune_cache
-        )
+        use_max_autotune()
         and layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device.index or 0)
@@ -773,7 +775,7 @@ def use_cutlass_template(layout):
 
 
 def use_aten_gemm_kernels():
-    return _use_autotune_backend("ATEN")
+    return not use_max_autotune() or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:

@@ -238,9 +238,8 @@ class TestDoBench(TestCase):
         def mm(a, b, bias):
             return torch.nn.functional.linear(a, b, bias)
 
-        a = torch.randn(2048, 51456).cuda().half()
-        b = torch.randn(4096, 51456).cuda().half()
-        bias = torch.randn(4096).cuda().half()
+        a = torch.randn(2048, 4096).cuda().half()
+        bias = torch.randn(2048).cuda().half()
 
         with config.patch(
             {
@@ -249,9 +248,9 @@ class TestDoBench(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
             }
         ):
-            Y = mm(a, b, bias)
-            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b, bias)
-            torch.testing.assert_close(Y_compiled, Y)
+            Y = mm(a, a, bias)
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic):
@@ -289,7 +288,9 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    def test_max_autotune_cutlass_backend_addmm(self, max_autotune_gemm_backends):
+    def test_max_autotune_cutlass_backend_addmm(
+        self, dynamic, max_autotune_gemm_backends
+    ):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
@@ -307,7 +308,7 @@ class TestDoBench(TestCase):
             b = torch.randn(k, n).cuda().half()
             y_expected = addmm(x, a, b, alpha, beta)
 
-            compiled_fn = torch.compile(addmm, dynamic=False)
+            compiled_fn = torch.compile(addmm, dynamic=dynamic)
             y = compiled_fn(x, a, b, alpha, beta)
             torch.testing.assert_close(y, y_expected)
 

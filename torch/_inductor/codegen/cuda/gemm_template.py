@@ -121,9 +121,17 @@ GEMM_ARGS_CUTLASS_3X = r"""
     }, // ProblemShape problem_shape
     {
       {{template.cutlass_type_cast(X, kernel.ptr(X))}},  // ElementA const* ptr_A
-      { {{template.cute_int(kernel.stride(X, -2), "stride_x0")}}, {{template.cute_int(kernel.stride(X, -1), "stride_x1")}}, {{template.cute_int(kernel.stride(X, -3), "batch_stride_x")}}},  // StrideA dA
+      {
+        {{template.cute_int(kernel.stride(X, -2), "stride_x0")}},
+        {{template.cute_int(kernel.stride(X, -1), "stride_x1")}},
+        {{template.cute_int(kernel.stride(X, -3), "batch_stride_x")}}
+      },  // StrideA dA
       {{template.cutlass_type_cast(W, kernel.ptr(W))}},  // ElementB const* ptr_B
-      { {{template.cute_int(kernel.stride(W, -1), "stride_w1")}}, {{template.cute_int(kernel.stride(W, -2), "stride_w0")}}, {{template.cute_int(kernel.stride(W, -3), "batch_stride_w")}}},  // StrideB dB
+      {
+        {{template.cute_int(kernel.stride(W, -1), "stride_w1")}},
+        {{template.cute_int(kernel.stride(W, -2), "stride_w0")}},
+        {{template.cute_int(kernel.stride(W, -3), "batch_stride_w")}}
+      },  // StrideB dB
     },  // MainloopArguments mainloop
     {{epilogue_arguments}}
   };
@@ -134,9 +142,17 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
     {
       {ElementComputeEpilogue({{alpha}}), ElementComputeEpilogue({{beta}})},  // typename ThreadEpilogueOp::Params thread
       {{template.cutlass_type_cast(Bias, kernel.ptr(Bias))}},  // ElementC const* ptr_C
-      { {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}}, {{template.cute_int(kernel.stride(Bias, -1, 1), "stride_bias1")}}, {{template.cute_int(kernel.stride(Bias, -3), "batch_stride_bias")}}},  // StrideC dC
+      {
+        {{template.cute_int(kernel.stride(Bias, -2, 1), "stride_bias0")}},
+        {{template.cute_int(kernel.stride(Bias, -1, 1), "stride_bias1")}},
+        {{template.cute_int(kernel.stride(Bias, -3), "batch_stride_bias")}}
+      },  // StrideC dC
       {{template.cutlass_type_cast(Y, kernel.ptr(Y))}},  // ElementD const* ptr_D
-      { {{template.cute_int(kernel.stride(Y, -2), "stride_y0")}}, {{template.cute_int(kernel.stride(Y, -1), "stride_y1")}}, {{template.cute_int(kernel.stride(Y, -3), "batch_stride_y")}}},  // StrideD dD
+      {
+        {{template.cute_int(kernel.stride(Y, -2), "stride_y0")}},
+        {{template.cute_int(kernel.stride(Y, -1), "stride_y1")}},
+        {{template.cute_int(kernel.stride(Y, -3), "batch_stride_y")}}
+      },  // StrideD dD
     },  // EpilogueArguments epilogue
 """
 

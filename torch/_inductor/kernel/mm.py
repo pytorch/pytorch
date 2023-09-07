@@ -10,7 +10,12 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_cutlass_template, use_triton_template
+from ..utils import (
+    use_aten_gemm_kernels,
+    use_cutlass_template,
+    use_max_autotune,
+    use_triton_template,
+)
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
@@ -166,6 +171,22 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
+    if m * n == 0 or not use_max_autotune():
+        choices = (
+            [
+                aten_addmm.bind(
+                    (inp, mat1, mat2),
+                    layout,
+                    ordered_kwargs_for_cpp_kernel,
+                    alpha=alpha,
+                    beta=beta,
+                )
+            ]
+            if use_aten_gemm_kernels()
+            else []
+        )
+        return autotune_select_algorithm("addmm", choices, [inp, mat1, mat2], layout)
+
     choices = (
         [
             aten_addmm.bind(
@@ -194,7 +215,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    if m * n != 0 and use_triton_template(layout):
+    if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
