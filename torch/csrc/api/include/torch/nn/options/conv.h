@@ -36,11 +36,11 @@ struct ConvNdOptions {
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, in_channels);
+  TORCH_ARG(int64_t, in_channels);
 
   /// The number of output channels the convolution should produce.
   /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, out_channels);
+  TORCH_ARG(int64_t, out_channels);
 
   /// The kernel size to use.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -84,7 +84,7 @@ struct ConvNdOptions {
 
   /// The number of convolution groups.
   /// This parameter __can__ be changed after construction.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, groups) = 1;
+  TORCH_ARG(int64_t, groups) = 1;
 
   /// Whether to add a bias after individual applications of the kernel.
   /// Changing this parameter after construction __has no effect__.
@@ -115,11 +115,11 @@ struct ConvOptions {
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, in_channels);
+  TORCH_ARG(int64_t, in_channels);
 
   /// The number of output channels the convolution should produce.
   /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, out_channels);
+  TORCH_ARG(int64_t, out_channels);
 
   /// The kernel size to use.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -152,7 +152,7 @@ struct ConvOptions {
 
   /// The number of convolution groups.
   /// This parameter __can__ be changed after construction.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, groups) = 1;
+  TORCH_ARG(int64_t, groups) = 1;
 
   /// Whether to add a bias after individual applications of the kernel.
   /// Changing this parameter after construction __has no effect__.
@@ -221,7 +221,7 @@ struct ConvFuncOptions {
 
   /// Split input into groups, `in_channels` should be divisible by
   /// the number of groups.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, groups) = 1;
+  TORCH_ARG(int64_t, groups) = 1;
 };
 
 /// `ConvFuncOptions` specialized for `torch::nn::functional::conv1d`.
@@ -269,11 +269,11 @@ struct ConvTransposeOptions {
 
   /// The number of channels the input volumes will have.
   /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, in_channels);
+  TORCH_ARG(int64_t, in_channels);
 
   /// The number of output channels the convolution should produce.
   /// Changing this parameter after construction __has no effect__.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, out_channels);
+  TORCH_ARG(int64_t, out_channels);
 
   /// The kernel size to use.
   /// For a `D`-dim convolution, must be a single number or a list of `D`
@@ -301,7 +301,7 @@ struct ConvTransposeOptions {
 
   /// The number of convolution groups.
   /// This parameter __can__ be changed after construction.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, groups) = 1;
+  TORCH_ARG(int64_t, groups) = 1;
 
   /// Whether to add a bias after individual applications of the kernel.
   /// Changing this parameter after construction __has no effect__.
@@ -371,7 +371,7 @@ struct ConvTransposeFuncOptions {
 
   /// Split input into groups, `in_channels` should be divisible by
   /// the number of groups.
-  TORCH_ARG_WITH_DEFAULT_CHECK(int64_t, groups) = 1;
+  TORCH_ARG(int64_t, groups) = 1;
 
   /// The spacing between kernel elements.
   /// For a `D`-dim convolution, must be a single number or a list of `D`

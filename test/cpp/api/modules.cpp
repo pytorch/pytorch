@@ -68,9 +68,9 @@ TEST_F(ModulesTest, Conv1dSameStrided) {
 }
 
 TEST_F(ModulesTest, Conv1dIvalidArg) {
-  auto options = Conv1dOptions(3, 2, 3);
+  auto options = Conv1dOptions(3, 2, 3).groups(-1);
   ASSERT_THROWS_WITH(
-      options.groups(-1), "groups should be positive, and the dtype");
+      Conv1d(options), "in_channels, groups and out_channels must");
 }
 
 TEST_F(ModulesTest, Conv2dEven) {
