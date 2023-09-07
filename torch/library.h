@@ -67,7 +67,6 @@
 // Just for inferFunctionSchemaFromFunctor
 #include <ATen/core/enum_tag.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/core/op_registration/pyimports.h>
 
 namespace torch {
 
@@ -607,14 +606,16 @@ class TORCH_API Library final {
   }
 
   /// Specifies a Python import to tie this library to. When loading
-  /// the library via torch.ops.load_library("lib.so") from Python,
-  /// it will automatically import the Python module (if it has not already
-  /// been imported). This is useful for separating the custom operator
+  /// the library from Python, we will import the module (if it has not
+  /// already been imported). If Python is not available, then
+  /// this is a no-op.
+  ///
+  /// This is useful for separating the custom operator
   /// definitions between a Python module and a C++ shared library.
   ///
   /// See NOTE: [Requiring Python imports with TORCH_LIBRARY] for more details.
-  Library& require_pyimport(const char* module, const char* reason) {
-    c10::impl::request_pyimport(module, reason);
+  Library& request_pyimport(const char* module, const char* context) {
+    c10::impl::request_pyimport(module, context);
     return *this;
   }
 

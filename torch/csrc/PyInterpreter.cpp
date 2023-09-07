@@ -44,8 +44,6 @@ struct ConcretePyInterpreterVTable final
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
-  void do_import_for_library(const char* module, const char* context)
-      const override;
   void reportErrorCallback(PyObject* callback, DispatchKey key) const override;
   void python_dispatcher(
       const c10::OperatorHandle& op,
@@ -798,17 +796,6 @@ void ConcretePyInterpreterVTable::reset_backward_hooks(
       py::reinterpret_steal<py::object>(THPVariable_Wrap(std::move(self_t)));
   PyObject_SetAttrString(self_p.ptr(), "_backward_hooks", Py_None);
   END_HANDLE_TH_ERRORS_PYBIND
-}
-
-void ConcretePyInterpreterVTable::do_import_for_library(
-    const char* module,
-    const char* context) const {
-  try {
-    py::module::import("torch._cpp_pyimports")
-        .attr("do_import")(module, context);
-  } catch (py::error_already_set ex) {
-    ex.restore();
-  }
 }
 
 PyInterpreterHolder self_interpreter;

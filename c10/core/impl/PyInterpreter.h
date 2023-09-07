@@ -143,11 +143,6 @@ struct C10_API PyInterpreterVTable {
   virtual void reportErrorCallback(PyObject* callback, DispatchKey key)
       const = 0;
 
-  // torch::Library's import method calls this (if Python is available) to
-  // import the Python module that the Library may be associated with.
-  virtual void do_import_for_library(const char* module, const char* context)
-      const = 0;
-
   // This is only invoked in the multipy/torchdeploy situation from
   // pythonOpRegistrationTrampoline; this lets us get to the Python
   // interpreter to actually find the appropriate Python op registration

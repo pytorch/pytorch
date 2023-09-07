@@ -11,16 +11,15 @@ struct PyImportsImpl : c10::impl::PyImportsInterface {
     try {
       py::module::import("torch._cpp_pyimports")
           .attr("do_import")(module, context);
-    } catch (py::error_already_set ex) {
+    } catch (py::error_already_set& ex) {
       ex.restore();
     }
   }
 };
 
-const c10::impl::IgnoredPyImports& initialize_pyimports_handler() {
-  auto* interpreter = getPyInterpreter();
-  if (!interpreter->is_main_interpreter()) {
-    return;
+c10::impl::IgnoredPyImports initialize_pyimports_handler() {
+  if (!isMainPyInterpreter()) {
+    return {};
   }
   std::lock_guard<std::mutex> lock(c10::impl::kPyImportsHandlerMutex());
 

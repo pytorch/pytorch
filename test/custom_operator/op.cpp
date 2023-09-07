@@ -68,12 +68,12 @@ torch::Tensor custom_sin(torch::Tensor x) {
 }
 
 TORCH_LIBRARY_FRAGMENT(custom, m) {
-    m.require_pyimport("my_custom_ops");
     m.def("op", custom_op);
     m.def("op2", custom_op2);
     m.def("op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]", custom_op);
     m.def("op_with_autograd(Tensor var1, int mul, Tensor var2, Tensor? var3=None) -> Tensor", custom_op_with_autograd);
     m.def("sin(Tensor x) -> Tensor");
+    m.request_pyimport("my_custom_ops");
 }
 
 TORCH_LIBRARY_IMPL(custom, CPU, m) {
