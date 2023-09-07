@@ -1043,7 +1043,7 @@ def forward(self, x_a_1, x_b_1, y_1):
                     dtype=elem.dtype, layout=elem.layout,
                     device=elem.device, requires_grad=elem.requires_grad,
                     strides=elem.stride(), storage_offset=elem.storage_offset(),
-                    extra_dispatch_keys=DispatchKeySet(DispatchKey.NestedTensor))
+                    _extra_dispatch_keys=DispatchKeySet(DispatchKey.NestedTensor))
                 return r
 
             @classmethod

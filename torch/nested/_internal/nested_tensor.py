@@ -40,7 +40,7 @@ class NestedTensor(torch.Tensor):
         _kwargs["dispatch_sizes_strides_policy"] = "sizes"
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
-        _kwargs["extra_dispatch_keys"] = ks
+        _kwargs["_extra_dispatch_keys"] = ks
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls, (0,), **_kwargs)
         if r.requires_grad:
