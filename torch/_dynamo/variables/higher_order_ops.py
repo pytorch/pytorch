@@ -1099,7 +1099,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         op = p_args[0]
         output_dtype = p_args[1]
         fake_sub_args = pytree.tree_map_only(
-            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args[2:]
+            torch.fx.Proxy, lambda a: a.node.meta["example_value"], p_args[2:]
         )
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
