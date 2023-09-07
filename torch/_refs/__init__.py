@@ -938,7 +938,6 @@ def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     )
 
     old_strides = self.stride()
-    new_sizes = sizes[:-1]
     torch._check(
         old_strides[-1] == 1,
         lambda: "Tensor must have a last dimension with stride 1",
@@ -948,18 +947,16 @@ def view_as_complex(self: TensorLikeType) -> TensorLikeType:
         py_all(stride % 2 == 0 for stride in dims),
         lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
     )
-    new_strides = tuple(dim // 2 for dim in dims)
     torch._check(
         self.storage_offset() % 2 == 0,
         lambda: "Tensor must have a storage_offset divisible by 2",
     )
-    new_storage_offset = self.storage_offset() // 2
     if not utils.is_complex_dtype(input_dtype):
-        self = prims.view_element_type(
+        return prims.view_element_type(
             self, utils.corresponding_complex_dtype(input_dtype)
-        )
-
-    return self.as_strided(new_sizes, new_strides, new_storage_offset)
+        ).squeeze(1)
+    else:
+        return self
 
 
 def _make_elementwise_binary_reference(
