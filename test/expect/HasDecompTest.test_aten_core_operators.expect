@@ -495,10 +495,6 @@ aten::sub.Tensor
 aten::sub.out
 aten::sub_.Scalar
 aten::sub_.Tensor
-aten::sum
-aten::sum.IntList_out
-aten::sum.dim_IntList
-aten::sum.out
 aten::tan
 aten::tan.out
 aten::tan_
