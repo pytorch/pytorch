@@ -1,6 +1,8 @@
 import logging
+import collections
+import typing
 from collections import Counter
-from typing import Set
+from typing import Counter, Dict, Set
 
 import torch
 import torch._guards
@@ -120,7 +122,7 @@ class UniformValueConstantFolder(ConstantFolder):
     def __init__(self, gm, skip_constructors=False):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: Dict[torch.fx.Node, int] = {}
-        self.constant_data_ptrs: Counter[int, int] = Counter()
+        self.constant_data_ptrs: typing.Counter[int] = Counter()
 
     def insertable_tensor_check(self, t: torch.Tensor) -> bool:
         # TODO - we could also Tensors which get replaced with arange here
@@ -155,10 +157,10 @@ def constant_fold_uniform_value(gm):
 
     # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
     # so just constant-ify if a Tensor is unaliased
-    constant_data_ptr_count = Counter()
+    constant_data_ptrs: collections.Counter = Counter()
 
     for node in cf.node_replacements:
-        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
+        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1  # type: ignore[name-defined]
 
     for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
@@ -167,7 +169,7 @@ def constant_fold_uniform_value(gm):
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue
 
-        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
+        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:  # type: ignore[name-defined]
             continue
 
         with graph.inserting_after(node):
