@@ -1352,8 +1352,11 @@ def _new_process_group_helper(
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
     # update global state
+    assert group_name is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
+    pg._set_group_name(group_name)
+
     _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
