@@ -378,7 +378,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertEqual(after_prepare_result_pt2e, after_prepare_result_fx)
 
         if verify_convert:
-            torch.ao.quantization.move_model_to_eval(model_pt2e)
+            torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
             model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
@@ -2431,7 +2431,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             non_ref_node_occurrence
         )
 
-    def test_move_model_to_eval(self):
+    def test_move_exported_model_to_eval(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2443,8 +2443,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1),)
         m = M().train()
         m = capture_pre_autograd_graph(m, example_inputs)
-        m.graph.eliminate_dead_code()
-        m.recompile()
 
         # Assert that dropout op exists and is in train mode
         dropout_node = None
@@ -2456,12 +2454,42 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertTrue(dropout_node.args[2])
 
         # Do the subgraph rewriting
-        torch.ao.quantization.move_model_to_eval(m)
+        torch.ao.quantization.move_exported_model_to_eval(m)
 
         # Assert that dropout op is now replaced with a clone op
         targets = [n.target for n in m.graph.nodes]
         self.assertTrue(torch.ops.aten.clone.default in targets)
         self.assertTrue(torch.ops.aten.native_dropout.default not in targets)
+
+    def test_disallow_eval_train(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True)
+        example_inputs = (torch.rand(3, 3, 5, 5),)
+
+        # Before export: this is OK
+        m.eval()
+        m.train()
+
+        # After export: this is not OK
+        m = capture_pre_autograd_graph(m, example_inputs)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After prepare: still not OK
+        quantizer = XNNPACKQuantizer()
+        m = prepare_qat_pt2e(m, quantizer)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
+
+        # After convert: still not OK
+        m = convert_pt2e(m)
+        with self.assertRaises(NotImplementedError):
+            m.eval()
+        with self.assertRaises(NotImplementedError):
+            m.train()
 
 
 @skipIfNoQNNPACK
