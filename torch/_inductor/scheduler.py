@@ -1820,6 +1820,8 @@ class Scheduler:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
                 return True  # allow fusion
+            elif "Cannot broadcast" in str(e):
+                return True
             else:
                 raise
 
