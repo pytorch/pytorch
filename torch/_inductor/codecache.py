@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import dataclasses
 import functools
@@ -231,11 +233,11 @@ class PersistentCache(CacheBase):
 
     def lookup(
         self,
-        choices: List["ChoiceCaller"],
+        choices: List[ChoiceCaller],
         name: str,
         inputs: str,
         benchmark: Callable[[Any], float],
-    ) -> Dict["ChoiceCaller", float]:
+    ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
@@ -965,7 +967,7 @@ class AotCodeCache:
     @classmethod
     def compile(
         cls,
-        graph: "GraphLowering",
+        graph: GraphLowering,
         source_code: str,
         serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
