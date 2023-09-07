@@ -99,7 +99,7 @@ def gen_ops() -> List[Any]:
 
 
 def dtype_match(
-    torch_dtype: torch.dtype, cutlass_dtype: cutlass_library.DataType
+    torch_dtype: torch.dtype, cutlass_dtype: "cutlass_library.DataType"
 ) -> bool:
     if torch_dtype == torch.float:
         return (

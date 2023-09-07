@@ -171,7 +171,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return res
 
     @staticmethod
-    def cutlass_layout(torch_layout) -> Optional[cutlass_lib.LayoutType]:
+    def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":
         if torch_layout.stride[-1] == 1:
             return cutlass_lib.LayoutType.RowMajor
         elif torch_layout.stride[-2] == 1:
@@ -181,8 +181,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def flip_cutlass_layout(
-        cutlass_layout: cutlass_lib.LayoutType,
-    ) -> cutlass_lib.LayoutType:
+        cutlass_layout: "cutlass_lib.LayoutType",
+    ) -> "cutlass_lib.LayoutType":
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
             return cutlass_lib.LayoutType.ColumnMajor
         else:
@@ -211,7 +211,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def define_gemm_instance(
-        op: cutlass_gemm_op.GemmOperation,
+        op: "cutlass_gemm_op.GemmOperation",
     ) -> Tuple[str, str]:
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
@@ -253,7 +253,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # return False
 
     @staticmethod
-    def swap_XW(op: cutlass_gemm_op.GemmOperation) -> cutlass_gemm_op.GemmOperation:
+    def swap_XW(op: "cutlass_gemm_op.GemmOperation") -> "cutlass_gemm_op.GemmOperation":
         # Swap X and W in GemmOperation.
         new_op = copy.deepcopy(op)
         new_op.A.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.A.layout)
@@ -265,8 +265,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def filter_op(
         self,
-        op: cutlass_gemm_op.GemmOperation,
-    ) -> cutlass_gemm_op.GemmOperation:
+        op: "cutlass_gemm_op.GemmOperation",
+    ) -> "cutlass_gemm_op.GemmOperation":
         # Skip simt kernels
         if (
             op.tile_description.math_instruction.opcode_class
@@ -344,7 +344,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         return op
 
-    def gen_ops(self) -> List[cutlass_gemm_op.GemmOperation]:
+    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         num_3x_ops = 0
@@ -447,7 +447,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
-        op: cutlass_gemm_op.GemmOperation,
+        op: "cutlass_gemm_op.GemmOperation",
         output_node: IRNode = None,
     ) -> str:
         if output_node is not None:

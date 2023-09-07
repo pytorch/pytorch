@@ -762,9 +762,13 @@ def use_triton_template(layout, *, enable_int32=False):
 
 
 def use_cutlass_template(layout):
+    from ..codegen.cuda import HAS_CUTLASS
+
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "CUTLASS"
+    return (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and _use_autotune_backend("CUTLASS")
+        and HAS_CUTLASS
     )
 
 
