@@ -858,7 +858,8 @@ class FlatParamHandle:
             )
             allocated = torch._storage_size_allocated(flat_param)
             if allocated:
-                flat_param._typed_storage()._resize_(0)
+                # flat_param._typed_storage()._resize_(0)
+                flat_param.resize_storage_(0)
             flat_param.set_(sharded_flat_param)
             start_idx = sharded_flat_param.numel() * self.rank
             end_idx = sharded_flat_param.numel() * (self.rank + 1) - 1  # inclusive

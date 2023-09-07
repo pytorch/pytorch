@@ -12,6 +12,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <iostream>
+
 #include <limits>
 
 namespace torch::jit {
@@ -753,14 +755,17 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk) {
+  std::cout << "Invoking op from python" << std::endl;
   auto opWithStack = getOpWithStack(operations, args, kwargs);
   std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
   Stack stack = std::get<1>(opWithStack);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {
+      std::cout << "Invoking for dk" << std::endl;
       found_op->getOperationForDispatchKey (*dk)(stack);
     } else {
+      std::cout << "Invoking as is" << std::endl;
       found_op->getOperation()(stack);
     }
   }

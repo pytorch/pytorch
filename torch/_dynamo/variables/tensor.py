@@ -1103,6 +1103,7 @@ class TypedStorageVariable(VariableTracker):
             # self.value().as_proxy()._resize_(args[0])
             self.original.as_proxy()._typed_storage()._resize_(args[0].value)
             with torch._dynamo.variables.higher_order_ops.dynamo_disable_grad(tx), torch.no_grad():
+                print("DYNAMO RESIZE")
                 new_t = wrap_fx_proxy(
                     tx,
                     tx.output.create_proxy(

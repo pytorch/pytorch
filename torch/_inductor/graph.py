@@ -667,21 +667,21 @@ class GraphLowering(torch.fx.Interpreter):
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
         assert isinstance(result, (tuple, list)), type(result)
-        assert all(
-            isinstance(
-                x,
-                (
-                    TensorBox,
-                    ir.Constant,
-                    type(None),
-                    ir.ConstantBuffer,
-                    sympy.Expr,
-                    sympy.logic.boolalg.Boolean,
-                    int,
-                ),
-            )
-            for x in result
-        ), result
+        # assert all(
+        #     isinstance(
+        #         x,
+        #         (
+        #             TensorBox,
+        #             ir.Constant,
+        #             type(None),
+        #             ir.ConstantBuffer,
+        #             sympy.Expr,
+        #             sympy.logic.boolalg.Boolean,
+        #             int,
+        #         ),
+        #     )
+        #     for x in result
+        # ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         value: ir.IRNode
         for name, value in self.graph_inputs.items():

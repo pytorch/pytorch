@@ -11,12 +11,18 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
+#include <iostream>
+
 namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
+  std::cout << "resize_bytes_cuda start" << std::endl;
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
+  std::cout << "check 1" << std::endl;
   auto allocator = storage->allocator();
+  std::cout << "allocator" << std::endl;
   TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
+  std::cout << "check 2" << std::endl;
 
   auto device = at::cuda::current_device();
   if (size_bytes == 0) {
@@ -24,7 +30,7 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
     storage->set_nbytes(0);
     return;
   }
-
+  std::cout << "Trying to resize storage from" << storage->nbytes() << " to " << size_bytes << " bytes\n";
   at::DataPtr data = allocator->allocate(size_bytes);
   if (storage->data_ptr()) {
     // Enable p2p access when the memcpy is across devices
@@ -41,8 +47,11 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   }
 
   // Destructively overwrite data_ptr
+  std::cout << "made data" << std::endl;
   storage->set_data_ptr_noswap(std::move(data));
+  std::cout << "set data" << std::endl;
   storage->set_nbytes(size_bytes);
+  std::cout << "Resized storage to" << storage->nbytes() << " bytes\n";
 }
 
 const Tensor& resize_cuda_(

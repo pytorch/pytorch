@@ -10,7 +10,7 @@ import torch._C
 
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
-
+import os
 # Query `hasattr` only once.
 
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
@@ -513,6 +513,12 @@ class OpOverload(OperatorBase):
         )
 
     def __call__(self, *args, **kwargs):
+        gpu_id = int(os.environ.get("LOCAL_RANK", 0))
+        if gpu_id == 0:
+            print("Running op", self._op, self._name)
+            if "storage" in self._name:
+                print("Storage lookup")
+                print("Storage size?", args[0]._typed_storage()._size())
         return self._op(*args, **kwargs or {})
 
     def __hash__(self):
@@ -650,7 +656,7 @@ class OpOverload(OperatorBase):
                     add_cached_op(self)
                 return handler
 
-        # print(self, key, final_key)
+        print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
             self._dispatch_cache[key] = r
