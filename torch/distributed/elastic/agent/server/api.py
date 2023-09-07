@@ -385,6 +385,8 @@ def _get_socket_with_port() -> socket.socket:
 def _get_fq_hostname() -> str:
     return socket.getfqdn(socket.gethostname())
 
+def _get_fq_host_ip() -> str:
+    return socket.gethostbyname(socket.gethostname())
 
 class ElasticAgent(abc.ABC):
     """
@@ -520,7 +522,7 @@ class SimpleElasticAgent(ElasticAgent):
             if local_addr:
                 master_addr = local_addr
             else:
-                master_addr = _get_fq_hostname()
+                master_addr = _get_fq_host_ip()
 
         store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
         store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
