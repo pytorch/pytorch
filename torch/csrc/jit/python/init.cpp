@@ -1593,18 +1593,41 @@ void initJITBindings(PyObject* module) {
       [](const std::string& op_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          auto operations = getAllOperatorsFor(symbol);
-          TORCH_CHECK(!operations.empty(), "No such operator ", op_name);
+          const auto& unsortedOps = getAllOperatorsFor(symbol);
+          TORCH_CHECK(!unsortedOps.empty(), "No such operator ", op_name);
+
+          // Depending on the order of registration, aten or jit ops may be
+          // registered first. This sorting is helpful in cases where
+          // deterministic (i.e. not dependent on build config) behavior is
+          // desired; e.g. torch.ops.aten.* uses this function, and tries to
+          // find the "first" op that matches input args. Without the sorting,
+          // the "first" op may change depending on registration order.
+          std::vector<std::shared_ptr<Operator>> sortedOps;
+          sortedOps.reserve(unsortedOps.size());
+          std::copy_if(
+              unsortedOps.begin(),
+              unsortedOps.end(),
+              std::back_inserter(sortedOps),
+              [](const std::shared_ptr<Operator>& op) {
+                return op->isC10Op();
+              });
+          std::copy_if(
+              unsortedOps.begin(),
+              unsortedOps.end(),
+              std::back_inserter(sortedOps),
+              [](const std::shared_ptr<Operator>& op) {
+                return !op->isC10Op();
+              });
           std::ostringstream docstring;
           docstring << "Automatically bound operator '" << op_name
                     << "' with schema(s):\n";
 
-          for (const auto& op : operations) {
+          for (const auto& op : sortedOps) {
             docstring << "  " << op->schema() << "\n";
           }
 
           py::list overload_names;
-          for (const auto& op : operations) {
+          for (const auto& op : sortedOps) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
@@ -1614,11 +1637,11 @@ void initJITBindings(PyObject* module) {
                torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 
           auto func = py::cpp_function(
-              [operations, symbol, allow_numbers_as_tensors](
+              [sortedOps, symbol, allow_numbers_as_tensors](
                   py::args args, py::kwargs kwargs) {
                 ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
-                    operations, symbol, args, kwargs, false);
+                    sortedOps, symbol, args, kwargs, false);
               },
               py::name(symbol.toUnqualString()),
               py::doc(docstring.str().c_str()));

@@ -8,12 +8,16 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
+
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
@@ -213,6 +217,38 @@ class TestDoBench(TestCase):
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+    @skipIfRocm
+    def test_autotune_conv1x1(self):
+        # Define the 1x1 convolutional layer
+        # Assuming input has 3 channels and we want to produce 16 channels as output
+        conv1x1 = (
+            torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
+            .to(memory_format=torch.channels_last)
+            .cuda()
+        )
+
+        # Example input tensor: batch size = 4, channels = 3, height = 32, width = 32
+        # The memory format is set to `channels_last`
+        input_tensor = (
+            torch.randn(4, 3, 32, 32)
+            .contiguous(memory_format=torch.channels_last)
+            .cuda()
+        )
+
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out, code = run_and_get_code(foo, conv1x1, input_tensor)
+
+            FileCheck().check_not("extern_kernels.convolution").run(code[0])
+            self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
     def test_cat_addmm(self):
         def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):

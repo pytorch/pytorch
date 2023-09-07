@@ -6,6 +6,7 @@ import re
 import traceback
 from typing import Any, Callable, Dict, List, Optional, Union
 
+from torch._logging import LazyString
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.diagnostics.infra import sarif
 
@@ -18,21 +19,6 @@ _SarifClass = Union[
     sarif.ReportingDescriptor,
     sarif.Result,
 ]
-
-
-class LazyString:
-    """A class to lazily evaluate a string.
-
-    Adopted from `torch._dynamo.utils.LazyString`.
-    """
-
-    def __init__(self, func, *args, **kwargs):
-        self.func = func
-        self.args = args
-        self.kwargs = kwargs
-
-    def __str__(self):
-        return self.func(*self.args, **self.kwargs)
 
 
 def lazy_format_exception(exception: Exception) -> LazyString:

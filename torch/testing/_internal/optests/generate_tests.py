@@ -1,10 +1,14 @@
+import datetime
 import functools
+import os
+import tempfile
 import unittest
 
 import torch
 
-import torch.utils._pytree as pytree
+import torch._dynamo
 
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import clone_input
 from torch._subclasses.schema_check_mode import SchemaCheckMode
 from torch.overrides import TorchFunctionMode
@@ -16,7 +20,7 @@ from torch.testing._internal.optests import (
 
 
 def safe_schema_check(op, args, kwargs):
-    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
+    args, kwargs = deepcopy_tensors((args, kwargs))
     with SchemaCheckMode():
         result = op(*args, **kwargs)
         return result
@@ -28,12 +32,12 @@ def safe_autograd_registration_check(op, args, kwargs):
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
     ):
         return
-    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
+    args, kwargs = deepcopy_tensors((args, kwargs))
     return autograd_registration_check(op, args, kwargs)
 
 
 def safe_fake_check(op, args, kwargs):
-    args, kwargs = pytree.tree_map(clone_input, (args, kwargs))
+    args, kwargs = deepcopy_tensors((args, kwargs))
     return fake_check(op, args, kwargs, dynamic_only=False)
 
 
@@ -47,11 +51,17 @@ def safe_aot_autograd_check(op, args, kwargs, dynamic):
     return aot_autograd_check(func, args, kwargs, dynamic, check_gradients="auto")
 
 
+def deepcopy_tensors(inputs):
+    return pytree.tree_map_only(torch.Tensor, clone_input, inputs)
+
+
 # Test util requirements
 # - The test util must have signature (op: OpOverload, args, kwargs)
 # - The test util must NOT mutate args, kwargs.
 # - The test utils in this list must not be prefixes of each other. For example,
 #   having both "test_schema" and "test_schema_is_functional" is NOT OK.
+# - The order of items in this dict matters (for opcheck), we'll run them
+#   in order.
 ALL_TEST_UTILS = {
     "test_schema": safe_schema_check,
     "test_autograd_registration": safe_autograd_registration_check,
@@ -68,7 +78,12 @@ ALL_TEST_UTILS = {
 
 
 def generate_opcheck_tests(
-    testcase, namespaces, failures_dict, additional_decorators, test_utils
+    testcase,
+    namespaces,
+    failures_dict,
+    failures_dict_path,
+    additional_decorators,
+    test_utils,
 ):
     """Given an existing TestCase, use the existing tests to generate
     additional validation tests for custom operators.
@@ -93,11 +108,14 @@ def generate_opcheck_tests(
     we will generate a ``test_schema__test_cumsum``,
     ``test_faketensor__test_cumsum``, etc.
 
+    For more details, see https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit
+
     Args:
         testcase: The testcase we will modify and generate additional tests for.
         namespaces: We will only intercept calls to custom operators with these
                     namespaces.
         failures_dict: See ``validate_failures_dict`` for more details
+        failures_dict_path: The path to your failures dict. We will mention it in errors.
         additional_decorators: Pass us some decorators
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
@@ -117,7 +135,14 @@ def generate_opcheck_tests(
         new_method_name = prefix + "__" + attr
 
         def new_method(*args, **kwargs):
-            with OpCheckMode(namespaces, tester, failures_dict, new_method_name):
+            with OpCheckMode(
+                namespaces,
+                prefix,
+                tester,
+                failures_dict,
+                new_method_name,
+                failures_dict_path,
+            ):
                 result = method(*args, **kwargs)
             return result
 
@@ -202,17 +227,28 @@ class OpCheckMode(TorchFunctionMode):
     test_util(op, args, kwargs) for each intercepted (op, args, kwargs).
     """
 
-    def __init__(self, namespaces, test_util, failures_dict, test_name):
+    def __init__(
+        self,
+        namespaces,
+        test_util_name,
+        test_util,
+        failures_dict,
+        test_name,
+        failures_dict_path,
+    ):
         # We will intercept calls to ops with these namespaces
         self.namespaces = namespaces
         # The test utility function. Its signature should be (op, args, kwargs) -> None.
         # Examples of test utilities are: schema_check, make_fx_check
         self.test_util = test_util
+        self.test_util_name = test_util_name
         # The name of the test that is running this OpCheckMode.
         self.test_name = test_name
         # Maps qualname -> test_name -> skip/xfail
         # Tells us if we should skip a test or assert that there is a failure.
         self.failures_dict = failures_dict
+        # Location of the failures dict. Makes it so that the error message is better.
+        self.failures_dict_path = failures_dict_path
 
         # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
         # Maps qualname -> List[exception]
@@ -225,20 +261,45 @@ class OpCheckMode(TorchFunctionMode):
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if option == "xfail":
                     raise OpCheckError(
-                        f"Unexpected success for operator {qualname} on test {self.test_name}"
+                        f"generate_opcheck_tests: Unexpected success for operator "
+                        f"{qualname} on test {self.test_name}. This may mean that "
+                        f"you have fixed this test failure. Please remove the "
+                        f"expected failure in the failure dict at "
+                        f"{self.failures_dict_path}."
+                        f"For more details, see "
+                        f"https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
                     )
                 continue
+        failed_ops = []
         for qualname in self.seen_ops_to_errors.keys():
             option = retrieve(self.failures_dict, qualname, self.test_name)
             if option != "success":
                 continue
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 continue
-            # Raise the first error
-            ex = self.seen_ops_to_errors[qualname][0]
-            raise OpCheckError(
-                f"{self.test_name} failed on operator {qualname}"
-            ) from ex
+            failed_ops.append(qualname)
+        if not failed_ops:
+            return
+        # Raise from the first error but also report about all of them to make
+        # recording xfails easier.
+        ex, op, args, kwargs = self.seen_ops_to_errors[failed_ops[0]][0]
+        if should_print_repro():
+            repro_command = generate_repro(self.test_util_name, op, args, kwargs)
+            repro_command = (
+                f"\n\nFor a minimal repro, run the following: \n\n{repro_command}"
+            )
+        else:
+            repro_command = ""
+        raise OpCheckError(
+            f"Test generated by `generate_opcheck_tests`, {self.test_name}, "
+            f"failed on operators {failed_ops}. This usually means that the "
+            f"operators are not implemented correctly and may lead to silently "
+            f"incorrect behavior. Set PYTORCH_OPCHECK_PRINT_REPRO=1 for a standalone repro, "
+            f"or please see "
+            f"https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit "
+            f"for more recommendations. "
+            f"{repro_command}"
+        ) from ex
 
     def __exit__(self, *args, **kwargs):
         try:
@@ -263,6 +324,12 @@ class OpCheckMode(TorchFunctionMode):
         # Only intercept calls to operators
         if not isinstance(func, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)):
             return func(*args, **kwargs)
+        if (
+            torch.jit.is_tracing()
+            or torch.jit.is_scripting()
+            or torch._dynamo.is_compiling()
+        ):
+            return func(*args, **kwargs)
         # Pre-existing code may not use the .default overload. If we see an
         # OpOverloadPacket and we cannot resolve the overload, then we just throw
         # and ask the user to clarify. Otherwise, we attempt to resolve the overload.
@@ -273,7 +340,7 @@ class OpCheckMode(TorchFunctionMode):
         if ns not in self.namespaces:
             return func(*args, **kwargs)
 
-        args_c, kwargs_c = pytree.tree_map(clone_input, (args, kwargs))
+        args_c, kwargs_c = deepcopy_tensors((args, kwargs))
         # Only call test_util(op, *args, **kwargs) if this succeeds.
         result = func(*args, **kwargs)
 
@@ -285,14 +352,130 @@ class OpCheckMode(TorchFunctionMode):
                     self.seen_ops_to_errors[qualname] = []
                 self.run_test_util(func, args_c, kwargs_c)
             except Exception as ex:
-                self.seen_ops_to_errors[qualname].append(ex)
+                if should_print_repro():
+                    self.seen_ops_to_errors[qualname].append((ex, func, args, kwargs))
+                else:
+                    self.seen_ops_to_errors[qualname].append((ex, None, None, None))
         elif option == "skip":
             pass
         return result
 
 
+def should_print_repro():
+    """If set, the tests generated by `generate_opcheck_tests` will print a
+    repro command on failure.
+
+    In order to print the repro command, we need to save some tensors to disk.
+    These will be saved under the following directory:
+    {tempfile.gettempdir()}/pytorch_opcheck_safe_to_delete/.
+
+    Although this is a temp folder, it will usually not automatically get cleaned
+    up, so you'll need to manually delete it.
+    """
+    key = "PYTORCH_OPCHECK_PRINT_REPRO"
+    if key not in os.environ:
+        return False
+    value = os.environ[key]
+    return value == "1" or value == 1
+
+
+def opcheck(op, args, kwargs=None, *, test_utils="ALL", raise_exception=True):
+    """Given an operator and some sample arguments, tests if the operator is
+    registered correctly.
+
+    We test the following (which are important for correctness in eager-mode
+    PyTorch and with torch.compile):
+    - test_schema: if the operator's schema is correct.
+    - test_autograd_registration: if autograd was registered correctly,
+        i.e. to the correct DispatchKey.
+    - test_faketensor: If the operator has a FakeTensor implementation
+        (and if it is correct).
+    - test_aot_dispatch_static: If the operator works with
+        AOTAutograd/AOTDispatch, which is one of the parts in the PT2 stack.
+        Checks that the outputs (and gradients, if they are computable)
+        of the operator are the same under eager-mode PyTorch and torch.compile.
+    - test_aot_dispatch_dynamic: Same as aot_dispatch_static, but
+        tests dynamic shapes instead of static shapes.
+
+    For best results, please call ``opcheck`` multiple times with a
+    representative set of inputs. For example, if your operator supports
+    autograd, please use ``opcheck`` with inputs that require_grad.
+
+    Args:
+        op: The operator. Should look like torch.ops.aten.foo
+        args: The args to the operator
+        kwargs: The kwargs to the operator
+        test_utils: Tests that we should run. Default: all of them.
+            Example: ["test_schema", "test_faketensor"]
+        raise_exception: If we should raise an exception on the first
+            error. If False, we will return a dict with information
+            on if each test passed or not.
+
+    """
+
+    if kwargs is None:
+        kwargs = {}
+    if isinstance(op, torch._ops.OpOverloadPacket):
+        op = resolve_unique_overload_or_throw(op)
+    if not isinstance(op, torch._ops.OpOverload):
+        raise ValueError(
+            f"opcheck(op, ...): op must be instance of torch._ops.OpOverload, "
+            f"e.g. torch.ops.aten.sin.default, got {type(op)}"
+        )
+    if test_utils == "ALL":
+        test_utils = tuple(ALL_TEST_UTILS.keys())
+    if isinstance(test_utils, str):
+        test_utils = (test_utils,)
+    if not isinstance(test_utils, (tuple, list)) or not set(test_utils).issubset(
+        ALL_TEST_UTILS.keys()
+    ):
+        raise ValueError(
+            f"opcheck(op, ..., test_utils={test_utils}), expected test_utils "
+            f"to be subset of {tuple(ALL_TEST_UTILS.keys())} but it was not"
+        )
+
+    results_dict = {}
+    for test_util in test_utils:
+        tester = ALL_TEST_UTILS[test_util]
+        try:
+            tester(op, args, kwargs)
+            results_dict[test_util] = "SUCCESS"
+        except Exception as ex:
+            if raise_exception:
+                raise OpCheckError(
+                    f"opcheck(op, ...): {test_util} failed with {ex} "
+                    f"(scroll up for stack trace)"
+                ) from ex
+            results_dict[test_util] = ex
+    return results_dict
+
+
 class OpCheckError(Exception):
     pass
+
+
+def generate_repro(test, op, args, kwargs):
+    now = datetime.datetime.now()
+    unix_timestamp = datetime.datetime.timestamp(now) * 1000
+    path = os.path.join(tempfile.gettempdir(), "pytorch_opcheck_safe_to_delete")
+    if not os.path.exists(path):
+        os.makedirs(path)
+    filepath = os.path.join(path, f"repro_{unix_timestamp}.pt")
+
+    ns, name = op._schema.name.split("::")
+    overload = op._overloadname
+
+    repro_command = (
+        f"import torch\n"
+        f"from torch.testing._internal.optests import opcheck\n"
+        f"# Make sure you have loaded the library that contains the op\n"
+        f"# via an import or torch.ops.load_library(...)\n"
+        f"op = torch.ops.{ns}.{name}.{overload}\n"
+        f'args, kwargs = torch.load("{filepath}")\n'
+        f'opcheck(op, args, kwargs, test_utils="{test}")\n'
+    )
+    torch.save((args, kwargs), filepath)
+    return repro_command
 
 
 def resolve_unique_overload_or_throw(op: torch._ops.OpOverloadPacket):

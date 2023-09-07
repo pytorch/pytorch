@@ -55,7 +55,20 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
 
   for (auto i : c10::irange(sym_sizes.size())) {
     auto si = sym_sizes[i];
-    if (auto m = si.maybe_as_int()) {
+    if (si.is_symbolic()) {
+      // First check for actual symbolic values.
+      // Reason: so that we don't replace it by its integer replacement
+      // implicitly.
+      TORCH_CHECK(
+          !torch::jit::tracer::isTracing(),
+          "JIT Tracing of SymInts isn't supported");
+      auto py_symint = py::cast(si).release().ptr();
+      if (!py_symint)
+        throw python_error();
+      PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    } else {
+      // Otherwise, we know that it is an actual integer value.
+      auto m = si.maybe_as_int();
       if (torch::jit::tracer::isTracing()) {
         PyObject* py_size_tensor =
             THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
@@ -65,14 +78,6 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       } else {
         PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*m));
       }
-    } else {
-      TORCH_CHECK(
-          !torch::jit::tracer::isTracing(),
-          "JIT Tracing of SymInts isn't supported");
-      auto py_symint = py::cast(si).release().ptr();
-      if (!py_symint)
-        throw python_error();
-      PyTuple_SET_ITEM(ret.get(), i, py_symint);
     }
   }
   return ret.release();

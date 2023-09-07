@@ -69,6 +69,10 @@ class StarDep(typing.NamedTuple):
     # depends on the entire buffer
     name: str
 
+    @property
+    def index(self):
+        raise NotImplementedError("StarDep does not have an index")
+
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
             return StarDep(renames[self.name])
@@ -94,6 +98,10 @@ class StarDep(typing.NamedTuple):
 # B must be ordered after A
 class WeakDep(typing.NamedTuple):
     name: str
+
+    @property
+    def index(self):
+        raise NotImplementedError("WeakDep does not have an index")
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:

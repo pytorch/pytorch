@@ -988,6 +988,26 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigh(a, out=(out_w, out_v))
 
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double)
+    @unittest.skipIf(_get_torch_cuda_version() < (12, 1), "Test is fixed on cuda 12.1 update 1.")
+    def test_eigh_svd_illcondition_matrix_input_should_not_crash(self, device, dtype):
+        # See https://github.com/pytorch/pytorch/issues/94772, https://github.com/pytorch/pytorch/issues/105359
+        # This test crashes with `cusolver error: CUSOLVER_STATUS_EXECUTION_FAILED` on cuda 11.8,
+        # but passes on cuda 12.1 update 1 or later.
+        a = torch.ones(512, 512, dtype=dtype, device=device)
+        a[0, 0] = 1.0e-5
+        a[-1, -1] = 1.0e5
+
+        eigh_out = torch.linalg.eigh(a)
+        svd_out = torch.linalg.svd(a)
+
+        # Matrix input a is too ill-conditioned.
+        # We'll just compare the first two singular values/eigenvalues. They are 1.0e5 and 511.0
+        # The precision override with tolerance of 1.0 makes sense since ill-conditioned inputs are hard to converge
+        # to exact values.
+        self.assertEqual(eigh_out.eigenvalues.sort(descending=True).values[:2], [1.0e5, 511.0], atol=1.0, rtol=1.0e-2)
+        self.assertEqual(svd_out.S[:2], [1.0e5, 511.0], atol=1.0, rtol=1.0e-2)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

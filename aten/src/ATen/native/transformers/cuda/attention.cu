@@ -38,6 +38,8 @@
 #ifdef USE_FLASH_ATTENTION
 // FlashAttention Specific Imports
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#endif
+#ifdef USE_MEM_EFF_ATTENTION
 // MemoryEfficient Attention Specific Imports
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_forward.h>
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernels/cutlassF.h>
@@ -830,7 +832,7 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
     c10::optional<double> scale,
     const c10::optional<at::Tensor>& causal_diagonal,
     const c10::optional<at::Tensor>& seqlen_k) {
-#if defined(USE_FLASH_ATTENTION)
+#if defined(USE_MEM_EFF_ATTENTION)
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
 // this would avoid runtime architecture checks, we should look into it
@@ -1097,7 +1099,7 @@ std::tuple<at::Tensor, at::Tensor, Tensor, Tensor> _efficient_attention_forward(
       std::move(seed_t),
       std::move(offset_t));
 #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }
 
@@ -1108,7 +1110,7 @@ Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tenso
 
 REGISTER_CUDA_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_cuda);
 
-#ifdef USE_FLASH_ATTENTION
+#ifdef USE_MEM_EFF_ATTENTION
 namespace {
 /**
  * simple kernel that populates a tensor with rand uniform values.
@@ -1174,7 +1176,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
   const int64_t n_heads = self.size(1);
   const int64_t n_queries = self.size(2);
   const int64_t n_keys = self.size(3);
-#if defined(USE_FLASH_ATTENTION)
+#if defined(USE_MEM_EFF_ATTENTION)
 
   at::PhiloxCudaState rng_engine_inputs;
   rng_engine_inputs = at::PhiloxCudaState(seed, offset);
@@ -1192,7 +1194,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 
   return self;
 #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
   return self;
 }
 
