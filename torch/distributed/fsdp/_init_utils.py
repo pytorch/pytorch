@@ -572,7 +572,7 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             fully_sharded_module, managed_params, state.process_group
         )
-        if getattr(state, "_inter_node_pg", None) is not None:
+        if state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
             _sync_module_params_and_buffers(
                 fully_sharded_module, managed_params, state._inter_node_pg
             )
