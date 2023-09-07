@@ -1,4 +1,5 @@
 import contextlib
+import functools
 import itertools
 import logging
 
@@ -39,6 +40,17 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
     finally:
         tx.output.graph = graph_checkpoint
         tx.restore_graphstate(checkpoint)
+
+
+def raise_hard_error_if_graph_break(fn):
+    @functools.wraps(fn)
+    def graph_break_as_hard_error(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Unsupported as e:
+            raise UncapturedHigherOrderOpError(e.msg) from e
+
+    return graph_break_as_hard_error
 
 
 @contextlib.contextmanager
@@ -304,6 +316,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -321,13 +334,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
@@ -336,14 +349,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
             isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
         ):
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
@@ -400,12 +413,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
-                raise UncapturedHigherOrderOpError(
+                raise unimplemented(
                     "Cond doesn't work unless it is captured completely with torch.compile"
                 ) from e
 
             if not isinstance(ret_val, TensorVariable):
-                raise UncapturedHigherOrderOpError(
+                unimplemented(
                     "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
