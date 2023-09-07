@@ -32,7 +32,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext
-from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._pytree import tree_map_only
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -317,7 +317,7 @@ def _extract_shape_env_and_assert_equal(args, kwargs) -> "ShapeEnv":
         return new
 
     shape_env = None
-    for val in tree_flatten((args, kwargs))[0]:
+    for val in itertools.chain(args, kwargs.values()):
         if isinstance(val, ShapeEnv):
             shape_env = assert_equal(shape_env, val)
         if isinstance(val, SymTypes):
@@ -2451,6 +2451,7 @@ class ShapeEnv:
                     "graph",
                     "validator",
                     "check_recorded_events",
+                    "should_record_events",
                     "is_recording",
                     "tracked_fakes",
                     "events",
