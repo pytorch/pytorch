@@ -35,8 +35,6 @@ from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 
 # Protects against includes accidentally setting the default dtype
-# NOTE: jit_metaprogramming_utils sets the default dtype to double!
-torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
 
 if TEST_SCIPY:
@@ -7585,4 +7583,5 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
