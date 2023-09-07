@@ -155,10 +155,12 @@ jobs:
             echo "Setting up the TestApp for LiteInterpreter"
             ruby setup.rb --lite 1
           else
+            # NB: Trace and generate the model for the later test as it doesn't exist
+            # yet (unlike those ptl ones), this need to be done before setup.rb
+            ${CONDA_RUN} python trace_model.py
+
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
-            # And also trace the model for the later test as it doesn't exist yet
-            ${CONDA_RUN} python trace_model.py
           fi
           popd
 
