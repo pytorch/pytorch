@@ -86,7 +86,6 @@ const std::string data_type2str(logical_tensor::data_type v) {
     if (v == logical_tensor::data_type::s32) return "s32";
     if (v == logical_tensor::data_type::s8) return "s8";
     if (v == logical_tensor::data_type::u8) return "u8";
-    if (v == logical_tensor::data_type::boolean) return "boolean";
     return "unknown data_type";
 }
 
@@ -141,14 +140,14 @@ void bind_logical_tensor(pybind11::module& m) {
       .def(pybind11::init<
            size_t,
            logical_tensor::data_type,
-           logical_tensor::dims_t,
+           logical_tensor::dims,
            logical_tensor::layout_type,
            logical_tensor::property_type>())
       .def(pybind11::init<
            size_t,
            logical_tensor::data_type,
-           logical_tensor::dims_t,
-           logical_tensor::dims_t,
+           logical_tensor::dims,
+           logical_tensor::dims,
            logical_tensor::property_type>())
       .def(pybind11::init<
            size_t,
@@ -173,7 +172,6 @@ void bind_logical_tensor(pybind11::module& m) {
       .value("s32", logical_tensor::data_type::s32)
       .value("s8", logical_tensor::data_type::s8)
       .value("u8", logical_tensor::data_type::u8)
-      .value("boolean", logical_tensor::data_type::boolean)
       .export_values();
 
   pybind11::enum_<logical_tensor::layout_type>(lt, "layout_type")
@@ -296,7 +294,6 @@ void bind_op(pybind11::module &m) {
             .value("Mish", op::kind::Mish)
             .value("MishBackward", op::kind::MishBackward)
             .value("Multiply", op::kind::Multiply)
-            .value("Pow", op::kind::Pow)
             .value("PReLU", op::kind::PReLU)
             .value("PReLUBackward", op::kind::PReLUBackward)
             .value("Quantize", op::kind::Quantize)
@@ -312,7 +309,6 @@ void bind_op(pybind11::module &m) {
             .value("ReLUBackward", op::kind::ReLUBackward)
             .value("Reorder", op::kind::Reorder)
             .value("Round", op::kind::Round)
-            .value("Select", op::kind::Select)
             .value("Sigmoid", op::kind::Sigmoid)
             .value("SigmoidBackward", op::kind::SigmoidBackward)
             .value("SoftMax", op::kind::SoftMax)
@@ -409,7 +405,6 @@ static size_t size_of(logical_tensor::data_type dtype) {
     switch (dtype) {
         case logical_tensor::data_type::f32:
         case logical_tensor::data_type::s32: return 4U;
-        case logical_tensor::data_type::boolean:
         case logical_tensor::data_type::s8:
         case logical_tensor::data_type::u8: return 1U;
         case logical_tensor::data_type::f16:
@@ -430,9 +425,6 @@ static std::string format_string(logical_tensor::data_type dtype) {
             break;
         case logical_tensor::data_type::s8:
             return pybind11::format_descriptor<int8_t>::format();
-            break;
-        case logical_tensor::data_type::boolean:
-            return pybind11::format_descriptor<bool>::format();
             break;
         default:
             throw std::runtime_error(

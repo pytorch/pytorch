@@ -37,7 +37,6 @@ class OnednnGraph:
             torch.int32: llga.logical_tensor.s32,
             torch.int8: llga.logical_tensor.s8,
             torch.uint8: llga.logical_tensor.u8,
-            torch.bool: llga.logical_tensor.boolean,
             torch.int64: llga.logical_tensor.dt_undef,
             torch.float64: llga.logical_tensor.dt_undef,
             torch.complex64: llga.logical_tensor.dt_undef,
@@ -71,18 +70,18 @@ class OnednnGraph:
         # Initialize map of supported tensors
         for p in self.partitions:
             p_is_supported = p in partitions and p.is_supported()
-            for out_desc in p.get_out_ports():
+            for out_desc in p.get_output_ports():
                 id = out_desc.get_id()
                 if p_is_supported and id not in output_to_flag_map:
                     output_to_flag_map[id] = []
-            for in_desc in p.get_in_ports():
+            for in_desc in p.get_input_ports():
                 id = in_desc.get_id()
                 if id in output_to_flag_map:
                     output_to_flag_map[id].append(p_is_supported)
         for p in partitions:
             if not p.is_supported():
                 continue
-            for in_desc in p.get_in_ports():
+            for in_desc in p.get_input_ports():
                 id = in_desc.get_id()
                 if id not in output_to_flag_map:
                     continue
@@ -120,7 +119,7 @@ class OnednnGraph:
         return [cp.query_logical_tensor(desc.get_id()) for desc in out_descs]
 
     def compile_partition(self, p: llga.partition, inputs: List[llga.logical_tensor]):
-        outputs = p.get_out_ports()
+        outputs = p.get_output_ports()
         for i, input in enumerate(inputs):
             id = input.get_id()
             if id in self.desc_id_to_queried_desc:
@@ -260,7 +259,7 @@ class OnednnGraph:
             in_desc.get_id()
             if in_desc.get_id() in self.desc_to_scalar_data.keys()
             else self.get_node_from_desc(in_desc).name
-            for in_desc in onednn_partition.get_in_ports()
+            for in_desc in onednn_partition.get_input_ports()
         ]
         arg_names = [n.name for n in node_args]
 
@@ -369,7 +368,7 @@ class OnednnGraphPartitionModule:
         self.partition = partition
         self.onednn_graph = onednn_graph
         self.input_order_data = [] if input_order_data is None else input_order_data
-        self.input_descs = partition.get_in_ports()
+        self.input_descs = partition.get_input_ports()
         self.kernel = None
         self.output_descs = None
 
@@ -402,7 +401,7 @@ class OnednnGraphPartitionModule:
                 self.partition, input_descs
             )
             output_descs = self.onednn_graph.get_compiled_output_descs(
-                compiled_partition, self.partition.get_out_ports()
+                compiled_partition, self.partition.get_output_ports()
             )
             output_tensors = [
                 torch.empty_strided(out_desc.get_dims(), out_desc.get_strides())
@@ -420,7 +419,7 @@ class OnednnGraphPartitionModule:
                     self.partition, self.input_descs
                 )
                 self.output_descs = self.onednn_graph.get_compiled_output_descs(
-                    self.kernel, self.partition.get_out_ports()
+                    self.kernel, self.partition.get_output_ports()
                 )
 
         if not self.input_onednn_tensors:
@@ -562,6 +561,7 @@ def build_onednn_graph(gm: GraphModule) -> OnednnGraph:
 
     onednn_graph_args = tuple(graph_input_nodes)
     FusionInterpreter(gm).run(*onednn_graph_args)
+    onednn_graph.graph.finalize()
     return onednn_graph
 
 
