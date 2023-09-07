@@ -767,11 +767,20 @@ def use_cutlass_template(layout):
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-    return (
+    res = (
         _use_template_for_cuda(layout, layout_dtypes)
         and _use_autotune_backend("CUTLASS")
-        and try_import_cutlass()
     )
+
+    if res:
+        if not try_import_cutlass():
+            log.warning(
+                "Failed to import CUTLASS lib. Please check whether "
+                "_inductor.config.cuda.cutlass_dir is set correctly. "
+                "Skipping CUTLASS backend for now."
+            )
+            return False
+    return res
 
 
 def use_aten_gemm_kernels():

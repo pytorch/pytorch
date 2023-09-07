@@ -182,7 +182,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return res
 
     @staticmethod
-    def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":
+    def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         if torch_layout.stride[-1] == 1:
@@ -194,8 +194,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def flip_cutlass_layout(
-        cutlass_layout: "cutlass_lib.LayoutType",
-    ) -> "cutlass_lib.LayoutType":
+        cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]
+    ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
@@ -228,7 +228,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def define_gemm_instance(
-        op: "cutlass_gemm_op.GemmOperation",
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> Tuple[str, str]:
         import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library as cutlass_lib  # type: ignore[import]
@@ -273,7 +273,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         # return False
 
     @staticmethod
-    def swap_XW(op: "cutlass_gemm_op.GemmOperation") -> "cutlass_gemm_op.GemmOperation":
+    def swap_XW(op: "cutlass_gemm_op.GemmOperation") -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
         # Swap X and W in GemmOperation.
         new_op = copy.deepcopy(op)
         new_op.A.layout = CUTLASSGemmTemplate.flip_cutlass_layout(new_op.A.layout)
@@ -285,8 +285,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     def filter_op(
         self,
-        op: "cutlass_gemm_op.GemmOperation",
-    ) -> "cutlass_gemm_op.GemmOperation":
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+    ) -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
@@ -366,7 +366,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
         return op
 
-    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":
+    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
         import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
@@ -472,7 +472,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def render(  # type: ignore[override]
         self,
         kernel: CUDATemplateKernel,
-        op: "cutlass_gemm_op.GemmOperation",
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
         output_node: IRNode = None,
     ) -> str:
         import cutlass_library as cutlass_lib  # type: ignore[import]
