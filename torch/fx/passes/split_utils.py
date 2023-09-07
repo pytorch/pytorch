@@ -160,6 +160,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # Placeholders in the original graph get copied to main graph.
         if node.op == "placeholder":
             main_remapping[node] = main_g.placeholder(node.name, type_expr=node.type)
+            main_remapping[node].meta = copy.copy(node.meta)
             continue
 
         # Get_attr nodes are ignored because we are not tagging them.
