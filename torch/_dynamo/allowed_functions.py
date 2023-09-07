@@ -11,7 +11,11 @@ import warnings
 
 from typing import cast, Dict, Optional, Set
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
 
 import torch
 import torch._functorch.deprecated as deprecated_func
@@ -166,6 +170,13 @@ def _allowed_function_ids():
             "torch.fx.",
             "torch.distributed.fsdp.",
             "torch.distributed._tensor.",
+            # Inline through the ActivationWrapper in
+            # torch.distributed.algorithms._checkpoint.checkpoint_wrapper. This
+            # nn module calls torch.utils.checkpoint internally. If Dynamo does
+            # not trace this, AOT Autograd will try to trace this and can cause
+            # issues observed in
+            # https://github.com/pytorch/pytorch/issues/108269
+            "torch.distributed.algorithms.",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -328,4 +339,6 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
+    if np is None:
+        return False
     return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids

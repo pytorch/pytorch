@@ -173,6 +173,45 @@ class MyModule4(torch.nn.Module):
         return torch.sigmoid(x6)
 
 
+class MyModule5(torch.nn.Module):
+    def __init__(self, device, has_bias=True):
+        super().__init__()
+        self.device = device
+
+        self.weights = torch.nn.ParameterList(
+            [torch.nn.Parameter(torch.randn(50, 100)).to(self.device) for _ in range(5)]
+        )
+
+        self.biases = (
+            ([torch.nn.Parameter(torch.randn(50)).to(self.device) for _ in range(5)])
+            if has_bias
+            else [None for _ in range(5)]
+        )
+
+    def forward(self, x):
+        l1_out = torch.split(x.to(self.device), 100, dim=1)
+        l1_linear = [
+            torch.nn.functional.linear(l1_out[i], self.weights[i], self.biases[i])
+            for i in range(len(l1_out))
+        ]
+        l1_out = torch.cat(l1_linear, dim=1)
+        return torch.sin(l1_out)
+
+
+class MyModule6(torch.nn.Module):
+    def __init__(self, device, has_bias=True):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = torch.split(x.to(self.device), 500, dim=1)
+        x_split = torch.split(inputs[0].to(self.device), 100, dim=1)
+        y_split = torch.split(inputs[1].to(self.device), 100, dim=1)
+        tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
+        tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
+        return torch.cat(tanh_1, dim=1) + torch.cat(tanh_2, dim=1)
+
+
 @requires_cuda()
 @torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
 class TestGroupBatchFusion(TestCase):
@@ -320,6 +359,54 @@ class TestGroupBatchFusion(TestCase):
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
+
+    def test_batch_linear_pre_grad_fusion(self):
+        for has_bias in [True, False]:
+            counters.clear()
+            module = MyModule5("cuda", has_bias)
+            input = [torch.randn(50, 500, device="cuda")]
+            traced = torch.compile(module)
+            ref = module(*input)
+            res = traced(*input)
+            self.compare_pred(module, traced, input)
+            self.assertEqual(counters["inductor"]["batch_fusion"], 1)
+            self.assertEqual(counters["inductor"]["group_fusion"], 0)
+            self.assertEqual(
+                counters["inductor"]["scmerge_split_removed"],
+                2,
+            )
+            self.assertEqual(
+                counters["inductor"]["scmerge_cat_removed"],
+                2,
+            )
+            ref.sum().backward()
+            res.sum().backward()
+            self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+            self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+            counters.clear()
+
+    def test_batch_tanh_pre_grad_fusion(self):
+        counters.clear()
+        module = MyModule6("cuda")
+        input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["batch_fusion"], 2)
+        self.assertEqual(
+            counters["inductor"]["scmerge_split_removed"],
+            2,
+        )
+        self.assertEqual(
+            counters["inductor"]["scmerge_cat_removed"],
+            2,
+        )
+        ref.sum().backward()
+        res.sum().backward()
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
 
 
 if __name__ == "__main__":

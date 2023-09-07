@@ -23,7 +23,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
-    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
@@ -45,7 +44,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -57,6 +56,11 @@ tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 foreach_ops = set()
+
+
+def assert_nyi(cond, msg):
+    if not cond:
+        raise NotImplementedError(f"inductor does not support {msg}")
 
 
 def add_needs_realized_inputs(fn):
@@ -190,9 +194,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
             if isinstance(arg, TensorBox):
-                if arg.get_dtype() != dtype:
-                    return to_dtype(arg, dtype)
-                return arg
+                return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
                 return ir.Constant(arg.value, dtype, args[indices[0]].get_device())
             else:
@@ -351,7 +353,12 @@ def promote_constants(inputs, override_return_dtype=None):
                 )
             )
         elif isinstance(x, sympy.Expr):
-            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+            out.append(
+                ExpandView.create(
+                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    list(ex.get_size()),
+                )
+            )
         else:
             out.append(x)
 
@@ -416,13 +423,6 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        def is_dynamic(*args):
-            return any(
-                isinstance(t, TensorBox)
-                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
-                for t in args
-            )
-
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -491,10 +491,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-@register_lowering(prims.convert_element_type, type_promotion_kind=None)
-def to_dtype(x: TensorBox, dtype: torch.dtype):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     if x.get_dtype() == dtype:
-        return clone(x)
+        return clone(x) if copy else x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype)
@@ -502,10 +501,14 @@ def to_dtype(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
-@register_lowering(aten.view.dtype, type_promotion_kind=None)
-def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
+@register_lowering(prims.convert_element_type, type_promotion_kind=None)
+def _convert_element_type(x: TensorBox, dtype: torch.dtype):
+    return to_dtype(x, dtype, copy=True)
+
+
+def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype, *, copy=False):
     if x.get_dtype() == dtype:
-        return x
+        return clone(x) if copy else x
 
     def _get_primitive_bitwidth(dtype):
         if dtype.is_floating_point:
@@ -526,12 +529,21 @@ def to_dtype_bitcast(x: TensorBox, dtype: torch.dtype):
     return make_pointwise(_to_dtype_bitcast, override_return_dtype=dtype)(x)
 
 
-@register_lowering(prims.device_put, type_promotion_kind=None)
-def to_device(x: TensorBox, device: torch.device):
+@register_lowering(aten.view.dtype, type_promotion_kind=None)
+def _view_dtype(x: TensorBox, dtype: torch.dtype):
+    return to_dtype_bitcast(x, dtype, copy=True)
+
+
+def to_device(x: TensorBox, device: torch.device, *, copy=False):
     device = decode_device(device)
     if x.get_device() == device:
-        return clone(x)
+        return clone(x) if copy else x
     return TensorBox.create(ir.DeviceCopy.create(x, device))
+
+
+@register_lowering(prims.device_put, type_promotion_kind=None)
+def _device_put(x: TensorBox, device: torch.device):
+    return to_device(x, device, copy=True)
 
 
 def register_pointwise(
@@ -923,6 +935,15 @@ def as_strided_copy(x, size, stride, storage_offset=None):
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
+    if all(input.get_dtype() is torch.uint8 for input in inputs):
+        # TODO <leslie> Remove this fallback when we support vectorization
+        # code gen with uint8 data type directly.
+        for input in inputs:
+            input.realize()
+        if all(len(input.layout.size) == 4 for input in inputs):
+            inputs, _ = require_channels_last(aten.cat, *inputs)
+        return fallback_handler(aten.cat)(inputs, dim)
+
     if len(inputs) == 1:
         return clone(inputs[0])
 
@@ -1101,6 +1122,7 @@ def register_onednn_fusion_ops():
             torch.ops.mkldnn._convolution_transpose_pointwise,
             torch.ops.mkldnn._linear_pointwise,
             aten.mkldnn_rnn_layer.default,
+            torch.ops.onednn.qconv2d_pointwise,
         ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
@@ -1282,6 +1304,136 @@ def register_onednn_fusion_ops():
                 ),
             )
 
+        @register_lowering(torch.ops.onednn.qconv2d_pointwise, type_promotion_kind=None)
+        def qconvolution_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
+        )
+        def qconvolution_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            accum: TensorBox,
+            accum_scale,
+            accum_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            return TensorBox.create(
+                ir.QConvPointWiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    accum,
+                    accum_scale,
+                    accum_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
+            )
+
+        @register_lowering(torch.ops.onednn.qlinear_pointwise, type_promotion_kind=None)
+        def qlinear_unary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            fp32_output,
+            attr,
+            scalars,
+            algorithm,
+        ):
+            return TensorBox.create(
+                ir.QLinearPointwisePT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    fp32_output,
+                    attr,
+                    scalars,
+                    algorithm,
+                )
+            )
+
         if torch._C.has_mkl:
             cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
@@ -1327,12 +1479,23 @@ def _warn_complex_not_supported():
     )
 
 
+@functools.lru_cache(None)
+def _warn_float8_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
+    )
+
+
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
+        return True
+    # FP8 Tensors are currently not supported
+    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
+        _warn_float8_not_supported()
         return True
     return False
 
@@ -1462,7 +1625,6 @@ def philox_rand(size, seed, offset, stride, device, dtype):
 
 @register_lowering(aten.native_dropout, type_promotion_kind=None)
 def native_dropout(x, p, train):
-    assert train and p not in (0, 1), "inference should have been handled as a decomp"
     if config.fallback_random:
         return pytree.tree_map(
             TensorBox.create, ir.FallbackKernel.create(aten.native_dropout, x, p, train)
@@ -1672,6 +1834,13 @@ def require_contiguous(_, *args, **kwargs):
     return args, kwargs
 
 
+def require_channels_last(_, *args, **kwargs):
+    args, kwargs = pytree.tree_map_only(
+        ir.IRNode, lambda t: ir.ExternKernel.require_channels_last(t), (args, kwargs)
+    )
+    return args, kwargs
+
+
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
@@ -1707,7 +1876,7 @@ make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten._scaled_dot_product_efficient_attention)
 make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
@@ -1715,6 +1884,7 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten._scaled_mm.default)
 
 # TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
@@ -1816,7 +1986,6 @@ make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
-make_fallback(aten.vdot)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -1875,7 +2044,7 @@ def copy(self, src, non_blocking=False):
 
 
 @register_lowering(aten.clone)
-def clone(x, *, memory_format=0):
+def clone(x, *, memory_format=None):
     # TODO(jansel): memory format
     return Pointwise.create(
         device=x.get_device(),
@@ -2022,8 +2191,8 @@ def _unwrap(x):
 
 @register_lowering([torch.tensor, aten.scalar_tensor])
 def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
-    assert layout in (None, torch.strided)
-    assert pin_memory is False
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    assert_nyi(not pin_memory, "pin_memory")
     if isinstance(_unwrap(data), int):
         dtype = dtype or torch.int64
     else:
@@ -2144,10 +2313,9 @@ def tensor_constructor(fill_value):
         pin_memory=False,
         memory_format=None,
     ):
-        assert names is None
-        assert not pin_memory
-        assert layout in (None, torch.strided)
-        assert memory_format in (None, torch.contiguous_format)
+        assert_nyi(names is None, "named tensors")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+        assert_nyi(not pin_memory, "pin_memory")
         device = decode_device(device)
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
@@ -2168,8 +2336,7 @@ def empty(
     pin_memory=None,
     memory_format=None,
 ):
-    assert names is None
-    assert memory_format in (None, torch.contiguous_format)
+    assert_nyi(names is None, "named tensors")
     device = decode_device(device)
     if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
         size = tuple(size[0])
@@ -2186,8 +2353,8 @@ def create_tensor_like(creation_fn):
     def _constant_like(
         x, *, dtype=None, device=None, layout=None, pin_memory=False, memory_format=None
     ):
-        assert not pin_memory
-        assert layout in (None, torch.strided)
+        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         if dtype is None:
             dtype = x.get_dtype()
         else:
@@ -2215,8 +2382,8 @@ def new_constant(fill_value):
         x, size, *, dtype=None, layout=None, device=None, pin_memory=None
     ):
         assert isinstance(size, (list, tuple))
-        assert not pin_memory
-        assert layout in (None, torch.strided)
+        assert_nyi(not pin_memory, "pin_memory")
+        assert_nyi(layout in (None, torch.strided), f"layout={layout}")
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -2242,8 +2409,8 @@ def empty_strided(
 ):
     assert isinstance(size, (list, tuple))
     assert isinstance(stride, (list, tuple, type(None)))
-    assert not pin_memory
-    assert layout in (None, torch.strided)
+    assert_nyi(not pin_memory, "pin_memory")
+    assert_nyi(layout in (None, torch.strided), f"layout={layout}")
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     pointwise = _full(fill_value=0, device=device, dtype=dtype, size=size)
@@ -2289,8 +2456,7 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
-    dtype = kwargs.get("dtype")
-    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
+    assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
@@ -2606,6 +2772,13 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
+        or (
+            fn == "aten.scatter_reduce_"
+            and reduce == "sum"
+            and isinstance(src, TensorBox)
+            and src.get_device() == torch.device("cpu")
+            and config.cpp.fallback_scatter_reduce_sum
+        )
         or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
         or torch.are_deterministic_algorithms_enabled()
     ):
@@ -2643,7 +2816,7 @@ def scatter_add(x, dim: int, index, src):
 
 @register_lowering(aten.scatter_add_, type_promotion_kind=None)
 def scatter_add_(x, dim: int, index, src):
-    return scatter_reduce_(clone(x), dim, index, src, "sum")
+    return scatter_reduce_(x, dim, index, src, "sum")
 
 
 @register_lowering(aten.scatter_reduce, type_promotion_kind=None)
@@ -4608,3 +4781,7 @@ except ImportError:
 from . import kernel
 
 import_submodule(kernel)
+
+from . import quantized_lowerings
+
+quantized_lowerings.register_quantized_ops()

@@ -28,11 +28,14 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer
 
+import torch._export.serde.schema as export_schema
+
 import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import identity
+from torch._export.serde.serialize import GraphModuleSerializer
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -54,6 +57,7 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
+    is_dynamic,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -1870,15 +1874,12 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
-        namespace = V.graph.wrapper_code.namespace
-        if offset != "0":
-            return (
-                f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
-            )
-        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+        # reinterpret_tensor is similar to as_strided except:
+        # - offset is added to the existing offset (rather than replacing it)
+        # - view tracking is disabled similar to unsafe_view
+        return V.graph.wrapper_code.codegen_reinterpret_view(
+            self.get_name(), self.layout.size, self.layout.stride, self.layout.offset
+        )
 
 
 class SliceView(View):
@@ -1971,6 +1972,9 @@ class Constant(BaseConstant):
     def realize(self):
         pass
 
+    def constant_to_device(self, device):
+        return Constant(self.value, self.dtype, device)
+
 
 @dataclasses.dataclass
 class IndexingConstant(BaseConstant):
@@ -1983,6 +1987,9 @@ class IndexingConstant(BaseConstant):
             return ops.index_expr(self.index, self.dtype)
 
         return loader
+
+    def constant_to_device(self, device):
+        return IndexingConstant(self.index, self.dtype, device)
 
 
 @dataclasses.dataclass
@@ -2865,13 +2872,29 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        buffer_names = []
         for i in range(len(inputs)):
-            kernel.data.inputs.append(
-                cls.realize_into(
-                    inputs[i],
-                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
-                )
+            input_buffer = cls.realize_into(
+                inputs[i],
+                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
             )
+
+            kernel.data.inputs.append(input_buffer)
+            if isinstance(inputs[i].data, BaseView):
+                input_unwrapped = inputs[i].data.unwrap_view()
+            else:
+                input_unwrapped = inputs[i].data
+
+            if (
+                input_unwrapped.is_input_buffer()
+                and inputs[i].get_device().type == "cuda"
+                and not is_dynamic(input_buffer)
+            ):
+                buffer_names.append(input_buffer.get_name())
+
+        if len(buffer_names) > 1:
+            V.graph.register_list(buffer_names)
+
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
@@ -3078,9 +3101,7 @@ class ExternKernel(InputsKernel):
             return x
         if isinstance(x, BaseView):
             x.realize()
-            if is_storage_and_layout(x.unwrap_view()) and not isinstance(
-                x.unwrap_view().data, ExternKernelAlloc
-            ):
+            if is_storage_and_layout(x.unwrap_view()):
                 try:
                     return cls.convert_to_reinterpret_view(x)
                 except NotImplementedError:
@@ -3565,6 +3586,12 @@ class DynamicScalar(IRNode):
 
 
 @dataclasses.dataclass
+class ExternKernelNode:
+    name: str
+    node: export_schema.Node
+
+
+@dataclasses.dataclass
 class FallbackKernel(ExternKernelAlloc):
     def __init__(
         self,
@@ -3583,6 +3610,8 @@ class FallbackKernel(ExternKernelAlloc):
         )
         self.use_cpp_op_schema = False
 
+        self.op_overload = kernel
+
         op_overload_packet = (
             kernel._overloadpacket
             if isinstance(kernel, torch._ops.OpOverload)
@@ -3599,6 +3628,11 @@ class FallbackKernel(ExternKernelAlloc):
                 else f"aten.{kernel.__name__}"
             )
             if schema is not None:
+                self.args_default_value = [
+                    {"type": x.real_type, "value": x.default_value}
+                    for x in schema.arguments
+                    if not x.kwarg_only
+                ]
                 self.ordered_kwargs_for_cpp_kernel = [
                     x.name for x in schema.arguments if x.kwarg_only
                 ]
@@ -3657,6 +3691,24 @@ class FallbackKernel(ExternKernelAlloc):
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
 
+    def get_arg_default_value(self, pos):
+        assert hasattr(
+            self, "args_default_value"
+        ), "self.args_default_value has to be provided"
+        assert pos < len(
+            self.args_default_value
+        ), f"expected the index {pos} to be smaller than len(self.args_default_value): {len(self.args_default_value)}"
+        v = self.args_default_value[pos]["value"]
+        if v is None:
+            arg_type = self.args_default_value[pos]["type"]
+            # TODO: extend the support here
+            assert (
+                str(arg_type) in default_value_map
+            ), f"unsupported default_value arg_type: {str(arg_type)}"
+            return default_value_map[str(arg_type)]()
+        else:
+            return v
+
     def codegen_args(self):
         @dataclasses.dataclass
         class Shim:
@@ -3668,6 +3720,17 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         args, kwargs = self.unflatten_args(tensor_args, self.constant_args)
         args = [V.graph.wrapper_code.val_to_arg_str(x) for x in args]
+        if V.graph.cpp_wrapper and hasattr(self, "args_default_value"):
+            n_args = len(args)
+            n_pos_args = len(self.args_default_value)
+            # Some positional args are not provided, need to use their default value in cpp wrapper
+            if n_args < n_pos_args:
+                pos_args = [
+                    self.get_arg_default_value(i) for i in range(n_args, n_pos_args)
+                ]
+                pos_args = [V.graph.wrapper_code.val_to_arg_str(x) for x in pos_args]
+                args.extend(pos_args)
+
         # let self.codegen_kwargs handle kwargs
         self.kwargs.update(kwargs)
         return args
@@ -3690,8 +3753,48 @@ class FallbackKernel(ExternKernelAlloc):
             return devices[0]
         return None
 
+    # ProxyExecutor Design Note
+    # We export the ExternFallbackNodes (for custom ops) into a serialized file
+    # and run it with a host side proxy executor to address the ABI problem
+    # This is currently only implemented for fbcode. Eventually, we will also make this work for OSS.
+    # Detailed design doc can be found at
+    # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
+    def export_extern_kernel_node(self):
+        args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
+        ordered_kwargs = [
+            kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
+        ]
+
+        serializer = GraphModuleSerializer(None, None, None)
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
+
+        # TODO: only single output is supported
+        output_arguments = [
+            export_schema.Argument.create(
+                as_tensor=export_schema.TensorArgument(name=self.get_name())
+            )
+        ]
+
+        node = ExternKernelNode(
+            name=self.get_name(),
+            node=export_schema.Node(
+                target=self.kernel,
+                inputs=named_arguments,
+                outputs=output_arguments,
+                metadata={},
+            ),
+        )
+
+        V.graph.extern_kernel_nodes.append(node)
+
+        return [*args, *ordered_kwargs]
+
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
+            exported_args = None
+            if config.is_fbcode():
+                exported_args = self.export_extern_kernel_node()
+
             args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
@@ -3700,6 +3803,8 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
                 self.cpp_kernel_overlad_name,
+                self.op_overload,
+                exported_args,
             )
         else:
             super().codegen(wrapper)
@@ -3931,6 +4036,62 @@ def _prepare_convolution_fusion_create(
     constant_args = [padding, stride, dilation, groups]
     if transposed:
         constant_args.insert(1, output_padding)
+
+    if bias is not None:
+        inputs.append(bias)
+    else:
+        constant_args.insert(0, bias)
+    return inputs, constant_args, kernel_layout, req_stride_order
+
+
+def _prepare_linear_fusion_create(
+    cls,
+    x: "TensorBox",
+    weight: "TensorBox",
+    bias: "TensorBox",
+):
+    """
+    This function is a helper function to prepare inputs, layout and constant args
+    for linear post-op fusion's create function. The function only supports the CPU device
+    since linear post-op fusion kernel is only supported on CPU right now.
+    """
+    x.realize()
+    weight.realize()
+    if bias is not None:
+        bias.realize()
+    with V.graph.fake_mode:
+        x_fake = ir_node_to_tensor(x, guard_shape=True)
+        weight_fake = ir_node_to_tensor(weight, guard_shape=True)
+        bias_fake = (
+            ir_node_to_tensor(bias, guard_shape=True) if bias is not None else bias
+        )
+        if bias is not None:
+            output = torch.ops.aten.addmm.default(
+                bias_fake,
+                x_fake,
+                weight_fake,
+            )
+        else:
+            output = torch.ops.aten.mm.default(
+                x_fake,
+                weight_fake,
+            )
+        output_size = output.size()
+
+        req_stride_order = [1, 0]
+        output_stride = make_contiguous_strides_for(output_size)
+
+    x = cls.require_stride_order(x, req_stride_order)
+    assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
+    inputs = [x, weight]
+
+    kernel_layout = FixedLayout(
+        x.get_device(),
+        x.get_dtype(),
+        convert_shape_to_inductor(output_size),
+        convert_shape_to_inductor(output_stride),
+    )
+    constant_args = []
 
     if bias is not None:
         inputs.append(bias)
@@ -4579,97 +4740,95 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         return output_ir
 
 
-class QConv(ExternKernelAlloc):
-    kernels = {
-        1: "torch.ao.nn.quantized.functional.conv1d",
-        2: "torch.ao.nn.quantized.functional.conv2d",
-        3: "torch.ao.nn.quantized.functional.conv3d",
-    }
-
+class QConvPointWisePT2E(ExternKernelAlloc):
     def __init__(
         self,
         layout,
         inputs,
-        input_qparams,
-        weight_qparams,
-        output_qparams,
         constant_args=(),
-        dim=2,
     ):
         """
-        Needs input/weight/output qparams
-        - inputs = [x, w, b]
-        - const_args = [stride, padding, dilation, groups]
-        - input_qparams = [scale, zp], assume per-tensor quantize to uint8
-        - weight_qparams = [scales, zp, axis], assume per-channel quantize to sint8
-        - output_qparams = [scale, zp, dtype], assume per-tensor quantize
-
-        Scales/zero points should be taken as inputs
-        Axis/dtypes are constants
+        if bias is not None
+            - inputs = [x, w, b, weight_scale, weight_zp]
+            - const_args is: [stride, padding, dilation, groups, x_scale, x_zp, o_inv_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, weight_scale, weight_zp]
+            - const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, o_inv_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
         """
-        assert len(input_qparams) == 2  # scale, zero point
-        assert len(weight_qparams) == 3  # scale, zero point, axis
-        assert len(output_qparams) == 3  # scale, zero point, dtype
-        inputs.extend(input_qparams + weight_qparams[:2] + output_qparams[:2])
-        constant_args.extend([weight_qparams[2], output_qparams[2]])
+        self.has_bias = len(inputs) == 5
         super().__init__(layout, inputs, constant_args)
-        self.dim = dim
-        self.kernel = self.kernels[dim]
 
     def codegen(self, wrapper):
-        # args = [x, w, b?, x_scale, x_zp, w_scale, w_zp, o_scale, o_zp]
+        # Parser the inputs and constant
         args = [x.codegen_reference() for x in self.inputs]
-        x_scale, x_zp = args[-6], args[-5]
-        w_scale, w_zp = args[-4], args[-3]
-        o_scale, o_zp = args[-2], args[-1]
-        # const args = [stride, padding, dilation, groups, w_axis, o_dtype]
         const_args = []
         const_args.extend(self.codegen_const_args())
-        o_dtype = const_args[-1]
-        w_axis = const_args[-2]
-        input_qparams = [x_scale, x_zp]
-        weight_qparams = [w_scale, w_zp, w_axis]
-        output_qparams = [o_scale, o_zp, o_dtype]
-        # Make x and w QTensors for functional conv ops
-        wrapper.writeline(
-            f"{args[0]} = torch._make_per_tensor_quantized_tensor({args[0]}, {', '.join(input_qparams)})"
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        w_scale, w_zp = args[-2], args[-1]
+        (
+            stride,
+            padding,
+            dilation,
+            groups,
+            x_scale,
+            x_zp,
+            o_inv_scale,
+            o_zp,
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ) = const_args[-12:]
+
+        self.kernel = "torch.ops.onednn.qconv2d_pointwise"
+        codegen_args = (
+            f"{x}"
+            + f", {x_scale}"
+            + f", {x_zp}"
+            + f", {packed_weight}"
+            + f", {w_scale}"
+            + f", {w_zp}"
+            + f", {bias}"
+            + f", {stride}"
+            + f", {padding}"
+            + f", {dilation}"
+            + f", {groups}"
+            + f", {o_inv_scale}"
+            + f", {o_zp}"
+            + f", {fp32_output}"
+            + f", {unary_attr}"
+            + f", {unary_scalars}"
+            + f", {unary_algorithm}"
         )
-        wrapper.writeline(
-            f"{args[1]} = torch._make_per_channel_quantized_tensor({args[1]}, {', '.join(weight_qparams)})"
-        )
-        # Note: padding_mode is always 'zeros'
-        padding_mode = "'zeros'"
-        conv_args = (
-            ", ".join(args[:-6])
-            + ", "
-            + ", ".join(const_args[:-2])
-            + f", {padding_mode}, "
-            + ", ".join(output_qparams)
-        )
-        # Do not need `.int_repr()` for output since its dtype is already uint8 instead of quint8
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
+        wrapper.writeline(f"{self.get_name()} = {self.kernel}({codegen_args})")
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
     @classmethod
     def create(
         cls,
-        dim: int,
         x: "TensorBox",
-        x_scale: "TensorBox",
-        x_zp: "TensorBox",
-        weight: "TensorBox",
+        x_scale: float,
+        x_zp: int,
+        weight: "TensorBox",  # packed_weight
         w_scale: "TensorBox",
         w_zp: "TensorBox",
-        w_axis: int,
         bias: "TensorBox",
         stride_: List[int],
         padding_: List[int],
         dilation_: List[int],
         groups: int,
-        output_scale: "TensorBox",
-        output_zero_point: "TensorBox",
-        output_dtype,
+        o_inv_scale: float,
+        output_zero_point: int,
+        fp32_output,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
     ):
         transposed = False
         output_padding = None
@@ -4690,17 +4849,303 @@ class QConv(ExternKernelAlloc):
             constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
         else:
             constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
-        input_qparams = [x_scale, x_zp]
-        weight_qparams = [w_scale, w_zp, w_axis]
-        output_qparams = [output_scale, output_zero_point, output_dtype]
-        return QConv(
+
+        w_scale.realize()
+        w_zp.realize()
+        inputs = inputs + [w_scale, w_zp]
+        constant_args = constant_args + [
+            x_scale,
+            x_zp,
+            o_inv_scale,
+            output_zero_point,
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
+
+        if fp32_output:
+            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = torch.float32
+
+        return QConvPointWisePT2E(
             layout=kernel_layout,
             inputs=inputs,
-            input_qparams=input_qparams,
-            weight_qparams=weight_qparams,
-            output_qparams=output_qparams,
             constant_args=constant_args,
-            dim=dim,
+        )
+
+
+class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        """
+        Needs input/weight/output qparams
+        if bias is not None
+            - inputs = [x, w, b, accum, w_scale, w_zp]
+            - const_args = [stride, padding, dilation, groups, x_scale, x_zp, accum_scale, accum_zp, o_inv_scale, o_zp,
+            fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, accum, w_scale, w_zp]
+            - const_args = const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, accum_scale,
+            accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = len(inputs) == 6
+        super().__init__(layout, inputs, constant_args)
+
+    def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        accum, w_scale, w_zp = args[-3], args[-2], args[-1]
+        (
+            stride,
+            padding,
+            dilation,
+            groups,
+            x_scale,
+            x_zp,
+            accum_scale,
+            accum_zp,
+            o_inv_scale,
+            o_zp,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ) = const_args[-16:]
+        self.kernel = "torch.ops.onednn.qconv2d_pointwise.binary"
+        conv_args = (
+            f"{x}"
+            + f", {x_scale}"
+            + f", {x_zp}"
+            + f", {accum}"
+            + f", {accum_scale}"
+            + f", {accum_zp}"
+            + f", {packed_weight}"
+            + f", {w_scale}"
+            + f", {w_zp}"
+            + f", {bias}"
+            + f", {stride}"
+            + f", {padding}"
+            + f", {dilation}"
+            + f", {groups}"
+            + f", {o_inv_scale}"
+            + f", {o_zp}"
+            + f", {fp32_output}"
+            + f", {binary_attr}"
+            + f", {alpha}"
+            + f", {unary_attr}"
+            + f", {unary_scalars}"
+            + f", {unary_algorithm}"
+        )
+        wrapper.writeline(f"{self.get_name()} = {self.kernel}({conv_args})")
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        x_scale,
+        x_zp,
+        accum: "TensorBox",
+        accum_scale,
+        accum_zp,
+        weight: "TensorBox",  # packed_weight
+        w_scale,
+        w_zp,
+        bias: "TensorBox",
+        stride_: List[int],
+        padding_: List[int],
+        dilation_: List[int],
+        groups: int,
+        o_inv_scale: "TensorBox",
+        output_zero_point: "TensorBox",
+        fp32_output,
+        binary_attr,
+        alpha,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
+    ):
+        transposed = False
+        output_padding = None
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            req_stride_order,
+        ) = _prepare_convolution_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups,
+            transposed,
+            output_padding,
+        )
+
+        accum = cls.require_stride_order(accum, req_stride_order)
+        inputs.append(accum)
+
+        # swap padding and stride to align with functional conv arg order
+        if bias is None:
+            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
+        else:
+            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
+
+        w_scale.realize()
+        w_zp.realize()
+        inputs = inputs + [w_scale, w_zp]
+        constant_args = constant_args + [
+            x_scale,
+            x_zp,
+            accum_scale,
+            accum_zp,
+            o_inv_scale,
+            output_zero_point,
+            fp32_output,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
+        if fp32_output:
+            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = torch.float32
+
+        return QConvPointWiseBinaryPT2E(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+
+
+class QLinearPointwisePT2E(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        """
+        if bias is not None
+            - inputs = [x, w, b, weight_scale, weight_zp]
+            - const_args is: [x_scale, x_zp, o_inv_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, weight_scale, weight_zp]
+            - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = len(inputs) == 5
+        super().__init__(layout, inputs, constant_args)
+
+    def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        w_scale, w_zp = args[-2], args[-1]
+        (
+            x_scale,
+            x_zp,
+            o_inv_scale,
+            o_zp,
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ) = const_args[-8:]
+
+        self.kernel = "torch.ops.onednn.qlinear_pointwise"
+        codegen_args = (
+            f"{x}"
+            + f", {x_scale}"
+            + f", {x_zp}"
+            + f", {packed_weight}"
+            + f", {w_scale}"
+            + f", {w_zp}"
+            + f", {bias}"
+            + f", {o_inv_scale}"
+            + f", {o_zp}"
+            + f", {fp32_output}"
+            + f", {unary_attr}"
+            + f", {unary_scalars}"
+            + f", {unary_algorithm}"
+        )
+        wrapper.writeline(f"{self.get_name()} = {self.kernel}({codegen_args})")
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        x_scale: float,
+        x_zp: int,
+        weight: "TensorBox",  # packed_weight
+        w_scale: "TensorBox",
+        w_zp: "TensorBox",
+        bias: "TensorBox",
+        o_inv_scale: float,
+        output_zero_point: int,
+        fp32_output,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
+    ):
+        (inputs, constant_args, kernel_layout, _) = _prepare_linear_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+        )
+
+        w_scale.realize()
+        w_zp.realize()
+        inputs = inputs + [w_scale, w_zp]
+        constant_args = constant_args + [
+            x_scale,
+            x_zp,
+            o_inv_scale,
+            output_zero_point,
+            fp32_output,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ]
+
+        if fp32_output:
+            # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = torch.float32
+
+        return QLinearPointwisePT2E(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
         )
 
 
