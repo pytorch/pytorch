@@ -144,8 +144,8 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
         check_dynamic=None,
     ):
-        clone_inputs = self._clone_inputs(inputs)
         with torch.no_grad():
+            clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
                 mod = self._generate_reference_quantized_model(mod, inputs)
             expected = mod(*inputs)
