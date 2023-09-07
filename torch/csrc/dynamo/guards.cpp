@@ -424,7 +424,7 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
-typedef struct {
+struct GlobalStateGuard {
   PyObject_HEAD;
 
   inline void init() {
@@ -450,7 +450,6 @@ typedef struct {
         _num_threads == at::get_num_threads());
   }
 
- private:
   bool _grad_mode;
   bool _torch_function;
   bool _deterministic_algorithms;
@@ -459,7 +458,7 @@ typedef struct {
   bool _allow_bf16_reduce;
   int _num_threads;
   // TODO(jansel): we should guard on more state as inductor starts using it
-} GlobalStateGuard;
+};
 
 int GlobalStateGuard_init(
     GlobalStateGuard* self,

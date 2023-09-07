@@ -1101,16 +1101,16 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard)
 
         assert not global_builder.shape_env_code
-        assert convert_frame.initial_global_state is not None
+        global_state = convert_frame.initial_global_state
+        if global_state is None:
+            # we should only hit this case in NopTests()
+            global_state = convert_frame.GlobalStateGuard()
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
-                (
-                    "___check_global_state",
-                    convert_frame.initial_global_state.check,
-                ),
+                ("___check_global_state", global_state.check),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
