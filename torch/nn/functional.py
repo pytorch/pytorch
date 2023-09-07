@@ -4958,6 +4958,7 @@ Note:
     disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
     In the event that a fused implementation is not available, an error will be raised with the
     reasons why the fused implementation cannot run.
+    See [this toturial](https://pytorch.org/tutorials/intermediate/scaled_dot_product_attention_tutorial.html) for an end-to-end example.
 
     Due to the nature of fusing floating point operations, the output of this function may be different
     depending on what backend kernel is chosen.
