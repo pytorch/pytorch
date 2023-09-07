@@ -51,6 +51,7 @@ jobs:
             runner: "macos-12",
             ios_platform: "SIMULATOR",
             ios_arch: "x86_64",
+            # TODO: set me to 1
             use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
             use_metal: 0,
             use_coreml: ${{ inputs.use_coreml || 1 }},
@@ -62,6 +63,7 @@ jobs:
             runner: "macos-12",
             ios_platform: "OS",
             ios_arch: "arm64",
+            # TODO: set me to 1
             use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
             use_metal: 1,
             use_coreml: ${{ inputs.use_coreml || 1 }},

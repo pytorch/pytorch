@@ -130,7 +130,8 @@ jobs:
           ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
       - name: Run simulator tests
-        if: matrix.ios_platform == 'SIMULATOR'
+        # TODO: All the test iOS models are using lite interpreter
+        if: matrix.ios_platform == 'SIMULATOR' && matrix.use_lite_interpreter == 1
         shell: bash
         run: |
           set -eux
@@ -141,6 +142,7 @@ jobs:
           # Generate models for differnet backends
           pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
+          # NB: Both of the following scripts only export models with lite interpreter
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
             ${CONDA_RUN} python coreml_backend.py
           else
@@ -155,10 +157,6 @@ jobs:
             echo "Setting up the TestApp for LiteInterpreter"
             ruby setup.rb --lite 1
           else
-            # NB: Trace and generate the model for the later test as it doesn't exist
-            # yet (unlike those ptl ones), this need to be done before setup.rb
-            ${CONDA_RUN} python trace_model.py
-
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
           fi
