@@ -26,8 +26,6 @@ from torch.testing._internal.common_utils import (
 )
 
 # Protects against includes accidentally setting the default dtype
-# NOTE: jit_metaprogramming_utils sets the default dtype to double!
-torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
 
 
@@ -263,4 +261,5 @@ instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), except_for="cpu")
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
