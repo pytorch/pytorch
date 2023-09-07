@@ -763,6 +763,7 @@ class TestOperators(TestCase):
         # (3) encountering this error in PyTorch internals.
         xfail("index_reduce"),
         decorate("linalg.householder_product", decorator=runOnRocm),  # works on ROCm
+        xfail("masked_scatter"),  # Tensor-likes are not close
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
         xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
         # got a batched tensor as input while the running_mean or running_var,
@@ -881,6 +882,7 @@ class TestOperators(TestCase):
         # -------------------- ALLOWED FAILURES --------------------------------
         # The following are not bugs and are expected behavior
         xfail('masked_select'),  # Not possible due to dynamic shapes
+        xfail('masked_select_static'),  # Not possible due to dynamic shapes
         skip('bernoulli'),  # randomness
         skip('normal', ''),  # randomness
         skip('normal', 'number_mean'),  # randomness
@@ -895,7 +897,6 @@ class TestOperators(TestCase):
         skip('nn.functional.multi_head_attention_forward'),  # randomness
         xfail('as_strided'),  # as_strided is too wild for us to support, wontfix
         xfail('index_put', ''),  # not possible due to dynamic shapes; we support a subset
-        xfail('masked_scatter'),  # dynamic
         xfail('nn.functional.fractional_max_pool2d'),  # random
         xfail('nn.functional.fractional_max_pool3d'),  # random
         xfail('pca_lowrank', ''),  # randomness
@@ -1091,6 +1092,7 @@ class TestOperators(TestCase):
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
+        xfail('masked_select_static'),  # aten::masked_select_static hit the vmap fallback
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
@@ -1165,6 +1167,7 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
+        xfail('masked_select_static'),  # aten::masked_select_static hit the vmap fallback
         xfail('nanquantile'),
         xfail('ormqr'),
         xfail('put'),
@@ -1779,6 +1782,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmap_autograd_grad', {
         # The size of tensor a (4) must match the size of tensor b (10) at non-singleton dimension 0
         xfail('masked_select'),
+        xfail("masked_select_static"),  # Tensor-likes are not close
         xfail('nn.functional.max_unpool2d', 'grad'),  # contiguous call
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue

@@ -116,6 +116,7 @@
 #include <ATen/ops/masked_scatter_native.h>
 #include <ATen/ops/masked_select_backward_native.h>
 #include <ATen/ops/masked_select_native.h>
+#include <ATen/ops/masked_select_static_native.h>
 #include <ATen/ops/nonzero_native.h>
 #include <ATen/ops/nonzero_numpy_native.h>
 #include <ATen/ops/ones_like.h>
@@ -1949,6 +1950,19 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
   }
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
+}
+
+Tensor masked_select_static(
+    const Tensor & self, const Tensor & mask, int64_t size, const Scalar & fill_value) {
+  auto tmp = at::masked_select(self, mask);
+  auto tmp_size = tmp.numel();
+  TORCH_CHECK(tmp_size <= size, "masked_select_static: Static output size exceeded, expected size <= ",
+              size, " but got size=", tmp_size);
+
+  if (tmp_size == size) {
+    return tmp;
+  }
+  return at::constant_pad_nd_symint(tmp, {0, size - tmp_size}, fill_value);
 }
 
 static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {

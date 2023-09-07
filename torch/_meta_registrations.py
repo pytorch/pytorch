@@ -3471,6 +3471,14 @@ def meta_masked_scatter(self, mask, source):
     return meta_masked_scatter_(output, mask, source)
 
 
+@register_meta(aten.masked_select_static)
+def meta_masked_select_static(self, mask, size, fill_value):
+    torch._check(
+        mask.dtype == torch.bool, lambda: "masked_select: expected BoolTensor for mask"
+    )
+    return torch.empty(size, device=self.device, dtype=self.dtype)
+
+
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     return self

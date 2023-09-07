@@ -1871,16 +1871,7 @@ Tensor masked_scatter_backward(
   for (const auto& size : sizes) {
     numel *= size;
   }
-  auto mask_selected = grad.masked_select(mask);
-  auto diff_nelem = numel - mask_selected.sym_numel();
-  if (diff_nelem > 0) {
-    // because mask_selected returns a 1-d tensor with size of masked elements
-    // that are 1, we need to fill out the rest with zeros then reshape back to
-    // tensor2's size.
-    auto zeros_fillin =
-        at::zeros_symint({std::move(diff_nelem)}, grad.options());
-    mask_selected = at::cat({mask_selected, std::move(zeros_fillin)}, 0);
-  }
+  auto mask_selected = at::masked_select_static_symint(grad, mask, numel, 0);
   return mask_selected.view_symint(sizes);
 }
 

@@ -6118,6 +6118,15 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad, **kwargs)
 
     yield SampleInput(make_arg(()), torch.randn((M, M), device=device) > 0)
 
+def sample_inputs_masked_select_static(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
+    make_mask = partial(make_arg, dtype=torch.bool, requires_grad=False)
+
+    yield SampleInput(make_arg(M, M), make_mask(M), size=M * M, fill_value=0)
+    yield SampleInput(make_arg(M, S), make_mask(M, S), size=M * S, fill_value=1)
+    yield SampleInput(make_arg(S, S), make_mask(S, S), size=M * S, fill_value=2)
+
 def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     yield SampleInput(make_arg((S, S)))
@@ -11546,6 +11555,17 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_masked_select,
            error_inputs_func=error_inputs_masked_select,
+           skips=(
+               # Compiler issue on ROCm. Might need to skip until ROCm5.5
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+           )),
+    OpInfo('masked_select_static',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False,
+           sample_inputs_func=sample_inputs_masked_select_static,
            skips=(
                # Compiler issue on ROCm. Might need to skip until ROCm5.5
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',

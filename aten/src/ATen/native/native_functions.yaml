@@ -8849,6 +8849,12 @@
   device_check: NoCheck
   device_guard: False
 
+- func: masked_select_static(Tensor self, Tensor mask, SymInt size, Scalar fill_value) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: masked_select_static
+  tags: [core]
+
 - func: nonzero.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: nonzero_out_cpu

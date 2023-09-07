@@ -2006,6 +2006,7 @@ make_fallback(aten._histogramdd_bin_edges.default)
 make_fallback(aten._histogramdd_from_bin_cts.default)
 make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
+make_fallback(aten.masked_select_static)
 make_fallback(aten.to_sparse)
 make_fallback(aten._to_sparse)
 make_fallback(aten.triangular_solve)
@@ -2747,6 +2748,7 @@ def masked_scatter_with_index(self, mask, source_idx, source):
     self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
 
     assert self.get_size() == mask.get_size()
+    assert mask.get_dtype() in {torch.bool, torch.uint8}
 
     self_loader = self_flat.make_loader()
     mask_loader = mask_flat.make_loader()
@@ -2756,12 +2758,13 @@ def masked_scatter_with_index(self, mask, source_idx, source):
 
     def inner_fn(idx):
         self_val = self_loader(idx)
-        mask_val = mask_loader(idx)
-        source_idx_val = source_idx_loader(idx)
+        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        # source_idx_val = source_idx_loader(idx)
 
         def load_source_val():
-            i = ops.indirect_indexing(source_idx_val, source)
-            return source_loader([i], source_numel)
+            source_idx_val = source_idx_loader(idx)
+            i = ops.indirect_indexing(source_idx_val, source_numel)
+            return source_loader([i])
 
         source_val = ops.masked(mask_val, load_source_val, 0)
         return ops.where(mask_val, source_val, self_val)

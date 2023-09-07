@@ -324,6 +324,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diag",
     "masked_scatter",
     "masked_select",
+    "masked_select_static",
     "index_add",
     "index_fill",
     "trace",
