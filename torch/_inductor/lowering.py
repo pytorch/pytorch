@@ -2740,6 +2740,41 @@ def index_put_impl_(self, indices, values, accumulate, check):
     return self
 
 
+@register_lowering(
+    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
+)
+def masked_scatter_with_index(self, mask, source_idx, source):
+    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
+
+    assert self.get_size() == mask.get_size()
+
+    self_loader = self_flat.make_loader()
+    mask_loader = mask_flat.make_loader()
+    source_idx_loader = source_idx.make_loader()
+    source_loader = source_flat.make_loader()
+    source_numel = source.get_numel()
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        mask_val = mask_loader(idx)
+        source_idx_val = source_idx_loader(idx)
+
+        def load_source_val():
+            i = ops.indirect_indexing(source_idx_val, source)
+            return source_loader([i], source_numel)
+
+        source_val = ops.masked(mask_val, load_source_val, 0)
+        return ops.where(mask_val, source_val, self_val)
+
+    result_flat = Pointwise.create(
+        device=self.get_device(),
+        dtype=self.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=self_flat.get_size(),
+    )
+    return view(result_flat, self.get_size())
+
+
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
 def as_strided_scatter(self, src, size, stride, storage_offset=None):
     output = clone(self)

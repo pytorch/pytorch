@@ -550,3 +550,12 @@ def select_decomp_table():
     if config.fallback_random:
         return decompositions
     return fast_random_decomps()
+
+
+@register_decomposition(aten.masked_scatter)
+def masked_scatter(self, mask, source):
+    if self.device.type == "cuda":
+        self, mask = aten.broadcast_tensors(self, mask)
+        source_idx = mask.reshape(-1).cumsum(0) - 1
+        return prims.inductor_masked_scatter_with_index(self, mask, source_idx, source)
+    return NotImplemented
