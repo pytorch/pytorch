@@ -125,7 +125,7 @@ static std::tuple<Tensor,optional<int64_t>> linspace_logspace_batch_rule_helper(
   if (steps == 0){
     result = at::full({batch_size, 0}, 0, tensor_options);
   } else if (steps == 1){
-    result = at::empty({batch_size}, tensor_options).copy_(start_).unsqueeze(1);
+    result = start_.new_empty({batch_size}, tensor_options).copy_(start_).unsqueeze(1);
   } else {
     result = (start_ + at::arange(0, steps, tensor_options).unsqueeze_(1) * (end_ - start_) / (steps - 1)).transpose(0, 1);
   }
