@@ -4,7 +4,6 @@ import pytest
 
 import torch._numpy as np
 
-from numpy.lib.index_tricks import ix_, mgrid, ndenumerate, ndindex, ogrid, r_
 from pytest import raises as assert_raises  # , assert_raises_regex,
 
 from torch._numpy import diag_indices, diag_indices_from, fill_diagonal, index_exp, s_
@@ -190,6 +189,7 @@ class TestRavelUnravelIndex:
             np.unravel_index([1], (2, 1, 0))
 
 
+@pytest.mark.xfail(reason="mgrid not implemented")
 class TestGrid:
     def test_basic(self):
         a = mgrid[-1:1:10j]
@@ -306,8 +306,8 @@ class TestGrid:
         assert_array_equal(grid64_a, grid64_b)
 
 
+@pytest.mark.xfail(reason="r_ not implemented")
 class TestConcatenator:
-    @pytest.mark.xfail(reason="r_ not implemented")
     def test_1d(self):
         assert_array_equal(r_[1, 2, 3, 4, 5, 6], np.array([1, 2, 3, 4, 5, 6]))
         b = np.ones(5)
@@ -318,12 +318,10 @@ class TestConcatenator:
         g = r_[10.1, 1:10]
         assert_(g.dtype == "f8")
 
-    @pytest.mark.xfail(reason="r_ not implemented")
     def test_more_mixed_type(self):
         g = r_[-10.1, np.array([1]), np.array([2, 3, 4]), 10.0]
         assert_(g.dtype == "f8")
 
-    @pytest.mark.xfail(reason="r_ not implemented")
     def test_complex_step(self):
         # Regression test for #12262
         g = r_[0:36:100j]
@@ -333,7 +331,6 @@ class TestConcatenator:
         g = r_[0 : 36 : np.complex64(100j)]
         assert_(g.shape == (100,))
 
-    @pytest.mark.xfail(reason="r_ not implemented")
     def test_2d(self):
         b = np.random.rand(5, 5)
         c = np.random.rand(5, 5)
@@ -346,13 +343,13 @@ class TestConcatenator:
         assert_array_equal(d[:5, :], b)
         assert_array_equal(d[5:, :], c)
 
-    @pytest.mark.xfail(reason="r_ not implemented")
     def test_0d(self):
         assert_equal(r_[0, np.array(1), 2], [0, 1, 2])
         assert_equal(r_[[0, 1, 2], np.array(3)], [0, 1, 2, 3])
         assert_equal(r_[np.array(0), [1, 2, 3]], [0, 1, 2, 3])
 
 
+@pytest.mark.xfail(reason="ndenumerate not implemented")
 class TestNdenumerate:
     def test_basic(self):
         a = np.array([[1, 2], [3, 4]])
@@ -375,8 +372,8 @@ class TestIndexExpression:
         assert_equal(a[:, :3, [1, 2]], a[s_[:, :3, [1, 2]]])
 
 
+@pytest.mark.xfail(reason="ix_ not implemented")
 class TestIx_:
-    @pytest.mark.xfail(reason="ix_ not implemented")
     def test_regression_1(self):
         # Test empty untyped inputs create outputs of indexing type, gh-5804
         (a,) = ix_(range(0))
@@ -389,7 +386,6 @@ class TestIx_:
         (a,) = ix_(np.array([], dtype=np.float32))
         assert_equal(a.dtype, np.float32)
 
-    @pytest.mark.xfail(reason="ix_ not implemented")
     def test_shape_and_dtype(self):
         sizes = (4, 5, 3, 2)
         # Test both lists and arrays
@@ -543,6 +539,7 @@ class TestDiagIndicesFrom:
             diag_indices_from(x)
 
 
+@pytest.mark.xfail(reason="ndindex not implemented")
 def test_ndindex():
     x = list(ndindex(1, 2, 3))
     expected = [ix for ix, e in ndenumerate(np.zeros((1, 2, 3)))]
