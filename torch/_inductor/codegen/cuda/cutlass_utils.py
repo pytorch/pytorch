@@ -1,24 +1,89 @@
 import functools
 import logging
+import os
+import sys
+import tempfile
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
 import sympy
 
-# Import cutlass python scripts.
-from . import HAS_CUTLASS
-
-if HAS_CUTLASS:
-    import cutlass_generator  # type: ignore[import]
-    import cutlass_library  # type: ignore[import]
-    import cutlass_manifest  # type: ignore[import]
-
 import torch
 
+from ...config import cuda as inductor_cuda_config
 from ...ir import Layout
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 log = logging.getLogger(__name__)
+
+
+_CUTLASS_PY_FULL_PATH = os.path.join(
+    inductor_cuda_config.cutlass_dir, "tools/library/scripts"
+)
+_TMP_CUTLASS_PY_FULL_PATH = os.path.abspath(
+    os.path.join(tempfile.gettempdir(), "torch_cutlass_script")
+)
+
+
+def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
+    for cutlass_module in cutlass_modules:
+        content = content.replace(
+            f"from {cutlass_module} import ", f"from cutlass_{cutlass_module} import "
+        )
+    return content
+
+
+def _gen_cutlass_file(file_name: str, cutlass_modules: List[str]) -> None:
+    orig_full_path = os.path.abspath(os.path.join(_CUTLASS_PY_FULL_PATH, file_name))
+    text = ""
+    with open(orig_full_path) as f:
+        text = f.read()
+    text = _rename_cutlass_import(text, cutlass_modules)
+    dst_full_path = os.path.abspath(
+        os.path.join(
+            _TMP_CUTLASS_PY_FULL_PATH,
+            f"cutlass_{file_name}" if file_name != "__init__.py" else file_name,
+        )
+    )
+    with open(dst_full_path, "w") as f:
+        f.write(text)
+
+
+@functools.lru_cache(None)
+def try_import_cutlass() -> bool:
+    # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
+    # This is a temporary hack to avoid CUTLASS module naming conflicts.
+    # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
+    if os.path.isdir(_CUTLASS_PY_FULL_PATH):
+        cutlass_file_names = [
+            file_name
+            for file_name in os.listdir(_CUTLASS_PY_FULL_PATH)
+            if file_name.endswith(".py")
+        ]
+        cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
+        if not os.path.isdir(_TMP_CUTLASS_PY_FULL_PATH):
+            os.mkdir(_TMP_CUTLASS_PY_FULL_PATH)
+        for file_name in cutlass_file_names:
+            _gen_cutlass_file(file_name, cutlass_module_names)
+        sys.path.append(_TMP_CUTLASS_PY_FULL_PATH)
+        try:
+            import cutlass_generator  # type: ignore[import]
+            import cutlass_library  # type: ignore[import]
+            import cutlass_manifest  # type: ignore[import]
+
+            return True
+
+        except ImportError as e:
+            log.debug(
+                "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
+                str(e),
+            )
+    else:
+        log.debug(
+            "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
+            _CUTLASS_PY_FULL_PATH,
+        )
+    return False
 
 
 @dataclass
@@ -63,11 +128,16 @@ class CUTLASSArgs:
             raise NotImplementedError(f"Unsupported cuda arch: {self.architectures}")
 
 
-@functools.lru_cache(maxsize=1)
+@functools.lru_cache(None)
 def gen_ops() -> List[Any]:
     """
     Generates all supported CUTLASS operations.
     """
+
+    # Import cutlass python scripts.
+    assert try_import_cutlass()
+    import cutlass_generator  # type: ignore[import]
+    import cutlass_manifest  # type: ignore[import]
 
     arch = get_cuda_arch()
     version = get_cuda_version()
@@ -101,6 +171,10 @@ def gen_ops() -> List[Any]:
 def dtype_match(
     torch_dtype: torch.dtype, cutlass_dtype: "cutlass_library.DataType"
 ) -> bool:
+    # Import cutlass python scripts.
+    assert try_import_cutlass()
+    import cutlass_library  # type: ignore[import]
+
     if torch_dtype == torch.float:
         return (
             cutlass_dtype == cutlass_library.DataType.f32
@@ -125,12 +199,12 @@ def get_accumulator_dtype(input_torch_dtypes: List[torch.dtype]) -> torch.dtype:
     for dtype in input_torch_dtypes[1:]:
         if torch_dtype != dtype:
             raise RuntimeError(f"Unmatched input dtypes: {torch_dtype=}, {dtype=}")
-    if torch_dtype in {torch.float16, torch.half}:
+    if torch_dtype == torch.half:
         if torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction:
             return torch_dtype
         else:
             return torch.float
-    if torch_dtype in {torch.bfloat16, torch.float, torch.float32}:
+    if torch_dtype in {torch.bfloat16, torch.float}:
         return torch.float
     raise NotImplementedError(f"Unsupported data type: {input_torch_dtypes=}")
 
@@ -141,9 +215,9 @@ def get_alignments(torch_dtype: torch.dtype) -> List[int]:
     CUTLASS gemm / conv SM80 APIs support 16 bytes max alignment, and 2 bytes min alignment.
     """
 
-    if torch_dtype in (torch.float16, torch.half, torch.bfloat16):
+    if torch_dtype in (torch.half, torch.bfloat16):
         return [8, 4, 2, 1]
-    elif torch_dtype in (torch.float, torch.float32):
+    elif torch_dtype == torch.float:
         return [4, 2, 1]
     else:
         raise NotImplementedError(f"unsupported {torch_dtype=} for alignments")
