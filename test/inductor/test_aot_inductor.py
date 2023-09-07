@@ -37,7 +37,7 @@ class AOTInductorModelRunner:
 
         # Use a utility function for easier testing
         source = """
-        #include <torch/csrc/inductor/aot_inductor_model.h>
+        #include <torch/csrc/inductor/aot_runtime/model.h>
 
         torch::aot_inductor::AOTInductorModel model;
 
@@ -178,6 +178,22 @@ class AotInductorTests(TestCase):
         example_inputs = (a,)
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    def test_duplicated_params(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.rand(6))
+                self.q = self.p
+
+            def forward(self, x):
+                return self.p * x + self.q
+
+        model = Model()
+        example_inputs = (torch.rand(6),)
+        expected = model(*example_inputs)
+        actual = torch._export.export(model, example_inputs)(*example_inputs)
         self.assertTrue(same(actual, expected))
 
 

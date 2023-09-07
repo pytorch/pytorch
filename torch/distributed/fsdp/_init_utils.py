@@ -528,16 +528,31 @@ def _init_param_handle_from_module(
     )
     # Materialize the module if needed
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
-        _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
+        _materialize_with_param_init_fn(
+            fully_sharded_module, param_init_fn, state._ignored_modules
+        )
     elif is_meta_module:
-        _materialize_meta_module(fully_sharded_module, device_id)
+        _materialize_meta_module(
+            fully_sharded_module, device_id, state._ignored_modules
+        )
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
-            check_fn=lambda k: _get_module_fsdp_state(k) is None,
+            check_fn=lambda submodule: _get_module_fsdp_state(submodule) is None
+            and submodule not in state._ignored_modules,
         )
+
+    ignored_buffers = {
+        buffer
+        for ignored_module in state._ignored_modules
+        for buffer in ignored_module.buffers()
+    }
+
     _move_module_to_device(
-        fully_sharded_module, state._ignored_params, device_from_device_id
+        fully_sharded_module,
+        state._ignored_params,
+        ignored_buffers,
+        device_from_device_id,
     )
     state.compute_device = _get_compute_device(
         fully_sharded_module,
@@ -802,12 +817,13 @@ def _need_to_materialize_module(
 def _materialize_with_param_init_fn(
     root_module: nn.Module,
     param_init_fn: Callable[[nn.Module], None],
+    ignored_modules: Set[nn.Module],
 ) -> None:
     if not callable(param_init_fn):
         raise ValueError(
             f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
         )
-    modules_to_materialize = _get_modules_to_materialize(root_module)
+    modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
     for module in modules_to_materialize:
         param_init_fn(module)
 
@@ -815,12 +831,13 @@ def _materialize_with_param_init_fn(
 def _materialize_meta_module(
     root_module: nn.Module,
     device_from_device_id: Optional[torch.device],
+    ignored_modules: Set[nn.Module],
 ):
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
         torch.cuda.current_device()
     )
-    modules_to_materialize = _get_modules_to_materialize(root_module)
+    modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
     try:
         # Assume that each module's `reset_parameters()` only initializes its
         # own parameters and not those of its children
@@ -844,9 +861,11 @@ def _materialize_meta_module(
         raise e
 
 
-def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
+def _get_modules_to_materialize(
+    root_module: nn.Module, ignored_modules: Set[nn.Module]
+) -> List[nn.Module]:
     # Run BFS to collect the modules to materialize via `reset_parameters()`,
-    # stopping at any module with FSDP already applied
+    # stopping at any module with FSDP already applied or at ignored modules.
     modules_to_materialize: List[nn.Module] = []
     queue = collections.deque([root_module])
     visited_modules: Set[nn.Module] = {root_module}
@@ -857,6 +876,7 @@ def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
             if (
                 child_module not in visited_modules
                 and _get_module_fsdp_state(child_module) is None
+                and child_module not in ignored_modules
             ):
                 visited_modules.add(child_module)
                 queue.append(child_module)
@@ -866,6 +886,7 @@ def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
 def _move_module_to_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    ignored_buffers: Set[torch.Tensor],
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
@@ -906,10 +927,9 @@ def _move_module_to_device(
             for submodule in curr_module.children():
                 if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
                     queue.append(submodule)
-        # NOTE: This includes moving ignored modules' parameters. If we
-        # decide to change the semantics in the future, simply filter based
-        # on the ignored parameters (and buffers).
-        _move_states_to_device(params, buffers, device_from_device_id)
+        params_to_move = [p for p in params if p not in ignored_params]
+        bufs_to_move = [p for p in buffers if p not in ignored_buffers]
+        _move_states_to_device(params_to_move, bufs_to_move, device_from_device_id)
         return
     param = next(_get_orig_params(module, ignored_params), None)
     if param is not None and param.device == cpu_device:
