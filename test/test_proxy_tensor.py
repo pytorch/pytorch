@@ -969,6 +969,15 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    # https://github.com/pytorch/pytorch/issues/108195
+    def test_symbolic_repeat_interleave(self):
+        def f(y, x):
+            return y.repeat_interleave(x)
+
+        y = torch.tensor([[1, 2], [3, 4]])
+        x = torch.tensor([2])
+        gm = make_fx(f, tracing_mode="symbolic")(y, x)
+
     def test_adv_index_batch(self):
         def f(src_tokens):
             bsz, src_len = src_tokens.size()[:2]

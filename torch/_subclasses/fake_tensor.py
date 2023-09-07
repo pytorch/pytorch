@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import sys
 import traceback
 import weakref
 from dataclasses import dataclass
@@ -527,7 +528,17 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 @register_op_impl(lambda func: func is aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
-        raise DynamicOutputShapeException(func)
+        if (
+            fake_mode.shape_env is None
+            or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+        ):
+            raise DynamicOutputShapeException(func)
+
+        from torch.fx.experimental.symbolic_shapes import constrain_range
+
+        output_size = fake_mode.shape_env.create_unbacked_symint()
+        constrain_range(output_size, min=2, max=sys.maxsize - 1)
+        # TODO: consider a memo
     return repeats.new_empty(output_size)
 
 
@@ -556,8 +567,6 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
-        import sys
-
         from torch.fx.experimental.symbolic_shapes import constrain_range
 
         nnz = fake_mode.shape_env.create_unbacked_symint()
