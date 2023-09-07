@@ -1599,7 +1599,7 @@ Tensor renorm_jvp(
   // For cuda half, calculate norm in float precision then cast
   // normalization factor to half
   auto dtype = self_p.scalar_type();
-  auto acc_type = at::toAccumulateType(dtype, self_p.device().type());
+  auto acc_type = at::toAccumulateType(dtype, /*is_cuda=*/true);
   Tensor norm = [&self_p, &p, &reduce_dims, acc_type, dtype]() {
     if (acc_type != dtype) {
       return at::linalg_vector_norm(
@@ -1626,8 +1626,7 @@ Tensor renorm_jvp(
       (factor *
        (self_t -
         self_p * invnorm *
-            norm_jvp(self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true)))
-          .to(self_t.scalar_type()),
+            norm_jvp(self_p, self_t, p, norm, reduce_dims, /*keepdim=*/true))),
       self_t);
 }
 
