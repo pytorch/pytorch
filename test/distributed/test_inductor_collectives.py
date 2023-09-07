@@ -155,6 +155,29 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allreduce_input_buffer_reuse(self):
+        def func(a, *, tag, ranks, group_size):
+            ar = _functional_collectives.all_reduce(a, "sum", ranks)
+            # ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
+            # ar = torch.ops.c10d_functional.wait_tensor(ar)
+            c = torch.relu(a)
+            d = torch.matmul(c, c)
+            e = d + ar
+            return (e,)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            # inputs = torch.ones(4, 4, device="cuda") + self.rank
+            inputs = torch.ones(4, 4, device="cuda")
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allgather_into_tensor_inductor(self):
