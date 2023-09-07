@@ -2672,10 +2672,10 @@ class TestNestedTensorAutograd(TestCase):
 # We can probably parametrizing existing tests instead of having a separate
 # test class as we begin to support more ops. Also maybe rewrite with OpInfos.
 class TestNestedTensorSubclass(TestCase):
-    def test_tensor_attributes(self):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+    def test_tensor_attributes(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
         nt, _offsets = jagged_from_list([a, b, c], None)
 
         for op in (
@@ -2708,11 +2708,11 @@ class TestNestedTensorSubclass(TestCase):
                     op(nt, torch.preserve_format)
                 op(nt)
 
-    def test_linear(self):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
-        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64)
+    def test_linear(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
 
         def grad_test_func(a, b, c, weight):
             nt, _ = jagged_from_list([a, b, c], None)
@@ -2721,11 +2721,11 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
 
-    def test_unary_pointwise(self):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
-        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64)
+    def test_unary_pointwise(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
 
         def grad_test_func(a, b, c, weight):
             nt, _ = jagged_from_list([a, b, c], None)
@@ -2734,10 +2734,10 @@ class TestNestedTensorSubclass(TestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
 
-    def test_binary_pointwise(self):
-        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
-        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
-        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+    def test_binary_pointwise(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
 
         # Incorrect usage: shape check will fail if the offsets tensor are not
         #                  the same exact tensor object
@@ -2761,6 +2761,7 @@ class TestNestedTensorSubclass(TestCase):
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
+instantiate_device_type_tests(TestNestedTensorSubclass, globals())
 
 if __name__ == '__main__':
     run_tests()
