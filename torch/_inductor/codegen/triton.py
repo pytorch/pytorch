@@ -2298,7 +2298,14 @@ class TritonScheduling(BaseScheduling):
         if not within_32bit(numel):
             return False
 
-        buf_sizes = [buf.get_layout().storage_size() for buf in buffers]
+        # Any use of a MultiOutputLayout will create a buffer with a
+        # Layout whose sizes are accounted for
+        buf_sizes = [
+            buf.get_layout().storage_size()
+            for buf in buffers
+            if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
+        ]
+
         if not all(within_32bit(size) for size in buf_sizes):
             return False
 
