@@ -8460,6 +8460,93 @@ get_out().sum().backward()
         _test_op(torch.view_as_complex, torch.rand(2, 2), ())
         _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
 
+    def test_forward_has_default_parameters(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(x, y=3):
+                return torch.pow(x, y)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, y = inputs
+                ctx.x = x
+                ctx.y = y
+
+            @staticmethod
+            def backward(ctx, gO):
+                x = ctx.x
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        class MyFunctionWithoutSetupContext(Function):
+            @staticmethod
+            def forward(ctx, x, y=3):
+                ctx.x = x
+                ctx.y = y
+                return torch.pow(x, y)
+
+            @staticmethod
+            def backward(ctx, gO):
+                x = ctx.x
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        class MyFunctionClass(Function):
+            @classmethod
+            def forward(cls, x, y=3):
+                return torch.pow(x, y)
+
+            @classmethod
+            def setup_context(cls, ctx, inputs, output):
+                x, y = inputs
+                ctx.x = x
+                ctx.y = y
+
+            @classmethod
+            def backward(cls, ctx, gO):
+                x = ctx.x
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        class MyFunctionClassWithoutSetupContext(Function):
+            @classmethod
+            def forward(cls, ctx, x, y=3):
+                ctx.x = x
+                ctx.y = y
+                return torch.pow(x, y)
+
+            @classmethod
+            def backward(cls, ctx, gO):
+                x = ctx.x
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        x = torch.tensor(2.0, requires_grad=True)
+
+        y = torch.tensor(8.0)
+        y_expected = torch.tensor(12.0)
+
+        y1 = MyFunction.apply(x)
+        y1_expected, = torch.autograd.grad(y1, x)
+
+        y2 = MyFunctionWithoutSetupContext.apply(x)
+        y2_expected, = torch.autograd.grad(y2, x)
+
+        y3 = MyFunctionClass.apply(x)
+        y3_expected, = torch.autograd.grad(y3, x)
+
+        y4 = MyFunctionClassWithoutSetupContext.apply(x)
+        y4_expected, = torch.autograd.grad(y4, x)
+
+        self.assertEqual(y, y1)
+        self.assertEqual(y_expected, y1_expected)
+        self.assertEqual(y, y2)
+        self.assertEqual(y_expected, y2_expected)
+        self.assertEqual(y, y3)
+        self.assertEqual(y_expected, y3_expected)
+        self.assertEqual(y, y4)
+        self.assertEqual(y_expected, y4_expected)
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
