@@ -398,6 +398,9 @@ def _pre_forward(
             # nested within FSDP
             return args, kwargs
         state.training_state = TrainingState.FORWARD_BACKWARD
+        # Updated before each forward; used to determine whether we'd need to
+        # clear FreeEventQueue after forward pass (yes if in eval mode)
+        state._is_training = module.training
         state._exec_order_data.record_pre_forward(handle, module.training)
         if handle:
             handle._training_state = HandleTrainingState.FORWARD
@@ -491,6 +494,11 @@ def _post_forward(
         state.training_state = TrainingState.IDLE
         if handle:
             handle._training_state = HandleTrainingState.IDLE
+        # Clear FreeEventQueue here if in eval mode where we cannot rely on the
+        # clean-up in post backward
+        if (not state._is_training) and state._is_root:
+            while event_with_tensor := state._free_event_queue.dequeue():
+                _free_storage(event_with_tensor.tensor)
         return output
 
 
