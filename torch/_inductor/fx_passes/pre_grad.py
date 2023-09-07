@@ -5,6 +5,9 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
+from torch.fx.experimental.efficient_conv_bn_eval import (
+    efficient_conv_bn_eval_graph_transform,
+)
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -63,6 +66,7 @@ def pre_grad_passes(gm, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
+        efficient_conv_bn_eval_graph_transform(gm)
         group_batch_fusion_pre_grad_passes(gm.graph)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)
