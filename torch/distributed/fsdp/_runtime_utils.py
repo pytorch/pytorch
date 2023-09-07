@@ -11,8 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torch.autograd.graph import register_multi_grad_hook
-from torch.distributed import get_backend, get_world_size
-from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._comm_hooks import LOW_PRECISION_HOOKS
 from torch.distributed.fsdp._common_utils import (
     _assert_in_training_states,
@@ -198,24 +196,6 @@ def _check_flat_params_on_expected_device(state: _FSDPState, module: nn.Module):
             )
 
 
-def _init_device_mesh(
-    root_state: _FSDPState,
-) -> Optional[DeviceMesh]:
-    # We are testing 1D DeviceMesh where dist.get_world_size(pg) == dist.get_world_size() for now.
-    # TODO: Address cases when dist.get_world_size(pg) != dist.get_world_size(). This would capture
-    #       what 1D DeviceMesh currently would not work for:
-    #       1) HSDP Hybrid Sharding, 2) 2D FSDP + TP, 3) dist.new_group() cannot be expressed in 1D DeviceMesh.
-    if root_state.process_group != dist.distributed_c10d._get_default_group():
-        return None
-    if get_backend() == "fake" or not root_state.compute_device:
-        return None
-
-    device_type = root_state.compute_device.type
-    mesh_tensor = torch.arange(get_world_size(root_state.process_group))
-    device_mesh = DeviceMesh(device_type, mesh_tensor, _validate_mesh=False)
-    return device_mesh
-
-
 @no_type_check
 def _share_state_and_init_handle_attrs(
     root_state: _FSDPState,
@@ -234,7 +214,6 @@ def _share_state_and_init_handle_attrs(
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
     root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
-    root_state._device_mesh = _init_device_mesh(root_state)
     # Update _has_optim_in_backward for each handle.
     for handle in root_state._all_handles:
         flat_param = handle.flat_param
@@ -270,10 +249,13 @@ def _share_state_and_init_handle_attrs(
         fsdp_state._default_stream = root_state._default_stream
         fsdp_state._exec_order_data = root_state._exec_order_data
         fsdp_state._free_event_queue = root_state._free_event_queue
-        fsdp_state._device_mesh = root_state._device_mesh
         handle = fsdp_state._handle
         if handle:
             handle.init_flat_param_attributes()
+        # TODO: remove this if check after we integrate device_mesh in Composable APIs.
+        # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
+        if hasattr(root_state, "_device_mesh"):
+            fsdp_state._device_mesh = root_state._device_mesh
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(

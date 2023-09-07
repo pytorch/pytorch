@@ -372,7 +372,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
                         torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                     }
@@ -426,7 +426,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                         # 2 conv will share same input quant/dequant
                         # one for extra input node of add
                         torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
-                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
                         torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
                         torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
                     }
@@ -457,7 +457,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
             node_occurrence = {
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
-                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7,
                 torch.ops.quantized_decomposed.quantize_per_channel.default: 4,
                 torch.ops.quantized_decomposed.dequantize_per_channel.default: 4,
             }

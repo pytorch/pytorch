@@ -285,7 +285,11 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
 
+    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    def test_max_autotune_cutlass_backend_addmm(self, max_autotune_gemm_backends):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
