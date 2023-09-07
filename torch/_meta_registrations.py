@@ -2891,6 +2891,7 @@ def meta__foreach_binop__list(self, other, alpha=1):
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
         aten._foreach_div_.Scalar,
+        aten._foreach_maximum_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):

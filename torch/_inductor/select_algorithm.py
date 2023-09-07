@@ -530,6 +530,7 @@ class TritonTemplate:
             return kernel, render
 
         # create the BenchmarkRequest
+        assert mod.__file__ is not None
         grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
         bmreq = BenchmarkRequest(
             module_path=mod.__file__,

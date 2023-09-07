@@ -39,10 +39,8 @@ from torch._inductor import config, cuda_properties, exc
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.select_algorithm import (
-        ExternKernelCaller,
-        TritonTemplateCaller,
-    )
+    from torch._inductor.select_algorithm import ChoiceCaller
+
 import concurrent.futures._base
 import concurrent.futures.process
 
@@ -233,11 +231,11 @@ class PersistentCache(CacheBase):
 
     def lookup(
         self,
-        choices: List[Union["ExternKernelCaller", "TritonTemplateCaller"]],
+        choices: List["ChoiceCaller"],
         name: str,
         inputs: str,
         benchmark: Callable[[Any], float],
-    ) -> Dict[Union["ExternKernelCaller", "TritonTemplateCaller"], float]:
+    ) -> Dict["ChoiceCaller", float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
         choice caller:
@@ -385,11 +383,11 @@ class CompiledFxGraph:
     current_callable: Optional[Callable[..., Any]] = None
     cache_key: Optional[str] = None
     artifact_path: Optional[str] = None
-    cache_linemap: Optional[List[Tuple[int, Optional[str]]]] = None
+    cache_linemap: Optional[List[Tuple[int, str]]] = None
     device_types: Set[str] = field(default_factory=set)
     device_idxs: Set[int] = field(default_factory=set)
     mutated_inputs: Set[str] = field(default_factory=set)
-    mutated_input_idxs: List[int] = field(default_factory=list)
+    mutated_input_idxs: Set[int] = field(default_factory=set)
 
     _boxed_call: Optional[bool] = None
 
@@ -969,7 +967,7 @@ class AotCodeCache:
         cls,
         graph: "GraphLowering",
         source_code: str,
-        serialized_extern_kernel_nodes: str,
+        serialized_extern_kernel_nodes: Optional[str],
         cuda: bool,
     ) -> Callable[..., Any]:
         # TODO: update cpp_compile_command for different platforms
@@ -1171,7 +1169,7 @@ class PyCodeCache:
         cls,
         source_code: str,
         extra: str = "",
-        linemap: Optional[List[Tuple[int, Optional[str]]]] = None,
+        linemap: Optional[List[Tuple[int, str]]] = None,
     ) -> ModuleType:
         key, path = write(source_code, "py", extra=extra)
         return cls.load_by_key_path(key, path, linemap)
@@ -1181,7 +1179,7 @@ class PyCodeCache:
         cls,
         key: str,
         path: str,
-        linemap: Optional[List[Tuple[int, Optional[str]]]] = None,
+        linemap: Optional[List[Tuple[int, str]]] = None,
     ) -> ModuleType:
         if linemap is None:
             linemap = []

@@ -3755,7 +3755,6 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
 
         self.assertTrue(torch.allclose(m(x), gm(x)))
 
-    @unittest.expectedFailure
     def test_predispatch_with_for_out_dtype_nested(self):
         class M(torch.nn.Module):
             def __init__(self, weight):
@@ -3801,6 +3800,32 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     sum_1 = torch.ops.aten.sum.default(out_dtype);  out_dtype = None
     return sum_1""",
         )
+
+    def test_export_nn_module_stack_patched_module(self):
+        def forward(self, x, y):
+            return x * y
+
+        class Toplevel(torch.nn.Module):
+            def __init__(self, m):
+                super().__init__()
+                self.m = m
+
+            def forward(self, x, y):
+                return self.m(x, y)
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        t = Toplevel(M())
+        t.m.forward = forward.__get__(t.m, M)
+        x, y = torch.rand(3), torch.rand(3)
+        gm, _ = torch._dynamo.export(t, x, y)
+
+        self.assertTrue(torch.allclose(forward(None, x, y), gm(x, y)))
+        for node in gm.graph.nodes:
+            if node.op == "call_function":
+                self.assertIn("nn_module_stack", node.meta)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
