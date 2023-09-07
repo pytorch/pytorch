@@ -22,6 +22,7 @@ from torch._inductor.codecache import PyCodeCache
 if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
+from . import config
 from .utils import do_bench
 from .virtualized import V
 
@@ -50,7 +51,7 @@ class TuningProcess:
     via pickling requests/responses over stdin/stdout pipes.
     """
 
-    device: int
+    device: Optional[int] = None
     process: Optional[subprocess.Popen[bytes]] = None
 
     @staticmethod
@@ -96,7 +97,8 @@ class TuningProcess:
             return
 
         env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = str(self.device)
+        if self.device is not None:
+            env["CUDA_VISIBLE_DEVICES"] = str(self.device)
         self.process = subprocess.Popen(
             [sys.executable, "-m", "torch._inductor.autotune_process_entry"],
             stdin=subprocess.PIPE,
@@ -179,13 +181,16 @@ class TuningProcessPool:
         if self.processes is not None:
             return
 
-        count = count or torch.cuda.device_count()
+        if config.autotune_multi_device:
+            count = count or torch.cuda.device_count()
+        else:
+            count = 1
         assert count > 0 and count <= torch.cuda.device_count()
 
         # Launch the child processes and push a msg to "warm up"
         self.processes = Queue()
         for device in range(count):
-            p = TuningProcess(device=device)
+            p = TuningProcess(device=device if config.autotune_multi_device else None)
             p.initialize()
             p.put(Ping())
             self.processes.put(p)

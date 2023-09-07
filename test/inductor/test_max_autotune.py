@@ -123,7 +123,8 @@ class TestDoBench(TestCase):
             self.assertNotEqual(0, child.exitcode)
 
     @parametrize("autotune_in_subproc", (True, False))
-    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
+    @parametrize("autotune_multi_device", (True, False))
+    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
@@ -139,7 +140,11 @@ class TestDoBench(TestCase):
         d = torch.randn(k, n).cuda()
 
         with config.patch(
-            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc}
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": autotune_in_subproc,
+                "autotune_multi_device": autotune_multi_device,
+            }
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
@@ -331,29 +336,32 @@ class TestTritonTemplateCaller(TritonTemplateCaller):
         return "test"
 
 
+@instantiate_parametrized_tests
 class TestTuningProcess(TestCase):
-    def test_tuning_pool(self):
-        tuning_pool = TuningProcessPool()
-        tuning_pool.initialize(1)
+    @parametrize("autotune_multi_device", (True, False))
+    def test_tuning_pool(self, autotune_multi_device):
+        with config.patch({"autotune_multi_device": autotune_multi_device}):
+            tuning_pool = TuningProcessPool()
+            tuning_pool.initialize(1)
 
-        # First cause the tuning process to crash.
-        bmreq = TestBenchmarkRequest(value=None)
-        choice = TestTritonTemplateCaller(bmreq)
+            # First cause the tuning process to crash.
+            bmreq = TestBenchmarkRequest(value=None)
+            choice = TestTritonTemplateCaller(bmreq)
 
-        timings = tuning_pool.benchmark([choice])
-        self.assertTrue(choice in timings)
-        self.assertEqual(timings[choice], float("inf"))
+            timings = tuning_pool.benchmark([choice])
+            self.assertTrue(choice in timings)
+            self.assertEqual(timings[choice], float("inf"))
 
-        # Then send another request and make sure the sub-process
-        # has restarted and is operational.
-        value = 3.14
-        choice.bmreq.value = value
+            # Then send another request and make sure the sub-process
+            # has restarted and is operational.
+            value = 3.14
+            choice.bmreq.value = value
 
-        timings = tuning_pool.benchmark([choice])
-        self.assertTrue(choice in timings)
-        self.assertEqual(timings[choice], value)
+            timings = tuning_pool.benchmark([choice])
+            self.assertTrue(choice in timings)
+            self.assertEqual(timings[choice], value)
 
-        tuning_pool.terminate()
+            tuning_pool.terminate()
 
 
 if __name__ == "__main__":
