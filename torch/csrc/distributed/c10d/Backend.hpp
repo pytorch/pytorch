@@ -366,7 +366,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
   void init();
-
+  void emitCollectiveStart(const Work& work);
+  void emitCollectiveEnd(const Work& work);
   // Optional sequence number structure for matching collectives.
   c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
   const int rank_;

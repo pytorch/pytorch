@@ -610,10 +610,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void runHookLoop();
 
   // Desync debug helper
-  void logWorkStart(WorkNCCL& work);
+  void logWorkStart(WorkNCCL& work, bool emitDesyncInfo);
 
   // Desync debug helper
-  void logWorkEnd(WorkNCCL& work);
+  void logWorkEnd(WorkNCCL& work, bool emitDesyncInfo);
 
  protected:
   static const int64_t kWatchdogThreadSleepMillis;

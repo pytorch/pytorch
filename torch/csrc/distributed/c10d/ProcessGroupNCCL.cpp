@@ -935,26 +935,33 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   }
 }
 
-void ProcessGroupNCCL::logWorkStart(WorkNCCL& work) {
-  if (work.startTraceUpdated_)
+void ProcessGroupNCCL::logWorkStart(WorkNCCL& work, bool emitDesyncInfo) {
+  if (terminateProcessGroup_.load() || work.startTraceUpdated_)
     return;
-
-  if (terminateProcessGroup_.load() || storeError_)
-    return;
-
   work.startTraceUpdated_ = true;
+
+  emitCollectiveStart(work);
+
+  if (!emitDesyncInfo || storeError_)
+    return;
+
   storeError_ = !c10d::traceUpdate(
       store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
 }
 
-void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
-  if (terminateProcessGroup_.load() || storeError_)
+void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work, bool emitDesyncInfo) {
+  if (terminateProcessGroup_.load())
     return;
 
   // In case the start of the work hasn't been logged
   if (!work.startTraceUpdated_) {
-    logWorkStart(work);
+    logWorkStart(work, emitDesyncInfo);
   }
+
+  emitCollectiveEnd(work);
+
+  if (!emitDesyncInfo || storeError_)
+    return;
 
   storeError_ = !c10d::traceUpdate(
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
@@ -1007,13 +1014,11 @@ void ProcessGroupNCCL::workCleanupLoop() {
       }
 
       // Work status logging for desync debug
-      if (desyncDebug_) {
-        if (work.isStarted()) {
-          logWorkStart(work);
-        }
-        if (work.isCompleted()) {
-          logWorkEnd(work);
-        }
+      if (work.isStarted()) {
+        logWorkStart(work, desyncDebug_);
+      }
+      if (work.isCompleted()) {
+        logWorkEnd(work, desyncDebug_);
       }
 
       // Clean up completed work
