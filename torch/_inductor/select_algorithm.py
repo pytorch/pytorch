@@ -21,6 +21,7 @@ from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import ChoiceCaller, IndentedBuffer, KernelTemplate
+from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
@@ -693,6 +694,11 @@ class AlgorithmSelectorCache(PersistentCache):
                 "config (defined in torch/_inductor/config.py) to allow at least one choice. "
             )
         log.info("Max autotune selects from %s choices.", str(len(choices)))
+
+        if len(choices) == 1:
+            if not isinstance(choices[0], CUDATemplateCaller):
+                # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
+                return choices[0].output_node()
 
         @functools.lru_cache(None)
         def make_benchmark_fn():
