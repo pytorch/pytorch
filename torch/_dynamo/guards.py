@@ -531,13 +531,13 @@ class GuardBuilder(GuardBuilderBase):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
-        pass  # we always guard on grad mode via GlobalStateGuard()
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard):
-        pass  # we always guard on grad mode via GlobalStateGuard()
+        pass  # we always guard on this via GlobalStateGuard()
 
     def TORCH_FUNCTION_STATE(self, guard: Guard):
-        pass  # we always guard on grad mode via GlobalStateGuard()
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
@@ -1101,24 +1101,7 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard)
 
         assert not global_builder.shape_env_code
-
-        # I am a bit horrified that these `initial_*` variables exist since it indicates a hacky workaround to a
-        # pretty terrible bug.  I want to see if these asserts ever get hit, and if they do delete the variables.
-        assert (
-            convert_frame.initial_grad_state == torch.is_grad_enabled()
-        ), "dynamo tracing should not mutate global state"
-        assert convert_frame.initial_deterministic_algorithms_state == (
-            torch.are_deterministic_algorithms_enabled()
-        ), "dynamo tracing should not mutate global state"
-        assert (
-            convert_frame.initial_torch_function_state
-            == torch._C._is_torch_function_enabled()
-        ), "dynamo tracing should not mutate global state"
-        assert (
-            convert_frame.initial_global_state is not None
-            and convert_frame.initial_global_state.check()
-        ), "dynamo tracing should not mutate global state"
-
+        assert convert_frame.initial_global_state is not None
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
@@ -1126,7 +1109,7 @@ class CheckFunctionManager:
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 (
                     "___check_global_state",
-                    torch._C._dynamo.guards.GlobalStateGuard().check,
+                    convert_frame.initial_global_state.check,
                 ),
                 ("tensor_check_names", tensor_check_names),
             ]

@@ -5785,6 +5785,70 @@ def fn():
         finally:
             write_state(initial_state)
 
+    def test_grad_state_mutated(self):
+        prior = torch.is_grad_enabled()
+        value = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            value = torch.is_grad_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            check_state()
+            torch.set_grad_enabled(False)
+            return x + 1
+
+        try:
+            torch.set_grad_enabled(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.is_grad_enabled() is False
+
+            value = None
+            torch.set_grad_enabled(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.is_grad_enabled() is False
+
+            assert cnt.frame_count == 1
+        finally:
+            torch.set_grad_enabled(prior)
+
+    def test_determinstic_algorithms_mutated(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        value = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            value = torch.are_deterministic_algorithms_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            check_state()
+            torch.use_deterministic_algorithms(False)
+            return x + 1
+
+        try:
+            torch.use_deterministic_algorithms(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+
+            value = None
+            torch.use_deterministic_algorithms(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+
+            assert cnt.frame_count == 1
+        finally:
+            torch.use_deterministic_algorithms(prior)
+
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
             def forward(self):

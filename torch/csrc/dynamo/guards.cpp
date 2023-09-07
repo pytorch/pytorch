@@ -433,6 +433,8 @@ typedef struct {
     _torch_function = torch::torch_function_enabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
+    _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
   }
 
@@ -443,6 +445,8 @@ typedef struct {
         _torch_function == torch::torch_function_enabled() &&
         _deterministic_algorithms == ctx.deterministicAlgorithms() &&
         _allow_tf32 == ctx.allowTF32CuBLAS() &&
+        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
         _num_threads == at::get_num_threads());
   }
 
@@ -451,6 +455,8 @@ typedef struct {
   bool _torch_function;
   bool _deterministic_algorithms;
   bool _allow_tf32;
+  bool _allow_fp16_reduce;
+  bool _allow_bf16_reduce;
   int _num_threads;
   // TODO(jansel): we should guard on more state as inductor starts using it
 } GlobalStateGuard;
@@ -476,10 +482,6 @@ PyObject* GlobalStateGuard_check(
 
 static PyMethodDef GlobalStateGuard_methods[] = {
     {"check",
-     (PyCFunction)(void*)GlobalStateGuard_check,
-     METH_NOARGS,
-     "Return true if global state was the same as at creation time"},
-    {"__bool__",
      (PyCFunction)(void*)GlobalStateGuard_check,
      METH_NOARGS,
      "Return true if global state was the same as at creation time"},
