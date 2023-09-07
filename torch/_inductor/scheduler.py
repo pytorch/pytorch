@@ -1354,6 +1354,10 @@ class Scheduler:
         if not config.benchmark_fusion:
             return True
 
+        if node1.is_template():
+            # TODO support benchmarking epilogue fusion
+            return True
+
         node_list_1 = node1.get_nodes()
         device = node_list_1[0].get_device()
 
