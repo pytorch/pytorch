@@ -39,11 +39,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    GuardOnDataDependentSymNode,
-    ShapeEnv,
-)
+from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
@@ -1073,7 +1069,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
             if (
-                isinstance(e, (UnbackedSymIntError, GuardOnDataDependentSymNode))
+                isinstance(e, UnbackedSymIntError)
             ) and torch._guards.CompileContext.get_capture_dynamic_output_shape_ops():
                 torch._guards.CompileContext.set_capture_dynamic_output_shape_ops(False)
                 raise RestartAnalysis() from None
