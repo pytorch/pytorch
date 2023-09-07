@@ -131,7 +131,7 @@ jobs:
 
       - name: Run simulator tests
         # TODO: All the test iOS models are using lite interpreter
-        if: matrix.ios_platform == 'SIMULATOR' && matrix.use_lite_interpreter == 1
+        if: matrix.ios_platform == 'SIMULATOR'
         shell: bash
         run: |
           set -eux
