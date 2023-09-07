@@ -76,6 +76,7 @@ from torch.testing._internal.common_quantization import (
 from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
 from torch._export import dynamic_dim
@@ -2025,6 +2026,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_conv_bn_fusion_cuda(self):
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        m = TestHelperModules.ConvWithBNRelu(relu=False).cuda()
+        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
     def test_qat_conv_bn_fusion_literal_args(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2078,6 +2086,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_qat_conv_bn_relu_fusion(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True)
         example_inputs = (torch.randn(1, 3, 5, 5),)
+        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True)
+        self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_qat_conv_bn_relu_fusion_cuda(self):
+        m = TestHelperModules.ConvWithBNRelu(relu=True).cuda()
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True)
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 

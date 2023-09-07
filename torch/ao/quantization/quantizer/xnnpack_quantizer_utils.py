@@ -352,11 +352,6 @@ def _annotate_conv2d_bn(
         if len(conv_partition.output_nodes) > 1:
             raise ValueError("conv partition has more than one output node")
         conv_node = conv_partition.output_nodes[0]
-        conv_node_users = list(conv_node.users.keys())
-        if len(conv_node_users) > 1:
-            raise ValueError(
-                "Conv node must be consumed by BN only for it to be fusable."
-            )
         if len(bn_partition.output_nodes) > 1:
             raise ValueError("BatchNorm partition has more than one output node")
         bn_output_node = bn_partition.output_nodes[0]
@@ -415,11 +410,6 @@ def _annotate_conv2d_bn_relu(
         if len(conv_partition.output_nodes) > 1:
             raise ValueError("conv partition has more than one output node")
         conv_node = conv_partition.output_nodes[0]
-        conv_node_users = list(conv_node.users.keys())
-        if len(conv_node_users) > 1:
-            raise ValueError(
-                "Conv node must be consumed by BN only for it to be fusable."
-            )
         if len(bn_partition.output_nodes) > 1:
             raise ValueError("BatchNorm partition has more than one output node")
         bn_output_node = bn_partition.output_nodes[0]

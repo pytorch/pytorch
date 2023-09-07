@@ -137,6 +137,7 @@ def capture_pre_autograd_graph(
         torch.ops.aten.batch_norm.default: torch.ops.aten.batch_norm.default.decompose,
         torch.ops.aten._batch_norm_impl_index.default: torch.ops.aten._batch_norm_impl_index.default.decompose,
         torch.ops.aten.native_batch_norm.default: torch.ops.aten.native_batch_norm.default.decompose,
+        torch.ops.aten.cudnn_batch_norm.default: torch.ops.aten.cudnn_batch_norm.default.decompose,
     }
 
     if kwargs is None:

@@ -1782,6 +1782,7 @@ def nop_decomposition(x):
 # Also register to the Autograd dispatch key, so this decomp can run above autograd.
 # native_batch_norm needs to decompose into other ops before autograd.
 @aten.cudnn_batch_norm.default.py_impl(DispatchKey.Autograd)
+@aten.cudnn_batch_norm.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @register_decomposition(aten.cudnn_batch_norm)
 def cudnn_batch_norm(
     input: Tensor,
