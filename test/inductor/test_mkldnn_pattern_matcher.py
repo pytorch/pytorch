@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import itertools
-import re
 
 import torch
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
@@ -20,7 +19,8 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
+
 
 # The dict value is match_nodes(computation_op+unary_op)
 
@@ -144,24 +144,6 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
         check_dynamic=False,
     ):
-        def _check_has_dynamic_shape(source_code):
-            # Ref to https://github.com/pytorch/pytorch/blob/3fe8417643c8d6c2b3d95552cd90321d141b5d54
-            # /test/inductor/test_torchinductor_codegen_dynamic_shapes.py#L82-L95
-            for_loop_found = False
-            has_dynamic = False
-            lines = source_code.split("\n")
-            for line in lines:
-                if "for(" in line:
-                    for_loop_found = True
-                    if re.search(r";.*ks.*;", line) is not None:
-                        has_dynamic = True
-                        break
-            self.assertTrue(
-                has_dynamic,
-                msg=f"Failed to find dynamic for loop variable\n{source_code}",
-            )
-            self.assertTrue(for_loop_found, f"Failed to find for loop\n{source_code}")
-
         clone_inputs = self._clone_inputs(inputs)
         with torch.no_grad():
             if check_quantization:
@@ -170,8 +152,6 @@ class TestPatternMatcherBase(TestCase):
                     torch.compile(convert_model, fullgraph=True, dynamic=check_dynamic),
                     *clone_inputs,
                 )
-                if check_dynamic:
-                    _check_has_dynamic_shape(source_code)
             else:
                 expected = mod(*inputs)
                 actual, (source_code,) = run_and_get_code(
@@ -182,6 +162,8 @@ class TestPatternMatcherBase(TestCase):
                 self.assertIn(op, source_code)
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
+            if check_dynamic:
+                _check_has_dynamic_shape(self, source_code)
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
