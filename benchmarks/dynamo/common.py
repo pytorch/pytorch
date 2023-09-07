@@ -21,6 +21,25 @@ import sys
 import time
 from contextlib import contextmanager
 
+import logging
+
+# BEGIN CHANGES ONLY FOR PERF TEST PURPOSE #####
+# REMOVE BEFORE LAND ####
+from torch._inductor import config
+
+config.benchmark_fusion = True
+config.debug_fusion = True
+config.benchmark_kernel = True
+config.triton.unique_kernel_names = True
+from torch._inductor.scheduler import log
+
+log.setLevel(logging.DEBUG)
+from torch._inductor.codegen.triton import log
+
+log.setLevel(logging.DEBUG)
+
+# END CHANGES ONLY FOR PERF TEST PURPOSE #####
+
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
 from unittest.mock import MagicMock
 
