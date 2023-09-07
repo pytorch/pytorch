@@ -40,7 +40,7 @@ def run(model, optim):
     torch.manual_seed(42)
     losses = []
     inp = torch.randn((2, 3), device="cuda")
-    
+
     for _ in range(4):
         optim.zero_grad(set_to_none=True)
         inp = torch.randn((2, 3), device="cuda")
