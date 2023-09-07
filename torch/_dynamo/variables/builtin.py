@@ -35,7 +35,6 @@ from ..utils import (
     check_unspec_python_args,
     get_fake_value,
     guard_if_dyn,
-    is_treespec_cls,
     is_utils_checkpoint,
     istype,
     numpy_operator_wrapper,
@@ -1091,20 +1090,6 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
-        if isinstance(obj, variables.ConstantVariable) and is_treespec_cls(
-            obj.python_type()
-        ):
-            value = obj.as_python_constant()
-            if name == "type":
-                return variables.UserDefinedClassVariable(value=value.type)
-            if name == "children_specs":
-                return variables.ListVariable(
-                    [
-                        variables.ConstantVariable(value=spec)
-                        for spec in value.children_specs
-                    ]
-                )
-
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
@@ -1326,11 +1311,7 @@ class BuiltinVariable(VariableTracker):
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable(id(mod))
         else:
-            try:
-                value = args[0].as_python_constant()
-                return variables.ConstantVariable(id(value))
-            except Exception:
-                unimplemented(f"call_id with args {args}")
+            unimplemented(f"call_id with args {args}")
 
     def _comparison(self, tx, left, right):
         """
