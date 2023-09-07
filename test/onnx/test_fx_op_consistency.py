@@ -391,12 +391,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "nn.functional.max_pool2d",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int16, torch.int32, torch.int64),
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
     ),
     xfail(
         "nn.functional.max_pool3d",
-        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        dtypes=(torch.uint8, torch.int16, torch.int32, torch.int64),
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool3d"),
     ),
     xfail(

@@ -17,6 +17,12 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
+constexpr scalar_t smallest{
+    std::numeric_limits<scalar_t>::has_infinity
+        ? -std::numeric_limits<scalar_t>::infinity()
+        : std::numeric_limits<scalar_t>::min()};
+
+template <typename scalar_t>
 bool is_nan(scalar_t v) {
   if (std::is_integral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
     return false;
@@ -85,7 +91,7 @@ compute_internal(
   using iVec = vec::Vectorized<integer_t>;
   // Pass I: init out lane
   iVec index0_vec = iVec(id0 * input_height * input_width + ih0 * input_width + iw0);
-  Vec out_vec = Vec(-std::numeric_limits<scalar_t>::infinity());
+  Vec out_vec = Vec(smallest<scalar_t>);
   int64_t d1 = 0;
   for (; d1 < len; d1 += Vec::size()) {
     index0_vec.store(index_ptr + d1);
@@ -93,7 +99,7 @@ compute_internal(
   }
   for (; d1 < size; d1++) {
     ind[d1] = ih0 * input_width + iw0;
-    out_data[d1] = -std::numeric_limits<scalar_t>::infinity();
+    out_data[d1] = smallest<scalar_t>;
   }
   // Pass II: compute local max
   for (int64_t id = id0; id < id1; id += dilationD) {
@@ -158,7 +164,7 @@ compute_internal(
   using iVec = vec::Vectorized<int32_t>;
   // Pass I: init out lane
   iVec index0_vec = iVec(id0 * input_height * input_width + ih0 * input_width + iw0);
-  fVec out_vec = fVec(-std::numeric_limits<opmath_t>::infinity());
+  fVec out_vec = fVec(smallest<opmath_t>);
   int64_t d1 = 0;
   for (; d1 < len; d1 += fVec::size()) {
     index0_vec.store(index_ptr + d1);
@@ -166,7 +172,7 @@ compute_internal(
   }
   for (; d1 < size; d1++) {
     ind[d1] = ih0 * input_width + iw0;
-    max_ptr[d1] = -std::numeric_limits<opmath_t>::infinity();
+    max_ptr[d1] = smallest<opmath_t>;
   }
   // Pass II: compute local max
   for (int64_t id = id0; id < id1; id += dilationD) {
@@ -312,12 +318,7 @@ void cpu_max_pool(
 
             // compute local max
             int64_t maxindex = id0 * input_height * input_width + ih0 * input_width + iw0;
-            opmath_t maxval;
-            if (std::numeric_limits<opmath_t>::has_infinity) {
-              maxval = -std::numeric_limits<opmath_t>::infinity();
-            } else {
-              maxval = std::numeric_limits<opmath_t>::min();
-            }
+            opmath_t maxval = smallest<opmath_t>;
 
             for (int64_t id = id0; id < id1; id += dilationD) {
               for (int64_t ih = ih0; ih < ih1; ih += dilationH) {
