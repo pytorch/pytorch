@@ -71,8 +71,6 @@ def _wrap_submodule(mod, path, module_call_specs):
             raise RuntimeError(f"Couldn't find submodule at path {path}")
         submodule = getattr(submodule, name)
 
-    # TODO(zhxchen17) Remove this decorator.
-    @torch._dynamo.assume_constant_result
     def update_module_call_signatures(path, in_spec, out_spec):
         assert path not in module_call_specs
         module_call_specs[path] = {"in_spec": in_spec, "out_spec": out_spec}

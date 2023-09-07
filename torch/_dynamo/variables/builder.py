@@ -403,7 +403,7 @@ class VariableBuilder:
             or k is collections.namedtuple
             for k in value.keys()
         ):
-            keys_are_types_or_namedtuple = all(
+            keys_are_types_or_namedtuple = len(value.keys()) > 0 and all(
                 isinstance(k, type) or k is collections.namedtuple for k in value.keys()
             )
 

@@ -3637,7 +3637,6 @@ def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch
         self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
 
-    @unittest.expectedFailure
     def test_fx_pytree(self):
         def foo(args):
             flat_args, spec = torch.utils._pytree.tree_flatten(args)
