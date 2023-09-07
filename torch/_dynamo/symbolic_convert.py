@@ -2224,23 +2224,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # Known sound
                 return
 
-            """
-            # Function returned by torch.autograd.function.once_differentiable is known sound
-            if (
-                isinstance(func, UserFunctionVariable) and
-                func.get_filename().endswith('torch/autograd/function.py') and
-                not func.fn.__module__.startswith('torch.autograd.function')
-            ):
-                return
-            # Function wrapped by torch.autograd.function.once_differentiable is known sound
-            if (
-                isinstance(func, NestedUserFunctionVariable) and
-                func.get_filename().endswith('torch/autograd/function.py') and
-                func.fn_name.value == 'once_differentiable.<locals>.wrapper.<locals>.<genexpr>'
-            ):
-                retuorn
-            """
-
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
