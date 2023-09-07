@@ -15,7 +15,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     @with_comms
     def test_sum(self):
         device_mesh = self.build_device_mesh()

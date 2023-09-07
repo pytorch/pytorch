@@ -19,7 +19,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestEmbeddingOp(DTensorTestBase):
+class TestEmbeddingOp(DTensorOpTestBase):
     def _run_embedding_op_test(
         self,
         shard_dim,

@@ -21,7 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-class DistMatrixOpsTest(DTensorTestBase):
+class DistMatrixOpsTest(DTensorOpTestBase):
     @with_comms
     def test_addmm(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))

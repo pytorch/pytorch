@@ -12,7 +12,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-class DistTensorOpsTest(DTensorTestBase):
+class DistTensorOpsTest(DTensorOpTestBase):
     @with_comms
     def test_aten_contiguous(self):
         # this op not covered by dtensor_ops
