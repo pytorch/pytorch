@@ -10,7 +10,7 @@ from ...config import cuda as inductor_cuda_config
 
 log = logging.getLogger(__name__)
 
-HAS_CUTLASS = True
+HAS_CUTLASS = False
 
 _CUTLASS_PY_FULL_PATH = os.path.join(
     inductor_cuda_config.cutlass_dir, "tools/library/scripts"
@@ -47,26 +47,31 @@ def _gen_cutlass_file(file_name: str, cutlass_modules: List[str]) -> None:
 # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
 # This is a temporary hack to avoid CUTLASS module naming conflicts.
 # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
-try:
-    if os.path.isdir(_CUTLASS_PY_FULL_PATH):
-        cutlass_file_names = [
-            file_name
-            for file_name in os.listdir(_CUTLASS_PY_FULL_PATH)
-            if file_name.endswith(".py")
-        ]
-        cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-        if not os.path.isdir(_TMP_CUTLASS_PY_FULL_PATH):
-            os.mkdir(_TMP_CUTLASS_PY_FULL_PATH)
-        for file_name in cutlass_file_names:
-            _gen_cutlass_file(file_name, cutlass_module_names)
-        sys.path.append(_TMP_CUTLASS_PY_FULL_PATH)
-
+if os.path.isdir(_CUTLASS_PY_FULL_PATH):
+    cutlass_file_names = [
+        file_name
+        for file_name in os.listdir(_CUTLASS_PY_FULL_PATH)
+        if file_name.endswith(".py")
+    ]
+    cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
+    if not os.path.isdir(_TMP_CUTLASS_PY_FULL_PATH):
+        os.mkdir(_TMP_CUTLASS_PY_FULL_PATH)
+    for file_name in cutlass_file_names:
+        _gen_cutlass_file(file_name, cutlass_module_names)
+    sys.path.append(_TMP_CUTLASS_PY_FULL_PATH)
+    try:
         import cutlass_generator  # type: ignore[import]
         import cutlass_library  # type: ignore[import]
         import cutlass_manifest  # type: ignore[import]
 
-except ImportError as e:
-    HAS_CUTLASS = False
+        HAS_CUTLASS = True
+    except ImportError as e:
+        log.warning(
+            "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
+            str(e),
+        )
+else:
     log.warning(
-        "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.", str(e)
+        "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
+        _CUTLASS_PY_FULL_PATH,
     )
