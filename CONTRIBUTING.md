@@ -187,9 +187,8 @@ into the repo directory.
 
 ## Codebase structure
 
-A diagram of the parts of the codebase showing at a high level picture, the frontend, backend, ATen and kernels. 
-![code base structure](simplified-codebase-structure.png)
-
+A diagram of the parts of the codebase showing at a high level picture.
+![codebase around operations](PyTorch%20ops%20high%20level%20picture.drawio.png)
 
 * [c10](c10) - Core library files that work everywhere, both server
   and mobile. We are slowly moving pieces from [ATen/core](aten/src/ATen/core)
