@@ -19,11 +19,11 @@ on:
   workflow_dispatch:
     inputs:
       use_lite_interpreter:
-        description: "Build iOS binaries with PyTorch lite interpreter support"
+        description: "Use PyTorch lite interpreter?"
         type: string
         default: 1
       use_coreml:
-        description: "Build iOS binaries with Apple Core ML"
+        description: "Use Apple Core ML?"
         type: string
         default: 1
       use_custom_op_list:
@@ -51,8 +51,7 @@ jobs:
             runner: "macos-12",
             ios_platform: "SIMULATOR",
             ios_arch: "x86_64",
-            # TODO: set me to 1
-            use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
+            use_lite_interpreter: ${{ inputs.use_lite_interpreter || 1 }},
             use_metal: 0,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}
@@ -63,8 +62,7 @@ jobs:
             runner: "macos-12",
             ios_platform: "OS",
             ios_arch: "arm64",
-            # TODO: set me to 1
-            use_lite_interpreter: ${{ inputs.use_lite_interpreter || 0 }},
+            use_lite_interpreter: ${{ inputs.use_lite_interpreter || 1 }},
             use_metal: 1,
             use_coreml: ${{ inputs.use_coreml || 1 }},
             use_custom_op_list: ${{ inputs.use_custom_op_list || '' }}

@@ -10,7 +10,7 @@
 }
 
 - (void)testFullJIT {
-  NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model_coreml"
+  NSString* modelPath = [[NSBundle bundleForClass:[self class]] pathForResource:@"model"
                                                                          ofType:@"pt"];
   auto module = torch::jit::load(modelPath.UTF8String);
   c10::InferenceMode mode;

@@ -130,7 +130,6 @@ jobs:
           ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
       - name: Run simulator tests
-        # TODO: All the test iOS models are using lite interpreter
         if: matrix.ios_platform == 'SIMULATOR'
         shell: bash
         run: |
@@ -150,13 +149,14 @@ jobs:
             ${CONDA_RUN} python test/mobile/model_test/gen_test_model.py ios-test
             popd
           fi
-          popd
 
-          pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             echo "Setting up the TestApp for LiteInterpreter"
             ruby setup.rb --lite 1
           else
+            # Generate some models for JIT without lite interpreter
+            ${CONDA_RUN} python trace_model.py
+
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
           fi
