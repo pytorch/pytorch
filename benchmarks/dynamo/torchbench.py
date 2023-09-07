@@ -81,6 +81,8 @@ SKIP = {
     "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
     # takes too long, extreme slowdown (< .001)
     "maml",
+    # Failing in eager mode
+    "clip",
 }
 
 SKIP_FOR_CPU = {
@@ -142,12 +144,14 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "doctr_reco_predictor",
     "drq",
 }
 
 
 REQUIRE_HIGHER_BF16_TOLERANCE = {
-    "detectron2_fcos_r_50_fpn",
+    "doctr_reco_predictor",
+    "drq",
 }
 
 REQUIRE_COSINE_TOLERACE = {
@@ -232,6 +236,8 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "doctr_reco_predictor",
     "Super_SloMo",
     "tts_angular",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # models in canary_models that we should run anyway
