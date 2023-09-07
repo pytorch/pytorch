@@ -11373,6 +11373,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -11448,6 +11450,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -18975,6 +18979,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.float64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
@@ -19022,6 +19027,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
