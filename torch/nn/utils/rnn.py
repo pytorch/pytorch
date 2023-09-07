@@ -338,9 +338,9 @@ def pad_packed_sequence(
         return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices.cpu()]
     return padded_output, lengths
 
-
+# NOTE: .pyi stub allows Iterable[Tensor], but for JIT-compatibility we need to be more restrictive here.
 def pad_sequence(
-    sequences: Union[Tensor, Iterable[Tensor]],
+    sequences: Union[Tensor, List[Tensor]],
     batch_first: bool = False,
     padding_value: float = 0.0,
 ) -> Tensor:
