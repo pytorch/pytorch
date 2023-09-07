@@ -12078,7 +12078,7 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1]``
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
 can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
 applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
