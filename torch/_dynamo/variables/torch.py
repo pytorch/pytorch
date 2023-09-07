@@ -756,7 +756,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     if (
-                        kwargs["out"] in tx.output.graphargs
+                        kwargs["out"].source
+                        and kwargs["out"] in tx.output.graphargs
                         and kwargs["out"].size != tensor_variable.size
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
