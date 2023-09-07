@@ -1172,13 +1172,13 @@ std::vector<Tensor> gradient(const Tensor& self, IntArrayRef dim, int64_t edge_o
 
 inline bool should_use_acc_buffer(at::TensorIterator& iter) {
   const auto ndim = iter.ndim();
-  if (!iter.device().is_cpu()) {
+  if (!iter.device().is_cpu() || iter.noutputs() != 1) {
     return false;
   }
   if (!at::isReducedFloatingType(iter.common_dtype())) {
     return false;
   }
-  if (ndim < 2 || iter.noutputs() != 1) {
+  if (ndim < 3) {
     return false;
   }
   auto out_strides = iter.strides(0);
