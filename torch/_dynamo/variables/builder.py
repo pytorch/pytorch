@@ -389,6 +389,12 @@ class VariableBuilder:
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
 
+        elif value is torch.utils._pytree.SUPPORTED_NODES:
+            guards = self.make_guards(GuardBuilder.DICT_VERSION)
+            result = {
+                k: ConstantVariable(value[k], guards=guards) for k in value.keys()
+            }
+            return ConstDictVariable(result, type(value), guards=guards)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(

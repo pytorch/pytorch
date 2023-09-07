@@ -51,7 +51,7 @@ class NodeDef(NamedTuple):
     flatten_fn: FlattenFunc
     unflatten_fn: UnflattenFunc
 
-SUPPORTED_NODES: Dict[int, NodeDef] = {}
+SUPPORTED_NODES: Dict[Type[Any], NodeDef] = {}
 
 # _SerializeNodeDef holds the following:
 # - typ: the type of the node (e.g., "Dict", "List", etc)
@@ -107,7 +107,7 @@ def _register_pytree_node(
         flatten_fn,
         unflatten_fn,
     )
-    SUPPORTED_NODES[id(typ)] = node_def
+    SUPPORTED_NODES[typ] = node_def
 
     if (to_dumpable_context is None) ^ (from_dumpable_context is None):
         raise ValueError(
@@ -198,7 +198,7 @@ def _get_node_type(pytree: Any) -> Any:
 
 # A leaf is defined as anything that is not a Node.
 def _is_leaf(pytree: PyTree) -> bool:
-    return id(_get_node_type(pytree)) not in SUPPORTED_NODES
+    return _get_node_type(pytree) not in SUPPORTED_NODES
 
 
 # A TreeSpec represents the structure of a pytree. It holds:
@@ -243,7 +243,7 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
         return [pytree], LeafSpec()
 
     node_type = _get_node_type(pytree)
-    flatten_fn = SUPPORTED_NODES[id(node_type)].flatten_fn
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
     child_pytrees, context = flatten_fn(pytree)
 
     # Recursively flatten the children
@@ -273,7 +273,7 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     if isinstance(spec, LeafSpec):
         return values[0]
 
-    unflatten_fn = SUPPORTED_NODES[id(spec.type)].unflatten_fn
+    unflatten_fn = SUPPORTED_NODES[spec.type].unflatten_fn
 
     # Recursively unflatten the children
     start = 0
@@ -414,7 +414,7 @@ def _broadcast_to_and_flatten(pytree: PyTree, spec: TreeSpec) -> Optional[List[A
     if node_type != spec.type:
         return None
 
-    flatten_fn = SUPPORTED_NODES[id(node_type)].flatten_fn
+    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
     child_pytrees, ctx = flatten_fn(pytree)
 
     # Check if the Node is different from the spec

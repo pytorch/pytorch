@@ -409,7 +409,13 @@ def is_typing(value):
         return isinstance(value, typing._GenericAlias)
     else:
         return isinstance(
-            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias, typing._SpecialForm)
+            value,
+            (
+                typing.TypeVar,
+                typing._SpecialGenericAlias,
+                typing._UnionGenericAlias,
+                typing._SpecialForm,
+            ),
         )
 
 

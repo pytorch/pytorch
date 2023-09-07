@@ -24,7 +24,6 @@ from ..source import GeneratorStateSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
-    is_treespec_cls,
     istype,
     product,
     proxy_args_kwargs,
@@ -597,20 +596,6 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
-        elif (
-            hasattr(self.value, "__module__")
-            and self.value.__module__ == "torch.utils._pytree"
-        ):
-            if isinstance(self.value, types.FunctionType):
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(self.value, **options),
-                    args,
-                    kwargs,
-                )
-            else:
-                assert is_treespec_cls(self.value), f"not TreeSpec class: {self.value}"
-                const_args = [a.as_python_constant() for a in args]
-                return ConstantVariable(self.value(*const_args), **options)
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
