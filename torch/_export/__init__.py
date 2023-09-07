@@ -53,6 +53,7 @@ from .exported_program import (
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
+from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
@@ -294,16 +295,25 @@ def export(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    constraints=constraints,
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                )(
-                    *args,
-                    **kwargs,
-                )
+            # TODO Horrible hack to skip dynamo
+            if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
+                if len(constraints) > 0:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        "Cannot provide constraints for already exported program."
+                    )
+                gm_torch_level = f
+            else:
+                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        constraints=constraints,
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                    )(
+                        *args,
+                        **kwargs,
+                    )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
@@ -383,10 +393,10 @@ def export(
     if isinstance(f, torch.nn.Module):
         param_lookup: Dict[int, List[str]] = {}
         buffer_lookup: Dict[int, List[str]] = {}
-        for name, param in f.named_parameters():
-            param_lookup.get(id(param), []).append(name)
-        for name, buffer in f.named_buffers():
-            buffer_lookup.get(id(buffer), []).append(name)
+        for name, param in f.named_parameters(remove_duplicate=False):
+            param_lookup.setdefault(id(param), []).append(name)
+        for name, buffer in f.named_buffers(remove_duplicate=False):
+            buffer_lookup.setdefault(id(buffer), []).append(name)
         for dynamo_name, dynamo_param in gm_torch_level.named_parameters(remove_duplicate=False):
             assert dynamo_name not in param_buffer_table
             if id(dynamo_param) in param_lookup:
@@ -514,6 +524,7 @@ def export(
         exported_program = exported_program._transform(
             _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
         )
+    exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
 
