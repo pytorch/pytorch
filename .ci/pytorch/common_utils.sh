@@ -43,7 +43,7 @@ function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
     if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
-        git_status=$(git status --porcelain)
+        git_status=$(git status --porcelain | grep -v '?? third_party' || true)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
             echo "git status --porcelain:"
@@ -210,15 +210,6 @@ function test_torch_deploy(){
  ./multipy/runtime/build/test_deploy_gpu
  popd
  popd
-}
-
-function install_timm() {
-  local commit
-  commit=$(get_pinned_commit timm)
-  pip_install pandas
-  pip_install scipy
-  pip_install z3-solver
-  pip_install "git+https://github.com/rwightman/pytorch-image-models@${commit}"
 }
 
 function checkout_install_torchbench() {
