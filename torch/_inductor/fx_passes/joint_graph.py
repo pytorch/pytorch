@@ -157,9 +157,10 @@ def constant_fold_uniform_value(gm):
     # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
     # so just constant-ify if a Tensor is unaliased
     constant_data_ptrs: typing.Counter[int] = Counter()
+    constant_data_ptr_count: typing.Counter[int] = Counter()
 
     for node in cf.node_replacements:
-        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1  # type: ignore[name-defined]
+        constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1
 
     for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
@@ -168,7 +169,7 @@ def constant_fold_uniform_value(gm):
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue
 
-        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:  # type: ignore[name-defined]
+        if constant_data_ptr_count[cf.constant_data_ptrs[node]] > 1:
             continue
 
         with graph.inserting_after(node):
