@@ -83,7 +83,7 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn", "original_aten", "recompute", "from_node"]
+_COPY_META_FIELDS = ["nn_module_stack", "source_fn", "original_aten", "recompute", "from_node", "quantization_tag"]
 
 
 @compatibility(is_backward_compatible=True)

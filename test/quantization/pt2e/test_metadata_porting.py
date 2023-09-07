@@ -58,13 +58,43 @@ _QUANT_OPS = {
 
 
 class TestMetaDataPorting(QuantizationTestCase):
+    def _test_quant_tag_preservation_through_decomp(
+        self, model, example_inputs, from_node_to_tags
+    ):
+        ep = export.export(model, example_inputs)
+        found_tags = True
+        not_found_nodes = ""
+        for from_node, tag in from_node_to_tags.items():
+            for n in ep.graph_module.graph.nodes:
+                from_node_meta = n.meta.get("from_node", None)
+                if from_node_meta is None:
+                    continue
+                if not isinstance(from_node_meta, list):
+                    raise ValueError(
+                        f"from_node metadata is of type {type(from_node_meta)}, but expected list"
+                    )
+                for meta in from_node_meta:
+                    node_target = meta[1]
+                    if node_target == from_node:
+                        node_tag = n.meta.get("quantization_tag", None)
+                        if node_tag is None or tag != node_tag:
+                            not_found_nodes += str(n.target) + ", "
+                            found_tags = False
+                            break
+                if not found_tags:
+                    break
+        self.assertTrue(
+            found_tags,
+            f"Decomposition did not preserve quantization tag for {not_found_nodes}",
+        )
+
     def _test_metadata_porting(
         self,
         model,
         example_inputs,
         quantizer,
         node_tags=None,
-    ):
+    ) -> torch.fx.GraphModule:
         m_eager = model.eval()
 
         # program capture
@@ -97,6 +127,7 @@ class TestMetaDataPorting(QuantizationTestCase):
         self.assertEqual(set(recorded_node_tags.keys()), set(node_tags.keys()))
         for k, v in recorded_node_tags.items():
             self.assertEqual(v, node_tags[k])
+        return m
 
     def test_simple_metadata_porting(self):
         """
@@ -146,11 +177,19 @@ class TestMetaDataPorting(QuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tags,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: dequantize_per_channel_tags,
         }
-        self._test_metadata_porting(
+        m = self._test_metadata_porting(
             TestHelperModules.Conv2dWithObsSharingOps(),
             example_inputs,
             BackendAQuantizer(),
             node_tags,
+        )
+
+        from_node_to_tags = {
+            torch.ops.aten.adaptive_avg_pool2d.default: "BackendA_adaptive_avg_pool2d_0",
+            torch.ops.aten.linear.default: "BackendA_linear_0",
+        }
+        self._test_quant_tag_preservation_through_decomp(
+            m, example_inputs, from_node_to_tags
         )
 
     def test_metadata_porting_with_no_quant_inbetween(self):
@@ -364,4 +403,32 @@ class TestMetaDataPorting(QuantizationTestCase):
             example_inputs,
             BackendAQuantizer(),
             node_tags,
+        )
+
+    def test_no_metadata_porting(self):
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                backend_string = "BackendA"
+                quantization_config = get_symmetric_quantization_config(
+                    is_per_channel=True
+                )
+                OP_TO_ANNOTATOR["linear"](gm, quantization_config)
+                OP_TO_ANNOTATOR["conv2d"](gm, quantization_config)
+                OP_TO_ANNOTATOR["adaptive_avg_pool2d"](gm, quantization_config)
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_tags = {}
+        m = self._test_metadata_porting(
+            TestHelperModules.Conv2dWithObsSharingOps(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_tags,
+        )
+
+        from_node_to_tags = {}
+        self._test_quant_tag_preservation_through_decomp(
+            m, example_inputs, from_node_to_tags
         )
