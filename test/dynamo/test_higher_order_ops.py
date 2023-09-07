@@ -1179,6 +1179,26 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             res, mod_for_eager(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
         )
 
+    def test_map_should_graph_break_for_unsupported_kwargs(self):
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("w", torch.ones(6, 4))
+
+            def forward(self, xs):
+                def body(x):
+                    self.w += 1
+                    return x
+
+                return control_flow.map(body, xs, unsupported_kwarg=[1, 2])
+
+        mod = torch.compile(Module(), fullgraph=True)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            r"Only kwargs of the following types are supported",
+        ):
+            mod(torch.rand(3))
+
     def test_map_side_effect(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
