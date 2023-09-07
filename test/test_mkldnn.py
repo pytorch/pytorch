@@ -577,13 +577,15 @@ class TestMkldnn(TestCase):
         loss1 = torch.mean((y1 - y_target) ** 2.0)
         loss1.backward()
 
-        torch._C._set_mkldnn_enabled(False)
-        y2 = m(x2).transpose(-1, -2)
-        loss2 = torch.mean((y2 - y_target) ** 2.0)
-        loss2.backward()
-
-        self.assertEqual(y1, y2)
-        self.assertEqual(x1.grad, x2.grad)
+        try:
+            torch._C._set_mkldnn_enabled(False)
+            y2 = m(x2).transpose(-1, -2)
+            loss2 = torch.mean((y2 - y_target) ** 2.0)
+            loss2.backward()
+            self.assertEqual(y1, y2)
+            self.assertEqual(x1.grad, x2.grad)
+        finally:
+            torch._C._set_mkldnn_enabled(True)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_gelu_bf16(self):
