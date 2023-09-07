@@ -461,7 +461,7 @@ static PyObject* dict_version(PyObject* dummy, PyObject* args) {
   if (!PyDict_Check(obj)) {
     return nullptr;
   }
-  return PyLong_FromUnsignedLong(((PyDictObject*)obj)->ma_version_tag);
+  return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
 }
 
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
