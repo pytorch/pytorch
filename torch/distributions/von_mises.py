@@ -110,7 +110,7 @@ class VonMises(Distribution):
     interpreted as angles modulo 2 pi.
 
     Example::
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = VonMises(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # von Mises distributed with loc=1 and concentration=1
         tensor([1.9777])
