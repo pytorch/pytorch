@@ -12,21 +12,6 @@ import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_allclose, assert_equal
-from torch.testing._internal.common_utils import TestCase
-
-
-def test_fail_freefunc():
-    raise AssertionError()
-
-
-class TestFailInherit(TestCase):
-    def test_fail_inherit(self):
-        raise AssertionError()
-
-
-class TestFailNoInhertit:
-    def test_fail_noinherit(self):
-        raise AssertionError()
 
 
 from torch.testing._internal.common_cuda import TEST_CUDA
