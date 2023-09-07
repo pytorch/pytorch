@@ -45,6 +45,9 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
+#ifdef FBCODE_CAFFE2
+#include <llvm/DebugInfo/Symbolize/Symbolize.h>
+#endif
 
 struct UpgradeExclusive {
   UpgradeExclusive(std::shared_lock<std::shared_timed_mutex>& rdlock)
@@ -312,6 +315,7 @@ std::vector<void*> unwind() {
   return frames;
 }
 
+#ifndef FBCODE_CAFFE2
 struct Symbolizer {
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
@@ -398,12 +402,42 @@ struct Symbolizer {
     }
   };
 };
-
-#ifdef FBCODE_CAFFE2
-// in CUDA binaries, we have to use the internal symbolizer because
-// addr2line seems to hang.
-__attribute__((weak))
+#else
+struct Symbolizer {
+  static std::lock_guard<std::mutex> guard() {
+    static std::mutex mutex;
+    return std::lock_guard<std::mutex>(mutex);
+  }
+  static Symbolizer& get() {
+    static Symbolizer singleton;
+    return singleton;
+  }
+  void request(void* addr) {
+    if (frame_map_.count(addr)) {
+      return;
+    }
+    auto maybe_library =
+        addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
+    if (maybe_library) {
+      auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
+      auto r = symbolizer.symbolizeCode(maybe_library->name(), {libaddress,
+                                      llvm::object::SectionedAddress::UndefSection});
+      if (r) {
+        frame_map_[addr] = Frame{r->FileName, r->FunctionName, r->Line};
+        return;
+      }
+    }
+    frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
+  }
+  const Frame& lookup(void* addr) {
+    return frame_map_.at(addr);
+  }
+ private:
+  ska::flat_hash_map<void*, Frame> frame_map_;
+  llvm::symbolize::LLVMSymbolizer symbolizer;
+};
 #endif
+
 std::vector<Frame>
 symbolize(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
