@@ -11364,6 +11364,15 @@ op_db: List[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+
+               # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -11430,6 +11439,15 @@ op_db: List[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+
+               # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -18952,6 +18970,11 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+
+            # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.float64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
     ),
     PythonRefInfo(
@@ -18994,6 +19017,11 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+
+            # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
     ),
     PythonRefInfo(
