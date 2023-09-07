@@ -16,17 +16,17 @@ from torch.testing._internal.common_utils import TestCase
 
 
 def test_fail_freefunc():
-    assert False
+    raise AssertionError()
 
 
 class TestFailInherit(TestCase):
     def test_fail_inherit(self):
-        assert False
+        raise AssertionError()
 
 
 class TestFailNoInhertit:
     def test_fail_noinherit(self):
-        assert False
+        raise AssertionError()
 
 
 # These function receive one array_like arg and return one array_like result
