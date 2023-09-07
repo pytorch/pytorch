@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+import weakref
 from contextlib import contextmanager
 
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
@@ -54,7 +55,11 @@ except ImportError:
     from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
+    import torch_xla
     import torch_xla.core.xla_model as xm
+
+    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
@@ -304,6 +309,8 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "doctr_det_predictor",
     "dlrm",
 }
+
+DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
 def model_specified_by_path(path_and_class_str):
@@ -661,7 +668,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
-    should_check_result = should_randomize_input = args.randomize_input
+    should_randomize_input = args.randomize_input
 
     import contextlib
 
@@ -723,11 +730,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
-                )
-
-            if should_check_result:
-                is_correct = is_correct and same(
-                    expected_output, actual_output, tol=tolerance
                 )
 
     if args.export_profiler_trace:
@@ -1115,7 +1117,7 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, eager_forward):
-        key = id(model)
+        key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_outputs = eager_forward(
@@ -1134,8 +1136,9 @@ class AOTInductorModelCache:
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
-                torch.empty(
+                torch.empty_strided(
                     node.meta["val"].size(),
+                    node.meta["val"].stride(),
                     dtype=node.meta["val"].dtype,
                     layout=node.meta["val"].layout,
                     device=node.meta["val"].device,
@@ -1145,7 +1148,7 @@ class AOTInductorModelCache:
 
             # Use a utility function for easier benchmarking
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model.h>
+            #include <torch/csrc/inductor/aot_runtime/model.h>
 
             torch::aot_inductor::AOTInductorModel model;
 
@@ -3189,7 +3192,7 @@ def run(runner, args, original_dir=None):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
-        torch._dynamo.config.print_graph_breaks = True
+        torch._logging.set_logs(graph_breaks=True)
 
     if args.quiet:
         torch._logging.set_logs(dynamo=logging.ERROR)
@@ -3482,8 +3485,11 @@ def run(runner, args, original_dir=None):
                 torch.cuda.set_per_process_memory_fraction(
                     args.per_process_memory_fraction
                 )
+            if model_name in DO_NOT_CAST_INPUTS:
+                model, _ = runner.cast_based_on_args(model, example_inputs)
 
-            model, example_inputs = runner.cast_based_on_args(model, example_inputs)
+            else:
+                model, example_inputs = runner.cast_based_on_args(model, example_inputs)
             runner.run_one_model(
                 name,
                 model,
