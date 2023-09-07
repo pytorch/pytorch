@@ -157,7 +157,7 @@ jobs:
 
           # run gradle buildRelease
           (echo "./.circleci/scripts/build_android_gradle.sh" | docker exec \
-            -e BUILD_ENVIRONMENT="pytorch-linux-focal-py3-clang7-android-ndk-r19c-gradle-build" \
+            -e BUILD_ENVIRONMENT="pytorch-linux-focal-py3-clang9-android-ndk-r19c-gradle-build" \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \

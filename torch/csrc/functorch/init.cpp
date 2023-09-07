@@ -144,6 +144,10 @@ Tensor _remove_batch_dim(
     int64_t level,
     int64_t batch_size,
     int64_t out_dim) {
+  TORCH_CHECK(
+      out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
+      "Nested tensors can only be vmapped over dim=0, but got dim=",
+      out_dim);
   if (!has_level(self, level)) {
     auto self_sizes = self.sizes();
     VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
