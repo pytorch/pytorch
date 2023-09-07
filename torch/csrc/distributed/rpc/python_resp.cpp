@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/python_resp.h>
 
+#include <c10/util/C++17.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {

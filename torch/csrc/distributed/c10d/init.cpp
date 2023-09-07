@@ -1333,6 +1333,10 @@ Example::
           py::arg("master_listen_fd") = py::none(),
           py::arg("use_libuv") = false,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "collect_client_counters",
+          &::c10d::TCPStore::collectClientCounters,
+          "Return a dict of counters for tcp store client")
       .def_property_readonly(
           "host",
           &::c10d::TCPStore::getHost,
