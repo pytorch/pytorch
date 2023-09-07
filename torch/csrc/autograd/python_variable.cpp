@@ -631,12 +631,12 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet extra_dispatch_keys=None)",
+      "DispatchKeySet _extra_dispatch_keys=None)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
-      "DispatchKeySet extra_dispatch_keys=None)",
+      "DispatchKeySet _extra_dispatch_keys=None)",
   });
   ParsedArgs<14> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
