@@ -556,7 +556,7 @@ class TestExport:
             and x != "set_default_dtype"
         )
         diff = set(exported_fns).difference(set(dir(_np)))
-        assert len(diff) == 1, str(diff)
+        assert len(diff) == 0, str(diff)
 
 
 class TestCtorNested:
