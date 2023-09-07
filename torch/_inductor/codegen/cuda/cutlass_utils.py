@@ -67,9 +67,9 @@ def try_import_cutlass() -> bool:
             _gen_cutlass_file(file_name, cutlass_module_names)
         sys.path.append(_TMP_CUTLASS_PY_FULL_PATH)
         try:
-            import cutlass_generator  # type: ignore[import]
-            import cutlass_library  # type: ignore[import]
-            import cutlass_manifest  # type: ignore[import]
+            import cutlass_generator  # type: ignore[import]  # noqa: F401
+            import cutlass_library  # type: ignore[import]  # noqa: F401
+            import cutlass_manifest  # type: ignore[import]  # noqa: F401
 
             return True
 
@@ -169,7 +169,8 @@ def gen_ops() -> List[Any]:
 
 
 def dtype_match(
-    torch_dtype: torch.dtype, cutlass_dtype: "cutlass_library.DataType"
+    torch_dtype: torch.dtype,
+    cutlass_dtype: "cutlass_library.DataType",  # type: ignore[name-defined]
 ) -> bool:
     # Import cutlass python scripts.
     assert try_import_cutlass()
