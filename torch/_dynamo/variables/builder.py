@@ -389,18 +389,13 @@ class VariableBuilder:
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
 
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            guards = self.make_guards(GuardBuilder.DICT_VERSION)
-            result = {
-                k: ConstantVariable(value[k], guards=guards) for k in value.keys()
-            }
-            return ConstDictVariable(result, type(value), guards=guards)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
             ConstantVariable.is_literal(k)
             or self.tensor_can_be_dict_key(k)
-            or isinstance(k, enum.Enum)
+            or isinstance(k, (enum.Enum, type))
+            or k is collections.namedtuple
             for k in value.keys()
         ):
             if not value and self.get_source().is_nn_module():
@@ -412,6 +407,12 @@ class VariableBuilder:
                 # to check for module property mutations, which does a reasonable,
                 # but not completely secure job ensuring a property wasn't changed.
                 guards = self.make_guards(GuardBuilder.BOOL_FALSE)
+            elif all(
+                isinstance(k, type) or k is collections.namedtuple for k in value.keys()
+            ):
+                # For keys that are types, we only guard on the wheather the dictionary
+                # was modified by checking its version.
+                guards = self.make_guards(GuardBuilder.DICT_VERSION)
             else:
                 guards = self.make_guards(GuardBuilder.DICT_KEYS)
 
@@ -426,12 +427,23 @@ class VariableBuilder:
                 else:
                     return key
 
-            result = {
-                k: VariableBuilder(
-                    self.tx, GetItemSource(self.get_source(), index_source(k))
-                )(value[k]).add_guards(guards)
-                for k in value.keys()
-            }
+            if value is torch.utils._pytree.SUPPORTED_NODES:
+                # Don't guard on SUPPORTED_NODES values.
+                # We assume, if the dictionary version is the same (i.e. it wasn't modified),
+                # that the values are also the same.
+                # If this is needed, we should find a way to materialize arbitrary types, so
+                # that we can guard the dictionary values.
+                result = {
+                    k: UserDefinedObjectVariable(value[k], guards=guards)
+                    for k in value.keys()
+                }
+            else:
+                result = {
+                    k: VariableBuilder(
+                        self.tx, GetItemSource(self.get_source(), index_source(k))
+                    )(value[k]).add_guards(guards)
+                    for k in value.keys()
+                }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
