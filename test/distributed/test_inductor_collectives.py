@@ -158,9 +158,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allreduce_input_buffer_reuse(self):
         def func(a, *, tag, ranks, group_size):
-            ar = _functional_collectives.all_reduce(a, "sum", ranks)
-            # ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
-            # ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
+            ar = torch.ops.c10d_functional.wait_tensor(ar)
             c = torch.relu(a)
             d = torch.matmul(c, c)
             e = d + ar
