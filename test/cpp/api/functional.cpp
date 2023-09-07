@@ -2237,6 +2237,13 @@ TEST_F(FunctionalTest, Interpolate) {
     }
   }
   {
+    ASSERT_THROWS_WITH(
+        F::interpolate(
+            torch::randn({1}),
+            F::InterpolateFuncOptions().size(std::vector<int64_t>({1}))),
+        "Input Error: Only 3D, 4D and 5D input Tensors supported (got 1D) ");
+  }
+  {
     auto input = torch::randn({3, 2, 2});
     ASSERT_THROWS_WITH(
         F::interpolate(
