@@ -142,28 +142,26 @@ class TestPatternMatcherBase(TestCase):
         atol=1e-5,
         rtol=1.3e-6,
         check_quantization=False,
-        check_dynamic=False,
+        check_dynamic=None,
     ):
         clone_inputs = self._clone_inputs(inputs)
         with torch.no_grad():
             if check_quantization:
-                convert_model = self._generate_reference_quantized_model(mod, inputs)
-                actual, (source_code,) = run_and_get_code(
-                    torch.compile(convert_model, fullgraph=True, dynamic=check_dynamic),
-                    *clone_inputs,
-                )
-            else:
-                expected = mod(*inputs)
-                actual, (source_code,) = run_and_get_code(
-                    torch.compile(mod, fullgraph=True), *clone_inputs
-                )
-                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
+                mod = self._generate_reference_quantized_model(mod, inputs)
+            expected = mod(*inputs)
+            actual, (source_code,) = run_and_get_code(
+                torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
+                *clone_inputs,
+            )
             for op in include_ops:
                 self.assertIn(op, source_code)
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
-            if check_dynamic:
+            if check_dynamic is not None:
                 _check_has_dynamic_shape(self, source_code)
+            if not check_quantization:
+                # Skip due to reduce range setting for Quantization on preCI system.
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
