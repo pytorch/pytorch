@@ -1,11 +1,12 @@
 Control Flow - Cond
 ====================
 
-Export supports the structured control flow operator `torch.ops.higher_order.cond`. It can be used to specify if-else like control flow within
-some code.
+Export supports the structured control flow operator `torch.ops.higher_order.cond`. It can be used to specify if-else like control flow.
 
-torch.ops.higher_order.cond
-----------
+.. warning::
+
+    `torch.ops.higher_order.cond` is a prototype of torch.cond as part of torch.export release. Using torch.ops.higher_order.cond directly is not recommended.
+
 
 `torch.ops.higher_order.cond` conditionally applies `true_fn` or `false_fn`. It can logically be seen as
 implemented as follows:
@@ -76,9 +77,10 @@ Temporal Limitations
 Example
 ~~~~~~~
 
-An example of how to use the `torch.ops.higher_order.cond` operator:
+An example of exporting `torch.ops.higher_order.cond` operator:
 
 .. code-block:: python
+
     import torch
     from torch.export import export, dynamic_dim
 
@@ -128,7 +130,7 @@ For the above example, if we run `ep.graph_module.print_readable()`, we get the 
             return sin
 
 Invariants after torch.export
------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 There are several useful invariants we get after torch.export `torch.ops.higher_order.cond`:
 
@@ -145,6 +147,6 @@ There are several useful invariants we get after torch.export `torch.ops.higher_
 - For operands:
     - It will also be a flat tuple.
 
-- Nesting of `cond` in user program becomes nested graph modules.
+- Nesting of `torch.ops.higher_order.cond` in user program becomes nested graph modules.
 
-See examples of advanced usage of `cond` operator in ExportDB.
+See examples of advanced usage of `torch.ops.higher_order.cond` operator in ExportDB.
