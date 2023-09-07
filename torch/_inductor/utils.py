@@ -121,7 +121,7 @@ def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float
     log.debug(actual_events.table(row_limit=-1))
 
     res = sum(event.cuda_time for event in actual_events) / 1000.0
-    log.debug("profiling results: %s", res)
+    log.debug("profiling results: %s ms", res)
     return res
 
 
@@ -764,13 +764,13 @@ def use_triton_template(layout, *, enable_int32=False):
 
 
 def use_cutlass_template(layout):
-    from .codegen.cuda import HAS_CUTLASS
+    from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     return (
         _use_template_for_cuda(layout, layout_dtypes)
         and _use_autotune_backend("CUTLASS")
-        and HAS_CUTLASS
+        and try_import_cutlass()
     )
 
 

@@ -5,8 +5,6 @@ import logging
 from typing import List, Optional
 from unittest.mock import patch
 
-# import cutlass libs
-
 import sympy
 
 import torch

@@ -3,13 +3,6 @@ import logging
 import re
 from typing import Dict, List, Optional, Tuple
 
-# import cutlass libs
-from . import HAS_CUTLASS
-
-if HAS_CUTLASS:
-    import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
-    import cutlass_library as cutlass_lib  # type: ignore[import]
-
 from ...ir import Buffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
 
@@ -160,6 +153,8 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
 class CUTLASSGemmTemplate(CUTLASSTemplate):
     # Calculates alpha * X@W + beta * Bias
 
+    assert cutlass_utils.try_import_cutlass()
+
     def __init__(
         self,
         input_nodes: List[IRNode],
@@ -188,6 +183,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         if torch_layout.stride[-1] == 1:
             return cutlass_lib.LayoutType.RowMajor
         elif torch_layout.stride[-2] == 1:
@@ -199,6 +196,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def flip_cutlass_layout(
         cutlass_layout: "cutlass_lib.LayoutType",
     ) -> "cutlass_lib.LayoutType":
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
             return cutlass_lib.LayoutType.ColumnMajor
         else:
@@ -219,6 +218,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def has_tma_epilogue(op) -> bool:
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         result = False
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             epilogue_schedule_str = str(op.epilogue_schedule).split(".")[-1]
@@ -229,6 +230,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def define_gemm_instance(
         op: "cutlass_gemm_op.GemmOperation",
     ) -> Tuple[str, str]:
+        import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         if op.gemm_kind == cutlass_lib.GemmKind.Universal3x:
             emitter = cutlass_gemm_op.EmitGemmUniversal3xInstance()
             op_def = emitter.emit(op)
@@ -283,6 +287,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         op: "cutlass_gemm_op.GemmOperation",
     ) -> "cutlass_gemm_op.GemmOperation":
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         # Skip simt kernels
         if (
             op.tile_description.math_instruction.opcode_class
@@ -361,6 +367,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return op
 
     def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":
+        import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         ops = cutlass_utils.gen_ops()[cutlass_lib.OperationKind.Gemm]
         res: Dict[str, cutlass_gemm_op.GemmOperation] = dict()
         num_3x_ops = 0
@@ -466,6 +475,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op: "cutlass_gemm_op.GemmOperation",
         output_node: IRNode = None,
     ) -> str:
+        import cutlass_library as cutlass_lib  # type: ignore[import]
+
         if output_node is not None:
             self.output_node = output_node
         assert len(self.input_nodes) >= 2 and self.output_node is not None

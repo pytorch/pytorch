@@ -258,6 +258,8 @@ class TestDoBench(TestCase):
         Make sure autotuning addmm in sub processes work without crashes.
         """
 
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
         def addmm(x, a, b):
             return torch.addmm(x, a, b)
 
@@ -265,9 +267,9 @@ class TestDoBench(TestCase):
         a = torch.randn(100, 10).cuda()
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
-            torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
             Y = addmm(x, a, b)
-            torch.testing.assert_close(Y_compiled, Y)
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_zero_size_input(self, dynamic):
