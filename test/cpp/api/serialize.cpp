@@ -54,9 +54,9 @@ void is_optimizer_param_group_equal(
 
 template <typename DerivedOptimizerParamState>
 void is_optimizer_state_equal(
-    const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
+    const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
         lhs_state,
-    const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
+    const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
         rhs_state) {
   ASSERT_TRUE(lhs_state.size() == rhs_state.size());
   for (const auto& value : lhs_state) {
@@ -188,7 +188,7 @@ void write_tensors_to_archive(
       key + "/size", torch::tensor(static_cast<int64_t>(buffers.size())));
   for (const auto index : c10::irange(buffers.size())) {
     archive.write(
-        key + "/" + std::to_string(index), buffers[index], /*is_buffer=*/true);
+        key + "/" + c10::to_string(index), buffers[index], /*is_buffer=*/true);
   }
 }
 
@@ -218,7 +218,7 @@ TEST(SerializeTest, KeysFunc) {
   torch::serialize::OutputArchive output_archive;
   for (const auto i : c10::irange(3)) {
     output_archive.write(
-        "element/" + std::to_string(i), c10::IValue(static_cast<int64_t>(i)));
+        "element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
   }
   output_archive.save_to(tempfile.name);
   torch::serialize::InputArchive input_archive;
@@ -226,7 +226,7 @@ TEST(SerializeTest, KeysFunc) {
   std::vector<std::string> keys = input_archive.keys();
   ASSERT_EQ(keys.size(), 3);
   for (const auto i : c10::irange(keys.size())) {
-    ASSERT_EQ(keys[i], "element/" + std::to_string(i));
+    ASSERT_EQ(keys[i], "element/" + c10::to_string(i));
   }
 }
 
@@ -235,7 +235,7 @@ TEST(SerializeTest, TryReadFunc) {
   torch::serialize::OutputArchive output_archive;
   for (const auto i : c10::irange(3)) {
     output_archive.write(
-        "element/" + std::to_string(i), c10::IValue(static_cast<int64_t>(i)));
+        "element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
   }
   output_archive.save_to(tempfile.name);
   torch::serialize::InputArchive input_archive;
@@ -557,7 +557,7 @@ TEST(SerializeTest, Optim_Adagrad) {
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (const auto& param : params_) {
-    auto key_ = param.unsafeGetTensorImpl();
+    auto key_ = c10::guts::to_string(param.unsafeGetTensorImpl());
     const AdagradParamState& curr_state_ =
         static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
     sum_buffers.emplace_back(curr_state_.sum());
@@ -602,7 +602,7 @@ TEST(SerializeTest, Optim_SGD) {
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
     if (i != (params_.size() - 1)) {
-      auto key_ = params_[i].unsafeGetTensorImpl();
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const SGDParamState& curr_state_ =
           static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
       momentum_buffers.emplace_back(curr_state_.momentum_buffer());
@@ -653,7 +653,7 @@ TEST(SerializeTest, Optim_Adam) {
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
     if (i != (params_.size() - 1)) {
-      auto key_ = params_[i].unsafeGetTensorImpl();
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const AdamParamState& curr_state_ =
           static_cast<const AdamParamState&>(*(optim1_state.at(key_).get()));
       step_buffers.emplace_back(curr_state_.step());
@@ -712,7 +712,7 @@ TEST(SerializeTest, Optim_AdamW) {
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
     if (i != (params_.size() - 1)) {
-      auto key_ = params_[i].unsafeGetTensorImpl();
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const AdamWParamState& curr_state_ =
           static_cast<const AdamWParamState&>(*(optim1_state.at(key_).get()));
       step_buffers.emplace_back(curr_state_.step());
@@ -769,7 +769,7 @@ TEST(SerializeTest, Optim_RMSprop) {
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
     if (i != (params_.size() - 1)) {
-      auto key_ = params_[i].unsafeGetTensorImpl();
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const RMSpropParamState& curr_state_ =
           static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
       square_average_buffers.emplace_back(curr_state_.square_avg());
@@ -799,8 +799,8 @@ TEST(SerializeTest, Optim_RMSprop) {
   // old RMSprop didn't track step value
   for (const auto i : c10::irange(params1_2_.size())) {
     if (i != (params1_2_.size() - 1)) {
-      auto key_ = params_[i].unsafeGetTensorImpl();
-      auto key1_2_ = params1_2_[i].unsafeGetTensorImpl();
+      auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
+      auto key1_2_ = c10::guts::to_string(params1_2_[i].unsafeGetTensorImpl());
       const RMSpropParamState& curr_state_ =
           static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
       RMSpropParamState& curr_state1_2_ =
@@ -838,7 +838,7 @@ TEST(SerializeTest, Optim_LBFGS) {
   std::deque<at::Tensor> old_dirs, old_stps;
 
   const auto& params_ = optim1.param_groups()[0].params();
-  auto key_ = params_[0].unsafeGetTensorImpl();
+  auto key_ = c10::guts::to_string(params_[0].unsafeGetTensorImpl());
   const auto& optim1_state =
       static_cast<const LBFGSParamState&>(*(optim1.state().at(key_).get()));
   d = optim1_state.d();
@@ -865,7 +865,7 @@ TEST(SerializeTest, Optim_LBFGS) {
       torch::load, optim1_2, optim_tempfile_old_format.name);
 
   const auto& params1_2_ = optim1_2.param_groups()[0].params();
-  auto param_key = params1_2_[0].unsafeGetTensorImpl();
+  auto param_key = c10::guts::to_string(params1_2_[0].unsafeGetTensorImpl());
   auto& optim1_2_state =
       static_cast<LBFGSParamState&>(*(optim1_2.state().at(param_key).get()));
 
