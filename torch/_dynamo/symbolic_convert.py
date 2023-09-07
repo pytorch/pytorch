@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._dynamo_utils import compiler_should_force_inline
+from torch._dynamo.utils import should_force_inline
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
@@ -2185,7 +2185,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
-        if compiler_should_force_inline(func):
+        if should_force_inline(func):
             return True
 
         if func.has_self():

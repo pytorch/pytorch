@@ -1,3 +1,4 @@
+import inspect
 import weakref
 from typing import Any
 
@@ -9,7 +10,7 @@ The motivation for this file is to avoid circular dependencies.
 DYNAMO_FORCE_INLINE: Any = weakref.WeakKeyDictionary()
 
 
-def compiler_force_inline(f):
+def force_inline(f):
     """Forces inline on all functions that have the same __code__ as f,
     bypassing things like the SKIPFILES check.
 
@@ -21,9 +22,9 @@ def compiler_force_inline(f):
     in SKIPFILES for inlining. We should rework the SKIPFILES design
     (and this API).
     """
+    if not (inspect.isfunction(f) and hasattr(f, "__code__")):
+        raise ValueError(
+            "force_inline(f): Expected f to be a Python function with .__code__"
+        )
     DYNAMO_FORCE_INLINE[f.__code__] = True
     return f
-
-
-def compiler_should_force_inline(func):
-    return func.get_code() in DYNAMO_FORCE_INLINE
