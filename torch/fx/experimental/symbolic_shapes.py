@@ -32,7 +32,7 @@ from torch import (  # noqa: F401
     SymInt,
 )
 from torch._guards import ShapeGuard, Source, TracingContext
-from torch.utils._pytree import tree_flatten, tree_map_only
+from torch.utils._pytree import tree_map_only
 from torch.utils._sympy.functions import FloorDiv, LShift, Mod, RShift
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
@@ -317,7 +317,7 @@ def _extract_shape_env_and_assert_equal(args, kwargs) -> "ShapeEnv":
         return new
 
     shape_env = None
-    for val in tree_flatten((args, kwargs))[0]:
+    for val in itertools.chain(args, kwargs.values()):
         if isinstance(val, ShapeEnv):
             shape_env = assert_equal(shape_env, val)
         if isinstance(val, SymTypes):
@@ -2221,7 +2221,7 @@ class ShapeEnv:
         # If not specified, enable event recording if both:
         #   - Translation validation is on
         #   - Translation validation bisection is not disabled
-        should_record_events = (
+        self.should_record_events = (
             should_record_events
             if should_record_events is not None
             else (
@@ -2234,16 +2234,16 @@ class ShapeEnv:
         #   - It should record events
         #   - The recording check is enabled
         self.check_recorded_events = (
-            should_record_events and torch._dynamo.config.check_shape_env_recorded_events
+            self.should_record_events and torch._dynamo.config.check_shape_env_recorded_events
         )
 
         # This will make sure we only record the top-level function call.
-        self.is_recording = not should_record_events
+        self.is_recording = not self.should_record_events
         # Keep track of the list of tracked fakes.
         self.tracked_fakes = tracked_fakes
         # List of events for reconstructing ShapeEnv at arbitrary points in time.
         self.events: List[ShapeEnvEvent] = (
-            [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if should_record_events else []
+            [ShapeEnvEvent(ShapeEnv, kwargs=kwargs)] if self.should_record_events else []
         )
 
     def _init(
@@ -2443,6 +2443,7 @@ class ShapeEnv:
                     "graph",
                     "validator",
                     "check_recorded_events",
+                    "should_record_events",
                     "is_recording",
                     "tracked_fakes",
                     "events",
