@@ -319,36 +319,6 @@ def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compi
     else:
         shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
 
-def _advise_is_size(a):
-    """
-    Don't use this directly; use torch._check_is_size instead.
-
-    This is a softer version of _constrain_range_for_size (with min=0,
-    max=Inf).  Instead of forcibly constraining a variable (and erroring if we
-    failed to constrain it), it will simply advise us that a size is
-    constrained in some way.  We will always defer a runtime assert for this
-    constraint if we cannot prove it at compile-time, but we we only
-    *sometimes* learn useful extra information at compile-time with this
-    information.  This is in contrast to constrain_range_for_size, where if
-    you don't call that on a fresh unbacked symint, chances are we will choke.
-
-    TODO: Make Dynamo handle this appropriately if this is seen in Dynamo-ed
-    code.  Right now this is only really used in code with AOTAutograd trace
-    through, so it is not a big problem that this isn't supported, but in
-    principle all of this code should be Dynamo'able too.
-
-    TODO: I didn't support min/max because I didn't have a use case where this
-    actually helped.  In principle we can support it, it just makes the
-    implementation below more complicated.
-    """
-
-    # This must always succeed, because the sole allowed caller _check_is_size
-    # was responsible for expect_true'ing this
-    assert a >= 0
-
-    if isinstance(a, SymInt) and isinstance(a.node.expr, sympy.Symbol):
-        _constrain_range_for_size(a)
-
 def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
     """
     This function is NOT INTENDED to be used by itself.
