@@ -14,7 +14,7 @@ from torch._functorch.aot_autograd import to_fun
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.nested._internal.nested_tensor import NestedTensor, jagged_from_list, buffer_from_jagged
+from torch.nested._internal.nested_tensor import jagged_from_list
 
 
 class MockSubclass(torch.Tensor):
