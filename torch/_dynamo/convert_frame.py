@@ -14,7 +14,6 @@ import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._utils_internal import log_compilation_event, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
-    bisect,
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
 )
@@ -428,6 +427,7 @@ def _compile(
     compile_id=None,
 ) -> Optional[GuardedCode]:
     from torch.fx.experimental.validator import (
+        bisect,
         BisectValidationException,
         translation_validation_enabled,
         ValidationException,
