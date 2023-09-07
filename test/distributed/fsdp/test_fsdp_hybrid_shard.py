@@ -206,7 +206,7 @@ class TestFSDPHybridShard(FSDPTest):
             FSDP.optim_state_dict_to_load(load_model, load_optim, osd)
         load_optim.load_state_dict(osd)
 
-    @skip_if_lt_x_gpu(4)    
+    @skip_if_lt_x_gpu(4)
     def test_hsdp_sync_module_state(self):
         model = MyModel().cuda()
         num_node_devices = torch.cuda.device_count()
