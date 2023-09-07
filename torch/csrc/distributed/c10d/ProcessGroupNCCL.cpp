@@ -286,6 +286,9 @@ inline void errorIfCapturingNonCapturableNCCL(c10::cuda::CaptureStatus status) {
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
+std::mutex ProcessGroupNCCL::allProcessGroupsMutex_;
+std::unordered_set<c10d::ProcessGroupNCCL*>
+    ProcessGroupNCCL::all_nccl_process_groups;
 
 std::ostream& operator<<(
     std::ostream& output,
@@ -728,6 +731,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   }
 #endif
+  {
+    std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
+    all_nccl_process_groups.insert(this);
+  }
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -897,6 +904,11 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   // Abort all NCCL Communicators on Process Group Destruction
   std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
   abort(abortReason);
+
+  {
+    std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
+    all_nccl_process_groups.erase(this);
+  }
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
@@ -1086,6 +1098,15 @@ void ProcessGroupNCCL::runHookLoop() {
 
     // Lock is still acquired at this point
     done = completedWorkList_.empty();
+  }
+}
+
+void ProcessGroupNCCL::waitForAllPendingWorks() {
+  std::lock_guard<std::mutex> lk(allProcessGroupsMutex_);
+  for (auto it = ProcessGroupNCCL::all_nccl_process_groups.begin();
+       it != ProcessGroupNCCL::all_nccl_process_groups.end();
+       it++) {
+    (*it)->waitForPendingWorks();
   }
 }
 
@@ -1649,6 +1670,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing() {
   c10::cuda::CaptureStatus capture_status =
       c10::cuda::currentStreamCaptureStatusMayInitCtx();
 
+  if (capture_status != c10::cuda::CaptureStatus::None) {
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    TORCH_INTERNAL_ASSERT(
+        workMetaList_.empty(),
+        "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
+  }
+
   if ((coalescing_state_ & CoalColl) &&
       capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);
@@ -1822,6 +1850,13 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   // multi-device per process is deprecated
   work->numelIn_ = inputs[0].numel();
   work->numelOut_ = outputs[0].numel();
+
+  if (capture_status != c10::cuda::CaptureStatus::None) {
+    std::lock_guard<std::mutex> lock(workMetaListMutex_);
+    TORCH_INTERNAL_ASSERT(
+        workMetaList_.empty(),
+        "In the middle of a CUDA Graph capture but the enqueued work is not empty. The watchdog will crash the capture when it polls the work.");
+  }
 
   if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
     workEnqueue(work);

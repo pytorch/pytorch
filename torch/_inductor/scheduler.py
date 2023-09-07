@@ -959,7 +959,7 @@ class SchedulerNode(BaseSchedulerNode):
             old__body = self._body
 
             self.apply_loop_order(order)
-            self.merge_loops
+            self.merge_loops()
             yield
         finally:
             self.read_writes = old_read_writes
@@ -1781,6 +1781,10 @@ class Scheduler:
         Otherwise, return True if fusion can brings speedup.
         """
         if not config.benchmark_fusion:
+            return True
+
+        if node1.is_template():
+            # TODO support benchmarking epilogue fusion
             return True
 
         node_list_1 = node1.get_nodes()
