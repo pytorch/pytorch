@@ -60,6 +60,9 @@ class DistributedStateDictOptions:
     # Whether to save the frozen parameters. The default is True.
     save_frozen_params: bool = True
 
+    # Flatten optimizer state dict or not
+    flatten_osd: bool = True
+
 
 @dataclass
 class _StateDictInfo(DistributedStateDictOptions):
@@ -217,7 +220,16 @@ def _verify_state_dict(
         )
 
     if info.handle_optim:
-        if not (optim_state_dict and optim_state_dict[STATE]):
+        valid_osd = False
+        if info.flatten_osd:
+            for key in optim_state_dict.keys():
+                if key.startswith(STATE_PREFIX):
+                    valid_osd = True
+                    break
+        else:
+            valid_osd = optim_state_dict and optim_state_dict[STATE]
+
+        if not valid_osd:
             raise RuntimeError(
                 "The option indicates that model state_dict is required to save, "
                 f"or load but optim state_dict is empty. {optim_state_dict}"
@@ -329,6 +341,130 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     optim.zero_grad(set_to_none=True)
 
 
+def _flatten_optim_state_dict(value: Any, prefix: str = "") -> Dict[str, ValueType]:
+    ret = {}
+    if isinstance(value, dict):
+        for key, child_value in value.items():
+            next_prefix = f"{prefix}.{key}" if prefix else key
+            ret.update(_flatten_optim_state_dict(child_value, next_prefix))
+    elif isinstance(value, (DTensor, ShardedTensor, torch.Tensor, int, float)):
+        ret[prefix] = value
+    elif isinstance(value, (list, tuple)):
+        assert len(value) > 0, prefix
+        for v in value:
+            assert isinstance(v, dict)
+            assert PARAMS in v
+            assert isinstance(v[PARAMS], (list, tuple))
+            states = {}
+            for key, state in v.items():
+                if key == PARAMS:
+                    continue
+                if isinstance(state, (list, tuple)):
+                    assert isinstance(
+                        state[0], (DTensor, ShardedTensor, torch.Tensor, int, float)
+                    )
+                    for idx, substate in enumerate(state):
+                        states[f"{key}.{idx}"] = substate
+                    continue
+                if state is None:
+                    continue
+                assert isinstance(
+                    state, (DTensor, ShardedTensor, torch.Tensor, int, float)
+                ), f"state, {key}, has an unsupported type {type(state)}, ."
+                states[key] = state
+            for fqn in v[PARAMS]:
+                ext_prefix = f"{prefix}.{fqn}"
+                for key, state in states.items():
+                    ret[f"{ext_prefix}.{key}"] = state
+    else:
+        raise RuntimeError(f"Unknown data type for {prefix}. Type is {type(value)}.")
+    return ret
+
+
+def _unflatten_optim_state_dict(
+    info: _StateDictInfo,
+    state_dict: Dict[str, ValueType],
+    param_groups: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    ret = {STATE: {}, PG: []}
+
+    def _unflatten_nested_value(
+        keys: List[str], value: ValueType, curr_dict: Dict[str, Any]
+    ):
+        assert isinstance(curr_dict, dict), (keys, type(curr_dict))
+        if len(keys) == 1:
+            curr_dict[keys[0]] = value
+        elif len(keys) == 2 and keys[1].isdigit():
+            idx = int(keys[1])
+            value_list: ValueType = curr_dict.setdefault(keys[0], [])
+            if value_list:
+                assert isinstance(value_list, tuple), (keys[0], type(value_list))
+            value_list = list(value_list)
+            if idx >= len(value_list):
+                value_list.extend(0 for _ in range(idx - len(value_list) + 1))
+            value_list[idx] = value
+            curr_dict[keys[0]] = tuple(value_list)
+        else:
+            next_dict = curr_dict.setdefault(keys[0], {})
+            _unflatten_nested_value(keys[1:], value, next_dict)
+
+    def _for_fqns(
+        states: Dict[str, ValueType]
+    ) -> Iterable[Tuple[str, Dict[str, ValueType]]]:
+        keys, values = list(states.keys()), list(states.values())
+        curr_idx = 0
+        for fqn in sorted(info.all_fqns):
+            prefix = f"{fqn}."
+            state_dict = {}
+            while curr_idx < len(keys):
+                full_key = keys[curr_idx]
+                if not full_key.startswith(prefix):
+                    break
+                value = values[curr_idx]
+                remaining_keys = full_key[len(prefix) :].split(".")
+                _unflatten_nested_value(remaining_keys, value, state_dict)
+                curr_idx += 1
+            yield fqn, state_dict
+
+    def _unflatten_state(all_states: Dict[str, ValueType]) -> Dict[str, Any]:
+        ret = {}
+        for fqn, state_dict in _for_fqns(all_states):
+            if state_dict:
+                ret[fqn] = state_dict
+        return ret
+
+    def _unflatten_pg(all_pg_states: Dict[str, ValueType]) -> List[Dict[str, Any]]:
+        param_mapping: Dict[str, int] = {}
+        for idx, pg in enumerate(param_groups):
+            for p in pg[PARAMS]:
+                for fqn in info.fqn_param_mapping[p]:
+                    param_mapping[fqn] = idx
+
+        ret = [{PARAMS: []} for _ in param_groups]
+        for fqn, state_dict in _for_fqns(all_pg_states):
+            pg_idx = param_mapping[fqn]
+            # TODO: check if the state_dict already exist and the values are the same.
+            ret[pg_idx].update(state_dict)
+            ret[pg_idx][PARAMS].append(fqn)
+        return ret
+
+    all_states: Dict[str, ValueType] = {}
+    all_pg_states: Dict[str, ValueType] = {}
+    for key in sorted(state_dict.keys()):
+        value = state_dict[key]
+        if key.startswith(STATE_PREFIX):
+            all_states[key[len(STATE_PREFIX) :]] = value
+        elif key.startswith(PG_PREFIX):
+            all_pg_states[key[len(PG_PREFIX) :]] = value
+        else:
+            raise RuntimeError(
+                "_unflatten_optim_state_dict only accepts flattened dict."
+            )
+    ret[STATE] = _unflatten_state(all_states)
+    ret[PG] = _unflatten_pg(all_pg_states)
+    return ret
+
+
 def _get_optim_state_dict(
     model: nn.Module,
     optimizers: Tuple[torch.optim.Optimizer],
@@ -368,6 +504,8 @@ def _get_optim_state_dict(
         optim_state_dict[STATE].update(osd[STATE])
         optim_state_dict[PG].extend(osd[PG])
 
+    if info.flatten_osd:
+        optim_state_dict = _flatten_optim_state_dict(optim_state_dict)
     return optim_state_dict
 
 
@@ -428,9 +566,19 @@ def _load_optim_state_dict(
     if not info.handle_optim:
         return
 
+    for key in state_dict.keys():
+        if not (key.startswith(PG_PREFIX) or key.startswith(STATE_PREFIX)):
+            unflattened_state_dict = state_dict
+            break
+    else:
+        param_groups = [pg for opt in optimizers for pg in opt.param_groups]
+        unflattened_state_dict = _unflatten_optim_state_dict(
+            info, state_dict, param_groups
+        )
+
     for optim in optimizers:
         optim_state_dict = _split_optim_state_dict(
-            model, optim, state_dict, info
+            model, optim, unflattened_state_dict, info
         )
         if info.fsdp_modules:
             with info.fsdp_context():

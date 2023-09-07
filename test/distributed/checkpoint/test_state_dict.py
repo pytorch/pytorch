@@ -184,7 +184,8 @@ class TestStateDict(FSDPTest):
         dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
         self._verify_msd(model, msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not options.flatten_osd:
+            self._verify_osd(model, optim, osd, dist_osd)
 
         # Initialize a completely new model to simulate checkpoint load.
         _, _, _, dist_model, dist_optim = init_model_optim()
@@ -216,7 +217,8 @@ class TestStateDict(FSDPTest):
         dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
         self._verify_msd(model, msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not options.flatten_osd:
+            self._verify_osd(model, optim, osd, dist_osd)
 
         # Test patch_model_state_dict, and patch_optimizer_state_dict
         patch_model_state_dict(dist_model, options=options)
@@ -225,7 +227,8 @@ class TestStateDict(FSDPTest):
         dist_osd = dist_optim[0].state_dict()
         self._verify_msd(model, msd, dist_msd, options)
         self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        self._verify_osd(model, optim, osd, dist_osd)
+        if not options.flatten_osd:
+            self._verify_osd(model, optim, osd, dist_osd)
 
     def _test_fsdp(self, use_orig_params: bool, use_composable: bool) -> None:
         if not use_orig_params and use_composable:
