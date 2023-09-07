@@ -953,8 +953,6 @@ def trunc(a):
 # TODO: register this as a real ref/decomposition once TorchInductor supports complex!
 def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     input_dtype = self.dtype
-    if utils.is_complex_dtype(input_dtype):
-        return self
     torch._check(
         utils.is_float_dtype(input_dtype),
         lambda: f"view_as_complex is only supported for floating point"
