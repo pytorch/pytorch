@@ -565,26 +565,26 @@ TORCH_API int init_conv3d_prepack(){
   register_prepack<3>(at::QEngine::X86, (PackedConvWeight<3>::prepack));
 #endif
 
-#if AT_MKLDNN_ENABLED()
-  register_prepack<3>(at::QEngine::ONEDNN, (PackedConvWeightsOnednn<3>::prepack));
-#endif
-
 #ifdef USE_PYTORCH_QNNPACK
   register_prepack<3>(at::QEngine::QNNPACK, (PackedConvWeightsQnnp<3>::prepack));
+#endif
+
+#if AT_MKLDNN_ENABLED()
+  register_prepack<3>(at::QEngine::ONEDNN, (PackedConvWeightsOnednn<3>::prepack));
 #endif
 
   return 0;
 }
 
 int init_linear_prepack(){
-#ifdef USE_PYTORCH_QNNPACK
+#ifdef USE_FBGEMM
   register_linear_prepack(at::QEngine::FBGEMM, PackedLinearWeight::prepack);
   register_linear_prepack_fp16(at::QEngine::FBGEMM, PackedLinearWeightFp16::prepack);
   register_linear_prepack(at::QEngine::X86, PackedLinearWeight::prepack);
   register_linear_prepack_fp16(at::QEngine::X86, PackedLinearWeightFp16::prepack);
 #endif
 
-#ifdef USE_PYTORCH_QNN_PACK
+#ifdef USE_PYTORCH_QNNPACK
  register_linear_prepack(at::QEngine::QNNPACK, PackedLinearWeightsQnnp::prepack);
 #endif
 
