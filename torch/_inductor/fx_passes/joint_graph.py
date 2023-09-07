@@ -2,7 +2,7 @@ import logging
 import collections
 import typing
 from collections import Counter
-from typing import Counter, Dict, Set
+from typing import Dict, Set
 
 import torch
 import torch._guards
@@ -157,7 +157,7 @@ def constant_fold_uniform_value(gm):
 
     # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
     # so just constant-ify if a Tensor is unaliased
-    constant_data_ptrs: collections.Counter = Counter()
+    constant_data_ptrs: typing.Counter[int] = Counter()
 
     for node in cf.node_replacements:
         constant_data_ptr_count[cf.constant_data_ptrs[node]] += 1  # type: ignore[name-defined]
