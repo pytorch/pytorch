@@ -576,7 +576,8 @@ class CompileContext:
     def get_capture_dynamic_output_shape_ops():
         self = CompileContext.get()
         if self is None:
-            raise AssertionError("No compile context available")
+            log.warning("No compile context available")
+            return None
         return self.capture_dynamic_output_shape_ops
 
     @staticmethod
