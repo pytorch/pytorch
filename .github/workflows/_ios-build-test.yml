@@ -136,7 +136,7 @@ jobs:
           set -eux
           # shellcheck disable=SC1091
           # Use the pytorch nightly build to generate models
-          ${CONDA_RUN} pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+          ${CONDA_RUN} pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
 
           # Generate models for differnet backends
           pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
@@ -158,7 +158,7 @@ jobs:
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
             # And also trace the model for the later test as it doesn't exist yet
-            python trace_model.py
+            ${CONDA_RUN} python trace_model.py
           fi
           popd
 
