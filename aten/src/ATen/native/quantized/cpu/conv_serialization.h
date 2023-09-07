@@ -338,7 +338,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
   auto& ctx = at::globalContext();
   auto eng = ctx.qEngine();
-  if(eng == at::QEngine::X86 || eng == at::QEngine::FBGEMM){
+  if (eng == at::QEngine::X86) {
   #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
         weight.value(), transpose, groups, output_padding);

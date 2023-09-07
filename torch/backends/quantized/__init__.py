@@ -17,7 +17,7 @@ def _get_qengine_id(qengine: str) -> int:
         ret = 3
     elif qengine == "x86":
         ret = 4
-    elif qengine == 'qxpu':
+    elif qengine == "qxpu":
         ret = 5
     else:
         ret = -1

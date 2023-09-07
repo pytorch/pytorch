@@ -17,7 +17,7 @@ enum class QEngine : uint8_t {
   QNNPACK = 2,
   ONEDNN = 3,
   X86 = 4,
-  QXPU= 5,
+  QXPU = 5,
 };
 
 constexpr auto kNoQEngine = QEngine::NoQEngine;
