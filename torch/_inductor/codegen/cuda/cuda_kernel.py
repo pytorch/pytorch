@@ -14,11 +14,7 @@ cexpr = CppPrinter().doprint
 
 
 def _normalize_idx(index: int, total_length: int) -> int:
-    res = index if index >= 0 else index + total_length
-    assert (
-        res >= 0 and res < total_length
-    ), f"normalize_idx failed: {index=}, {total_length=}"
-    return res
+    return index if index >= 0 else index + total_length
 
 
 class CUDAKernel(Kernel):
