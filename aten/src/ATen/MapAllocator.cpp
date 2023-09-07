@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <random>
+#include <thread>
 #include <string>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define AT_ATOMIC_IPC_REFCOUNT 1
@@ -28,6 +29,7 @@
 #include <c10/util/win32-headers.h>
 #endif
 #include <fmt/format.h>
+#include <fmt/std.h>
 
 namespace at {
 
@@ -36,19 +38,11 @@ static constexpr int64_t map_alloc_alignment = 64;
 std::string NewProcessWideShmHandle() {
   static std::atomic<uint64_t> counter{0};
   static std::random_device rd;
-#ifdef _MSC_VER
   return fmt::format(
       "/torch_{}_{}_{}",
-      GetCurrentProcessId(),
+      std::this_thread::get_id(),
       rd(),
       counter.fetch_add(1, std::memory_order_relaxed));
-#else
-  return fmt::format(
-      "/torch_{}_{}_{}",
-      getpid(),
-      rd(),
-      counter.fetch_add(1, std::memory_order_relaxed));
-#endif
 }
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
