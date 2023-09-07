@@ -420,8 +420,9 @@ struct Symbolizer {
         addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
     if (maybe_library) {
       auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
-      auto r = symbolizer.symbolizeCode(maybe_library->name(), {libaddress,
-                                      llvm::object::SectionedAddress::UndefSection});
+      auto r = symbolizer.symbolizeCode(
+          maybe_library->name(),
+          {libaddress, llvm::object::SectionedAddress::UndefSection});
       if (r) {
         frame_map_[addr] = Frame{r->FileName, r->FunctionName, r->Line};
         return;
@@ -432,14 +433,14 @@ struct Symbolizer {
   const Frame& lookup(void* addr) {
     return frame_map_.at(addr);
   }
+
  private:
   ska::flat_hash_map<void*, Frame> frame_map_;
   llvm::symbolize::LLVMSymbolizer symbolizer;
 };
 #endif
 
-std::vector<Frame>
-symbolize(const std::vector<void*>& frames) {
+std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
   Symbolizer& s = Symbolizer::get();
   for (auto f : frames) {
