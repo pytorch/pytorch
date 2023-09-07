@@ -1021,12 +1021,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
                     self.prefix.writeline(
-                        f"""at::Tensor {constants_key} = constants_->at("{constants_key}");"""
+                        f"""auto {constants_key} = constants_->at("{constants_key}");"""
                     )
                 else:
                     # Append constants as inputs to the graph
                     constants_idx = inputs_len + idx
-                    self.prefix.writeline(f"auto {constants_key} = args[{constants_idx}];")
+                    self.prefix.writeline(
+                        f"auto {constants_key} = args[{constants_idx}];"
+                    )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
