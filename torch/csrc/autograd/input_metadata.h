@@ -87,8 +87,7 @@ struct InputMetadata {
 
   at::Tensor zeros_like() const {
     TORCH_CHECK(
-        !is_nested_,
-        "Zeros is not currently supported for nested tensors.")
+        !is_nested_, "Zeros is not currently supported for nested tensors.")
     return at::zeros_symint(shape_as_dim_vector(), options_);
   }
 
@@ -97,12 +96,11 @@ struct InputMetadata {
     bool grad_is_nested = grad.is_nested();
     bool grad_is_cpp_nested = grad_is_nested && !grad_is_subclass;
     TORCH_CHECK(
-        grad_is_cpp_nested == is_cpp_nested_tensor()
-        && grad_is_nested == is_nested_,
-        "grad and the input wrt the gradient is being computed for need to be "
-        "either both nested or both non-nested tensors. Also note that python "
-        "subclass and non-python-subclass variants of nested tensors are not "
-        "compatible.");
+        grad_is_cpp_nested == is_cpp_nested_tensor() &&
+            grad_is_nested == is_nested_,
+        "grad and the input wrt the gradient that is being computed for need to be "
+        "either both nested or both non-nested tensors. Also note that nested "
+        "tensors with different layouts do not compose currently.");
   }
 
   bool is_same_shape(const at::Tensor& grad) const {
@@ -134,8 +132,7 @@ struct InputMetadata {
       const at::Tensor& grad) const {
     std::stringstream ss;
     ss << "invalid gradient at index " << index << " - got ";
-    if (grad.is_nested() &&
-        !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
+    if (grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
       ss << grad._nested_tensor_size();
     } else {
       ss << grad.sym_sizes();
@@ -176,7 +173,7 @@ struct InputMetadata {
  private:
   MetadataShape compute_variant_shape(const at::Tensor& input) {
     if (input.is_nested() &&
-        !input.unsafeGetTensorImpl()->key_set().has(at::DispatchKey::Python)) {
+        !input.unsafeGetTensorImpl()->is_python_dispatch()) {
       auto nested_size = input._nested_tensor_size();
       return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
     }

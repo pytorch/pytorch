@@ -1038,12 +1038,15 @@ def forward(self, x_a_1, x_b_1, y_1):
         class ExtraKeysTensor(torch.Tensor):
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
+                # NB: only the non-kwarg overload of _make_wrapper_subclass supports
+                #     extra dispatch keys. We probably want to unify the two APIs
+                #     in the future.
                 r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-                    cls, elem.size(),
-                    dtype=elem.dtype, layout=elem.layout,
-                    device=elem.device, requires_grad=elem.requires_grad,
-                    strides=elem.stride(), storage_offset=elem.storage_offset(),
-                    _extra_dispatch_keys=DispatchKeySet(DispatchKey.NestedTensor))
+                    cls, elem.size(), elem.stride(), elem.storage_offset(),
+                    torch.contiguous_format,
+                    elem.dtype, elem.layout,
+                    elem.device, False, False, None, False, False,
+                    DispatchKeySet(DispatchKey.NestedTensor))
                 return r
 
             @classmethod
