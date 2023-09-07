@@ -4357,7 +4357,7 @@ def bisect(shape_env: ShapeEnv):
         # Stop and don't bisect.
         return
 
-    if shape_env.should_record_events and torch._dynamo.config.translation_validation_no_bisect:
+    if not shape_env.should_record_events or torch._dynamo.config.translation_validation_no_bisect:
         # Bisection is off.
         # Return the last ValidationException we got.
         raise last_exception
