@@ -953,6 +953,8 @@ def trunc(a):
 # TODO: register this as a real ref/decomposition once TorchInductor supports complex!
 def view_as_complex(self: TensorLikeType) -> TensorLikeType:
     input_dtype = self.dtype
+    if utils.is_complex_dtype(input_dtype):
+        return self
     torch._check(
         utils.is_float_dtype(input_dtype),
         lambda: f"view_as_complex is only supported for floating point"
@@ -982,12 +984,9 @@ def view_as_complex(self: TensorLikeType) -> TensorLikeType:
         self.storage_offset() % 2 == 0,
         lambda: "Tensor must have a storage_offset divisible by 2",
     )
-    if not utils.is_complex_dtype(input_dtype):
-        return prims.view_element_type(
-            self, utils.corresponding_complex_dtype(input_dtype)
-        ).squeeze(1)
-    else:
-        return self
+    return prims.view_element_type(
+        self, utils.corresponding_complex_dtype(input_dtype)
+    ).squeeze(-1)
 
 
 def _make_elementwise_binary_reference(

@@ -782,21 +782,21 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     int64_t size_ratio = new_element_size / self_element_size;
 
     TORCH_CHECK(
-      (self.size(-1) % size_ratio) == 0,
+      (self.sym_size(-1) % size_ratio) == 0,
       "self.size(-1) must be divisible by ", size_ratio, " to view ",
       self.scalar_type(), " as ", dtype, " (different element sizes), ",
-      "but got ", self.size(-1));
+      "but got ", self.sym_size(-1));
 
     TORCH_CHECK(
-      (self.storage_offset() % size_ratio) == 0,
+      (self.sym_storage_offset() % size_ratio) == 0,
       "self.storage_offset() must be divisible by ", size_ratio, " to view ",
       self.scalar_type(), " as ", dtype, " (different element sizes), but got ",
-      self.storage_offset());
+      self.sym_storage_offset());
 
     auto new_strides = compute_strides_for_view_dtype_upsize(
       self.sym_strides(), size_ratio, self.scalar_type(), dtype);
 
-    auto old_sizes = self.sizes();
+    auto old_sizes = self.sym_sizes();
     SymDimVector new_sizes(self.dim());
     std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
     new_sizes[self.dim() - 1] /= size_ratio;
