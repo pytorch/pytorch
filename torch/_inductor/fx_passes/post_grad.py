@@ -65,7 +65,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     if config.pattern_matcher:
         if torch.backends.mkldnn.is_available() and config.cpp.onednn_graph:
             from .onednn_graph_fusion import onednn_graph_fuse_fx
-
             onednn_graph_fuse_fx(gm, is_inference)
         lazy_init()
 
