@@ -19,6 +19,7 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/python_pyimports.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
@@ -722,6 +723,10 @@ void initDispatchBindings(PyObject* module) {
 
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
+
+  m.def(
+      "_initialize_pyimports_handler",
+      torch::detail::initialize_pyimports_handler);
 
   m.def("_replace_", [](const at::Tensor& a, const at::Tensor& b) {
     return at::functionalization::impl::replace_(a, b);

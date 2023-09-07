@@ -1834,3 +1834,6 @@ def __getattr__(name):
 
 from . import _logging
 _logging._init_logs()
+
+from . import _cpp_pyimports
+_cpp_pyimports.initialize_pyimports_handler(_C)

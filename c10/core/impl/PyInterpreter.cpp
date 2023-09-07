@@ -28,6 +28,11 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(dispatch);
   }
 
+  void do_import_for_library(const char* module, const char* context)
+      const override {
+    PANIC(do_import_for_library);
+  }
+
   void reportErrorCallback(PyObject* callback, DispatchKey key) const override {
     PANIC(reportErrorCallback);
   }
