@@ -16,7 +16,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 
 
 @config.patch({"freezing": True})
-class TestPatternMatcherBase(TestCase):
+class TestCustomPassBase(TestCase):
     def _clone_inputs(self, inputs):
         def clone(x):
             if not isinstance(x, torch.Tensor):
@@ -54,7 +54,7 @@ aten = torch.ops.aten
 mkldnn = torch.ops.mkldnn
 
 
-class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
+class TestPostGradCustomPrePostPass(TestCustomPassBase):
     #  mkldnn fusion's pattern_matcher
     # (torch/_inductor/fx_passes/mkldnn_fusion.py),
     # and apply it to custom post_grad_passes.
@@ -123,10 +123,10 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
         dafault_pattern_matcher = config.pattern_matcher
         config.pattern_matcher = False
         # define pattern match as custom post grad opt pass
-        config.custom_pre_pass = self._CustomPass()
-        config.custom_post_pass = None
+        config.post_grad_custom_pre_pass = self._CustomPass()
+        config.post_grad_custom_post_pass = None
         # init mkldnn fusion on custom_matcher
-        self._register_mkldnn_conv_relu_fusion(config.custom_pre_pass)
+        self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_pre_pass)
 
         mod = self._ConvReLU(16, 16).eval()
         x = torch.randn((1, 16, 56, 56), dtype=torch.float32)
@@ -147,10 +147,10 @@ class TestCustomPrePostPassOfPostGrad(TestPatternMatcherBase):
         dafault_pattern_matcher = config.pattern_matcher
         config.pattern_matcher = False
         # define pattern match as custom post grad opt pass
-        config.custom_pre_pass = None
-        config.custom_post_pass = self._CustomPass()
+        config.post_grad_custom_pre_pass = None
+        config.post_grad_custom_post_pass = self._CustomPass()
         # init mkldnn fusion on custom_matcher
-        self._register_mkldnn_conv_relu_fusion(config.custom_post_pass)
+        self._register_mkldnn_conv_relu_fusion(config.post_grad_custom_post_pass)
 
         mod = self._ConvReLU(16, 16).eval()
         x = torch.randn((1, 16, 56, 56), dtype=torch.float32)

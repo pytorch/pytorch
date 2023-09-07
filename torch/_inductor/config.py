@@ -56,10 +56,10 @@ pattern_matcher = True
 #     # my custom graph optimization pass
 #     ...
 #
-# torch._inductor.config.custom_pre_pass = my_custom_pre_pass
-# torch._inductor.config.custom_post_pass = my_custom_post_pass
-custom_pre_pass = None
-custom_post_pass = None
+# torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
+# torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+post_grad_custom_pre_pass = None
+post_grad_custom_post_pass = None
 
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
