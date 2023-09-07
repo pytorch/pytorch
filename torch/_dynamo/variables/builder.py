@@ -206,6 +206,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
+        ignore_guards: bool = False,
     ):
         assert (
             source is not None
@@ -215,6 +216,7 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name()
+        self.ignore_guards = ignore_guards
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -277,6 +279,9 @@ class VariableBuilder:
         return {"source": self.get_source()}
 
     def make_guards(self, *guards):
+        if self.ignore_guards:
+            return None
+
         source = self.get_source()
         if (
             isinstance(source, ConstantSource)
@@ -398,6 +403,10 @@ class VariableBuilder:
             or k is collections.namedtuple
             for k in value.keys()
         ):
+            keys_are_types_or_namedtuple = all(
+                isinstance(k, type) or k is collections.namedtuple for k in value.keys()
+            )
+
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
@@ -407,9 +416,7 @@ class VariableBuilder:
                 # to check for module property mutations, which does a reasonable,
                 # but not completely secure job ensuring a property wasn't changed.
                 guards = self.make_guards(GuardBuilder.BOOL_FALSE)
-            elif all(
-                isinstance(k, type) or k is collections.namedtuple for k in value.keys()
-            ):
+            elif keys_are_types_or_namedtuple:
                 # For keys that are types, we only guard on the wheather the dictionary
                 # was modified by checking its version.
                 guards = self.make_guards(GuardBuilder.DICT_VERSION)
@@ -427,23 +434,19 @@ class VariableBuilder:
                 else:
                     return key
 
-            if value is torch.utils._pytree.SUPPORTED_NODES:
-                # Don't guard on SUPPORTED_NODES values.
-                # We assume, if the dictionary version is the same (i.e. it wasn't modified),
-                # that the values are also the same.
-                # If this is needed, we should find a way to materialize arbitrary types, so
-                # that we can guard the dictionary values.
-                result = {
-                    k: UserDefinedObjectVariable(value[k], guards=guards)
-                    for k in value.keys()
-                }
-            else:
-                result = {
-                    k: VariableBuilder(
-                        self.tx, GetItemSource(self.get_source(), index_source(k))
-                    )(value[k]).add_guards(guards)
-                    for k in value.keys()
-                }
+            # If keys_are_types_or_namedtuple is True, don't guard on dictionary values.
+            #
+            # In this case, we are guarding on the dictionary version (i.e. it wasn't
+            # modified). So, we assume that the values are also the same, since we don't
+            # know how to materialize sources for the keys.
+            result = {
+                k: VariableBuilder(
+                    self.tx,
+                    GetItemSource(self.get_source(), index_source(k)),
+                    ignore_guards=keys_are_types_or_namedtuple,
+                )(value[k]).add_guards(guards)
+                for k in value.keys()
+            }
 
             if istype(value, collections.defaultdict):
                 result = DefaultDictVariable(
