@@ -4,8 +4,8 @@
 #include <mutex>
 #include <shared_mutex>
 
-#include <torch/csrc/inductor/aot_inductor_model.h>
-#include <torch/csrc/inductor/proxy_executor.h>
+#include <torch/csrc/inductor/aot_runtime/model.h>
+#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 
 namespace torch {
 namespace aot_inductor {
