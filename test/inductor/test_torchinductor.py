@@ -625,7 +625,7 @@ class CommonTemplate:
         def fn(x):
             return (x + x).to(torch.int32)
 
-        x = torch.tensor([35000], dtype=torch.int16)
+        x = torch.tensor([32000], dtype=torch.int16)
 
         self.common(fn, x)
 
