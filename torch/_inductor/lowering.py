@@ -353,7 +353,12 @@ def promote_constants(inputs, override_return_dtype=None):
                 )
             )
         elif isinstance(x, sympy.Expr):
-            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+            out.append(
+                ExpandView.create(
+                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    list(ex.get_size()),
+                )
+            )
         else:
             out.append(x)
 
