@@ -340,7 +340,7 @@ def pad_packed_sequence(
 
 
 def pad_sequence(
-    sequences: Union[Tensor, List[Tensor]],
+    sequences: Union[Tensor, Iterable[Tensor]],
     batch_first: bool = False,
     padding_value: float = 0.0,
 ) -> Tensor:
