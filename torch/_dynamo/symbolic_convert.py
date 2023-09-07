@@ -33,7 +33,12 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_constant
-from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
+from .bytecode_analysis import (
+    get_indexof,
+    JUMP_OPNAMES,
+    livevars_analysis,
+    propagate_line_nums,
+)
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -2291,13 +2296,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
-        # if we're calling a GraphModule method, then add the GraphModule
-        # to its forward function's context
-        self_maybe = func.fn.__self__ if func.has_self() else None
-        if self_maybe and isinstance(self_maybe, torch.fx.GraphModule):
-            code_context.get_context(self_maybe.forward.__code__)[
+        if (
+            args
+            and isinstance(args[0], NNModuleVariable)
+            and isinstance(args[0].module, torch.fx.GraphModule)
+        ):
+            code_context.get_context(args[0].module.forward.__code__)[
                 "orig_graphmodule"
-            ] = self_maybe
+            ] = args[0].module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2355,6 +2361,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
+        instructions = cleaned_instructions(code)
+        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},
@@ -2362,7 +2370,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
-            instructions=cleaned_instructions(code),
+            instructions=instructions,
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,

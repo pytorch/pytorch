@@ -709,7 +709,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
-                return NNModuleVariable(type(target), module_key, **options)
+                return NNModuleVariable(target, type(target), module_key, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
@@ -1313,18 +1313,26 @@ class SubgraphTracer(fx.Tracer):
                     nd.meta for nd in orig_graphmodule_maybe.graph.nodes
                 ]
                 self._orig_gm_lineno_map = orig_graphmodule_maybe._lineno_map
-                self._orig_gm_firstlineno = orig_graphmodule_maybe.forward.__code__.co_firstlineno
+                self._orig_gm_firstlineno = (
+                    orig_graphmodule_maybe.forward.__code__.co_firstlineno
+                )
             else:
                 self._orig_gm_meta = None
                 self._orig_gm_lineno_map = None
                 self._orig_gm_firstlineno = None
 
         # preserve original meta if it is available
-        if self._orig_gm_meta and self._orig_gm_lineno_map and self._orig_gm_firstlineno:
+        if (
+            self._orig_gm_meta
+            and self._orig_gm_lineno_map
+            and self._orig_gm_firstlineno
+        ):
             lineno = tx.current_instruction.starts_line
             node_idx = None
             if lineno is not None:
-                node_idx = self._orig_gm_lineno_map[lineno - self._orig_gm_firstlineno]
+                node_idx = self._orig_gm_lineno_map.get(
+                    lineno - self._orig_gm_firstlineno, None
+                )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
                 for key in ("nn_module_stack", "source_fn", "stack_trace"):

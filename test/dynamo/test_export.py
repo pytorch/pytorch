@@ -3903,10 +3903,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertIn("return torch.sin(x)", gm1.print_readable(print_output=False))
         self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
 
-    def test_reexport_preserves_fx_node_metadata_inline(self):
-        # this test currently fails
-        return
-
+    def test_preserve_fx_node_metadata_inline(self):
         def f1(x):
             return torch.sin(x)
 
@@ -3918,7 +3915,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         gm2, _ = torch._dynamo.export(f2)(torch.randn(3, 3))
 
-        breakpoint()
         self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
 
     def test_preserve_fx_node_metadata_graph_break(self):
@@ -3946,6 +3942,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             "x = torch.sin(x)",
             "return torch.cos(x)",
         ]
+
         def test_backend(gm: torch.fx.GraphModule, example_inputs):
             self.assertTrue(expected)
             self.assertIn(expected[0], gm.print_readable(print_output=False))
@@ -3955,6 +3952,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         torch._dynamo.reset()
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
