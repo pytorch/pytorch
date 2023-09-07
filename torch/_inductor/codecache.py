@@ -933,7 +933,7 @@ class CudaKernelParamCache:
             cubin,
             "cubin",
             hash_type="cubin",
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
         params["cubin_path"] = path
         cls.cache[key] = params
@@ -960,7 +960,7 @@ class AotCodeCache:
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
         if key not in cls.cache:
             from filelock import FileLock

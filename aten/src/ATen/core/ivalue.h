@@ -14,7 +14,6 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <typeindex>
-#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -511,17 +510,17 @@ public:
   template <
       typename... Args,
       std::enable_if_t<
-          !std::disjunction<
+          !guts::disjunction<
               std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>::value,
+              guts::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
       std::enable_if_t<
-          !std::disjunction<
+          !guts::disjunction<
               std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>::value,
+              guts::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
@@ -982,7 +981,7 @@ public:
       TORCH_FORALL_TAGS(DEFINE_CASE)
 #undef DEFINE_CASE
     }
-    return "InvalidTag(" + std::to_string(static_cast<int>(tag)) + ")";
+    return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
   }
 
   // generic v.to<at::Tensor>() implementations
