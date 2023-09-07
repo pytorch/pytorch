@@ -188,13 +188,14 @@ all the time. Such dimensions must be marked dynamic using the
 Some additional things to note:
 
 * Through the :func:``torch.export.dynamic_dim`` API, we specified the first
-  dimension of each input to be dynamic. Lookinga the inputs ``arg4_1`` and
-  ``arg5_1``, they have a shape of [s0, 64] and [s1, 128], instead of the [32,
-  64] and [32, 128] shaped tensors that we passed in as example input. ``s0``
-  and ``s1`` are symbolic shapes which represents a range of values.
+  dimension of each input to be dynamic. Looking at the inputs ``arg4_1`` and
+  ``arg5_1``, they have a symbolic shape of [s0, 64] and [s1, 128], instead of
+  the [32, 64] and [32, 128] shaped tensors that we passed in as example inputs.
+  ``s0`` and ``s1`` are symbols representing that this dimension can be a range
+  of values.
 
-* ``exported_program.range_constraints`` describes the ranges of each symbolic
-  shape appearing in the graph. In this case, we see that ``s0`` and ``s1`` have
+* ``exported_program.range_constraints`` describes the ranges of each symbol
+  appearing in the graph. In this case, we see that ``s0`` and ``s1`` have
   the range [2, inf]. For technical reasons that are difficult to explain here,
   they are assumed to be not 0 or 1. This is not a bug, and does not necessarily
   mean that the exported program will not work for dimensions 0 or 1. See
@@ -202,8 +203,8 @@ Some additional things to note:
   for an in-depth discussion of this topic.
 
 * ``exported_program.equality_constraints`` describes which dimensions are
-  equivalent. Since we specified in the constraints that the first dimension of
-  each argument is equivalent,
+  required to be equal. Since we specified in the constraints that the first
+  dimension of each argument is equivalent,
   (``dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0)``),
   we see in the equality constraints the tuple specifying that ``arg4_1``
   dimension 0 and ``arg5_1`` dimension 0 are equal.
@@ -216,19 +217,19 @@ Graph Breaks
 ^^^^^^^^^^^^
 
 As ``torch.export`` is a one-shot process for capturing a computation graph from
-a PyTorch program, it will ultimately run into untraceable parts of programs as
+a PyTorch program, it might ultimately run into untraceable parts of programs as
 it is nearly impossible to support tracing all PyTorch and Python features. In
-the case of ``torch.compile``, untraceable parts of programs will "graph break"
-and run the unsupported operation with default Python evaluation. However,
-``torch.export`` will require users to provide additional information or rewrite
-parts of their code to make it traceable. As the foundation of the tracing is
-based on TorchDynamo, which evaluates at the Python bytecode level, there
-will be significantly fewer rewrites required compared to previous tracing
-frameworks.
+the case of ``torch.compile``, an unsupported operation will cause a "graph
+break" and the unsupported operation will be run with default Python evaluation.
+In contrast, ``torch.export`` will require users to provide additional
+information or rewrite parts of their code to make it traceable. As the
+tracing is based on TorchDynamo, which evaluates at the Python
+bytecode level, there will be significantly fewer rewrites required compared to
+previous tracing frameworks.
 
 When a graph break is encountered, :ref:`ExportDB <torch.export_db>` is a great
-source of supported and unsupported programs, along with ways to rewrite
-programs to make them traceable.
+resource for learning about the kinds of programs that are supported and
+unsupported, along with ways to rewrite programs to make them traceable.
 
 Control Flow
 ^^^^^^^^^^^^
