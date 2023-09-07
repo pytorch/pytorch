@@ -1,6 +1,6 @@
 import logging
-from collections import Counter
 import typing
+from collections import Counter
 from typing import Dict, Set
 
 import torch
