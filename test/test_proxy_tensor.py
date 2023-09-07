@@ -972,11 +972,16 @@ def forward(self, x_1, y_1):
     # https://github.com/pytorch/pytorch/issues/108195
     def test_symbolic_repeat_interleave(self):
         def f(y, x):
-            return y.repeat_interleave(x)
+            return y.repeat_interleave(x, dim=1)
 
         y = torch.tensor([[1, 2], [3, 4]])
-        x = torch.tensor([2])
-        gm = make_fx(f, tracing_mode="symbolic")(y, x)
+        x = torch.tensor([2, 3])
+        r = str(make_fx(f, tracing_mode="symbolic")(y, x).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, y_1, x_1):
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
+    index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
+    return index_select""")
 
     def test_adv_index_batch(self):
         def f(src_tokens):
