@@ -32,8 +32,7 @@ class SqueezeNet(nn.Module):
         super().__init__()
         if version not in [1.0, 1.1]:
             raise ValueError(
-                "Unsupported SqueezeNet version {version}:"
-                "1.0 or 1.1 expected".format(version=version)
+                f"Unsupported SqueezeNet version {version}:" "1.0 or 1.1 expected"
             )
         self.num_classes = num_classes
         if version == 1.0:

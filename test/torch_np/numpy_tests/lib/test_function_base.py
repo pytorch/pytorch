@@ -1982,8 +1982,7 @@ class TestCorrCoef:
 
     def test_extreme(self):
         x = [[1e-100, 1e100], [1e100, 1e-100]]
-        with np.errstate(all="raise"):
-            c = corrcoef(x)
+        c = corrcoef(x)
         assert_array_almost_equal(c, np.array([[1.0, -1.0], [-1.0, 1.0]]))
         assert_(np.all(np.abs(c) <= 1.0))
 

@@ -652,7 +652,7 @@ jobs:
             - run:
                 name: Archive artifacts into zip
                 command: |
-                  zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
+                  zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json .pytorch-test-file-ratings.json
                   cp artifacts.zip /Users/distiller/workspace
 
       - persist_to_workspace:

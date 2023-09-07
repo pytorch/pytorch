@@ -543,14 +543,13 @@ def _make_deprecate(meth):
         warnings.warn(f"nn.init.{old_name} is now deprecated in favor of nn.init.{new_name}.", stacklevel=2)
         return meth(*args, **kwargs)
 
-    deprecated_init.__doc__ = r"""
+    deprecated_init.__doc__ = fr"""
     {old_name}(...)
 
     .. warning::
         This method is now deprecated in favor of :func:`torch.nn.init.{new_name}`.
 
-    See :func:`~torch.nn.init.{new_name}` for details.""".format(
-        old_name=old_name, new_name=new_name)
+    See :func:`~torch.nn.init.{new_name}` for details."""
     deprecated_init.__name__ = old_name
     return deprecated_init
 

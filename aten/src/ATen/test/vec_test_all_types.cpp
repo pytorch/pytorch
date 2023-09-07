@@ -1532,6 +1532,15 @@ namespace {
               << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
         }
       }
+      // Map - For float32 in, reduced floating points out
+      for (int64_t len = 1; len <= N; len++) {
+        at::vec::map<RT>([](auto x) { return x; }, y_f, x_f1, len);
+        at::vec::map<VT>([](auto x) { return x; }, y_b, x_f1, len);
+        for (const auto i : c10::irange(len)) {
+          ASSERT_TRUE(cmp(y_f[i], y_b[i])) << "Failure Details:\nTest Seed to reproduce: " << seed
+              << "\nmap, Length: " << len << "; index: " << i << "; fp32 reference: " << y_f[i] << "; bf16 value: " << RT(y_b[i]);
+        }
+      }
       // Map2
       for (int64_t len = 1; len <= N; len++) {
         at::vec::map2<RT>([](auto x, auto y) { return x + y; }, y_f, x_f1, x_f2, len);

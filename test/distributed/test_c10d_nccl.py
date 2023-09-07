@@ -3177,6 +3177,39 @@ class CompilerTest(test_c10d_common.CompilerTest):
             torch.ones(2, 2, device=self.rank) * self.rank
         )
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_base_k(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        output_tensor = torch.zeros(2, dtype=torch.int64).to(self.rank)
+        input_tensors = torch.arange(self.world_size * 2, dtype=torch.int64).to(self.rank)
+        input_tensors = torch.reshape(input_tensors, (self.world_size, 2))
+        dist.reduce_scatter_tensor(output_tensor, input_tensors)
+        self.assertEqual(output_tensor, input_tensors[self.rank] * self.world_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_coalesced(self):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        output_tensors = torch.zeros(2, 2).to(self.rank)
+        input_tensors = [torch.ones(2, 2).to(self.rank) for _ in range(self.world_size)]
+        with dist._coalescing_manager():
+            for i in range(self.world_size):
+                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
+        self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
+
 class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
     @requires_nccl()
     @skip_if_lt_x_gpu(1)
@@ -3208,41 +3241,6 @@ class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGro
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_into_tensor(output_tensor, tensor)
         self.assertEqual(output_tensor, tensor)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(1)
-    def test_reduce_scatter_base(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        device = "cuda"
-        tensor = torch.ones(10, 10, device=torch.device(device))
-        output_tensor = torch.zeros(10, 10, device=torch.device(device))
-        dist.reduce_scatter_tensor(output_tensor, tensor)
-        self.assertEqual(output_tensor, tensor)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(1)
-    def test_reduce_scatter_tensor_coalesced(self):
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
-        device = "cuda"
-        input_tensors = [torch.ones(10, 10, device=torch.device(device)) for _ in range(self.world_size)]
-        output_tensors = [torch.zeros(10, 10, device=torch.device(device)) for _ in range(self.world_size)]
-        with dist._coalescing_manager():
-            for i in range(self.world_size):
-                dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
-        for i in range(self.world_size):
-            self.assertEqual(output_tensors[i], input_tensors[i])
 
 class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase):
     def setUp(self):
