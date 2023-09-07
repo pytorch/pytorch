@@ -13,7 +13,21 @@ import functools
 import inspect
 import pickle
 import warnings
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    overload,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
+
+from typing_extensions import Never
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -1065,11 +1079,94 @@ def create_script_list(obj, type_hint=None):
     return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
 
 
+# Defined in torch/csrc/jit/python/script_init.cpp
+ResolutionCallback = Callable[[str], Callable[..., Any]]
+EnumVar = TypeVar("EnumVar", bound=enum.Enum)
+ClassVar = TypeVar("ClassVar", bound=type)
+
+
+@overload
+def script(
+    obj: Type[Module],
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> Never:
+    ...
+
+
+@overload
+def script(
+    obj: Dict,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> torch.ScriptDict:
+    ...
+
+
+@overload
+def script(
+    obj: List,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> torch.ScriptList:
+    ...
+
+
+@overload
+def script(  # type: ignore[misc]
+    obj: Module,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> RecursiveScriptModule:
+    ...
+
+
+@overload
+def script(  # type: ignore[misc]
+    obj: ClassVar,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> ClassVar:
+    ...
+
+
+@overload
+def script(  # type: ignore[misc]
+    obj: Callable,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> ScriptFunction:
+    ...
+
+
+@overload
+def script(
+    obj: Any,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+) -> RecursiveScriptClass:
+    ...
+
+
 def script(
     obj,
-    optimize=None,
-    _frames_up=0,
-    _rcb=None,
+    optimize: Optional[bool] = None,
+    _frames_up: int = 0,
+    _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
 ):
     r"""
