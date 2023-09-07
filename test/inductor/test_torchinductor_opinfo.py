@@ -163,7 +163,6 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
 }
 
@@ -207,8 +206,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "cholesky": {f32, f64},
     "complex": {f16},
     "exponential": {f16},
-    "geometric": {f16},
-    "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
     ("min", "reduction_with_dim"): {b8},
@@ -226,11 +223,11 @@ inductor_expected_failures_single_sample["cpu"] = {
     "to_sparse": {f32, f64},
     "uniform": {f16},
     "view_as_complex": {f16},
+    "pca_lowrank": {f64},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "addr": {f16},
