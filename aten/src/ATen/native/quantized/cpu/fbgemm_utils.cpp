@@ -681,6 +681,6 @@ static C10_UNUSED auto embedding_params = register_embedding_params();
 
 static C10_UNUSED auto conv2d_prepack = init_conv2d_prepack();
 static C10_UNUSED auto conv3d_prepack = init_conv3d_prepack();
-static C10_UNUSED auto linear_preapck = init_linear_prepack();
+static C10_UNUSED auto linear_prepack = init_linear_prepack();
 
 } // namespace
