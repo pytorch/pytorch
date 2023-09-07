@@ -1017,7 +1017,7 @@ def load(
                              overall_storage=overall_storage,
                              **pickle_load_args)
         if mmap:
-            raise RuntimeError("mmap can only be used with files saved with ",
+            raise RuntimeError("mmap can only be used with files saved with "
                                "`torch.save(_use_new_zipfile_serialization=True), "
                                "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:

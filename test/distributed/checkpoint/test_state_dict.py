@@ -14,12 +14,13 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     _init_optim_state,
-    distributed_load_state_dict,
-    distributed_state_dict,
     DistributedStateDictOptions,
+    load_state_dict,
     patch_model_state_dict,
     patch_optimizer_state_dict,
     PG,
+    STATE,
+    state_dict,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
@@ -53,7 +54,7 @@ if not dist.is_available():
 
 
 class TestStateDict(FSDPTest):
-    """Tests distributed_state_dict and distributed_load_state_dict"""
+    """Tests state_dict and load_state_dict"""
 
     @property
     def world_size(self) -> int:
@@ -98,10 +99,10 @@ class TestStateDict(FSDPTest):
             fqn_pid_mapping[pid] = fqn
         # Check optimizer_state_dict state
 
-        self.assertEqual(len(osd["state"]), len(dist_osd["state"]))
-        for pid, states in osd["state"].items():
+        self.assertEqual(len(osd[STATE]), len(dist_osd[STATE]))
+        for pid, states in osd[STATE].items():
             fqn = fqn_pid_mapping[pid]
-            dist_states = dist_osd["state"].get(fqn, None)
+            dist_states = dist_osd[STATE].get(fqn, None)
             self.assertIsNotNone(dist_states, fqn)
             self.assertEqual(len(states), len(dist_states))
             for key, state in states.items():
@@ -143,7 +144,7 @@ class TestStateDict(FSDPTest):
         dist_osd: Dict[str, Any],
     ) -> None:
         new_dist_osd = _gather_state_dict(dist_osd)
-        distributed_load_state_dict(
+        load_state_dict(
             model,
             [new_optim],
             model_state_dict={},
@@ -156,11 +157,8 @@ class TestStateDict(FSDPTest):
         self,
         init_model_optim: Callable,
         test_frozen: bool = False,
-        use_dtensor: bool = False,
     ) -> None:
-        options = DistributedStateDictOptions(
-            save_frozen_params=(not test_frozen), use_dtensor=use_dtensor
-        )
+        options = DistributedStateDictOptions(save_frozen_params=(not test_frozen))
         # Initialize original model and distributed model.
         model, optim, copy_optim, dist_model, dist_optim = init_model_optim()
 
@@ -183,14 +181,10 @@ class TestStateDict(FSDPTest):
         osd = optim.state_dict()
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
-        dist_msd, dist_osd = distributed_state_dict(
-            dist_model, dist_optim, options=options
-        )
+        dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
         self._verify_msd(model, msd, dist_msd, options)
-        if options.flatten_osd:
-            self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        else:
-            self._verify_osd(model, optim, osd, dist_osd)
+        self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+        self._verify_osd(model, optim, osd, dist_osd)
 
         # Initialize a completely new model to simulate checkpoint load.
         _, _, _, dist_model, dist_optim = init_model_optim()
@@ -200,7 +194,7 @@ class TestStateDict(FSDPTest):
         # Then finally we can call load_state_dict().
         if not isinstance(dist_optim, list):
             dist_optim = [dist_optim]
-        curr_dist_msd, curr_dist_osd = distributed_state_dict(
+        curr_dist_msd, curr_dist_osd = state_dict(
             dist_model, dist_optim, options=options
         )
         if test_frozen:
@@ -209,8 +203,8 @@ class TestStateDict(FSDPTest):
         # Since we already have the state_dict saved before, no need to call DCP.
         # We can directly load them back. This asser is to ensure that optimizer
         # state storage are initialized.
-        # self.assertEqual(len(curr_dist_osd["state"]), len(dist_osd["state"]))
-        distributed_load_state_dict(
+        # self.assertEqual(len(curr_dist_osd[STATE]), len(dist_osd[STATE]))
+        load_state_dict(
             dist_model,
             dist_optim,
             model_state_dict=dist_msd,
@@ -219,14 +213,10 @@ class TestStateDict(FSDPTest):
         )
 
         # Check if the new state_dict are the same
-        dist_msd, dist_osd = distributed_state_dict(
-            dist_model, dist_optim, options=options
-        )
+        dist_msd, dist_osd = state_dict(dist_model, dist_optim, options=options)
         self._verify_msd(model, msd, dist_msd, options)
-        if options.flatten_osd:
-            self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        else:
-            self._verify_osd(model, optim, osd, dist_osd)
+        self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+        self._verify_osd(model, optim, osd, dist_osd)
 
         # Test patch_model_state_dict, and patch_optimizer_state_dict
         patch_model_state_dict(dist_model, options=options)
@@ -234,10 +224,8 @@ class TestStateDict(FSDPTest):
         dist_msd = dist_model.state_dict()
         dist_osd = dist_optim[0].state_dict()
         self._verify_msd(model, msd, dist_msd, options)
-        if options.flatten_osd:
-            self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
-        else:
-            self._verify_osd(model, optim, osd, dist_osd)
+        self._verify_osd_by_load(model, optim, copy_optim, dist_osd)
+        self._verify_osd(model, optim, osd, dist_osd)
 
     def _test_fsdp(self, use_orig_params: bool, use_composable: bool) -> None:
         if not use_orig_params and use_composable:
@@ -295,7 +283,6 @@ class TestStateDict(FSDPTest):
         use_composable: bool,
         optim_in_backward: bool = False,
         test_frozen: bool = False,
-        use_dtensor: bool = False,
     ) -> None:
         def init_model_optim():
             orig_model = CompositeParamModel(device=torch.device("cuda"))
@@ -329,7 +316,7 @@ class TestStateDict(FSDPTest):
                 dist_optim = torch.optim.Adam(dist_model.parameters(), lr=1e-3)
             return orig_model, orig_optim, copy_optim, dist_model, dist_optim
 
-        self._test_save_load(init_model_optim, test_frozen, use_dtensor)
+        self._test_save_load(init_model_optim, test_frozen)
 
     @skip_if_lt_x_gpu(2)
     def test_fsdp_ddp(self) -> None:
@@ -342,9 +329,12 @@ class TestStateDict(FSDPTest):
     def test_frozen_parameters(self) -> None:
         self._test_fsdp_ddp(use_composable=False, test_frozen=True)
 
+    # TODO: enable use_dtensor once 2D device_mesh support is fully landed.
+    """
     @skip_if_lt_x_gpu(2)
     def test_use_dtensor(self) -> None:
         self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
+    """
 
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:
