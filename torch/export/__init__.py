@@ -182,6 +182,12 @@ class ExportGraphSignature:
             == assertion_dep_token_index
         )
 
+    def inputs(self) -> List[str]:
+        return list(self.inputs_to_parameters.keys()) + list(self.inputs_to_buffers.keys()) + self.user_inputs
+
+    def outputs(self) -> List[str]:
+        return list(self.buffers_to_mutate.keys()) + self.user_outputs
+
 
 class ArgumentKind(Enum):
     Tensor = auto()
