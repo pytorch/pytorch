@@ -5,7 +5,9 @@ Export supports the structured control flow operator `torch.ops.higher_order.con
 
 .. warning::
 
-    `torch.ops.higher_order.cond` is a prototype of torch.cond as part of torch.export release. Using torch.ops.higher_order.cond directly is not recommended.
+    `torch.ops.higher_order.cond` is a prototype feature in PyTorch, included as a part of the torch.export release.
+    Using torch.ops.higher_order.cond directly is not recommended. Please look forward to a more stable implementation
+    in a future version of PyTorch.
 
 
 `torch.ops.higher_order.cond` conditionally applies `true_fn` or `false_fn`. It can logically be seen as
