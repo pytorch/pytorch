@@ -12,6 +12,22 @@ import torch._numpy._ufuncs as _ufuncs
 import torch._numpy._util as _util
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_allclose, assert_equal
+from torch.testing._internal.common_utils import TestCase
+
+
+def test_fail_freefunc():
+    assert False
+
+
+class TestFailInherit(TestCase):
+    def test_fail_inherit(self):
+        assert False
+
+
+class TestFailNoInhertit:
+    def test_fail_noinherit(self):
+        assert False
+
 
 # These function receive one array_like arg and return one array_like result
 one_arg_funcs = [
@@ -587,6 +603,5 @@ def test_f16_on_cuda():
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
-    breakpoint()
 
     run_tests()
