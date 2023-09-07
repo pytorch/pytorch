@@ -5651,6 +5651,9 @@ class InPlaceCollectiveKernel(CollectiveKernel):
 
     def __init__(self, layout, inputs, constant_args):
         super().__init__(layout, inputs, constant_args)
+        input_names = [t.codegen_reference() for t in self.inputs]
+        for name in input_names:
+            V.graph.never_reuse_buffers.add(name)
 
     def should_allocate(self):
         return False
@@ -5659,8 +5662,6 @@ class InPlaceCollectiveKernel(CollectiveKernel):
         return True
 
     def codegen_output(self, wrapper, output_name, input_names):
-        for x in input_names:
-            V.graph.never_reuse_buffers.add(x)
         if len(input_names) > 1:
             wrapper.writeline(f"{output_name} = [{','.join(input_names)}] ")
         else:
