@@ -379,9 +379,9 @@ def convolution(
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
         weight = ir.ExternKernel.require_channels_last(weight)
-        layout = conv_layout(x, weight, None, **kwargs) # type: ignore[arg-type]
+        layout = conv_layout(x, weight, None, **kwargs)  # type: ignore[arg-type]
     else:
-        layout = conv_layout(x, weight, None, **kwargs) # type: ignore[arg-type]
+        layout = conv_layout(x, weight, None, **kwargs)  # type: ignore[arg-type]
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
@@ -399,8 +399,8 @@ def convolution(
     if bias is None:
         args = [x, weight]
         kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
-        bias.freeze_layout() # type: ignore[attr-defined]
-        V.graph.sizevars.evaluate_static_shapes(bias.get_size()) # type: ignore[attr-defined]
+        bias.freeze_layout()  # type: ignore[attr-defined]
+        V.graph.sizevars.evaluate_static_shapes(bias.get_size())  # type: ignore[attr-defined]
 
     choices = [
         aten_convolution.bind(args, layout, ordered_kwargs_for_cpp_kernel, **kwargs)
