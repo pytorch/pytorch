@@ -201,3 +201,81 @@ _sfdp_pattern_4_training = MultiOutputPattern([CallFunction(aten.view.default,
   None,
   None
 ])
+tmp_0 = CallFunction(aten.mul.Tensor,
+  CallFunction(aten.view.default,
+    CallFunction(aten.bmm.default,
+      CallFunction(aten.view.default,
+        CallFunction(aten.expand.default,
+          KeywordArg('query'),
+          Ignored()
+        ),
+        Ignored()
+      ),
+      CallFunction(aten.view.default,
+        CallFunction(aten.expand.default,
+          CallFunction(aten.permute.default,
+            KeywordArg('key'),
+            Ignored()
+          ),
+          Ignored()
+        ),
+        Ignored()
+      )
+    ),
+    Ignored()
+  ),
+  KeywordArg('scale_factor'),
+  _users=2
+)
+tmp_1 = CallFunction(aten.exp.default,
+  CallFunction(aten.sub.Tensor,
+    tmp_0,
+    CallFunction(aten.amax.default,
+      tmp_0,
+      Ignored(),
+      True
+    )
+  ),
+  _users=2
+)
+_sfdp_pattern_4_inference = CallFunction(aten.view.default,
+  CallFunction(aten.bmm.default,
+    CallFunction(aten.view.default,
+      CallFunction(aten.expand.default,
+        CallFunction(aten.mul.Tensor,
+          CallFunction(aten.mul.Tensor,
+            CallFunction(aten.gt.Scalar,
+              CallFunction(aten.rand.default,
+                Ignored(),
+                dtype=Ignored(),
+                device=Ignored(),
+                pin_memory=False
+              ),
+              KeywordArg('dropout_p')
+            ),
+            CallFunction(aten.div.Tensor,
+              tmp_1,
+              CallFunction(aten.sum.dim_IntList,
+                tmp_1,
+                Ignored(),
+                True
+              )
+            )
+          ),
+          Ignored()
+        ),
+        Ignored()
+      ),
+      Ignored()
+    ),
+    CallFunction(aten.view.default,
+      CallFunction(aten.expand.default,
+        KeywordArg('value'),
+        Ignored()
+      ),
+      Ignored()
+    )
+  ),
+  Ignored(),
+  _users=0
+)

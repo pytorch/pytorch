@@ -210,3 +210,91 @@ _sfdp_pattern_10_training = MultiOutputPattern([CallFunction(aten.view.default,
     Ignored()
   )
 ])
+tmp_0 = CallFunction(prims.convert_element_type.default,
+  CallFunction(aten.view.default,
+    CallFunction(aten.bmm.default,
+      CallFunction(aten.view.default,
+        CallFunction(aten.clone.default,
+          CallFunction(aten.expand.default,
+            CallFunction(aten.div.Tensor,
+              CallFunction(aten.permute.default,
+                KeywordArg('query'),
+                Ignored()
+              ),
+              Ignored()
+            ),
+            Ignored()
+          ),
+          memory_format=torch.contiguous_format
+        ),
+        Ignored()
+      ),
+      CallFunction(aten.view.default,
+        CallFunction(aten.clone.default,
+          CallFunction(aten.expand.default,
+            CallFunction(aten.permute.default,
+              CallFunction(aten.permute.default,
+                KeywordArg('key'),
+                Ignored()
+              ),
+              Ignored()
+            ),
+            Ignored()
+          ),
+          memory_format=torch.contiguous_format
+        ),
+        Ignored()
+      )
+    ),
+    Ignored()
+  ),
+  Ignored(),
+  _users=2
+)
+tmp_1 = CallFunction(aten.exp.default,
+  CallFunction(aten.sub.Tensor,
+    tmp_0,
+    CallFunction(aten.amax.default,
+      tmp_0,
+      Ignored(),
+      True
+    )
+  ),
+  _users=2
+)
+_sfdp_pattern_10_inference = CallFunction(aten.view.default,
+  CallFunction(aten.bmm.default,
+    CallFunction(aten.view.default,
+      CallFunction(aten.expand.default,
+        CallFunction(prims.convert_element_type.default,
+          CallFunction(aten.div.Tensor,
+            tmp_1,
+            CallFunction(aten.sum.dim_IntList,
+              tmp_1,
+              Ignored(),
+              True
+            )
+          ),
+          Ignored()
+        ),
+        Ignored()
+      ),
+      Ignored()
+    ),
+    CallFunction(aten.view.default,
+      CallFunction(aten.clone.default,
+        CallFunction(aten.expand.default,
+          CallFunction(aten.permute.default,
+            KeywordArg('value'),
+            Ignored()
+          ),
+          Ignored()
+        ),
+        memory_format=torch.contiguous_format
+      ),
+      Ignored()
+    )
+  ),
+  Ignored(),
+  _users=0
+)
