@@ -1308,7 +1308,8 @@ class TritonKernel(Kernel):
                 names = {name}
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and ("rmask" in mask or indirect_indexing)
-            ep = ", eviction_policy='evict_last'" if evict_last else ""
+            ep = ", eviction_policy='evict_last'" if evict_last else ", eviction_policy='evict_first'"
+            # ep = ", eviction_policy='evict_last'" if evict_last else ""
         else:
             ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737

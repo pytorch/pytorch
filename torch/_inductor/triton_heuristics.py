@@ -237,6 +237,7 @@ class CachingAutotuner(KernelInterface):
                     bin.c_wrapper(grid_0, grid_1, grid_2, bin.num_warps, bin.shared,
                                 stream, bin.cu_function, None, None, None,
                                 {', '.join(call_args)})
+                return bin
             """.lstrip(),
             scope,
         )
