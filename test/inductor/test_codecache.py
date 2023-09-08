@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
-import torch
-from torch._inductor.codecache import AsyncCompile
 import functools
-from torch.testing._internal.inductor_utils import HAS_CUDA
 import unittest
 
+import torch
+from torch._inductor.codecache import AsyncCompile
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 
 class MyModel(torch.nn.Module):
     def __init__(self):
@@ -14,6 +16,7 @@ class MyModel(torch.nn.Module):
 
     def forward(self, inp):
         return self.fc1(inp)
+
 
 def _run_codecache_test(start_method):
     torch._inductor.config.worker_start_method = start_method
@@ -25,9 +28,11 @@ def _run_codecache_test(start_method):
     inp = torch.rand(10, 10).cuda()
     model(inp).sum().backward()
 
+
 @requires_cuda()
 def test_codecache_spawn():
     _run_codecache_test("spawn")
+
 
 @requires_cuda()
 def test_codecache_fork():

@@ -1307,6 +1307,7 @@ class TritonFuture:
         del self.kernel_name, self.source_code, self.future
         return kernel
 
+
 # If this process dies abnormally (e.g. segfault)
 # it will not shut down the workers. Instead
 # the workers will have their parent reassigned to the
@@ -1326,6 +1327,7 @@ def _async_compile_initializer(orig_ppid):
     global _watchdog_thread
     _watchdog_thread = Thread(target=run, daemon=True)
     _watchdog_thread.start()
+
 
 class AsyncCompile:
     def __init__(self):
@@ -1350,7 +1352,7 @@ class AsyncCompile:
         pool = ProcessPoolExecutor(
             config.compile_threads,
             mp_context=ctx,
-            initializer=partial(_async_compile_initializer, orig_ppid)
+            initializer=partial(_async_compile_initializer, orig_ppid),
         )
         # when this pool is created in a subprocess object, the normal exit handler
         # doesn't run, and we need to register our own handler.
