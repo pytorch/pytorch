@@ -35,8 +35,7 @@ dead_code_elimination = True
 # controls the maximum number of cache entries with a guard on same ID_MATCH'd
 # object. It also controls the maximum size of cache entries if they don't have
 # any ID_MATCH'd guards.
-# TODO(janimesh) - Reduce this value to a smaller number once stability is reached.
-cache_size_limit = 64
+cache_size_limit = 8
 # controls the maximum number of entries for a code object.
 accumulated_cache_size_limit = 64
 
@@ -216,11 +215,6 @@ optimize_ddp = True
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
-
-# Make dynamo skip guarding on hooks on nn modules
-# Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
-# dynamo will not notice and will execute whichever version you first compiled.
-skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True

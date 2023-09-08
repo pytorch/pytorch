@@ -789,7 +789,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(0)
+        >>> torch.randn(10, device='cuda').kthvalue(1)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
 
