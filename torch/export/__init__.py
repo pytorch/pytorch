@@ -305,8 +305,9 @@ class ExportedProgram:
 
     @compatibility(is_backward_compatible=False)
     def buffers(self) -> Iterator[torch.Tensor]:
-        """Returns an iterator over original module buffers."""
-
+        """
+        Returns an iterator over original module buffers.
+        """
         for _, buf in self.named_buffers():
             yield buf
 
