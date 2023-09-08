@@ -92,6 +92,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    FunctoolsPartialVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -474,6 +475,25 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, functools.partial):
+            func_src = AttrSource(self.get_source(), "func")
+            func_obj = VariableBuilder(self.tx, func_src)(value.func)
+
+            args = []
+            args_source = AttrSource(self.get_source(), "args")
+            for i, arg in enumerate(value.args):
+                args.append(
+                    VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
+                )
+
+            keywords = {}
+            keywords_source = AttrSource(self.get_source(), "keywords")
+            for k, v in value.keywords.items():
+                keywords[k] = VariableBuilder(
+                    self.tx, GetItemSource(keywords_source, k)
+                )(v)
+
+            return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
