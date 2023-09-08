@@ -1448,7 +1448,6 @@ def forward(self, arg0_1, arg1_1):
  [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     return [conditional]
 """
-        print(gm.code)
         self._expected_inline_normalized(gm.code, exp_graph)
         self._expected_inline_normalized(gm.body_graph_0.code, exp_body_graph)
 
