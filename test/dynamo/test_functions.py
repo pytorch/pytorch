@@ -1269,6 +1269,27 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 3)  # Recompile! func id changed
 
+        def fn2(f0, f1, args):
+            return f0(*args) * f1(*args)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        x = torch.randn(2, 2)
+        fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        dynamo_result = fn2(lambda0, lambda1, [x])
+        self.assertEqual(cnts.frame_count, 1)  # start over
+
+        lambda4 = functools.partial(multiply, y=3, x=torch.randn(3, 3))
+        fn2(lambda4, lambda4, [])
+
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Different kwarg keys
+
+        lambda5 = functools.partial(multiply, 1)
+        x = torch.randn(3, 3)
+        fn2(lambda5, lambda5, [x])
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! Different arg keys
+
 
 def udf_mul(x, y):
     return x * y

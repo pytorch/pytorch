@@ -606,16 +606,6 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 class FunctoolsPartialVariable(VariableTracker):
     def __init__(self, func, args, keywords, **kwargs):
         super().__init__(**kwargs)
-        # This must be a callable. It is sound to expand this list to other callables.
-        assert isinstance(
-            func,
-            (
-                variables.UserFunctionVariable,
-                variables.NestedUserFunctionVariable,
-                variables.TorchVariable,
-                variables.NNModuleVariable,
-            ),
-        )
         self.func = func
         assert isinstance(args, list)
         self.args = args

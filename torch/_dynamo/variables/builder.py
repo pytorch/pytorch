@@ -493,7 +493,12 @@ class VariableBuilder:
                     self.tx, GetItemSource(keywords_source, k)
                 )(v)
 
-            return FunctoolsPartialVariable(func_obj, args, keywords)
+            guards = {
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                args_source.make_guard(GuardBuilder.LIST_LENGTH),
+            }
+
+            return FunctoolsPartialVariable(func_obj, args, keywords).add_guards(guards)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
