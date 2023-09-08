@@ -73,7 +73,7 @@ force_stride_order = make_prim(
 )
 masked_scatter_with_index = make_prim(
     "inductor_masked_scatter_with_index(Tensor input, Tensor mask, Tensor source_idx, Tensor source) -> Tensor",
-    lambda input_tensor, mask, index, source: aten.masked_scatter(
+    lambda input_tensor, mask, index, source: torch.masked_scatter(
         input_tensor, mask, source
     ),
     doc="masked_scatter with precomputed indices",
