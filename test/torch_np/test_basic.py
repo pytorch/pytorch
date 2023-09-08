@@ -13,6 +13,8 @@ import torch._numpy._util as _util
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_allclose, assert_equal
 
+from torch.testing._internal.common_cuda import TEST_CUDA
+
 
 from torch.testing._internal.common_cuda import TEST_CUDA
 
