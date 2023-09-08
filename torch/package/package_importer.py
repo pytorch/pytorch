@@ -484,7 +484,7 @@ class PackageImporter(Importer):
             return self._do_find_and_load(name)
 
         if module is None:
-            message = "import of {} halted; " "None in sys.modules".format(name)
+            message = f"import of {name} halted; None in sys.modules"
             raise ModuleNotFoundError(message, name=name)
 
         # To handle https://github.com/pytorch/pytorch/issues/57490, where std's

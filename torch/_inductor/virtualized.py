@@ -11,7 +11,7 @@ from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
 
-from .utils import sympy_str, sympy_symbol
+from .utils import reduction_num_outputs, sympy_str, sympy_symbol
 
 threadlocal = local()
 
@@ -83,7 +83,7 @@ class MockHandler:
     @classmethod
     def _init_cls(cls):
         def make_handler(format_string):
-            @staticmethod
+            @staticmethod  # type: ignore[misc]
             def inner(*args):
                 return format_string.format(*args)
 
@@ -121,7 +121,7 @@ class KernelFormatterHandler:
                 )
                 formatter.output.writeline(f"{lhs} = {name}")
 
-        with V.set_ops_handler(formatter), patch.object(
+        with V.set_ops_handler(formatter), patch.object(  # type: ignore[call-arg]
             FlexibleLayout, "allow_indexing", True
         ):
             result = ir_fn(*args)
@@ -138,6 +138,13 @@ class KernelFormatterHandler:
             return varname
 
         return inner
+
+    def reduction(self, dtype, src_dtype, reduction_type, value):
+        line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
+        num_values = reduction_num_outputs(reduction_type)
+        varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
+        self.output.writeline(f"{','.join(varnames)} = {line}")
+        return tuple(varnames) if num_values > 1 else varnames[0]
 
     def getvalue(self, result):
         self.output.writeline(f"return {result}")
@@ -161,6 +168,7 @@ _fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
+_aot_compilation = Virtualized("aot_compilation", NullHandler)
 
 
 class OpsValue:
@@ -222,15 +230,23 @@ class OpsWrapper:
         def inner(*args, **kwargs):
             new_args = [OpsWrapper._unwrap(a) for a in args]
             new_kwargs = {k: OpsWrapper._unwrap(v) for k, v in kwargs.items()}
-            return OpsValue(getattr(_ops, name)(*new_args, **new_kwargs))
+            return OpsWrapper._wrap(getattr(_ops, name)(*new_args, **new_kwargs))
 
         return inner
 
     @staticmethod
     def _unwrap(x):
+        if isinstance(x, (list, tuple)):
+            return tuple(OpsWrapper._unwrap(v) for v in x)
         if isinstance(x, OpsValue):
             return x.value
         return x
+
+    @staticmethod
+    def _wrap(x):
+        if isinstance(x, (list, tuple)):
+            return tuple(OpsValue(v) for v in x)
+        return OpsValue(x)
 
     @staticmethod
     def indirect_indexing(index, size, check=True):
@@ -257,9 +273,11 @@ class _V:
     set_kernel_handler = _kernel._set_handler
     set_debug_handler = _debug._set_handler
     set_interpreter_handler = _interpreter._set_handler
+    set_aot_compilation = _aot_compilation._set_handler
+    get_aot_compilation = _aot_compilation._get_handler
 
     @property
-    def ops(self) -> MockHandler:
+    def ops(self) -> MockHandler:  # type: ignore[valid-type]
         """The operator handler specific to the current codegen task"""
         return _ops._get_handler()
 
@@ -290,6 +308,10 @@ class _V:
     @property
     def interpreter(self):
         return _interpreter._get_handler()
+
+    @property
+    def aot_compilation(self):
+        return _aot_compilation._get_handler()
 
 
 V = _V()

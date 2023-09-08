@@ -295,13 +295,32 @@ def linetable_311_writer(first_lineno):
     linetable = []
     lineno = first_lineno
 
-    def update(lineno_new, inst_size):
+    def update(positions: dis.Positions, inst_size):
         nonlocal lineno
+        lineno_new = positions.lineno if positions else None
 
         def _update(delta, size):
             assert 0 < size <= 8
-            # first byte - always use no column info code (13)
-            linetable.append(0b1_1101_000 + size - 1)
+            # first byte - use 13 (no column info) is positions is
+            # malformed, otherwise use 14 (long form)
+            other_varints = ()
+            if (
+                positions
+                and positions.lineno is not None
+                and positions.end_lineno is not None
+                and positions.col_offset is not None
+                and positions.end_col_offset is not None
+            ):
+                linetable.append(0b1_1110_000 + size - 1)
+                # for whatever reason, column offset needs `+ 1`
+                # https://github.com/python/cpython/blob/1931c2a438c50e6250725c84dff94fc760b9b951/Python/compile.c#L7603
+                other_varints = (
+                    positions.end_lineno - positions.lineno,
+                    positions.col_offset + 1,
+                    positions.end_col_offset + 1,
+                )
+            else:
+                linetable.append(0b1_1101_000 + size - 1)
             # encode signed int
             if delta < 0:
                 delta = ((-delta) << 1) | 1
@@ -309,6 +328,8 @@ def linetable_311_writer(first_lineno):
                 delta <<= 1
             # encode unsigned int
             linetable.extend(encode_varint(delta))
+            for n in other_varints:
+                linetable.extend(encode_varint(n))
 
         if lineno_new is None:
             lineno_delta = 0
@@ -420,14 +441,19 @@ def assemble(instructions: List[Instruction], firstlineno):
     if sys.version_info >= (3, 11):
         lnotab, update_lineno = linetable_311_writer(firstlineno)
         num_ext = 0
-        for inst in instructions:
+        for i, inst in enumerate(instructions):
             if inst.opname == "EXTENDED_ARG":
                 inst_size = 1
                 num_ext += 1
+                # copy positions from the actual instruction
+                for j in (1, 2, 3):
+                    if instructions[i + j].opname != "EXTENDED_ARG":
+                        inst.positions = instructions[i + j].positions
+                        break
             else:
                 inst_size = instruction_size(inst) // 2 + num_ext
                 num_ext = 0
-            update_lineno(inst.starts_line, inst_size)
+            update_lineno(inst.positions, inst_size)
             num_ext = 0
             arg = inst.arg or 0
             code.extend((inst.opcode, arg & 0xFF))

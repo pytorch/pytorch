@@ -104,7 +104,7 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
-        upgraded = ep.transform(*upgrader.upgrader_passes)
+        upgraded = ep._transform(*upgrader.upgrader_passes)
         upgraded.graph_module.print_readable()
 
         count = count_op(upgraded.graph, "aten::div.Scalar_mode")
@@ -117,7 +117,7 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
             return torch.ops.aten.div.Scalar_mode(a, b, rounding_mode='trunc')
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
-        ep = export(fn, inputs, [], _add_runtime_assertions=False)
+        ep = export(fn, inputs, {}, [])
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)

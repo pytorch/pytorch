@@ -210,7 +210,7 @@ def get_suffix_str(number):
 def convert_num_with_suffix(number, suffix):
     index = suffixes.index(suffix)
     # Divide the number by 1000^index and format it to two decimal places
-    value = "{:.3f}".format(number / (1000 ** index))
+    value = f"{number / 1000 ** index:.3f}"
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
@@ -361,13 +361,13 @@ class FlopCounterMode(TorchDispatchMode):
             values.append([
                 padding + mod_name,
                 convert_num_with_suffix(total_flops, global_suffix),
-                "{:.2f}%".format(total_flops / global_flops * 100)
+                f"{total_flops / global_flops * 100:.2f}%"
             ])
             for k, v in self.flop_counts[mod_name].items():
                 values.append([
                     padding + " - " + str(k),
                     convert_num_with_suffix(v, global_suffix),
-                    "{:.2f}%".format(v / global_flops * 100)
+                    f"{v / global_flops * 100:.2f}%"
                 ])
             return values
 

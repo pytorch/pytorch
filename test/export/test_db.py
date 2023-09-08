@@ -32,6 +32,7 @@ class ExampleTests(TestCase):
         exported_program = export(
             model,
             inputs.args,
+            inputs.kwargs,
             constraints=case.constraints,
         )
         exported_program.graph_module.print_readable()
@@ -61,6 +62,7 @@ class ExampleTests(TestCase):
             exported_model = export(
                 model,
                 inputs.args,
+                inputs.kwargs,
                 constraints=case.constraints,
             )
 
@@ -83,6 +85,7 @@ class ExampleTests(TestCase):
         exported_model = export(
             rewrite_case.model,
             inputs.args,
+            inputs.kwargs,
             constraints=rewrite_case.constraints,
         )
 

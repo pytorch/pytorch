@@ -2,7 +2,7 @@ import functools
 import inspect
 import itertools
 import types
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Dict, List
 
 import torch.nn
@@ -61,6 +61,16 @@ def initialize_lazy_module(tx, mod, args, kwargs):
             for arg in proxy_args_kwargs(args, {})[0]
         ]
         mod._infer_parameters(mod, input)
+
+
+@contextmanager
+def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
+    fully_qualified_name = source.name()
+    try:
+        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        yield
+    finally:
+        del tx.nn_module_stack[module_key]
 
 
 class NNModuleVariable(VariableTracker):
@@ -149,6 +159,11 @@ class NNModuleVariable(VariableTracker):
         if not isinstance(getattr_fn, types.FunctionType):
             unimplemented("torch.nn.Module with a non-function custom __getattr__")
 
+        if getattr(base, "_is_fsdp_managed_module", False):
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, source)(getattr_fn(base, name))
+
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable(name)], {}
         )
@@ -231,15 +246,6 @@ class NNModuleVariable(VariableTracker):
 
         return variables.GetAttrVariable(self, name, **options)
 
-    @contextmanager
-    def record_nn_module_stack(self, tx, mod):
-        fully_qualified_name = self.source.name()
-        try:
-            tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
-            yield
-        finally:
-            del tx.nn_module_stack[self.module_key]
-
     def call_function(
         self,
         tx,
@@ -249,7 +255,7 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
 
-        with self.record_nn_module_stack(tx, mod):
+        with record_nn_module_stack(self.module_key, self.source, tx, mod):
             is_lazy = is_lazy_module(mod)
             if (
                 isinstance(mod, torch.nn.Sequential)
@@ -294,10 +300,8 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
-                    unimplemented(
-                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
-                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
-                    )
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
 
                 from .builder import wrap_fx_proxy
 
@@ -385,7 +389,7 @@ class NNModuleVariable(VariableTracker):
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
-            with self.record_nn_module_stack(tx, module):
+            with record_nn_module_stack(self.module_key, self.source, tx, module):
                 return generic_call_method_helper(name)
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
@@ -414,60 +418,25 @@ class NNModuleVariable(VariableTracker):
             name = f"{module.__class__.__name__}_{name}_result"
             return invoke_and_store_as_constant(tx, fn, name, options, args, kwargs)
 
-        def assert_all_args_kwargs_const():
-            if not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
-            ):
-                raise unimplemented(f"non-const NNModule method {name}")
-
-        def get_kwargs(*names):
-            assert_all_args_kwargs_const()
-            fn = getattr(module, name)
-            bound_args = inspect.signature(fn).bind(
-                *([x.as_python_constant() for x in args]),
-                **{k: v.as_python_constant() for k, v in kwargs.items()},
-            )
-            bound_args.apply_defaults()
-            bound_args = bound_args.arguments
-            return {k: bound_args[k] for k in names}
-
-        def wrap_values(items):
-            result = []
-            for name, submod in items:
-                result.append(
-                    tx.output.register_attr_or_module(
-                        submod,
-                        key,
-                        name,
-                        source=NNModuleSource(gen_source(self.source, name)),
-                        **options,
-                    )
-                )
-            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
-
-        def named_embed(name, obj):
-            return TupleVariable(
-                [
-                    ConstantVariable(name, **options),
-                    tx.output.register_attr_or_module(
-                        obj,
-                        key,
-                        name,
-                        source=NNModuleSource(gen_source(self.source, name)),
-                        **options,
-                    ),
-                ]
-            )
-
-        def gen_source(source, name):
-            name_split = name.split(".")
-            if name_split[0] == "":
-                return source
-            while len(name_split) > 0:
-                x = name_split.pop(0)
-                source = AttrSource(source, x)
-            return source
-
+        named_embed = functools.partial(
+            _named_embed,
+            tx=tx,
+            key=key,
+            source_cls=NNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        wrap_values = functools.partial(
+            _wrap_values,
+            tx=tx,
+            key=key,
+            source_cls=FSDPNNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        get_kwargs = functools.partial(
+            _get_kwargs, mod=module, name=name, args=args, kwargs=kwargs
+        )
         if name == "named_children":
             assert not (args or kwargs)
             result = []
@@ -593,8 +562,8 @@ class NNModuleVariable(VariableTracker):
             submod = module[key]
             return tx.output.register_attr_or_module(
                 submod,
+                self.module_key,
                 key,
-                args[0].as_python_constant(),
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
@@ -650,6 +619,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 "ScriptModules aren't supported in UnspecializedNNModuleVariable"
                 " becuase their .forward function isn't a static member of their type"
             )
+        if (
+            getattr(value, "_is_fsdp_managed_module", False)
+            and type(self) == UnspecializedNNModuleVariable
+        ):
+            raise RuntimeError(f"Illegal construction {type(self)}")
         if "value_type" in kwargs:
             lazy_value_to_become = getattr(kwargs["value_type"], "cls_to_become", None)
             if type(value) is lazy_value_to_become:
@@ -713,9 +687,15 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         else:
             source = None
 
-        return variables.UserFunctionVariable(
-            fn, source=source, **options
-        ).call_function(tx, [self] + list(args), kwargs)
+        ctx = (
+            record_nn_module_stack(str(id(mod)), self.source, tx, mod)
+            if self.source
+            else nullcontext()
+        )
+        with ctx:
+            return variables.UserFunctionVariable(
+                fn, source=source, **options
+            ).call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,
@@ -791,7 +771,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     compilation.
     """
 
-    def __init__(self, value, **kwargs):
+    def __init__(self, value, module_key, **kwargs):
         source = kwargs.get("source", None)
         assert (
             source is not None
@@ -803,3 +783,124 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
         else:
             # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
             self.source = NotNNModuleSource(source)
+        self.module_key = module_key
+
+    def call_method(
+        self, tx, name, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
+    ) -> VariableTracker:
+        key = self.module_key
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        named_embed = functools.partial(
+            _named_embed,
+            tx=tx,
+            key=key,
+            source_cls=FSDPNNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        wrap_values = functools.partial(
+            _wrap_values,
+            tx=tx,
+            key=key,
+            source_cls=FSDPNNModuleSource,
+            source=self.source,
+            options=options,
+        )
+        get_kwargs = functools.partial(
+            _get_kwargs, mod=self.value, name=name, args=args, kwargs=kwargs
+        )
+
+        if name == "buffers":
+            return wrap_values(self.value.named_buffers(**get_kwargs("recurse")))
+        elif name == "named_buffers":
+            result = []
+            for name, buffer in self.value.named_buffers(
+                **get_kwargs("prefix", "recurse", "remove_duplicate")
+            ):
+                result.append(named_embed(name, buffer))
+            return variables.ListIteratorVariable(
+                result, mutable_local=MutableLocal(), **options
+            )
+        elif name == "children":
+            assert not (args or kwargs)
+            return wrap_values(self.value.named_children())
+        return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name in ["named_buffers", "children", "buffers"]:
+            # Route this to produce a ListIteratorVariable instead of getting the generator
+            return variables.LambdaVariable(
+                lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+            ).add_options(self)
+        return super().var_getattr(tx, name)
+
+    def as_python_constant(self):
+        return self.value
+
+
+def _gen_source(source, name):
+    name_split = name.split(".")
+    if name_split[0] == "":
+        return source
+    while len(name_split) > 0:
+        x = name_split.pop(0)
+        source = AttrSource(source, x)
+    return source
+
+
+def _get_kwargs(*names, mod, name, args, kwargs):
+    _assert_all_args_kwargs_const(args, kwargs)
+    fn = getattr(mod, name)
+    bound_args = inspect.signature(fn).bind(
+        *([x.as_python_constant() for x in args]),
+        **{k: v.as_python_constant() for k, v in kwargs.items()},
+    )
+    bound_args.apply_defaults()
+    bound_args = bound_args.arguments
+    res = {}
+    for k in names:
+        if k in bound_args:
+            res[k] = bound_args[k]
+    return res
+
+
+# Breaks tx first convention because meant for functools partial usage, post * args should be
+# same for a given VT
+def _wrap_values(items, *, tx, key, source_cls, source, options):
+    result = []
+    for name, submod in items:
+        result.append(
+            tx.output.register_attr_or_module(
+                submod,
+                key,
+                name,
+                source=source_cls(_gen_source(source, name)),
+                **options,
+            )
+        )
+    return variables.ListIteratorVariable(
+        result, mutable_local=MutableLocal(), **options
+    )
+
+
+# Breaks tx first convention because meant for functools partial usage, post * args should be
+# same for a given VT
+def _named_embed(name, obj, *, tx, key, source_cls, source, options):
+    return variables.TupleVariable(
+        [
+            variables.ConstantVariable(name, **options),
+            tx.output.register_attr_or_module(
+                obj,
+                key,
+                name,
+                source=source_cls(_gen_source(source, name)),
+                **options,
+            ),
+        ]
+    )
+
+
+def _assert_all_args_kwargs_const(args, kwargs):
+    if not all(x.is_python_constant() for x in itertools.chain(args, kwargs.values())):
+        raise unimplemented(f"non-const NNModule method {name}")

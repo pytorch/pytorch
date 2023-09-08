@@ -27,9 +27,11 @@ from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
     check_unspec_python_args,
+    get_fake_value,
     guard_if_dyn,
     is_utils_checkpoint,
     istype,
+    numpy_operator_wrapper,
     proxy_args_kwargs,
     specialize_args_kwargs,
 )
@@ -409,6 +411,16 @@ class BuiltinVariable(VariableTracker):
     def as_python_constant(self):
         return self.fn
 
+    def as_proxy(self):
+        DTYPE = {
+            bool: torch.bool,
+            int: torch.int64,
+            float: torch.float64,
+        }
+        if self.fn in DTYPE:
+            return DTYPE[self.fn]
+        return super().as_proxy()
+
     def reconstruct(self, codegen):
         name = self.fn.__name__
         assert self.fn.__module__ == "builtins"
@@ -501,6 +513,21 @@ class BuiltinVariable(VariableTracker):
                         args[1],
                     ]
 
+                # Interaction between ndarray and tensors:
+                #   We prefer the tensor op whenever there are tensors involved
+                if check_numpy_ndarray_args(args, kwargs) and not any(
+                    type(arg) == variables.TensorVariable for arg in args
+                ):
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        numpy_operator_wrapper(self.fn),
+                        *proxy_args_kwargs(args, kwargs),
+                    )
+
+                    return wrap_fx_proxy_cls(
+                        variables.NumpyNdarrayVariable, tx, proxy, **options
+                    )
+
                 proxy = tx.output.create_proxy(
                     "call_function",
                     fn,
@@ -529,13 +556,6 @@ class BuiltinVariable(VariableTracker):
                         proxy,
                         raw_value=raw_value,
                         need_unwrap=need_unwrap,
-                        **options,
-                    )
-                elif check_numpy_ndarray_args(args, kwargs):
-                    return wrap_fx_proxy_cls(
-                        variables.NumpyNdarrayVariable,
-                        tx,
-                        proxy,
                         **options,
                     )
                 elif all(isinstance(x, SymNodeVariable) for x in args):
@@ -653,9 +673,10 @@ class BuiltinVariable(VariableTracker):
 
             # Dynamic input does not get resolved, rather, gets stored as call_function
             if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
-                from .builder import wrap_fx_proxy
+                from .builder import wrap_fx_proxy_cls
 
-                return wrap_fx_proxy(
+                return wrap_fx_proxy_cls(
+                    type(a),
                     tx=tx,
                     proxy=tx.output.create_proxy(
                         "call_function",
@@ -667,13 +688,24 @@ class BuiltinVariable(VariableTracker):
 
             # convert min/max to torch ops
             if b.is_python_constant():
+                if isinstance(a, variables.NumpyNdarrayVariable):
+                    import numpy as np
+
+                    fn = variables.NumpyVariable(np.clip)
+                else:
+                    fn = variables.TorchVariable(torch.clamp)
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
-                result = variables.TorchVariable(torch.clamp).call_function(
-                    tx, [a], kwargs
-                )
+                result = fn.call_function(tx, [a], kwargs)
             else:
-                fn = {max: torch.maximum, min: torch.minimum}[self.fn]
-                result = variables.TorchVariable(fn).call_function(tx, [a, b], {})
+                if isinstance(a, variables.NumpyNdarrayVariable):
+                    import numpy as np
+
+                    fn = {max: np.maximum, min: np.minimum}[self.fn]
+                    fn = variables.NumpyVariable(fn)
+                else:
+                    fn = {max: torch.maximum, min: torch.minimum}[self.fn]
+                    fn = variables.TorchVariable(fn)
+                result = fn.call_function(tx, [a, b], {})
 
             # return unspec if both a, b are unspec or const
             if all(
@@ -1137,6 +1169,33 @@ class BuiltinVariable(VariableTracker):
                 raise AttributeMutationError(
                     "Can't inplace modify module params/buffers inside HigherOrderOp"
                 )
+            if name_var.is_python_constant() and isinstance(
+                val, variables.TensorVariable
+            ):
+                assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
+
+                try:
+                    getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+                except AttributeError:
+                    getattr_var = None
+
+                if isinstance(getattr_var, variables.TensorVariable):
+                    # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
+                    existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                    existing_fake_attr = (
+                        variables.builder.wrap_to_fake_tensor_and_record(
+                            existing_attr, tx, source=getattr_var.source, is_tensor=True
+                        )
+                    )
+
+                    # same tensor identiy, setattr is a no-op
+                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                    if (
+                        existing_fake_attr is assigning_fake_val
+                        and mod_setattr is torch.nn.Module.__setattr__
+                    ):
+                        return getattr_var
+
             obj.convert_to_unspecialized(tx)
 
     def call_delattr(self, tx, obj: VariableTracker, name_var: VariableTracker):
@@ -1307,11 +1366,22 @@ class BuiltinVariable(VariableTracker):
             return ConstantVariable(op(left._underlying_items, right._underlying_items))
 
         if isinstance(left, TensorVariable):
-            from .builder import wrap_fx_proxy
+            from .builder import wrap_fx_proxy_cls
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
-            return wrap_fx_proxy(
+            if (
+                isinstance(right, TensorVariable)
+                and (left.size and right.size) is not None
+                and left.size != right.size
+            ):
+                try:
+                    torch.broadcast_shapes(left.size, right.size)
+                except RuntimeError:
+                    # not broadcastable, can't be compared
+                    _unimplemented()
+            return wrap_fx_proxy_cls(
+                type(left),  # handle Ndarrays and Tensors
                 tx,
                 op(left.as_proxy(), right.as_proxy()),
             )

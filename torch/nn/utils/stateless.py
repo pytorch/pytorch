@@ -109,12 +109,10 @@ def _reparametrize_module(
         error_msgs = []
         if len(unexpected_keys) > 0:
             error_msgs.append(
-                "Unexpected key(s): {}.".format(", ".join(map(repr, unexpected_keys)))
+                f"Unexpected key(s): {', '.join(map(repr, unexpected_keys))}."
             )
         if len(missing_keys) > 0:
-            error_msgs.append(
-                "Missing key(s): {}.".format(", ".join(map(repr, missing_keys)))
-            )
+            error_msgs.append(f"Missing key(s): {', '.join(map(repr, missing_keys))}.")
         if len(error_msgs) > 0:
             raise RuntimeError(
                 "Error(s) in reparametrizing for {}:\n\t{}".format(
@@ -252,6 +250,10 @@ def _functional_call(
         )
     ):
         raise RuntimeError("The stateless API can't be used with Jitted modules")
+    if isinstance(module, torch.nn.DataParallel):
+        raise RuntimeError(
+            "The stateless API can't be used with nn.DataParallel module"
+        )
     if kwargs is None:
         kwargs = {}
     if not isinstance(args, tuple):

@@ -66,7 +66,7 @@ def get_execution_plan(graph_executor_state):
     num_plans = len(execution_plans)
     if num_plans != 1:
         raise RuntimeError('This test assumes this GraphExecutor should '
-                           'only have one execution plan, got: {}'.format(num_plans))
+                           f'only have one execution plan, got: {num_plans}')
     return execution_plans[0]
 
 class _AssertRaisesRegexWithHighlightContext:
@@ -316,8 +316,7 @@ class JitTestCase(JitCommonTestCase):
                 return
             subgraph = 'including' if consider_subgraphs else 'excluding'
             raise AssertionError(
-                '{}\nError: graph contains {} {} nodes ({} subgraphs) but expected {}'.format(
-                    graph, actual, kind, subgraph, expected))
+                f'{graph}\nError: graph contains {actual} {kind} nodes ({subgraph} subgraphs) but expected {expected}')
 
         if consider_subgraphs:
             strgraph = str(graph)
@@ -869,7 +868,7 @@ def get_traced_sample_variant_pairs(device, dtype, op):
         return outputs
 
     for sample in samples:
-        for func_type, variant in variants.items():
+        for variant in variants.values():
             if variant is None:
                 continue
 

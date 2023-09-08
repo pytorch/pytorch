@@ -390,8 +390,7 @@ if __name__ == '__main__':
         if len(failing_repros) == 0:
             print("test passed")
         else:
-            print("{} out of {} tests failed;".format(
-                  len(failing_repros), args.iterations))
+            print(f"{len(failing_repros)} out of {args.iterations} tests failed;")
             print("To repro failing tests, run\n")
             for repro in failing_repros:
                 print(repro)

@@ -1562,8 +1562,9 @@ Tensor renorm_backward(
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
   reduce_dims.erase(reduce_dims.begin() + dim);
 
-  auto acc_type =
-      at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
+  auto acc_type = self.is_mps()
+      ? self.scalar_type()
+      : at::toAccumulateType(self.scalar_type(), /*is_cuda=*/self.is_cuda());
   auto norm = at::linalg_vector_norm(
       self, p, reduce_dims, /*keepdim=*/true, /*dtype=*/acc_type);
 
@@ -6729,7 +6730,9 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
         src_single_zero,
         (grad * masked_src_result).gather(dim, index),
         (grad * result).gather(dim, index) / src.masked_fill(src_zero, 1));
-    if ((src_num_zeros > 1).any().item<bool>()) {
+    // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
+    // is disabled; this also avoids having the item() call in the usual case.
+    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "scatter_reduce(): Double backward is unsupported for src when >1 zeros in src are scattered to the same position in self",
           /* num inputs */ 1);
@@ -6823,7 +6826,9 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
         (grad * masked_src_result).index_select(dim, index),
         (grad * result).index_select(dim, index) /
             source.masked_fill(src_zero, 1));
-    if ((src_num_zeros > 1).any().item<bool>()) {
+    // GradMode::is_enabled() - adding the autograd Node is a no-op if autograd
+    // is disabled this also avoids having the item() call in the usual case
+    if (GradMode::is_enabled() && (src_num_zeros > 1).any().item<bool>()) {
       auto node = std::make_shared<DelayedError>(
           "index_reduce(): Double backward is unsupported for source when >1 zeros in source are scattered to the same position in self",
           /* num inputs */ 1);

@@ -58,6 +58,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
                                           // use the custom class mechanism
                                           // instead. @jerryzh
       {"Device", c10::TypeFactory::get<DeviceObjType>()},
+      {"DeviceIndex", c10::TypeFactory::get<IntType>()},
       {"Stream", c10::TypeFactory::get<StreamObjType>()},
       {"Scalar", c10::TypeFactory::get<NumberType>()},
       {"str", c10::TypeFactory::get<StringType>()},
@@ -137,7 +138,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     L.expect(')');
   } else if (L.nextIf('!')) {
     alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + c10::guts::to_string(next_id++)));
+        Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
     return c10::nullopt;

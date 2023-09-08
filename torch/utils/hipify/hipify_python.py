@@ -77,7 +77,7 @@ class InputError(Exception):
         self.message = message
 
     def __str__(self):
-        return "{}: {}".format("Input error", self.message)
+        return f"Input error: {self.message}"
 
 
 def openf(filename, mode):
@@ -225,7 +225,7 @@ def compute_stats(stats):
     print(", ".join(unsupported_calls))
 
     # Print the number of kernel launches
-    print("\nTotal number of replaced kernel launches: {:d}".format(len(stats["kernel_launches"])))
+    print(f"\nTotal number of replaced kernel launches: {len(stats['kernel_launches']):d}")
 
 
 def add_dim3(kernel_string, cuda_kernel):
@@ -502,7 +502,7 @@ def hip_header_magic(input_string):
 
     # Check if one of the following headers is already included.
     headers = ["hip/hip_runtime.h", "hip/hip_runtime_api.h"]
-    if any(re.search(r'#include ("{0}"|<{0}>)'.format(ext), output_string) for ext in headers):
+    if any(re.search(fr'#include ("{ext}"|<{ext}>)', output_string) for ext in headers):
         return output_string
 
     # Rough logic to detect if we're inside device code
@@ -531,8 +531,7 @@ def replace_extern_shared(input_string):
     """
     output_string = input_string
     output_string = RE_EXTERN_SHARED.sub(
-        lambda inp: "HIP_DYNAMIC_SHARED({} {}, {})".format(
-            inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
+        lambda inp: f"HIP_DYNAMIC_SHARED({inp.group(1) or ''} {inp.group(2)}, {inp.group(3)})", output_string)
 
     return output_string
 
@@ -644,7 +643,12 @@ def is_cusparse_file(rel_filepath):
 
 def is_special_file(rel_filepath):
     if is_pytorch_file(rel_filepath):
-        return ("sparse" in rel_filepath.lower()) or ("linalg" in rel_filepath.lower())
+        if "sparse" in rel_filepath.lower():
+            return True
+        elif "linalg" in rel_filepath.lower():
+            if "batchlinearalgebralibblas" in rel_filepath.lower():
+                return False  # don't use "special" mappings for this specific linalg cublas file
+            return True
     return False
 
 def is_caffe2_gpu_file(rel_filepath):
@@ -711,7 +715,7 @@ class Trie:
             if cconly:
                 result += "?"
             else:
-                result = "(?:%s)?" % result
+                result = f"(?:{result})?"
         return result
 
     def pattern(self):
@@ -746,7 +750,7 @@ for mapping in CUDA_TO_HIP_MAPPINGS:
                 PYTORCH_SPECIAL_MAP[src] = dst
             else:
                 PYTORCH_MAP[src] = dst
-        if constants.API_PYTORCH not in meta_data:
+        if constants.API_PYTORCH not in meta_data and constants.API_SPECIAL not in meta_data:
             CAFFE2_TRIE.add(src)
             CAFFE2_MAP[src] = dst
 RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.pattern())

@@ -33,7 +33,7 @@ class UniqueKeyLoader(Loader):
             raise ConstructorError(
                 None,
                 None,
-                "expected a mapping node, but found %s" % node.id,
+                f"expected a mapping node, but found {node.id}",
                 node.start_mark,
             )
         mapping = {}
@@ -353,7 +353,7 @@ def genCppH(
         shader_info = getShaderInfo(srcPath)
 
         tile_size = (
-            "{{{}}}".format(", ".join(str(x) for x in shader_info.tile_size))
+            f"{{{', '.join(str(x) for x in shader_info.tile_size)}}}"
             if (len(shader_info.tile_size) > 0)
             else "std::vector<uint32_t>()"
         )
@@ -385,11 +385,7 @@ def genCppH(
             for registry_key in registry_keys:
                 shader_info_registry_code.append(
                     textwrap.indent(
-                        "{{\"{}\", {{{{\"{}\", \"{}\"}}}}}}".format(
-                            op_name,
-                            registry_key,
-                            name,
-                        ),
+                        f"{{\"{op_name}\", {{{{\"{registry_key}\", \"{name}\"}}}}}}",
                         "        ",
                     ),
                 )

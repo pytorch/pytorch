@@ -134,19 +134,22 @@ def save_model_with_external_data(
                 # name-modifying code in FX-to-ONNX exporter.
                 # See function _replace_get_attr_with_placeholder for details.
                 name = name.replace(".", "_")
-                # For each PyTorch tensor name loaded by torch.load,
-                #  1.  Search its best match in ONNX model. E.g., the match of
-                #       "transformer_attention_weight" could be "attention_weight".
-                #  2.  Set "tensor" as the initializer of the matched ONNX input.
-                #      E.g., "tensor" is stored as the initializer of "attention_weight".
-                # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
-                # loaded by torch.load.
-                for onnx_input_name in onnx_input_names:
-                    if onnx_input_name.endswith(name) or name.endswith(onnx_input_name):
-                        # Find a match. Change name to the matched ONNX input name, so that we
-                        # create initializer with the right ONNX name.
-                        name = onnx_input_name
-                        break
+
+            # This block tries to match the onnx initializer name with torch parameter/buffer
+            #  e.g. A pytorch buffer 'transformer.h.0.attn.bias' can be named 'h.0.attn.bias' in a ONNX initializer
+            # For each PyTorch tensor name loaded by torch.load,
+            #  1.  Search its best match in ONNX model. E.g., the match of
+            #       "transformer_attention_weight" could be "attention_weight".
+            #  2.  Set "tensor" as the initializer of the matched ONNX input.
+            #      E.g., "tensor" is stored as the initializer of "attention_weight".
+            # Step 1 is required because sometimes, tensor names are stored with prefix the dictionary
+            # loaded by torch.load.
+            for onnx_input_name in onnx_input_names:
+                if onnx_input_name.endswith(name) or name.endswith(onnx_input_name):
+                    # Find a match. Change name to the matched ONNX input name, so that we
+                    # create initializer with the right ONNX name.
+                    name = onnx_input_name
+                    break
 
             relative_tensor_file_path = os.path.join(initializer_location, name)
             # Create one file per tensor.

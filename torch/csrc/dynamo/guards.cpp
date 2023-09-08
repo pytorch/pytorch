@@ -1,6 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <c10/util/flat_hash_map.h>
+#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
 #include <sstream>
@@ -35,10 +37,10 @@ class TensorCheck {
         device_index_(v.device().index()),
         requires_grad_(v.requires_grad()),
         sizes_(std::move(dynamic_dims_sizes)),
-        strides_(std::move(dynamic_dims_strides)) {
+        strides_(std::move(dynamic_dims_strides)),
+        dim_(static_cast<int64_t>(sizes_.size())) {
     // TODO(voz): In cases where sizes_ and strides_ are fully dynamic, should
     // we just treat this as optional?
-    dim_ = sizes_.size();
   }
 
   // See note in guards.py [Note - On Export Tensor Guards]
@@ -54,8 +56,8 @@ class TensorCheck {
     if (ndim != dim_) {
       return false;
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -76,7 +78,7 @@ class TensorCheck {
   std::string check_verbose(
       const LocalState& state,
       const at::Tensor& v,
-      std::string tensor_name) {
+      const std::string& tensor_name) {
     std::stringstream fail_reason;
     fail_reason << "tensor '" << tensor_name << "' ";
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr()) {
@@ -113,8 +115,8 @@ class TensorCheck {
                   << ndim;
       return fail_reason.str();
     }
-    const auto& sizes = v.sizes();
-    const auto& strides = v.strides();
+    const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
       auto known_stride = strides_[i];
@@ -157,9 +159,9 @@ typedef struct {
 } TensorGuards;
 
 static void TensorGuards_dealloc(TensorGuards* self) {
-  if (self->checks != NULL) {
+  if (self->checks != nullptr) {
     delete self->checks;
-    self->checks = NULL;
+    self->checks = nullptr;
   }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -169,7 +171,7 @@ static PyObject* TensorGuards_new(
     PyObject* args,
     PyObject* kwds) {
   TensorGuards* self = (TensorGuards*)type->tp_alloc(type, 0);
-  if (self != NULL) {
+  if (self != nullptr) {
     self->checks = new ChecksList();
   }
   return (PyObject*)self;
@@ -191,7 +193,7 @@ static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
   for (Py_ssize_t i = 0; i < size; i++) {
     PyObject* item = PyList_GetItem(pyList, i);
     if (item == Py_None) {
-      vec.push_back(std::nullopt);
+      vec.emplace_back(std::nullopt);
     } else {
       int64_t value = PyLong_AsLongLong(item);
       if (value == -1 && PyErr_Occurred()) {
@@ -200,7 +202,7 @@ static std::vector<std::optional<int64_t>> pyListToVecOptInt(PyObject* pyList) {
             "Size or stride list item is not a valid integer.");
         TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
       }
-      vec.push_back(value);
+      vec.emplace_back(value);
     }
   }
   return vec;
@@ -231,13 +233,13 @@ static int TensorGuards_init(
   // Top level structure is List[List[Union[int, None]]]
   PyObject* dynamic_dims_sizes_py =
       PyDict_GetItemString(kwds, "dynamic_dims_sizes");
-  if (dynamic_dims_sizes_py == NULL) {
+  if (dynamic_dims_sizes_py == nullptr) {
     PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_sizes=...");
     return -1;
   }
   PyObject* dynamic_dims_strides_py =
       PyDict_GetItemString(kwds, "dynamic_dims_strides");
-  if (dynamic_dims_strides_py == NULL) {
+  if (dynamic_dims_strides_py == nullptr) {
     PyErr_SetString(PyExc_TypeError, "missing dynamic_dims_strides=...");
     return -1;
   }
@@ -263,11 +265,11 @@ static int TensorGuards_init(
     }
     auto tensor = THPVariable_Unpack(item);
     std::vector<std::optional<int64_t>> tensor_dims_size =
-        per_tensor_dynamic_dims_sizes.size() == 0
+        per_tensor_dynamic_dims_sizes.empty()
         ? wrapIntegersInOptional(tensor.sizes())
         : per_tensor_dynamic_dims_sizes[i];
     std::vector<std::optional<int64_t>> tensor_dims_stride =
-        per_tensor_dynamic_dims_strides.size() == 0
+        per_tensor_dynamic_dims_strides.empty()
         ? wrapIntegersInOptional(tensor.strides())
         : per_tensor_dynamic_dims_strides[i];
     checks.emplace_back(
@@ -280,17 +282,22 @@ static int TensorGuards_init(
   return 0;
 }
 
-PyObject* TensorGuards_check(TensorGuards* self, PyObject* args) {
+PyObject* TensorGuards_check(
+    TensorGuards* self,
+    PyObject* args,
+    PyObject* kwargs) {
   if (!PyTuple_CheckExact(args)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
-    return NULL;
+    return nullptr;
   }
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
 
+  // kwargs is just ignored here
+
   if (static_cast<decltype(len)>(checks.size()) != len) {
     PyErr_SetString(PyExc_TypeError, "wrong length");
-    return NULL;
+    return nullptr;
   }
 
   LocalState state;
@@ -325,26 +332,26 @@ PyObject* TensorGuards_check_verbose(
     PyObject* kwargs) {
   if (!PyTuple_CheckExact(args)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
-    return NULL;
+    return nullptr;
   }
   auto& checks = *self->checks;
   auto len = PyTuple_GET_SIZE(args);
 
   if (static_cast<decltype(len)>(checks.size()) != len) {
     PyErr_SetString(PyExc_TypeError, "wrong length");
-    return NULL;
+    return nullptr;
   }
 
   PyObject* tensor_check_names_py =
       PyDict_GetItemString(kwargs, "tensor_check_names");
-  if (tensor_check_names_py == NULL) {
+  if (tensor_check_names_py == nullptr) {
     PyErr_SetString(PyExc_TypeError, "missing tensor_check_names kwarg");
-    return NULL;
+    return nullptr;
   }
 
   if (!PyList_Check(tensor_check_names_py)) {
     PyErr_SetString(PyExc_TypeError, "tensor_check_names kwarg must be a list");
-    return NULL;
+    return nullptr;
   }
 
   auto names_size = PyList_Size(tensor_check_names_py);
@@ -352,7 +359,7 @@ PyObject* TensorGuards_check_verbose(
     PyErr_SetString(
         PyExc_TypeError,
         "tensor_check_names should be the same size as # tensors");
-    return NULL;
+    return nullptr;
   }
 
   std::vector<std::string> tensor_check_names;
@@ -362,7 +369,7 @@ PyObject* TensorGuards_check_verbose(
     if (!PyUnicode_Check(value)) {
       PyErr_SetString(
           PyExc_TypeError, "tensor_check_names must only contain strings");
-      return NULL;
+      return nullptr;
     }
     tensor_check_names.emplace_back(PyUnicode_AsUTF8(value));
   }
@@ -402,26 +409,92 @@ PyObject* TensorGuards_check_verbose(
   Py_RETURN_TRUE;
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef TensorGuards_methods[] = {
-    {"check", (PyCFunction)TensorGuards_check, METH_VARARGS, ""},
+    {"check",
+     (PyCFunction)(void*)TensorGuards_check,
+     METH_VARARGS | METH_KEYWORDS,
+     ""},
     {"check_verbose",
      (PyCFunction)(void*)TensorGuards_check_verbose,
      METH_VARARGS | METH_KEYWORDS,
      "verbose fail reasons for failed checks"},
-    {NULL} /* Sentinel */
+    {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = {
-    // NOLINTNEXTLINE
-    PyVarObject_HEAD_INIT(NULL, 0)};
+static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+
+struct GlobalStateGuard {
+  PyObject_HEAD;
+
+  inline void init() {
+    auto& ctx = at::globalContext();
+    _grad_mode = at::GradMode::is_enabled();
+    _torch_function = torch::torch_function_enabled();
+    _deterministic_algorithms = ctx.deterministicAlgorithms();
+    _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
+    _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
+    _num_threads = at::get_num_threads();
+  }
+
+  inline bool check() {
+    auto& ctx = at::globalContext();
+    return (
+        _grad_mode == at::GradMode::is_enabled() &&
+        _torch_function == torch::torch_function_enabled() &&
+        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+        _allow_tf32 == ctx.allowTF32CuBLAS() &&
+        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+        _num_threads == at::get_num_threads());
+  }
+
+  bool _grad_mode;
+  bool _torch_function;
+  bool _deterministic_algorithms;
+  bool _allow_tf32;
+  bool _allow_fp16_reduce;
+  bool _allow_bf16_reduce;
+  int _num_threads;
+  // TODO(jansel): we should guard on more state as inductor starts using it
+};
+
+int GlobalStateGuard_init(
+    GlobalStateGuard* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  self->init();
+  return 0;
+}
+
+PyObject* GlobalStateGuard_check(
+    GlobalStateGuard* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (self->check()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+static PyMethodDef GlobalStateGuard_methods[] = {
+    {"check",
+     (PyCFunction)(void*)GlobalStateGuard_check,
+     METH_NOARGS,
+     "Return true if global state was the same as at creation time"},
+    {nullptr}};
+static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
-  PyObject* obj;
-  unsigned long long expected;
+  PyObject* obj = nullptr;
+  unsigned long long expected = 0;
   if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
-    return NULL;
+    return nullptr;
   }
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   if (Py_TYPE(obj) == (void*)expected) {
     Py_RETURN_TRUE;
   } else {
@@ -431,11 +504,12 @@ static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
 
 static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
-  PyObject* obj;
-  unsigned long long expected;
+  PyObject* obj = nullptr;
+  unsigned long long expected = 0;
   if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
-    return NULL;
+    return nullptr;
   }
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
   if (obj == (void*)expected) {
     Py_RETURN_TRUE;
   } else {
@@ -448,25 +522,25 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
    Assert that a given tensor has a given size/stride, but ignore strides
    of size==1 dimensions.  Implemented in C++ as this is on the hot path.
   */
-  PyObject* item;
-  PyObject* size;
-  PyObject* stride;
+  PyObject* item = nullptr;
+  PyObject* size = nullptr;
+  PyObject* stride = nullptr;
   if (!PyArg_ParseTuple(args, "OOO", &item, &size, &stride)) {
-    return NULL;
+    return nullptr;
   }
   if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
     PyErr_SetString(PyExc_TypeError, "expected Tensor()");
-    return NULL;
+    return nullptr;
   }
   if (!PyTuple_CheckExact(size) || !PyTuple_CheckExact(stride)) {
     PyErr_SetString(PyExc_TypeError, "expected tuple()");
-    return NULL;
+    return nullptr;
   }
   at::Tensor tensor = THPVariable_Unpack(item);
   int64_t ndim = tensor.ndimension();
   if (PyTuple_GET_SIZE(size) != ndim || PyTuple_GET_SIZE(stride) != ndim) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
-    return NULL;
+    return nullptr;
   }
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
@@ -480,17 +554,18 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
       msg << "expected size " << actual_size << "==" << want_size << ", stride "
           << actual_stride << "==" << want_stride << " at dim=" << i;
       PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
-      return NULL;
+      return nullptr;
     }
   }
   Py_RETURN_TRUE;
 }
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
-    {"check_type_id", check_type_id, METH_VARARGS, NULL},
-    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
-    {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
-    {NULL, NULL, 0, NULL}};
+    {"check_type_id", check_type_id, METH_VARARGS, nullptr},
+    {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
+    {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
+    {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
@@ -513,19 +588,38 @@ PyObject* torch_c_dynamo_guards_init() {
   TensorGuardsType.tp_init = (initproc)TensorGuards_init;
   TensorGuardsType.tp_new = TensorGuards_new;
 
-  PyObject* m;
   if (PyType_Ready(&TensorGuardsType) < 0)
-    return NULL;
+    return nullptr;
 
-  m = PyModule_Create(&_module);
-  if (m == NULL)
-    return NULL;
+  GlobalStateGuardType.tp_name = "torch._C._dynamo.guards.GlobalStateGuard";
+  GlobalStateGuardType.tp_basicsize = sizeof(GlobalStateGuard);
+  GlobalStateGuardType.tp_itemsize = 0;
+  GlobalStateGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
+  GlobalStateGuardType.tp_doc = "Guard on PyTorch global flags such as no_grad";
+  GlobalStateGuardType.tp_methods = GlobalStateGuard_methods;
+  GlobalStateGuardType.tp_init = (initproc)GlobalStateGuard_init;
+  GlobalStateGuardType.tp_new = PyType_GenericNew;
+
+  if (PyType_Ready(&GlobalStateGuardType) < 0)
+    return nullptr;
+
+  auto m = PyModule_Create(&_module);
+  if (m == nullptr)
+    return nullptr;
 
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);
     Py_DECREF(m);
-    return NULL;
+    return nullptr;
+  }
+
+  Py_INCREF(&GlobalStateGuardType);
+  if (PyModule_AddObject(
+          m, "GlobalStateGuard", (PyObject*)&GlobalStateGuardType) < 0) {
+    Py_DECREF(&GlobalStateGuardType);
+    Py_DECREF(m);
+    return nullptr;
   }
 
   return m;
