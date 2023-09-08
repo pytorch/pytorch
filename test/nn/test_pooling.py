@@ -871,7 +871,7 @@ torch.cuda.synchronize()
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
@@ -908,7 +908,7 @@ torch.cuda.synchronize()
         helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.bfloat16, torch.float, torch.double)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool3d_ndhwc(self, device, dtype):
@@ -974,9 +974,10 @@ torch.cuda.synchronize()
         helper(0, 79, 4, 4, 4, 3, stride=2)
 
     @onlyCPU
-    def test_max_pool_bfloat16(self, device):
-        def helper(shape, kernel_size, stride, memory_format):
-            input = torch.randn(shape, dtype=torch.float32, device=device).bfloat16()
+    @dtypes(torch.half, torch.bfloat16)
+    def test_max_pool_bfloat16_half(self, device, dtype):
+        def helper(shape, kernel_size, stride, memory_format, dtype):
+            input = torch.randn(shape, dtype=dtype, device=device)
             input = input.to(memory_format=memory_format).requires_grad_()
             if len(shape) == 4:
                 pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
@@ -991,22 +992,22 @@ torch.cuda.synchronize()
             out2.sum().backward()
 
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2.bfloat16())
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype))
             self.assertEqual(ind, ind2)
-            self.assertEqual(input.grad, input2.grad.bfloat16())
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
 
-        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format)
-        helper((4, 65, 8, 8), 7, 1, torch.channels_last)
-        helper((1, 19, 20, 10), 8, 2, torch.contiguous_format)
-        helper((1, 19, 20, 10), 8, 2, torch.channels_last)
-        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format)
-        helper((4, 65, 8, 8), 7, 1, torch.channels_last)
-        helper((1, 19, 10, 10, 10), 8, 2, torch.contiguous_format)
-        helper((1, 19, 10, 9, 14), 8, 2, torch.channels_last_3d)
-        helper((4, 10, 3, 8, 8), 3, 1, torch.contiguous_format)
-        helper((4, 10, 8, 8, 8), 7, 1, torch.channels_last_3d)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format, dtype)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last, dtype)
+        helper((1, 19, 20, 10), 8, 2, torch.contiguous_format, dtype)
+        helper((1, 19, 20, 10), 8, 2, torch.channels_last, dtype)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format, dtype)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last, dtype)
+        helper((1, 19, 10, 10, 10), 8, 2, torch.contiguous_format, dtype)
+        helper((1, 19, 10, 9, 14), 8, 2, torch.channels_last_3d, dtype)
+        helper((4, 10, 3, 8, 8), 3, 1, torch.contiguous_format, dtype)
+        helper((4, 10, 8, 8, 8), 7, 1, torch.channels_last_3d, dtype)
 
     @onlyCUDA
     @gcIfJetson

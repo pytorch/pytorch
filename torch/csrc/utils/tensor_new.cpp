@@ -1710,7 +1710,9 @@ Tensor asarray(
       if (wrong_device || wrong_dtype) {
         tensor = tensor.to(
             device.value_or(tensor.device()),
-            dtype.value_or(tensor.scalar_type()));
+            dtype.value_or(tensor.scalar_type()),
+            /*non_blocking=*/false,
+            /*copy=*/force_copy);
       } else {
         tensor = tensor.clone();
       }
