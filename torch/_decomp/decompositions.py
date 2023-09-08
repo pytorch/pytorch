@@ -2096,8 +2096,8 @@ def _index_add(
     )
     index_size = index.size(0) if index.ndim == 1 else 1
     torch._check(
-        x.size(dim) == index_size,
-        lambda: f"Number of indices ({index_size}) should be equal to source.size(dim): ({x.size(dim)}), for {dim=}",
+        tensor.size(dim) == index_size,
+        lambda: f"Number of indices ({index_size}) should be equal to source.size(dim) ({tensor.size(dim)}), for {dim=}",
     )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
