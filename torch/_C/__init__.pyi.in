@@ -55,8 +55,8 @@ from . import _functorch, _lazy, _lazy_ts_backend, _nn, _onnx, _VariableFunction
 
 T = TypeVar("T")
 S = TypeVar("S", bound="torch.Tensor")
-P = ParamSpec('P')
-R = TypeVar('R', covariant=True)  # return value (always covariant)
+P = ParamSpec("P")
+ReturnVal = TypeVar("ReturnVal", covariant=True)  # return value (always covariant)
 
 # Defined in torch/csrc/Device.cpp
 class device:
@@ -947,8 +947,8 @@ class LiteScriptModule:
     def forward(self, *input) -> List[str]: ...
     def run_method(self, method_name: str, *input): ...
 
-class ScriptFunction(Callable[P,R]):
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R: ...
+class ScriptFunction(Generic[P,ReturnVal]):
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnVal: ...
     def save(self, filename: str, _extra_files: Dict[str, bytes]) -> None: ...
     def save_to_buffer(self, _extra_files: Dict[str, bytes]) -> bytes: ...
     @property
