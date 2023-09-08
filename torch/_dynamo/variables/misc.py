@@ -773,7 +773,9 @@ class SkipFilesVariable(VariableTracker):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
                     # `wraps_source` should implement `reconstruct`
                     # which NestedUserFunctionVariable does.
-                    return fn.clone(wraps_source=fn)
+                    # We prefer `args[0].source` if that is available.
+                    wraps_source = args[0].source if args[0].source else fn
+                    return fn.clone(wraps_source=wraps_source)
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps, **options)
