@@ -292,10 +292,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
     def check_kwargs(self, kwargs, supported_types):
-        assert (
-            all(isinstance(value, supported_types) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        if not all(isinstance(value, supported_types) for value in kwargs.values()):
+            raise unimplemented(
+                f"Only kwargs of the following types are supported: {supported_types}"
+            )
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -315,8 +315,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -511,8 +509,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        self.check_kwargs(kwargs, ConstantVariable)
-
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
@@ -633,8 +629,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO: Support `fn` with kwargs.
         if not torch._dynamo.config.capture_func_transforms:
