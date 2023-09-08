@@ -117,15 +117,13 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         mod = torch.nn.Module()
         mod.handle = None
 
-        v, y, z= fn(v, torch.randn([2, 2]), torch.randn([2, 2]), mod)
+        v, y, z = fn(v, torch.randn([2, 2]), torch.randn([2, 2]), mod)
         v.backward(torch.tensor([1.0, 2.0, 3.0]))
 
         self.assertEqual(v.grad, torch.tensor([2.0, 4.0, 6.0]))
         self.assertEqual(cnts.frame_count, 1)
 
         self.assertNotEqual(mod.handle, None)
-
-
 
     def test_tensor_only_register_hook_in_graph_local(self):
         def local_hook(grad):

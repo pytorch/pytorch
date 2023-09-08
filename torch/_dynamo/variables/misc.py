@@ -792,7 +792,7 @@ class SkipFilesVariable(VariableTracker):
             )
         elif self.value is functools.partial:
             if not args:
-                unimplemented(f"functools.partial malformed")
+                unimplemented("functools.partial malformed")
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
