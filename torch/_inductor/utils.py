@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections
 import contextlib
 import functools
@@ -513,7 +515,7 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvaluewithlinemap(self):
+    def getvaluewithlinemap(self) -> tuple[str, list[tuple[int, LineContext]]]:
         buf = StringIO()
         p = 1
         linemap = []
@@ -531,11 +533,11 @@ class IndentedBuffer:
             p += 1 + line.count("\n")
         return buf.getvalue(), linemap
 
-    def getvalue(self):
+    def getvalue(self) -> str:
         v, _ = self.getvaluewithlinemap()
         return v
 
-    def getrawvalue(self):
+    def getrawvalue(self) -> str:
         buf = StringIO()
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
@@ -623,7 +625,7 @@ class DeferredLineBase:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
         raise NotImplementedError()
 
-    def _new_line(self, line: str) -> "DeferredLineBase":
+    def _new_line(self, line: str) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
         raise NotImplementedError()
 

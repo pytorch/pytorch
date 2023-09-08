@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
-from typing import Any
+from typing import Any, Callable, Union
 from unittest.mock import patch
 
 import sympy
@@ -23,8 +25,8 @@ class Virtualized:
     This allows us to swap in different op implementations in codegen.
     """
 
-    def __init__(self, vname, default):
-        self._key = f"__torchinductor_{vname}"
+    def __init__(self, vname: str, default):
+        self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
     def _set_handler(self, value):
@@ -54,7 +56,7 @@ class NullHandler:
     pass
 
 
-def _arg_str(a):
+def _arg_str(a) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -73,11 +75,11 @@ class MockHandler:
         return inner
 
     @staticmethod
-    def masked(mask, body, other):
+    def masked(mask, body, other) -> str:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True):
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
@@ -102,7 +104,7 @@ class KernelFormatterHandler:
         self.var_counter = itertools.count()
 
     @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None):
+    def ir_to_string(ir_fn, index, rindex=None) -> str:
         from .ir import FlexibleLayout
 
         args = [index, rindex] if rindex is not None else [index]
@@ -127,7 +129,7 @@ class KernelFormatterHandler:
             result = ir_fn(*args)
             return formatter.getvalue(result)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name) -> Callable[..., str]:
         def inner(*args, **kwargs):
             line = getattr(self.parent_handler, name)(*args, **kwargs)
             if name == "indirect_indexing":
@@ -139,7 +141,9 @@ class KernelFormatterHandler:
 
         return inner
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(
+        self, dtype, src_dtype, reduction_type, value
+    ) -> Union[tuple[str, ...], str]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
