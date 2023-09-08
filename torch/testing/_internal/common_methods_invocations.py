@@ -1166,18 +1166,20 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
         # -- not conjugated arg tensors)
         yield SampleInput(make_arg((S, )), make_arg_conj((S, )))
 
-def error_inputs_dot_vdot(op_info, device, **kwargs):
+
+def error_inputs_dot_vdot(op_info, device, is_ref=False, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
 
-    yield ErrorInput(SampleInput(make_input(1), args=(make_input(3, dtype=torch.float16),)),
-                     error_regex='dot : expected both vectors to have same dtype')
+    if not is_ref:
+        yield ErrorInput(SampleInput(make_input(1), args=(make_input(3, dtype=torch.float16),)),
+                         error_regex='dot : expected both vectors to have same dtype')
     yield ErrorInput(SampleInput(make_input(1, 1), args=(make_input(3),)),
                      error_regex='1D tensors expected')
     yield ErrorInput(SampleInput(make_input(9), args=(make_input(3),)),
                      error_regex='inconsistent tensor size')
-    if device != "cpu":
-        ErrorInput(SampleInput(make_input(3), args=(make_input(3, device="cpu"),)),
-                   error_regex='Expected all tensors to be on the same device')
+    if device != "cpu" and not is_ref:
+        yield ErrorInput(SampleInput(make_input(3), args=(make_input(3, device="cpu"),)),
+                         error_regex='Expected all tensors to be on the same device')
 
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
@@ -8674,6 +8676,18 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                    }
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'tanh',
@@ -8681,6 +8695,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {torch.complex64: tol(atol=5e-03, rtol=1e-04)}
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'sin',
@@ -12621,8 +12645,7 @@ op_db: List[OpInfo] = [
            aten_name='group_norm',
            aliases=('group_norm',),
            ref=reference_group_norm,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13092,7 +13115,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
@@ -13117,7 +13140,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -13134,8 +13157,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_max_pool,
            skips=(
                # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
@@ -13157,7 +13179,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13683,12 +13705,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
+                                            torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
@@ -13697,6 +13719,11 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
+        # tan(j * pi/2 * odd_number) is nan which also make tanhshrink nan.
+        reference_numerics_filter=NumericsFilter(
+            condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
+                                 if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+            safe_val=0)
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',
@@ -14777,6 +14804,10 @@ op_db: List[OpInfo] = [
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   decorators=(DecorateInfo(
+                               toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                               'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                               device_type='cuda'),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14808,7 +14839,11 @@ op_db: List[OpInfo] = [
                    ref=np.tanh,
                    aten_backward_name='tanh_backward',
                    aliases=('nn.functional.tanh',),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                   device_type='cuda'),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -18994,6 +19029,15 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
     ),
     PythonRefInfo(
+        "_refs.take_along_dim",
+        torch_opinfo_name="take_along_dim",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestCommon',
+                         'test_python_ref'),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.to",
         torch_opinfo_name="to",
     ),
@@ -19668,6 +19712,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tan",
         torch_opinfo_name="tan",
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+        ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -19691,6 +19740,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tanh",
         torch_opinfo_name="tanh",
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+        ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -19964,15 +20018,12 @@ python_ref_db = [
                          'test_reference_numerics_normal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                'TestUnaryUfuncs',),
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
+                                   torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128),
-                         active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128),
@@ -20961,6 +21012,28 @@ python_ref_db = [
         torch_opinfo_name="vsplit",
     ),
     PythonRefInfo(
+        "_refs.dot",
+        torch_opinfo_name="dot",
+        error_inputs_func=partial(error_inputs_dot_vdot, is_ref=True),
+        # .conj() does not set ._is_view() correctly in ATen
+        validate_view_consistency=False,
+        skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.vdot",
+        torch_opinfo_name="vdot",
+        error_inputs_func=partial(error_inputs_dot_vdot, is_ref=True),
+        # .conj() does not set ._is_view() correctly in ATen
+        validate_view_consistency=False,
+        skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
     ),
@@ -21506,6 +21579,10 @@ python_ref_db = [
             ),
         ],
     ),
+    PythonRefInfo(
+        "_refs.view_as_complex",
+        torch_opinfo_name="view_as_complex",
+    ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
@@ -21514,7 +21591,7 @@ ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in ops_and_refs if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
 binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
-spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
+spectral_funcs = [op for op in ops_and_refs if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]

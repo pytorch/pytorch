@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 #include <c10/macros/Macros.h>

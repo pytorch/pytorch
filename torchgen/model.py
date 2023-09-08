@@ -99,6 +99,7 @@ class DispatchKey(Enum):
     VmapMode = auto()
     FuncTorchGradWrapper = auto()
     FuncTorchBatched = auto()
+    BatchedNestedTensor = auto()
     FuncTorchVmapMode = auto()
     FuncTorchDynamicLayerFrontMode = auto()
     Functionalize = auto()
@@ -203,6 +204,11 @@ class DispatchKey(Enum):
             if k == value:
                 return v
         raise AssertionError(f"unknown dispatch key {value}")
+
+
+class _TorchDispatchModeKey(Enum):
+    FAKE = auto()
+    PROXY = auto()
 
 
 def codegen_per_backend_entries() -> str:
