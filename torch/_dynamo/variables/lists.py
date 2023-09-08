@@ -15,10 +15,33 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import check_constant_args, get_fake_value, guard_if_dyn, namedtuple_fields
+from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
+
+
+def _listlike_contains_helper(items, search, tx, options):
+    if search.is_python_constant():
+        result = any(
+            x.as_python_constant() == search.as_python_constant() for x in items
+        )
+        return variables.ConstantVariable(result, **options)
+
+    from .builtin import BuiltinVariable
+
+    result = None
+    for x in items:
+        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+        if result is None:
+            result = check
+        else:
+            result = BuiltinVariable(operator.or_).call_function(
+                tx, [check, result], {}
+            )
+    if result is None:
+        result = ConstantVariable(None)
+    return result
 
 
 class BaseListVariable(VariableTracker):
@@ -112,29 +135,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-
-            search = args[0]
-            if check_constant_args(args, {}) and search.is_python_constant():
-                result = any(
-                    x.as_python_constant() == search.as_python_constant()
-                    for x in self.items
-                )
-                return variables.ConstantVariable(result, **options)
-
-            from .builtin import BuiltinVariable
-
-            result = None
-            for x in self.items:
-                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
-                if result is None:
-                    result = check
-                else:
-                    result = BuiltinVariable(operator.or_).call_function(
-                        tx, [check, result], {}
-                    )
-            if result is None:
-                result = ConstantVariable(None)
-            return result
+            return _listlike_contains_helper(self.items, args[0], tx, options)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -541,6 +542,34 @@ class SizeVariable(TupleVariable):
     def unpack_var_sequence(self, tx):
         return [x.add_options(self) for x in self.items]
 
+    def numel(self, tx):
+        from .builtin import BuiltinVariable
+        from .tensor import SymNodeVariable
+
+        const_result = 1
+        sym_sizes = []
+
+        for v in self.items:
+            if isinstance(v, ConstantVariable):
+                const_result *= v.value
+            else:
+                assert isinstance(v, SymNodeVariable), type(v)
+                # Delay proxy calls  until we know it will be necessary
+                sym_sizes.append(v)
+
+        result = ConstantVariable(const_result).add_options(self)
+        if sym_sizes and const_result == 1:
+            # Skip multiplying by 1
+            result, *sym_sizes = sym_sizes
+
+        if not sym_sizes or const_result == 0:
+            return result
+
+        mul = BuiltinVariable(operator.mul)
+        for v in sym_sizes:
+            result = mul.call_function(tx, [result, v], {})
+        return result
+
     def call_method(
         self,
         tx,
@@ -553,6 +582,10 @@ class SizeVariable(TupleVariable):
             assert not kwargs and len(args) == 1
             out = self.get_item_dyn(tx, args[0])
             return out
+        elif name == "numel":
+            assert not args and not kwargs
+            return self.numel(tx)
+
         return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
@@ -562,15 +595,6 @@ class SizeVariable(TupleVariable):
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
-
-
-class ShapeVariable(TupleVariable):
-    """
-    Represents tensor.shape(...) and helps differentiate between a constant
-    TupleVariable and ShapeVariable.
-    """
-
-    pass
 
 
 class NamedTupleVariable(TupleVariable):
@@ -898,6 +922,10 @@ class SetVariable(VariableTracker):
             return result
         elif name == "__len__":
             return ConstantVariable(len(self.items)).add_options(options)
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return _listlike_contains_helper(self.items, args[0], tx, options)
         else:
             return super().call_method(tx, name, args, kwargs)
 

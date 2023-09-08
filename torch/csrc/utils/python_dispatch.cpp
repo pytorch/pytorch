@@ -561,6 +561,8 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(CompositeExplicitAutograd)
       DEF_ONE(CompositeImplicitAutogradNestedTensor)
       DEF_ONE(CompositeImplicitAutograd)
+      // NestedTensor is not a backend key
+      DEF_ONE(AutogradNestedTensor)
       DEF_ONE(AutogradOther)
       DEF_ONE(Autograd)
       DEF_ONE(BackendSelect)
@@ -744,6 +746,11 @@ void initDispatchBindings(PyObject* module) {
     return c10::SymInt(
         c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
+
+  using c10::impl::TorchDispatchModeKey;
+  py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
+      .value("PROXY", TorchDispatchModeKey::PROXY)
+      .value("FAKE", TorchDispatchModeKey::FAKE);
 }
 
 // TODO: dedupe with the kernel

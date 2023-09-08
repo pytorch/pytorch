@@ -31,6 +31,12 @@ from .bytecode_transformation import (
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
+from .cache_size import (
+    CacheSizeRelevantForFrame,
+    compute_cache_size,
+    exceeds_cache_size_limit,
+    is_recompilation,
+)
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
     augment_exc_message,
@@ -71,6 +77,7 @@ from .utils import (
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
+GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 
 class Tracker:
@@ -96,10 +103,7 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-
-initial_grad_state = None
-initial_deterministic_algorithms_state = None
-initial_torch_function_state = None
+initial_global_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -122,7 +126,9 @@ def wrap_convert_context(fn):
 
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
+        guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+        prior_deterministic = torch.are_deterministic_algorithms_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
@@ -135,11 +141,15 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
+            torch.use_deterministic_algorithms(prior_deterministic)
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+            assert (
+                guards.check()
+            ), "Global state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -167,7 +177,9 @@ def has_tensor_in_frame(frame):
             return seen_ids[obj_id]
         seen_ids[obj_id] = False
 
-        if isinstance(obj, (torch.Tensor, torch.nn.Module)):
+        if isinstance(obj, (torch.Tensor, torch.nn.Module)) or (
+            istype(obj, type) and issubclass(obj, torch.nn.Module)
+        ):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]
         elif istype(obj, (list, tuple)):
@@ -219,21 +231,6 @@ def exception_handler(e, code, frame=None, export=False):
     augment_exc_message(e, export=export)
 
 
-def is_recompilation(cache_size):
-    # cache_size here refers to the number of total cached entries on the code
-    # object.
-    return cache_size >= 1
-
-
-def compute_cache_size(cache_entry):
-    # Walk the linked list to calculate the cache size
-    running_cache_size = 0
-    while cache_entry:
-        running_cache_size += 1
-        cache_entry = cache_entry.next
-    return running_cache_size
-
-
 FRAME_COUNTER = 0
 FRAME_COMPILE_COUNTER: typing.Counter[int] = collections.Counter()
 
@@ -254,7 +251,7 @@ def convert_frame_assert(
 
         code = frame.f_code
 
-        cache_size = compute_cache_size(cache_entry)
+        cache_size = compute_cache_size(frame, cache_entry)
         if is_recompilation(cache_size) and (
             recompiles_log.isEnabledFor(logging.DEBUG) or config.error_on_recompile
         ):
@@ -316,7 +313,7 @@ def convert_frame_assert(
 
         if is_generator(code):
             unimplemented("generator")
-        if cache_size >= config.cache_size_limit:
+        if exceeds_cache_size_limit(cache_size):
 
             def format_func_info(code):
                 return f"'{code.co_name}' ({code.co_filename}:{code.co_firstlineno})"
@@ -354,16 +351,8 @@ def convert_frame_assert(
         if not has_tensor_in_frame(frame):
             return None
 
-        global initial_grad_state
-        initial_grad_state = torch.is_grad_enabled()
-
-        global initial_deterministic_algorithms_state
-        initial_deterministic_algorithms_state = (
-            torch.are_deterministic_algorithms_enabled()
-        )
-
-        global initial_torch_function_state
-        initial_torch_function_state = torch._C._is_torch_function_enabled()
+        global initial_global_state
+        initial_global_state = GlobalStateGuard()
 
         global FRAME_COUNTER
         if "_id" not in frame_state:
@@ -383,7 +372,8 @@ def convert_frame_assert(
                 "co_name": code.co_name,
                 "co_filename": code.co_filename,
                 "co_firstlineno": code.co_firstlineno,
-                "cache_size": cache_size,
+                "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
+                "accumulated_cache_size": cache_size.num_cache_entries,
             },
         )
 
@@ -422,7 +412,7 @@ def _compile(
     export: bool,
     export_constraints,
     hooks: Hooks,
-    cache_size: int,
+    cache_size: CacheSizeRelevantForFrame,
     frame: Optional[types.FrameType] = None,
     frame_state=None,
     compile_id=None,
@@ -619,7 +609,8 @@ def _compile(
                 code.co_name,
                 code.co_filename,
                 code.co_firstlineno,
-                cache_size,
+                cache_size.num_cache_entries_with_same_id_matched_objs,
+                cache_size.num_cache_entries,
                 guard_count,
                 graph_op_count,
                 graph_node_count,
@@ -635,12 +626,10 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
     inner_convert = convert_frame_assert(compiler_fn, one_graph=False)
 
-    def _convert_frame(
-        frame: types.FrameType, cache_size: int, hooks: Hooks, frame_state
-    ):
+    def _convert_frame(frame: types.FrameType, cache_entry, hooks: Hooks, frame_state):
         counters["frames"]["total"] += 1
         try:
-            result = inner_convert(frame, cache_size, hooks, frame_state)
+            result = inner_convert(frame, cache_entry, hooks, frame_state)
             counters["frames"]["ok"] += 1
             return result
         except Exception as e:
@@ -705,7 +694,7 @@ def replay(filename):
             export=False,
             export_constraints=None,
             hooks=Hooks(),
-            cache_size=0,
+            cache_size=CacheSizeRelevantForFrame(0, 0),
             frame=None,
         )
     except Exception:
