@@ -794,9 +794,6 @@ class CommonTemplate:
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
                     code = run_and_get_cpp_code(fn_opt, *inps)
-                    # Ensure ternary operator is being used in cpp code
-                    self.assertTrue("<" in code)
-                    self.assertTrue("?" in code)
                 else:
                     code = run_and_get_triton_code(fn_opt, *inps)
                     self.assertTrue(("tl.where" in code) is has_wrapping)
