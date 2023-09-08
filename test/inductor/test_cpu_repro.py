@@ -1356,6 +1356,28 @@ class CPUReproTests(TestCase):
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_scatter_using_atomic_add(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.randn(5, 29, 13),
+            2,
+            torch.tensor([[[3, 5, 7, 9]]]),
+            torch.randn(1, 1, 10),
+        )
+
+        fn_opt = torch.compile()(fn)
+        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
+            code = run_and_get_cpp_code(fn_opt, *inps)
+            FileCheck().check("atomic_add").run(code)
+
+            self.assertEqual(
+                fn(*inps),
+                fn_opt(*inps),
+            )
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )

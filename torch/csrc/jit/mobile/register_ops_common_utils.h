@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
+#include <iostream>
+
 namespace torch {
 namespace jit {
 

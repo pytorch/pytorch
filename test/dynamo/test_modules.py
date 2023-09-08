@@ -980,6 +980,17 @@ class ModuleComparison(torch.nn.Module):
         return output
 
 
+class ModuleWithTrainingState(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.drop1 = torch.nn.Dropout(0.5)
+        self.bn1 = torch.nn.BatchNorm2d(6)
+
+    def forward(self, x):
+        x = self.bn1(self.drop1(x))
+        return x
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -987,6 +998,25 @@ class ModulePatch1(torch.nn.Module):
 class ModulePatch2(torch.nn.Module):
     def forward(self, x):
         return x - 1
+
+
+class UnspecNonInlinableModule(torch.nn.Module):
+    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+    def forward(self, x):
+        if x.sum() > 0:
+            return x + 1
+        else:
+            return x - 1
+
+
+class UnspecNonInlinableToplevelModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.m = UnspecNonInlinableModule()
+
+    def forward(self, x):
+        return self.m(x)
 
 
 def make_test(fn, expected_ops=None):
@@ -1548,6 +1578,87 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check all attributes, parameters and buffers
         self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
 
+    def test_no_recompile_on_nn_guarded_modules(self):
+        size = (10, 10)
+        cache_size_limit = 1
+        num_submodules = 4
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(*size)
+
+            def forward(self, x):
+                a = torch.sin(torch.cos(x))
+                return self.linear(a)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule() for _ in range(num_submodules)]
+                self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        # Each submod is compiled separately and has a different nn module
+        # guard. Ensure that recompilation logic is handle correctly.
+        with unittest.mock.patch(
+            "torch._dynamo.config.error_on_recompile", True
+        ), unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit",
+            cache_size_limit,
+        ):
+            x = torch.randn(*size)
+            mod(x)
+            self.assertEqual(cnts.frame_count, num_submodules)
+
+    def test_cache_size_limit_on_guarded_nn_modules(self):
+        cache_size_limit = 2
+        num_submodules = 4
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                a = torch.sin(torch.cos(x))
+                return self.relu(a)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule() for _ in range(num_submodules)]
+                self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        # For the third iteration, we would reach the cache size limit, and
+        # therefore the total number of expected frame count is 2 *
+        # num_submodules.
+        with unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit",
+            cache_size_limit,
+        ):
+            for size in [
+                (4,),
+                (4, 4),
+                (4, 4, 4),
+            ]:
+                x = torch.randn(size)
+                mod(x)
+        self.assertEqual(cnts.frame_count, 2 * num_submodules)
+
     def test_recursion(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -2036,6 +2147,16 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_assign_does_not_exist(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                self.text_encoding = x + 1
+                return self.text_encoding
+
+        mod = MyModule()
+        out = torch.compile(mod, fullgraph=True)(torch.randn(10))
+        assert mod.text_encoding is out
+
     def test_module_dict_iter_values(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2108,6 +2229,30 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
+
+    def test_module_with_training_state(self):
+        mod = ModuleWithTrainingState()
+        opt_mod = torch.compile(mod)
+        input = torch.randn(64, 6, 32, 32)
+        # trigger the compilation
+        opt_mod(input)
+
+        # calling .eval in sub model
+        # now the model should be deterministic
+        opt_mod.drop1.eval()
+        opt_mod.bn1.eval()
+
+        output2 = opt_mod(input)
+        output3 = opt_mod(input)
+        self.assertEqual(output2, output3)
+
+    def test_unspec_non_inlinable_module(self):
+        mod = UnspecNonInlinableModule()
+        opt_fn = torch._dynamo.optimize("eager")(mod)
+        x = torch.randn(100)
+        actual = opt_fn(x)
+        expected = mod(x)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
