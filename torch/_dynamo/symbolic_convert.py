@@ -2157,6 +2157,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(null_idxes),
         )
 
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
         orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
             "orig_graphmodule", None
         )
@@ -2296,9 +2298,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
+        # Detect inline GraphModule calls in order to propgate node metadata,
+        # by checking if the first argument (self) is a variable tracking a GraphModule.
         if args and isinstance(args[0], NNModuleVariable):
             module = parent.output.get_submodule(args[0].module_key)
             if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
                 code_context.get_context(module.forward.__code__)[
                     "orig_graphmodule"
                 ] = module
