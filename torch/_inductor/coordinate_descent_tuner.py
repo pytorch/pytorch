@@ -241,13 +241,6 @@ class CoordescTuner:
         self,
         func: Callable[["triton.Config"], float],
         baseline_config: "triton.Config",
-        # import time
-        # begin = time.time()
-        # torch.cuda.synchronize()
-        # for _ in range(100):
-        #     kernel_call()
-        # torch.cuda.synchronize()
-        # return (time.time() - begin)*1000/100
         baseline_timing: Optional[float] = None,
     ) -> "triton.Config":
         if baseline_timing is None:
