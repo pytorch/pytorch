@@ -25,7 +25,7 @@ class NestedTensor(torch.Tensor):
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
-    def __new__(cls, values, *, offsets=None, **kwargs):
+    def __new__(cls, values, offsets, **kwargs):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -51,7 +51,7 @@ class NestedTensor(torch.Tensor):
         r._values = values.detach() if values.requires_grad else values
         return r
 
-    def __init__(self, values, *, offsets=None, **kwargs):
+    def __init__(self, values, offsets, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
