@@ -1288,7 +1288,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         samples = list(
             sample_inputs_gather(
-                None, "cpu", torch.float32, requires_grad=False, include_0d=False
+                None,
+                "cpu",
+                torch.float32,
+                requires_grad=False,
+                include_0d=False,
+                include_empty=False,
             )
         )
         cnts = torch._dynamo.testing.CompileCounter()
