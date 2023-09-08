@@ -23,7 +23,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
-    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
@@ -354,7 +353,12 @@ def promote_constants(inputs, override_return_dtype=None):
                 )
             )
         elif isinstance(x, sympy.Expr):
-            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+            out.append(
+                ExpandView.create(
+                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    list(ex.get_size()),
+                )
+            )
         else:
             out.append(x)
 
@@ -1882,6 +1886,7 @@ make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten._scaled_mm.default)
 
+# TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
@@ -2451,8 +2456,7 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
-    dtype = kwargs.get("dtype")
-    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
+    assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
