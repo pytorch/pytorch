@@ -138,7 +138,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     L.expect(')');
   } else if (L.nextIf('!')) {
     alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
+        Symbol::fromQualString("alias::$" + c10::guts::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
     return c10::nullopt;

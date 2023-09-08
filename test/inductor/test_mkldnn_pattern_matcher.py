@@ -90,6 +90,7 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
     ):
         counters.clear()
+        torch._dynamo.reset()
         maybe_autocast = contextlib.nullcontext()
         if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             maybe_autocast = torch.cpu.amp.autocast()

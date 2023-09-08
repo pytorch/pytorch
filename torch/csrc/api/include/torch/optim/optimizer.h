@@ -156,12 +156,12 @@ class TORCH_API Optimizer {
   const std::vector<OptimizerParamGroup>& param_groups() const noexcept;
 
   /// Provides a reference to the state this optimizer holds
-  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
   state() noexcept;
 
   /// Provides a const reference to the state this optimizer holds
-  const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& state()
-      const noexcept;
+  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+  state() const noexcept;
 
   /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
@@ -171,7 +171,7 @@ class TORCH_API Optimizer {
 
  protected:
   std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>> state_;
+  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
   std::unique_ptr<OptimizerOptions> defaults_;
 };
 

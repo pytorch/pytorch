@@ -1,14 +1,10 @@
-from collections import Counter
-from typing import Any, Callable, Dict, Optional
+import collections
+from typing import Any, Dict
 
 import torch
 import torch.utils._pytree as pytree
 
 aten = torch.ops.aten
-
-
-def return_true(*args, **kwargs) -> bool:
-    return True
 
 
 def replace_node_with_constant(gm, node, constant):
@@ -43,18 +39,16 @@ class ConstantFolder(torch.fx.Interpreter):
         self,
         gm,
         skip_constructors=False,
-        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
     ):
         super().__init__(gm)
         self.node_replacements: Dict[torch.fx.Node, Any] = {}
-        self.replaced_uses: Dict[torch.fx.Node, int] = Counter()
+        self.replaced_uses: Dict[torch.fx.Node, int] = collections.Counter()
         self.unknown_value = object()
-        self.skip_constructors = skip_constructors
-        self.insertable_tensor_check = (
-            insertable_tensor_check
-            if insertable_tensor_check is not None
-            else return_true
-        )  # type: ignore[assignment]
+        self.skip_constructors: bool = skip_constructors
+
+        # overwrite this to deallocate env values if their only remaining use
+        # is the output
+        self.user_to_last_uses = self.node_to_last_non_output_use()
 
     def is_impure(self, node: torch.fx.node.Node):
         if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
@@ -65,13 +59,41 @@ class ConstantFolder(torch.fx.Interpreter):
             return True
         return False
 
-    def run_node(self, node):
-        aten = torch.ops.aten
-        args, kwargs = self.fetch_args_kwargs_from_env(node)
+    def node_to_last_non_output_use(self):
+        last_non_output_use = collections.defaultdict(list)
+        seen_uses = set()
+        output_node = next(iter(reversed(self.module.graph.nodes)))
 
+        for node in reversed(self.module.graph.nodes):
+            if node.target == "output":
+                continue
+
+            def add_use(inp):
+                if inp in seen_uses:
+                    return
+
+                seen_uses.add(inp)
+                last_non_output_use[node].append(inp)
+
+            pytree.tree_map_only(torch.fx.Node, add_use, (node.args, node.kwargs))
+
+            # if this node is only used in output, we want to gc it right away
+            if len(node.users) == 1 and output_node in node.users:
+                last_non_output_use[node].append(node)
+
+        return last_non_output_use
+
+    def run_node(self, node):
         if node.target == "output":
+            # because we remove nodes from env on last non output use,
+            # re-define them now or we'll get error in interpreter
+            def set_env(arg):
+                self.env[arg] = self.unknown_value
+
+            pytree.tree_map_only(torch.fx.Node, set_env, node.args)
             return super().run_node(node)
 
+        args, kwargs = self.fetch_args_kwargs_from_env(node)
         flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
 
         if self.unknown_value in flattened_inputs:
@@ -104,13 +126,13 @@ class ConstantFolder(torch.fx.Interpreter):
         out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
-            if not self.insertable_tensor_check(out):  # type: ignore[operator]
+            if not self.insertable_tensor_check(out):
                 return out
 
             if self.is_impure(node):
                 return self.unknown_value
 
-            self.node_replacements[node] = out
+            self.add_node_replacement(node, out)
 
             flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
 
@@ -125,6 +147,12 @@ class ConstantFolder(torch.fx.Interpreter):
                     self.node_replacements.pop(to_delete, None)
 
         return out
+
+    def insertable_tensor_check(self, tensor: torch.Tensor) -> bool:
+        return True
+
+    def add_node_replacement(self, node: torch.fx.Node, tensor: torch.Tensor) -> None:
+        self.node_replacements[node] = tensor
 
     def run(self):
         env = {}
