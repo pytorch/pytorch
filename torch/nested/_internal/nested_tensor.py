@@ -30,8 +30,8 @@ class NestedTensor(torch.Tensor):
     def __new__(
         cls,
         values,
+        offsets,
         *,
-        offsets=None,
         sym_size=None,
         raggedness_id=None,
         is_fake=False,
@@ -65,8 +65,8 @@ class NestedTensor(torch.Tensor):
     def __init__(
         self,
         values,
+        offsets,
         *,
-        offsets=None,
         sym_size=None,
         raggedness_id=None,
         **kwargs

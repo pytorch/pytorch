@@ -495,7 +495,7 @@ class MetaConverter:
                             )
                         )
                     ):
-                        # You're normal and hapapy, install the fresh storage into the memo
+                        # You're normal and happy, install the fresh storage into the memo
                         self.storage_memo[swr] = r.untyped_storage()
                     else:
                         # We don't support views with nested tensors (yet?), so
