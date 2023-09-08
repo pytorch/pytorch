@@ -181,9 +181,9 @@ case "$image" in
     CONDA_CMAKE=yes
     ONNX=yes
     ;;
-  pytorch-linux-focal-py3-clang7-android-ndk-r19c)
+  pytorch-linux-focal-py3-clang9-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.8
-    CLANG_VERSION=7
+    CLANG_VERSION=9
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes

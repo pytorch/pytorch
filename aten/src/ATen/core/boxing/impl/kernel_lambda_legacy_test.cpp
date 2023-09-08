@@ -854,7 +854,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   std::string prefix = "prefix";
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", [&] (const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-    return prefix + a + b + std::to_string(c);
+    return prefix + a + b + c10::guts::to_string(c);
   });
   expectCallsConcatUnboxed(DispatchKey::CPU);
 }
