@@ -59,7 +59,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
-from .exc import CondOpArgsMismatchError, UserError, UserErrorType
+from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -86,29 +86,7 @@ class Unset(Enum):
 unset = Unset.token
 
 compile_lock = threading.RLock()
-guarded_backend_cache = threading.local()
-
-
-@contextlib.contextmanager
-def backend_cache_wrapper(backend: CompilerFn):
-    def _set_current_backend(backend: CompilerFn):
-        if not hasattr(guarded_backend_cache, "current_backend"):
-            guarded_backend_cache.current_backend = None
-        if not hasattr(guarded_backend_cache, "cached_backends"):
-            guarded_backend_cache.cached_backends = {}
-        prev_backend = guarded_backend_cache.current_backend
-        guarded_backend_cache.current_backend = backend
-        # Mapping id of a CompilerFn to itself
-        guarded_backend_cache.cached_backends[id(backend)] = backend
-        return prev_backend
-
-    prev_backend = _set_current_backend(backend)
-    try:
-        yield backend
-    finally:
-        _set_current_backend(prev_backend)
-
-
+most_recent_backend: Optional[CompilerFn] = None
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
@@ -283,8 +261,6 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
-        self.backend_cache_manager = backend_cache_wrapper(innermost_fn(self.callback))
-        self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
         self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -297,7 +273,6 @@ class _TorchDynamoContext:
         # TODO: This is totally not the right way to chain contexts manually
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
-        self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -355,8 +330,6 @@ class _TorchDynamoContext:
 
             on_enter()
             prior = set_eval_frame(callback)
-            backend_cache_manager = backend_cache_wrapper(innermost_fn(self.callback))
-            backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -367,7 +340,6 @@ class _TorchDynamoContext:
                 set_eval_frame(prior)
                 dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
-                backend_cache_manager.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -427,6 +399,10 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
     def __init__(
         self,
         callback,
@@ -438,8 +414,19 @@ class OptimizeContext(_TorchDynamoContext):
         compiler_config=None,
     ):
         def on_enter():
+            global most_recent_backend
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
+            most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
+        compiler_fn = innermost_fn(callback)
         super().__init__(
             callback=callback,
             on_enter=on_enter,
@@ -671,13 +658,14 @@ def explain(f, *extra_args, **extra_kwargs):
             nonlocal out_guards
             out_guards.extend(guards)
 
-        opt_f = optimize(
-            dynamo_graph_accumulating_compiler,
-            nopython=False,
-            guard_export_fn=guard_export_print,
-        )(f)
-        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-        opt_f(*args, **kwargs)
+        with patch(f"{__name__}.most_recent_backend", None):
+            opt_f = optimize(
+                dynamo_graph_accumulating_compiler,
+                nopython=False,
+                guard_export_fn=guard_export_print,
+            )(f)
+            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+            opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
 
@@ -1141,7 +1129,7 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with config.patch(
+        with patch(f"{__name__}.most_recent_backend", None), config.patch(
             specialize_int=True,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
