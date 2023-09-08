@@ -418,29 +418,19 @@ class SideEffects:
             #  - For tensors without sources:
             #    - We graph break
             # - The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
-            if tensor.source:
-                cg(tensor)
-                cg.extend_output([cg.create_load_attr("register_hook")])
-                cg(hook)
-                cg.extend_output(create_call_function(1, True))
-                if hasattr(handle, "last_seen_name") and handle.last_seen_name:
-                    # register_hook stored with variable name assigned to the handle
-                    cg.extend_output(
-                        [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
-                    )
-                else:
-                    # register_hook stored w/o a variable name assigned to the handle
-                    cg.extend_output([create_instruction("POP_TOP")])
+            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
+            cg(tensor)
+            cg.extend_output([cg.create_load_attr("register_hook")])
+            cg(hook)
+            cg.extend_output(create_call_function(1, True))
+            if hasattr(handle, "last_seen_name") and handle.last_seen_name:
+                # register_hook stored with variable name assigned to the handle
+                cg.extend_output(
+                    [cg.create_store(handle.last_seen_name)]
+                )
             else:
-                if (
-                    handle.as_global
-                    and hasattr(handle, "last_seen_name")
-                    and handle.last_seen_name
-                ):
-                    cg(handle)
-                    cg.extend_output(
-                        [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
-                    )
+                # register_hook stored w/o a variable name assigned to the handle
+                cg.extend_output([create_instruction("POP_TOP")])
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []

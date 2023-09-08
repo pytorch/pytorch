@@ -662,7 +662,7 @@ class RemovableHandleVariable(UserDefinedObjectVariable):
             return [codegen.create_load_global(self.as_global, False, add=True)]
         if self.last_seen_name:
             # It is an invariant that at this point, a STORE_FAST was executed for this name.
-            return [create_instruction("LOAD_FAST", argval=self.last_seen_name)]
+            return [codegen.create_load(self.last_seen_name)]
         return super().reconstruct(codegen)
 
     def rename(self, tx, name):
