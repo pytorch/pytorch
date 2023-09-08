@@ -15,13 +15,13 @@ from torch.distributed._tensor.placement_types import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
     with_comms,
 )
 
 
-class DistMatrixOpsTest(DTensorTestBase):
+class DistMatrixOpsTest(DTensorOpTestBase):
     @with_comms
     def test_addmm(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))

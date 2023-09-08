@@ -7,7 +7,7 @@ from torch.distributed._tensor import distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     with_comms,
 )
 
@@ -19,7 +19,7 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 
-class TestEmbeddingOp(DTensorTestBase):
+class TestEmbeddingOp(DTensorOpTestBase):
     def _run_embedding_op_test(
         self,
         shard_dim,

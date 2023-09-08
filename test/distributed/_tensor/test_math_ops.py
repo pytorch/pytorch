@@ -9,13 +9,13 @@ from torch.distributed._tensor import distribute_tensor
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorOpTestBase,
     skip_unless_torch_gpu,
     with_comms,
 )
 
 
-class DistMathOpsTest(DTensorTestBase):
+class DistMathOpsTest(DTensorOpTestBase):
     @with_comms
     def test_sum(self):
         device_mesh = self.build_device_mesh()
