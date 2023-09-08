@@ -902,11 +902,18 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
-PYTHON_TYPE_TO_SCHEMA_TYPE = {
-    torch.dtype: "int",
-    torch.device: "Device",
-    bool: "bool",
-}
+@functools.lru_cache(None)
+def python_type_to_schema_type():
+    from . import ir
+
+    PYTHON_TYPE_TO_SCHEMA_TYPE = {
+        torch.dtype: "int",
+        torch.device: "Device",
+        bool: "bool",
+        float: "float",
+        ir.TensorBox: "Tensor",
+    }
+    return PYTHON_TYPE_TO_SCHEMA_TYPE
 
 
 def may_get_optional_schema_type(schema_type, is_optional_arg):
@@ -927,8 +934,8 @@ def type_match(arg, arg_type, is_optional_arg):
             # TODO: add support here
             return False
 
-    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
-        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+    if arg.__class__ in python_type_to_schema_type():
+        schema_type = python_type_to_schema_type()[arg.__class__]
         may_optional_schema_type = may_get_optional_schema_type(
             schema_type, is_optional_arg
         )
@@ -961,6 +968,9 @@ def schema_match(schema, args, kwargs):
     def is_optional(arg):
         return "Optional" in str(arg.type)
 
+    def allow_none(arg):
+        return is_optional(arg) or arg.has_default_value()
+
     assert len(args) <= max_pos_args, args_error_message(
         len(args), max_pos_args, min_args
     )
@@ -977,7 +987,7 @@ def schema_match(schema, args, kwargs):
                 obj = kwargs[argument.name]
                 is_kwd = True
 
-        if obj is None and not is_optional(argument):
+        if obj is None and not allow_none(argument):
             return False
 
         if obj is not None:
@@ -1029,3 +1039,28 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def has_free_symbols(itr):
+    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+
+
+def is_dynamic(*args):
+    from . import ir
+
+    for t in args:
+        if isinstance(t, ir.TensorBox):
+            if has_free_symbols(t.data.get_size()) or (
+                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+            ):
+                return True
+        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
+            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
+            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
+                return True
+        elif not isinstance(t, ir.IRNode):
+            continue
+        else:
+            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+
+    return False
