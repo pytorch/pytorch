@@ -27,6 +27,7 @@ Stats stats() {
 } // namespace torch
 
 #else
+
 #include <c10/util/flat_hash_map.h>
 #include <elf.h>
 #include <link.h>
@@ -45,9 +46,6 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
-#ifdef FBCODE_CAFFE2
-#include <llvm/DebugInfo/Symbolize/Symbolize.h>
-#endif
 
 struct UpgradeExclusive {
   UpgradeExclusive(std::shared_lock<std::shared_timed_mutex>& rdlock)
@@ -315,7 +313,19 @@ std::vector<void*> unwind() {
   return frames;
 }
 
-#ifndef FBCODE_CAFFE2
+c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
+  if (!addr) {
+    return c10::nullopt;
+  }
+  std::shared_lock lock(cache_mutex_);
+  const LibraryInfo* library_info = unwind_cache.findLibraryFor((uint64_t)addr);
+  if (!library_info) {
+    return c10::nullopt;
+  }
+  return std::make_pair(
+      library_info->name(), (uint64_t)addr - library_info->load_bias());
+}
+
 struct Symbolizer {
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
@@ -329,16 +339,15 @@ struct Symbolizer {
     if (frame_map_.count(addr)) {
       return;
     }
-    auto maybe_library =
-        addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
+    auto maybe_library = libraryFor(addr);
     if (!maybe_library) {
       frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
       return;
     }
     has_pending_results_ = true;
-    auto& entry = getOrCreate(maybe_library->name());
+    auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
-    auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
+    auto libaddress = maybe_library->second - 1;
     entry.comm->out() << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
@@ -402,44 +411,8 @@ struct Symbolizer {
     }
   };
 };
-#else
-struct Symbolizer {
-  static std::lock_guard<std::mutex> guard() {
-    static std::mutex mutex;
-    return std::lock_guard<std::mutex>(mutex);
-  }
-  static Symbolizer& get() {
-    static Symbolizer singleton;
-    return singleton;
-  }
-  void request(void* addr) {
-    if (frame_map_.count(addr)) {
-      return;
-    }
-    auto maybe_library =
-        addr ? unwind_cache.findLibraryFor((uint64_t)addr) : nullptr;
-    if (maybe_library) {
-      auto libaddress = ((uint64_t)addr - maybe_library->load_bias() - 1);
-      auto r = symbolizer.symbolizeCode(
-          maybe_library->name(),
-          {libaddress, llvm::object::SectionedAddress::UndefSection});
-      if (r) {
-        frame_map_[addr] = Frame{r->FileName, r->FunctionName, r->Line};
-        return;
-      }
-    }
-    frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
-  }
-  const Frame& lookup(void* addr) {
-    return frame_map_.at(addr);
-  }
 
- private:
-  ska::flat_hash_map<void*, Frame> frame_map_;
-  llvm::symbolize::LLVMSymbolizer symbolizer;
-};
-#endif
-
+#ifndef FBCODE_CAFFE2
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
   Symbolizer& s = Symbolizer::get();
@@ -453,6 +426,7 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   }
   return results;
 }
+#endif
 
 Stats stats() {
   return unwind_cache.stats();
