@@ -19,7 +19,7 @@ class CodeContextDict:
 
     def pop_context(self, code: types.CodeType):
         ctx = self.get_context(code)
-        self._remove_id(id(code))
+        self.code_context._remove_id(id(code))
         return ctx
 
     def clear(self):

@@ -74,6 +74,7 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 
+#include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -120,7 +121,8 @@ enum class ParameterType {
   QSCHEME,
   FLOAT_LIST,
   SCALAR_LIST,
-  SYM_INT_LIST
+  SYM_INT_LIST,
+  DISPATCH_KEY_SET
 };
 
 struct FunctionParameter;
@@ -298,6 +300,7 @@ struct PythonArgs {
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
+  inline c10::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
   at::Tensor tensor_slow(int i);
@@ -727,6 +730,14 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
   return this->getDoublelist(i);
 }
 
+inline c10::optional<c10::DispatchKeySet> PythonArgs::toDispatchKeySetOptional(
+    int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return py::cast<c10::DispatchKeySet>(py::handle(args[i]));
+}
+
 inline at::ScalarType PythonArgs::scalartypeWithDefault(
     int i,
     at::ScalarType default_scalartype) {
@@ -1095,8 +1106,8 @@ inline at::Storage PythonArgs::storage(
     is_typed_storage = false;
     storage_scalar_type = at::ScalarType::Undefined;
   } else {
-    std::tie(storage, storage_scalar_type, is_typed_storage) =
-        createStorageGetType(args[i]);
+    storage =
+        createStorageGetType(args[i], storage_scalar_type, is_typed_storage);
   }
   return storage;
 }
