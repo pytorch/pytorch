@@ -27,7 +27,7 @@ from typing import (
     Union,
 )
 
-from typing_extensions import Never
+from typing_extensions import Never, ParamSpec
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -1081,8 +1081,9 @@ def create_script_list(obj, type_hint=None):
 
 # Defined in torch/csrc/jit/python/script_init.cpp
 ResolutionCallback = Callable[[str], Callable[..., Any]]
-EnumVar = TypeVar("EnumVar", bound=enum.Enum)
 ClassVar = TypeVar("ClassVar", bound=type)
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)  # return value
 
 
 @overload
@@ -1142,12 +1143,12 @@ def script(  # type: ignore[misc]
 
 @overload
 def script(  # type: ignore[misc]
-    obj: Callable,
+    obj: Callable[P, R],
     optimize: Optional[bool] = None,
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> ScriptFunction:
+) -> ScriptFunction[P, R]:
     ...
 
 
