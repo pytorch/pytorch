@@ -548,6 +548,9 @@ class TestDefaultDtype:
             w.set_default_dtype(fp_dtype="numpy")
 
 
+@pytest.mark.skipif(
+    _np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23"
+)
 class TestExport:
     def test_exported_objects(self):
         exported_fns = (
