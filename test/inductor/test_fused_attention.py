@@ -99,7 +99,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
         self._check_common(dot_prod_attention)
-        # self._check_common(checkpoint_wrapper(dot_prod_attention))
+        self._check_common(checkpoint_wrapper(dot_prod_attention))
 
     def _test_pattern_fails_with_reuse(self):
         """

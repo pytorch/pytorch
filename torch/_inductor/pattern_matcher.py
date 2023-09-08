@@ -532,8 +532,7 @@ class MultiOutputPattern(PatternExpr):
     def _match_from_anchors(self, pattern, ctx):
         prior = dict(ctx.pattern_to_node)
         m = FailedMatch("no anchor found")
-        set1 = set()
-        for node in pattern.find_anchor_nodes(ctx, set1):
+        for node in pattern.find_anchor_nodes(ctx, set()):
             m = ctx.match(pattern, node)
             if m:
                 return m
@@ -581,13 +580,23 @@ class RepeatedExpr(PatternExpr):
 
 
 class PatternPrettyPrinter:
+    """
+    Serializes Patterns to executable python.
+    XXX: currently only used and tested for fuse attention patterns. May not cover
+    all patterns.
+    """
+
     def __init__(self):
         self.memoized_objs_names: Dict[PatternExpr, str] = {}
         self.memoized_objs_pp: Dict[PatternExpr, str] = {}
         self.tmp_counter = itertools.count(0)
 
     @staticmethod
-    def run(obj, output_name="output"):
+    def run(obj: PatternExpr, output_name="output"):
+        """
+        Serializes obj to python code with obj written out to `output_name`
+        """
+
         pp = PatternPrettyPrinter()
         out_str = obj.pretty_print(pp=pp)
 
