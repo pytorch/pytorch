@@ -498,7 +498,7 @@ class VariableBuilder:
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             }
 
-            return FunctoolsPartialVariable(func_obj, args, keywords).add_guards(guards)
+            return FunctoolsPartialVariable(func_obj, args, keywords, guards=guards)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
