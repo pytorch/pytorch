@@ -1177,12 +1177,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_partials_udf_kwarg_module(x, y):
-        par_mod = functools.partial(udf_module, mod=smallnn)
+        par_mod = functools.partial(udf_module, mod=SmallNN())
         return par_mod(x=x, y=y)
 
     @make_test
     def test_partials_udf_kwarg_method(x, y):
-        par_mod = functools.partial(udf_module, mod=smallnn.forward)
+        par_mod = functools.partial(udf_module, mod=SmallNN().forward)
         return par_mod(x=x, y=y)
 
     @make_test
@@ -1279,9 +1279,6 @@ class SmallNN(torch.nn.Module):
         out = torch.nn.ReLU()(combined)
         out = torch.nn.ReLU()(out)
         return out
-
-
-smallnn = SmallNN()
 
 
 def udf_module(mod, x, y):

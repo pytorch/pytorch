@@ -631,6 +631,10 @@ class FunctoolsPartialVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        options = VariableTracker.propagate([self])
         merged_args = self.args + args
         merged_kwargs = {**self.keywords, **kwargs}
-        return self.func.call_function(tx, merged_args, merged_kwargs)
+
+        return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
+            options
+        )
