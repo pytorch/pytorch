@@ -4,7 +4,7 @@ torch.export
 =====================
 
 .. warning::
-    This feature is a prototype and may have compatibility breaking changes in the future.
+    This feature is a prototype under active development and there WILL BE breaking changes in the future.
 
 
 Overview
