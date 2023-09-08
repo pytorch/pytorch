@@ -7,7 +7,8 @@ import itertools
 try:
     import numpy as _np
 
-    HAVE_NUMPY = True
+    v = _np.__version__.split(".")
+    HAVE_NUMPY = int(v[0]) >= 1 and int(v[1]) >= 24
 except ImportError:
     HAVE_NUMPY = False
 
