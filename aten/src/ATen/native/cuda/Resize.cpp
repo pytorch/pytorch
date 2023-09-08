@@ -70,5 +70,4 @@ const Tensor& resize_cuda_(
   }
   return self;
 }
-
 } // namespace at::native
