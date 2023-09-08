@@ -2762,7 +2762,7 @@ def masked_scatter_with_index(self, mask, source_idx, source):
 
         def load_source_val():
             source_idx_val = source_idx_loader(idx)
-            i = ops.indirect_indexing(source_idx_val, source)
+            i = ops.indirect_indexing(source_idx_val, source_numel)
             return source_loader([i])
 
         source_val = ops.masked(mask_val, load_source_val, 0)
