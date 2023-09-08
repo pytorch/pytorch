@@ -454,7 +454,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_cuda
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     AT_DISPATCH_FLOATING_TYPES_AND2
-      (kBFloat16, kHalf, v.scalar_type(),
+      (kBFloat16, kHalf, saved_v.scalar_type(),
        "weight_norm_bwd_first_dim_kernel",
        [&]
        {
