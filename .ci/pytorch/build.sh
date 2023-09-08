@@ -173,7 +173,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
-  export LDSHARED="clang --shared"
   export USE_CUDA=0
   export USE_ASAN=1
   export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"

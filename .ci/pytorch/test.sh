@@ -144,6 +144,9 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
+    if [[ "$USE_CUDA" == 1 ]]; then
+      export ASAN_OPTIONS=${ASAN_OPTIONS}:protect_shadow_gap=0
+    fi
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -189,9 +192,9 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
-    echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
-    #(cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    # (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_vptr_ubsan()")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
