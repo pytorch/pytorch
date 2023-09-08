@@ -17,14 +17,6 @@ from .cuda_env import get_cuda_arch, get_cuda_version
 log = logging.getLogger(__name__)
 
 
-_CUTLASS_PY_FULL_PATH = os.path.join(
-    inductor_cuda_config.cutlass_dir, "tools/library/scripts"
-)
-_TMP_CUTLASS_PY_FULL_PATH = os.path.abspath(
-    os.path.join(tempfile.gettempdir(), "torch_cutlass_script")
-)
-
-
 def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
     for cutlass_module in cutlass_modules:
         content = content.replace(
@@ -33,15 +25,17 @@ def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
     return content
 
 
-def _gen_cutlass_file(file_name: str, cutlass_modules: List[str]) -> None:
-    orig_full_path = os.path.abspath(os.path.join(_CUTLASS_PY_FULL_PATH, file_name))
+def _gen_cutlass_file(
+    file_name: str, cutlass_modules: List[str], src_dir: str, dst_dir: str
+) -> None:
+    orig_full_path = os.path.abspath(os.path.join(src_dir, file_name))
     text = ""
     with open(orig_full_path) as f:
         text = f.read()
     text = _rename_cutlass_import(text, cutlass_modules)
     dst_full_path = os.path.abspath(
         os.path.join(
-            _TMP_CUTLASS_PY_FULL_PATH,
+            dst_dir,
             f"cutlass_{file_name}" if file_name != "__init__.py" else file_name,
         )
     )
@@ -54,18 +48,31 @@ def try_import_cutlass() -> bool:
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
     # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
-    if os.path.isdir(_CUTLASS_PY_FULL_PATH):
+
+    cutlass_py_full_path = os.path.join(
+        inductor_cuda_config.cutlass_dir, "tools/library/scripts"
+    )
+    tmp_cutlass_py_full_path = os.path.abspath(
+        os.path.join(tempfile.gettempdir(), "torch_cutlass_script")
+    )
+
+    if os.path.isdir(cutlass_py_full_path):
         cutlass_file_names = [
             file_name
-            for file_name in os.listdir(_CUTLASS_PY_FULL_PATH)
+            for file_name in os.listdir(cutlass_py_full_path)
             if file_name.endswith(".py")
         ]
         cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-        if not os.path.isdir(_TMP_CUTLASS_PY_FULL_PATH):
-            os.mkdir(_TMP_CUTLASS_PY_FULL_PATH)
+        if not os.path.isdir(tmp_cutlass_py_full_path):
+            os.mkdir(tmp_cutlass_py_full_path)
         for file_name in cutlass_file_names:
-            _gen_cutlass_file(file_name, cutlass_module_names)
-        sys.path.append(_TMP_CUTLASS_PY_FULL_PATH)
+            _gen_cutlass_file(
+                file_name,
+                cutlass_module_names,
+                cutlass_py_full_path,
+                tmp_cutlass_py_full_path,
+            )
+        sys.path.append(tmp_cutlass_py_full_path)
         try:
             import cutlass_generator  # type: ignore[import]  # noqa: F401
             import cutlass_library  # type: ignore[import]  # noqa: F401
@@ -81,9 +88,22 @@ def try_import_cutlass() -> bool:
     else:
         log.debug(
             "Failed to import CUTLASS packages: CUTLASS repo does not exist: %s",
-            _CUTLASS_PY_FULL_PATH,
+            cutlass_py_full_path,
         )
     return False
+
+
+def _normalize_cuda_arch(arch: str) -> str:
+    if int(arch) >= 90:
+        return "90"
+    elif int(arch) >= 80:
+        return "80"
+    elif int(arch) >= 75:
+        return "75"
+    elif int(arch) >= 70:
+        return "70"
+    else:
+        raise NotImplementedError(f"Unsupported cuda arch: {arch}")
 
 
 @dataclass
@@ -112,20 +132,7 @@ class CUTLASSArgs:
             raise RuntimeError(
                 f"{self.architectures=} or {self.cuda_version=} is None!"
             )
-        self._normalize_cuda_arch()
-
-    def _normalize_cuda_arch(self) -> None:
-        assert self.architectures is not None
-        if int(self.architectures) >= 90:
-            self.architectures = "90"
-        elif int(self.architectures) >= 80:
-            self.architectures = "80"
-        elif int(self.architectures) >= 75:
-            self.architectures = "75"
-        elif int(self.architectures) >= 70:
-            self.architectures = "70"
-        else:
-            raise NotImplementedError(f"Unsupported cuda arch: {self.architectures}")
+        self.architectures = _normalize_cuda_arch(self.architectures)
 
 
 @functools.lru_cache(None)
@@ -139,7 +146,7 @@ def gen_ops() -> List[Any]:
     import cutlass_generator  # type: ignore[import]
     import cutlass_manifest  # type: ignore[import]
 
-    arch = get_cuda_arch()
+    arch = _normalize_cuda_arch(get_cuda_arch())
     version = get_cuda_version()
     if arch is None or version is None:
         log.error(
