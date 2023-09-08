@@ -101,20 +101,20 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
 def extract_kwargs(arg):
     kwargs = {
-        "offsets": arg.offsets,
+        "offsets": arg.offsets(),
         "raggedness_id": arg.raggedness_id
     }
     return kwargs
 
 
 def jagged_unary_pointwise(func, *args, **kwargs):
-    return NestedTensor(func(args[0].values, **kwargs), **extract_kwargs(args[0]))
+    return NestedTensor(func(args[0].values(), **kwargs), **extract_kwargs(args[0]))
 
 
 def jagged_binary_pointwise(func, *args, **kwargs):
     check_ragged_dim_same(func, args[0], "lhs", args[1], "rhs")
     return NestedTensor(
-        func(args[0].values, args[1].values, **kwargs), **extract_kwargs(args[0])
+        func(args[0].values(), args[1].values(), **kwargs), **extract_kwargs(args[0])
     )
 
 
@@ -138,7 +138,7 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return 3
 
     if func == torch.ops.aten.sym_numel.default:
-        return args[0].values.numel()
+        return args[0].values().numel()
 
 
 @register_jagged_func(
@@ -166,7 +166,7 @@ def tensor_attr_unsupported_getter(func, *args, **kwargs):
 
 @register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
 def linear_default(func, *args, **kwargs):
-    values = torch.mm(args[0].values, args[1])
+    values = torch.mm(args[0].values(), args[1])
     if len(args) == 3:
         values += args[2]
     return NestedTensor(values, **extract_kwargs(args[0]))
@@ -178,7 +178,7 @@ def linear_default(func, *args, **kwargs):
 )
 def linear_backward_default(func, *args, **kwargs):
     check_ragged_dim_same(func, args[0], "self", args[1], "grad_output")
-    ds = NestedTensor(torch.mm(args[1].values, args[2].T), **extract_kwargs(args[1]))
-    dw = torch.mm(args[0].values.T, args[1].values)
+    ds = NestedTensor(torch.mm(args[1].values(), args[2].T), **extract_kwargs(args[1]))
+    dw = torch.mm(args[0].values().T, args[1].values())
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)

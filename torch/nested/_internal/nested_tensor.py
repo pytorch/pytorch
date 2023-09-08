@@ -18,8 +18,8 @@ def get_tensor_id(tensor):
 
 
 class NestedTensor(torch.Tensor):
-    values: torch.Tensor  # type: ignore[assignment]
-    offsets: torch.Tensor
+    _values: torch.Tensor  # type: ignore[assignment]
+    _offsets: torch.Tensor
     _size: Tuple[int, int, int]
     ragged_size: torch.SymInt
     is_fake: bool
@@ -59,7 +59,7 @@ class NestedTensor(torch.Tensor):
         # if r.requires_grad:
         #     raise ValueError(
         #         "buffer should not require grad when constructing NestedTensor")
-        r.values = values.detach() if values.requires_grad else values
+        r._values = values.detach() if values.requires_grad else values
         return r
 
     def __init__(
@@ -92,8 +92,14 @@ class NestedTensor(torch.Tensor):
             D = values.shape[1]
             B = offsets.shape[0] - 1
             self._size = (B, self.raggedness_id, D)
-        self.offsets = offsets
+        self._offsets = offsets
         return
+
+    def values(self):
+        return self._values
+
+    def offsets(self):
+        return self._offsets
 
     def set_raggedness_id(self, id):
         self.raggedness_id = id
@@ -109,21 +115,21 @@ class NestedTensor(torch.Tensor):
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
-        return ["buffer", "offsets"], (self.size(1), self.requires_grad,)
+        return ["_values", "_offsets"], (self.size(1), self.requires_grad,)
 
     def __tensor_unflatten__(inner_tensors, meta):
         assert len(inner_tensors) == 2
-        buffer = inner_tensors["buffer"]
-        offsets = inner_tensors["offsets"]
+        values = inner_tensors["_values"]
+        offsets = inner_tensors["_offsets"]
         symint, requires_grad, = meta
 
         # This pair of methods gets called during the initial creation and then
         B = offsets.shape[0] - 1
-        D = buffer.shape[1]
+        D = values.shape[1]
         sym_size = (B, symint, D)
 
         return NestedTensor(
-            buffer, offsets=offsets, nb_tensors=B, sym_size=sym_size,
+            values, offsets=offsets, sym_size=sym_size,
             requires_grad=requires_grad)
 
     @classmethod
@@ -144,8 +150,8 @@ class NestedTensor(torch.Tensor):
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
-        ctx.save_for_backward(x.offsets)
-        return x.values
+        ctx.save_for_backward(x.offsets())
+        return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
@@ -161,7 +167,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values, None, None
+        return gO.values(), None, None
 
 
 # Need to make it obvious that users should be passing in offsets
