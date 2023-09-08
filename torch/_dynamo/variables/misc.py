@@ -791,7 +791,8 @@ class SkipFilesVariable(VariableTracker):
                 items, mutable_local=MutableLocal(), **options
             )
         elif self.value is functools.partial:
-            assert len(args) > 0
+            if not args:
+                unimplemented(f"functools.partial malformed")
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
