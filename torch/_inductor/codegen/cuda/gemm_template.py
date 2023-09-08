@@ -153,7 +153,7 @@ GEMM_ARGS_CUTLASS_3X_EPILOGUE = r"""
 class CUTLASSGemmTemplate(CUTLASSTemplate):
     # Calculates alpha * X@W + beta * Bias
 
-    assert cutlass_utils.try_import_cutlass()
+    _has_cutlass = cutlass_utils.try_import_cutlass()
 
     def __init__(
         self,
@@ -183,6 +183,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def cutlass_layout(torch_layout) -> "Optional[cutlass_lib.LayoutType]":  # type: ignore[name-defined]
+        assert self._has_cutlass
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         if torch_layout.stride[-1] == 1:
@@ -196,6 +197,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def flip_cutlass_layout(
         cutlass_layout: "cutlass_lib.LayoutType",  # type: ignore[name-defined]
     ) -> "cutlass_lib.LayoutType":  # type: ignore[name-defined]
+        assert self._has_cutlass
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         if cutlass_layout == cutlass_lib.LayoutType.RowMajor:
@@ -218,6 +220,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
 
     @staticmethod
     def has_tma_epilogue(op) -> bool:
+        assert self._has_cutlass
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         result = False
@@ -230,6 +233,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
     def define_gemm_instance(
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> Tuple[str, str]:
+        assert self._has_cutlass
         import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
@@ -287,6 +291,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         self,
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
     ) -> "cutlass_gemm_op.GemmOperation":  # type: ignore[name-defined]
+        assert self._has_cutlass
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         # Skip simt kernels
@@ -367,6 +372,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         return op
 
     def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]
+        assert self._has_cutlass
         import cutlass_gemm_operation as cutlass_gemm_op  # type: ignore[import]
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
@@ -475,6 +481,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
         output_node: IRNode = None,
     ) -> str:
+        assert self._has_cutlass
         import cutlass_library as cutlass_lib  # type: ignore[import]
 
         if output_node is not None:
