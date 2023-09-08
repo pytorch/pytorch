@@ -203,7 +203,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
         def wrapper(*args, **kwargs):
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            if isinstance(args[0], ShapeEnv) and args[0].is_recording:
+            if isinstance(args[0], ShapeEnv) and args[0].is_recording:  # type: ignore[has-type]
                 # If ShapeEnv is already recording an event, call the wrapped
                 # function directly.
                 #
