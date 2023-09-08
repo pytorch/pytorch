@@ -2486,7 +2486,7 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         # 'positive' is None for unspecified symbols, since we can't
         # assume that it will be neither positive nor negative.
-        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
+        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, unspecified=True)
 
     def create_symbol(
         self,
@@ -2495,6 +2495,8 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
+        *,
+        unspecified: bool = False,
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
@@ -2515,7 +2517,7 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if val in (0, 1) and self.specialize_zero_one:
+        if val in (0, 1) and self.specialize_zero_one and not unspecified:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol

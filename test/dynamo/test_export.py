@@ -3171,30 +3171,29 @@ def forward(self, x):
         true_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s0, s1], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         sin = arg1.sin();  arg1 = None
         return pytree.tree_unflatten([sin], self._out_spec)
 """
         false_graph = """\
 class GraphModule(torch.nn.Module):
     def forward(self, pred, x):
-        arg0, arg1: f32[s0, s1], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
         true_guard_code = ["L['pred'].__int__() == 1"]
-        false_guard_code = ["L['pred'].__int__() == 0"]
+        false_guard_code = [
+            "Ne(L['pred'].__int__(), 1)",
+            "-9223372036854775808 <= L['pred'].__int__()",
+        ]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            [
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-                ["Eq(s0, 3)"],
-            ],
+            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
+            [[], [], [], []],
         )
 
     def test_invalid_input_global(self) -> None:
