@@ -12,7 +12,6 @@ import threading
 import traceback
 import types
 import warnings
-from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -95,15 +94,26 @@ DONT_WRAP_FILES = {
 }
 
 
-CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
-def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+def _debug_get_cache_entry_list(
+    code: Union[types.CodeType, Callable[..., Any]]
+) -> List[CacheEntry]:  # type: ignore[valid-type]
     """
-    Given a code object, retrieve the cache entries stored in this code.
+    Given a code object or a callable object, retrieve the cache entries
+     stored in this code.
     """
-    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    return list(map(CacheEntry._make, cache_list))
+    if callable(code):
+        code = code.__code__
+    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    cache_list = []
+    while cache_head is not None:
+        cache_list.append(cache_head)
+        cache_head = cache_head.next
+    return cache_list
 
 
 class OptimizedModule(torch.nn.Module):
