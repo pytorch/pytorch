@@ -372,8 +372,8 @@ static PyObject* THPStorage_pynew(
   torch::ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
-  int64_t allocator_arg_idx = 0;
-  int64_t device_arg_idx = 1;
+  int allocator_arg_idx = 0;
+  int device_arg_idx = 1;
 
   if (r.idx > 0) {
     allocator_arg_idx = 1;
