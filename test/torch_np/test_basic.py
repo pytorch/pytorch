@@ -13,6 +13,8 @@ import torch._numpy._util as _util
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_allclose, assert_equal
 
+from torch.testing._internal.common_cuda import TEST_CUDA
+
 
 # These function receive one array_like arg and return one array_like result
 one_arg_funcs = [
@@ -572,7 +574,7 @@ def test_ndarrays_to_tensors():
     assert isinstance(out[0][0], torch.Tensor)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires cuda")
+@pytest.mark.skipif(not TEST_CUDA, reason="requires cuda")
 def test_f16_on_cuda():
     # make sure operations with float16 tensors give same results on CUDA and on CPU
     t = torch.arange(5, dtype=torch.float16)
