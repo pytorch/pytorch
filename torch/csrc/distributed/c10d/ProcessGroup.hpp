@@ -601,7 +601,6 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         opts.timeout.count());
   }
 
-
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
