@@ -292,9 +292,10 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
     picklePos += toCopy;
     return toCopy;
   };
-  auto tensorReadFunc = [&](const std::string& ename) -> at::DataPtr {
+  auto tensorReadFunc =
+      [&](const std::string& ename) -> std::tuple<at::DataPtr, size_t> {
     unsigned long index = std::stoul(ename);
-    return std::move(buffers.tensors.at(index));
+    return std::make_tuple(std::move(buffers.tensors.at(index)), 0);
   };
 
   // No need to pass typeResolver here, as it always processes string and

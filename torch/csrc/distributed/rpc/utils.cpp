@@ -442,7 +442,8 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       metaDataPos += toCopy;
       return toCopy;
     };
-    auto sectionReadFunc = [&](const std::string& ename) -> at::DataPtr {
+    auto sectionReadFunc =
+        [&](const std::string& ename) -> std::tuple<at::DataPtr, size_t> {
       auto it = sections.find(ename);
       if (it == sections.end()) {
         TORCH_CHECK(false, "Couldn't find entity " + ename);
@@ -452,7 +453,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
       if (idat.second != 0) {
         memcpy(dptr.get(), idat.first, idat.second);
       }
-      return dptr;
+      return std::make_tuple(std::move(dptr), idat.second);
     };
 
     // No need to pass typeResolver here, as it always processes string and

@@ -590,7 +590,17 @@ PickleOpCode Unpickler::readInstruction() {
           // If there are no elements in the tensor, there's no point in
           // reading a zero (0) byte file from the input stream and paying
           // that cost.
-          storage_ptr = read_record_(key);
+          size_t bytes_read;
+          std::tie(storage_ptr, bytes_read) = read_record_(key);
+          TORCH_CHECK(
+              bytes_read >= numel * dtype.itemsize(),
+              "Tensor unpicklig: read storage with ",
+              bytes_read,
+              " bytes of data, but tensor expects at least ",
+              numel,
+              " elements by ",
+              dtype.itemsize(),
+              " bytes each");
         }
 
         storage = at::Storage(

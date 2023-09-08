@@ -37,7 +37,7 @@ IValue readArchiveAndTensors(
 
   auto read_record = [&](const std::string& name) {
     std::string ss = tensor_dir_path + name;
-    return std::get<0>(stream_reader.getRecord(ss));
+    return stream_reader.getRecord(ss);
   };
 
   Unpickler unpickler(
