@@ -625,8 +625,7 @@ class InvalidVecISA(VecISA):
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
 
-    @functools.lru_cache(None)
-    def __bool__(self) -> bool:
+    def __bool__(self) -> bool:  # type: ignore[override]
         return False
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
@@ -890,9 +889,9 @@ def get_include_and_linking_paths(
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
-    ipaths_str = " ".join(["-I" + p for p in ipaths])
-    lpaths_str = " ".join(["-L" + p for p in lpaths])
-    libs_str = " ".join(["-l" + p for p in libs])
+    ipaths_str = " ".join("-I" + p for p in ipaths)
+    lpaths_str = " ".join("-L" + p for p in lpaths)
+    libs_str = " ".join("-l" + p for p in libs)
     return ipaths_str, lpaths_str, libs_str, macros
 
 
