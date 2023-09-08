@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -277,6 +278,13 @@ test_failures = {
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
 }
+
+if TEST_WITH_ROCM:
+    test_failures.update(
+        {
+            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+        }
+    )
 
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(

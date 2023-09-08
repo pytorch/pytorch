@@ -355,8 +355,6 @@ torch._dynamo.variables.torch.tensor_dunder_fns.append(
 
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
-    # We have better precision than eager
-    ("cumsum", "cuda", f16): {"reference_in_float": True},
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
     "empty_permuted": {"assert_equal": False},
@@ -379,6 +377,16 @@ inductor_override_kwargs = {
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
 }
+
+
+if not TEST_WITH_ROCM:
+    inductor_override_kwargs.update(
+        {
+            # We have better precision than eager
+            ("cumsum", "cuda", f16): {"reference_in_float": True},
+        }
+    )
+
 
 # Always test with all sample for following ops
 inductor_all_samples = {
