@@ -5589,9 +5589,6 @@ class Wait(ExternKernelAlloc):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].codegen_reference()]
 
-    # def get_mutation_names(self):
-    #     return [self.inputs[0].codegen_reference()]
-
 
 class CollectiveKernel(ExternKernel):
     """
@@ -5654,7 +5651,6 @@ class InPlaceCollectiveKernel(CollectiveKernel):
 
     def __init__(self, layout, inputs, constant_args):
         super().__init__(layout, inputs, constant_args)
-        input_names = [t.codegen_reference() for t in self.inputs]
 
     def should_allocate(self):
         return False
@@ -5667,9 +5663,6 @@ class InPlaceCollectiveKernel(CollectiveKernel):
             wrapper.writeline(f"{output_name} = [{','.join(input_names)}] ")
         else:
             wrapper.writeline(f"{output_name} = {input_names[0]}")
-
-    def get_mutation_names(self):
-        return [self.inputs[0].codegen_reference()]
 
 
 class OutOfPlaceCollectiveKernel(CollectiveKernel):
@@ -5792,6 +5785,9 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def should_allocate(self):
         return False
 
+    def get_mutation_names(self):
+        return [self.inputs[0].codegen_reference()]
+
     @classmethod
     def create(
         cls,
@@ -5826,6 +5822,9 @@ class AllReduce(InPlaceCollectiveKernel):
     def __init__(self, layout, inputs, constant_args, reduce_op):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
+
+    def get_mutation_names(self):
+        return [self.inputs[0].codegen_reference()]
 
     @classmethod
     def create(
