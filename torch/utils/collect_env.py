@@ -172,6 +172,9 @@ def get_cudnn_version(run_lambda):
         l = os.environ.get('CUDNN_LIBRARY')
         if l is not None and os.path.isfile(l):
             return os.path.realpath(l)
+        cuda_home = os.environ.get('CUDA_HOME')
+        if cuda_home is not None and os.path.isfile(cuda_home + '/lib64/libcudnn.so'):
+            return os.path.realpath(cuda_home + '/lib64/libcudnn.so')
         return None
     files_set = set()
     for fn in out.split('\n'):
