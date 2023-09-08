@@ -148,6 +148,7 @@ __all__ = [
     "squeeze",
     "transpose",
     "view_of",
+    "view_element_type",
     #
     # Functionalized view mutations
     #
@@ -172,7 +173,6 @@ __all__ = [
     "item",
     "maximum_value",
     "minimum_value",
-    "to_dtype",
     "copy_strided",
     #
     # Inplace prims
@@ -1778,6 +1778,27 @@ view_of = _make_prim(
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_view_of_doc,
+)
+
+
+def _view_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    return a.view(dtype)
+
+
+def _view_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+    return a.view(dtype)
+
+
+_view_element_type_doc = """
+    Creates a view of the tensor with a different dtype.
+    """
+
+view_element_type = _make_prim(
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
+    meta=_view_element_type_meta,
+    impl_aten=_view_element_type_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_view_element_type_doc,
 )
 
 #

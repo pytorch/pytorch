@@ -240,20 +240,6 @@ if HAS_PYDOT:
             tensor_meta = node.meta.get('tensor_meta')
             label += self._tensor_meta_to_label(tensor_meta)
 
-            # for ir_post_fusion
-            # print origin_0=sin file:lineno code
-            fusion_meta = node.meta.get('fusion_meta', None)
-            if fusion_meta is not None and fusion_meta.snode.node is not None:
-                for idx, origin in enumerate(fusion_meta.snode.node.origins):
-                    if origin.stack_trace is None:
-                        label += f"|origin_{idx}={origin.name}" + r"\n"
-                    else:
-                        parsed_stack_trace = _parse_stack_trace(origin.stack_trace)
-                        fname = self._shorten_file_name(parsed_stack_trace.file)
-                        lineno = parsed_stack_trace.lineno
-                        code = parsed_stack_trace.code
-                        label += f"|origin_{idx}={origin.name} file={fname}:{lineno} {code}" + r"\n"
-
             # for original fx graph
             # print buf=buf0, n_origin=6
             buf_meta = node.meta.get('buf_meta', None)
