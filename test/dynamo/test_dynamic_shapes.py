@@ -68,6 +68,7 @@ tests = [
 ]
 for test in tests:
     make_dynamic_cls(test)
+del test
 
 if TEST_Z3:
     # this only fails when z3 is available
