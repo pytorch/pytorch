@@ -5581,13 +5581,16 @@ class Wait(ExternKernelAlloc):
         # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
         collective_op.decide_layout()
         return Wait(
-            layout=collective_op.get_layout(),
+            layout=AliasedLayout(collective_op),
             inputs=[collective_op],
         )
 
     def get_alias_names(self):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].codegen_reference()]
+
+    # def get_mutation_names(self):
+    #     return [self.inputs[0].codegen_reference()]
 
 
 class CollectiveKernel(ExternKernel):
@@ -5652,8 +5655,6 @@ class InPlaceCollectiveKernel(CollectiveKernel):
     def __init__(self, layout, inputs, constant_args):
         super().__init__(layout, inputs, constant_args)
         input_names = [t.codegen_reference() for t in self.inputs]
-        for name in input_names:
-            V.graph.never_reuse_buffers.add(name)
 
     def should_allocate(self):
         return False
@@ -5666,6 +5667,9 @@ class InPlaceCollectiveKernel(CollectiveKernel):
             wrapper.writeline(f"{output_name} = [{','.join(input_names)}] ")
         else:
             wrapper.writeline(f"{output_name} = {input_names[0]}")
+
+    def get_mutation_names(self):
+        return [self.inputs[0].codegen_reference()]
 
 
 class OutOfPlaceCollectiveKernel(CollectiveKernel):
@@ -5798,7 +5802,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         group_size: int,
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        layout = MultiOutputLayout(inputs[0].get_device())
+        layout = MutationLayout(inplace_inputs[0])
 
         _ = AllReduceCoalesced(
             layout=layout,
@@ -5828,7 +5832,7 @@ class AllReduce(InPlaceCollectiveKernel):
         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        layout = MultiOutputLayout(inplace_inputs[0].get_device())
+        layout = MutationLayout(inplace_inputs[0])
 
         _ = AllReduce(
             layout=layout,
