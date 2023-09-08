@@ -27,7 +27,7 @@ from torch.testing._internal.common_device_type import \
      toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     SM53OrLater, SM60OrLater, SM80OrLater, with_tf32_off, TEST_CUDNN,
-    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    _get_torch_cuda_version, _get_torch_rocm_version, PLATFORM_SUPPORTS_FUSED_SDPA
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
@@ -13114,7 +13114,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
@@ -13139,7 +13139,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -13156,8 +13156,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_max_pool,
            skips=(
                # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
@@ -13179,7 +13178,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13522,9 +13521,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # See [Note] SDPA returns Philox Offset and Seed as tensors that will live on CPU when not in cuda graph capture
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp',
-                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_ATTENTION),
+                         device_type='cuda', dtypes=(torch.float32,), active_if=PLATFORM_SUPPORTS_FUSED_SDPA),
             # TODO Need to understand what this is testing and why it doesn't work
             DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
             DecorateInfo(unittest.skip('output is non-deterministic (when dropout_p > 0)'), 'TestCommon', 'test_compare_cpu'),
@@ -19027,6 +19026,15 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
     ),
     PythonRefInfo(
+        "_refs.take_along_dim",
+        torch_opinfo_name="take_along_dim",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestCommon',
+                         'test_python_ref'),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.to",
         torch_opinfo_name="to",
     ),
@@ -21568,6 +21576,10 @@ python_ref_db = [
             ),
         ],
     ),
+    PythonRefInfo(
+        "_refs.view_as_complex",
+        torch_opinfo_name="view_as_complex",
+    ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
@@ -21576,7 +21588,7 @@ ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in ops_and_refs if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
 binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
-spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
+spectral_funcs = [op for op in ops_and_refs if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
