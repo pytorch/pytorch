@@ -418,8 +418,7 @@ def _sfdp_scale_factor_check(scale_factor_op):
     return fn
 
 
-@functools.lru_cache(None)
-def _sfdp_init():
+def _get_sfdp_patterns():
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -547,22 +546,37 @@ def _sfdp_init():
             _sfdp_scale_factor_check(aten.div.Tensor),
         ),
     ]:
+        # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
+        # gets serialized to a python file and does not require tracing at runtime.
         args = [*args, *workaround.values()]
+        name = pattern.__name__
+
+        yield f"{name}_training", {
+            "search_fn": pattern,
+            "replace_fn": replacement,
+            "example_inputs": args,
+            "trace_fn": training_graph,
+            "pass_dict": patterns,
+            "extra_check": extra_check,
+            "scalar_workaround": workaround,
+        }
+        yield f"{name}_inference", {
+            "search_fn": pattern,
+            "replace_fn": replacement,
+            "example_inputs": args,
+            "trace_fn": inference_graph,
+            "pass_dict": patterns,
+            "extra_check": extra_check,
+            "scalar_workaround": workaround,
+        }
+
+
+@functools.lru_cache(None)
+def _sfdp_init():
+    from .serialized_attention_patterns.central_index import get_serialized_pattern
+
+    for key, register_replacement_kwargs in _get_sfdp_patterns():
+        search_fn_pattern = get_serialized_pattern(key)
         register_replacement(
-            pattern,
-            replacement,
-            args,
-            training_graph,
-            patterns,
-            extra_check=extra_check,
-            scalar_workaround=workaround,
-        )
-        register_replacement(
-            pattern,
-            replacement,
-            args,
-            inference_graph,
-            patterns,
-            extra_check=extra_check,
-            scalar_workaround=workaround,
+            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
         )

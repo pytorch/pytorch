@@ -203,6 +203,9 @@ class Ignored(PatternExpr):
     def __repr__(self):
         return "*"
 
+    def pretty_print(self, pp: "PatternPrettyPrinter", level=0):
+        return "Ignored()"
+
 
 class KeywordArg(PatternExpr):
     """
@@ -261,11 +264,15 @@ class _TargetExpr(PatternExpr):
         self.users = users
 
     def fns_repr(self):
-        return (
-            f"[{self.fns[0].__name__}, ...]"
-            if len(self.fns) > 1
-            else self.fns[0].__name__
-        )
+        fn_name = self.fns[0].__name__
+        if len(self.fns) > 1:
+            return f"[{fn_name}, ...]"
+        elif self.fns[0] is getattr(torch, fn_name, None):
+            return f"torch.{fn_name}"
+        elif isinstance(self.fns[0], torch._ops.OpOverload):
+            return str(self.fns[0])
+        else:
+            return self.fns[0].__name__
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.fns_repr()})"
@@ -336,6 +343,19 @@ class _TargetArgsExpr(_TargetExpr):
             *[f"{k}={v}" for k, v in self.kwargs.items()],
         ]
         return f"{self.__class__.__name__}({', '.join(args)})"
+
+    def pretty_print(self, pp: "PatternPrettyPrinter", level=0):
+        indent = "  " * level
+        args = [
+            self.fns_repr(),
+            *(pp.pretty_print(x, level=level) for x in self.args),
+            *[f"{k}={pp.pretty_print(v, level=level)}" for k, v in self.kwargs.items()],
+        ]
+        if self.users != 1:
+            args.append(f"_users={self.users}")
+
+        joiner_str = f",\n{'  ' * (level + 1)}"
+        return f"{self.__class__.__name__}({joiner_str.join(args)}\n{indent})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if (
@@ -487,6 +507,13 @@ class MultiOutputPattern(PatternExpr):
     def __repr__(self):
         return f"{self.__class__.__name__}({self.outputs})"
 
+    def pretty_print(self, pp: "PatternPrettyPrinter"):
+        args = [pp.pretty_print(x, level=0) for x in self.outputs]
+        joiner_str = f",\n{'  '}"
+        str_out = f"{self.__class__.__name__}([{joiner_str.join(args)}"
+        str_out = f"{str_out}\n])"
+        return str_out
+
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         m = ctx.match(self.outputs[0], node)
         if not m:
@@ -505,7 +532,8 @@ class MultiOutputPattern(PatternExpr):
     def _match_from_anchors(self, pattern, ctx):
         prior = dict(ctx.pattern_to_node)
         m = FailedMatch("no anchor found")
-        for node in pattern.find_anchor_nodes(ctx, set()):
+        set1 = set()
+        for node in pattern.find_anchor_nodes(ctx, set1):
             m = ctx.match(pattern, node)
             if m:
                 return m
@@ -550,6 +578,45 @@ class RepeatedExpr(PatternExpr):
                 return anchor_m
             m.extend(anchor_m)
         return m
+
+
+class PatternPrettyPrinter:
+    def __init__(self):
+        self.memoized_objs_names: Dict[PatternExpr, str] = {}
+        self.memoized_objs_pp: Dict[PatternExpr, str] = {}
+        self.tmp_counter = itertools.count(0)
+
+    @staticmethod
+    def run(obj, output_name="output"):
+        pp = PatternPrettyPrinter()
+        out_str = obj.pretty_print(pp=pp)
+
+        output = []
+        for key in pp.memoized_objs_names:
+            output.append(f"{pp.memoized_objs_names[key]} = {pp.memoized_objs_pp[key]}")
+
+        output.append(f"{output_name} = {out_str}")
+
+        return "\n".join(output)
+
+    def pretty_print(self, obj, level):
+        if isinstance(obj, _TargetArgsExpr):
+            if memoized_name := self.memoized_objs_names.get(obj):
+                return memoized_name
+            elif obj.users > 1:
+                return self.memoize(obj)
+        if hasattr(obj, "pretty_print"):
+            return obj.pretty_print(self, level + 1)
+
+        return repr(obj)
+
+    def memoize(self, obj):
+        # will be printed as a top level variable, so indent level goes to 0
+        obj_str = obj.pretty_print(self, level=0)
+        tmp_name = f"tmp_{next(self.tmp_counter)}"
+        self.memoized_objs_names[obj] = tmp_name
+        self.memoized_objs_pp[obj] = obj_str
+        return tmp_name
 
 
 @dataclasses.dataclass
@@ -705,6 +772,7 @@ def register_replacement(
     extra_check=_return_true,
     scalar_workaround=(),
     exclusive_arg_names=(),
+    search_fn_pattern=None,
 ):
     """
     Create a replacement rule based on example functions that get traced
@@ -771,14 +839,17 @@ def register_replacement(
         requires_grad = [
             isinstance(x, torch.Tensor) and x.requires_grad for x in example_inputs
         ]
-        search_gm = trace_fn(search_fn, example_inputs)
-        pattern = fx_to_pattern(
-            search_gm,
-            ignore_types=(int, float, list, torch.device, torch.dtype),
-            argnames=argnames,
-            scalar_workaround=scalar_workaround,
-            exclusive_arg_names=exclusive_arg_names,
-        )
+        if search_fn_pattern is None:
+            pattern = gen_pattern(
+                search_fn,
+                example_inputs,
+                trace_fn,
+                scalar_workaround,
+                exclusive_arg_names,
+            )
+        else:
+            pattern = search_fn_pattern
+
         assert repr(pattern) not in _seen_patterns
         _seen_patterns.add(repr(pattern))
         pattern = ReplacementPatternEntry(
@@ -787,6 +858,21 @@ def register_replacement(
             normalize_args=normalize_args,
         )
         pattern.register(pass_dict)
+
+
+@functorch_config.patch(functionalize_rng_ops=False)
+def gen_pattern(
+    search_fn, example_inputs, trace_fn, scalar_workaround=(), exclusive_arg_names=()
+) -> PatternExpr:
+    argnames = [*inspect.signature(search_fn).parameters.keys()]
+    search_gm = trace_fn(search_fn, example_inputs)
+    return fx_to_pattern(
+        search_gm,
+        ignore_types=(int, float, list, torch.device, torch.dtype),
+        argnames=argnames,
+        scalar_workaround=scalar_workaround,
+        exclusive_arg_names=exclusive_arg_names,
+    )
 
 
 def register_lowering_pattern(

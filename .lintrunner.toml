@@ -16,6 +16,7 @@ exclude_patterns = [
     'functorch/docs/**',
     'functorch/examples/**',
     'functorch/notebooks/**',
+    'torch/_inductor/fx_passes/serialized_attention_patterns/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
     # Tests from the NumPy test suite
@@ -193,6 +194,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     '**/fb/**',
+    'torch/_inductor/fx_passes/serialized_attention_patterns/**',
     'torch/_inductor/index_propagation.py',
     'torch/_inductor/coordinate_descent_tuner.py',
     'torch/_inductor/debug.py',
@@ -2676,6 +2678,7 @@ exclude_patterns = [
     'caffe2/**',
     'functorch/docs/**',
     'functorch/notebooks/**',
+    'torch/_inductor/fx_passes/serialized_attention_patterns/**',
     'scripts/**',
     'third_party/**',
     'fb/**',

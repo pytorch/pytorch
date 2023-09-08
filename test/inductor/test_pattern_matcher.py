@@ -8,6 +8,12 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.pattern_matcher import (
+    _TargetExpr,
+    gen_pattern,
+    PatternExpr,
+    PatternPrettyPrinter,
+)
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -770,6 +776,37 @@ class TestPaternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_fuse_attention_roundtrip_pattern(self):
+        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+
+        global_vals = {
+            "aten": torch.ops.aten,
+            "prims": torch.ops.prims,
+            "torch": torch,
+        }
+
+        for name in dir(torch._inductor.pattern_matcher):
+            attr = getattr(torch._inductor.pattern_matcher, name)
+            if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
+                global_vals[name] = attr
+
+        for _, kwargs in _get_sfdp_patterns():
+            gen_kwargs = {
+                key: kwargs[key]
+                for key in (
+                    "search_fn",
+                    "example_inputs",
+                    "trace_fn",
+                    "scalar_workaround",
+                )
+            }
+            pattern = gen_pattern(**gen_kwargs)
+            pattern_pp = PatternPrettyPrinter.run(pattern)
+            env = global_vals.copy()
+            exec(pattern_pp, env)
+            pattern_2 = env["output"]
+            self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
 
 
 if __name__ == "__main__":
