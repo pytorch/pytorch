@@ -2116,7 +2116,7 @@ def gradgradcheck(
     inputs: _TensorOrTensors,
     grad_outputs: Optional[_TensorOrTensors] = None,
     *,
-    eps: float = 1e-6,
+    eps: float = 1e-7,
     atol: float = 1e-5,
     rtol: float = 1e-3,
     gen_non_contig_grad_outputs: bool = False,
