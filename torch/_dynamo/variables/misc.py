@@ -767,16 +767,13 @@ class SkipFilesVariable(VariableTracker):
             return variables.ListIteratorVariable(
                 items, mutable_local=MutableLocal(), **options
             )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and args[0].source
-        ):
+        elif self.value is functools.wraps and not kwargs and len(args) == 1:
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wraps_source=args[0].source)
+                    # `wraps_source` should implement `reconstruct`
+                    # which NestedUserFunctionVariable does.
+                    return fn.clone(wraps_source=fn)
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps, **options)
