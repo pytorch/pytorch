@@ -7,7 +7,7 @@ import operator
 import re
 from collections import namedtuple
 from itertools import chain
-from typing import Any, Callable, ClassVar, Dict, List, NamedTuple, Optional, Set, Union
+from typing import Any, Callable, ClassVar, Dict, List, NamedTuple, Optional, Set, Union, Tuple
 
 import sympy
 from sympy.printing.printer import Printer
@@ -824,6 +824,8 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+        # Upper bounds for indirect_indexing and their str representation
+        self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
 
     @contextlib.contextmanager
     def set_current_node(self, node):

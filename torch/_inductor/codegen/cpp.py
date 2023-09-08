@@ -1209,8 +1209,19 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
+    def indirect_indexing(self, index_var, size, check=True):
+        generate_assert = (
+            (check or config.debug_index_asserts)
+            and config.cpp.assert_indirect_indexing
+        )
+
+        if generate_assert:
+            expr = ops.and_(ops.ge(index_var, '0'),
+                            ops.le(index_var, self.rename_indexing(size)))
+            cond = self.cse.generate(self.compute, expr)
+            line = f'assert({cond} && "index out of bounds");'
+            self.compute.writeline(line)
+
         return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
@@ -2858,6 +2869,8 @@ class KernelGroup:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
+
+        code.writelines(["#include <cassert>"])
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():

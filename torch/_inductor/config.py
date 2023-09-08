@@ -306,6 +306,9 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # assert that indirect indexing does not read / write out of bounds
+    assert_indirect_indexing = True
+
 
 # config specific to codegen/triton.py
 class triton:

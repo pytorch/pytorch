@@ -776,8 +776,6 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
-        # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
