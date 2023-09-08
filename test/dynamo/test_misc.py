@@ -1646,6 +1646,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    def test_dunder_new_function_inlining(self):
+        # https://github.com/pytorch/pytorch/issues/107460
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        class ModelA(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.tanh(x + 1)
+
+        class ModelB(torch.nn.Module):
+            def __new__(cls):
+                return ModelA()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                other = ModelB()
+                return self.layer(x) + other(x)
+
+        x = torch.rand(2, 2)
+        m = Model()
+
+        opt_m = torch.compile(backend="eager")(m)
+        ref = m(x)
+        res = opt_m(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertFalse("super() nn.Module.__init__" in counters["graph_break"])
+
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
