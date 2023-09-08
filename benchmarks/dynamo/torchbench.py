@@ -82,7 +82,7 @@ SKIP = {
     # takes too long, extreme slowdown (< .001)
     "maml",
     # Failing in eager mode
-    "clip"
+    "clip",
 }
 
 SKIP_FOR_CPU = {
