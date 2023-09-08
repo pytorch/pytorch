@@ -105,7 +105,11 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    RemovableHandleVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -788,7 +792,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        self.symbolic_locals[inst.argval] = self.pop()
+        loaded_vt = self.pop()
+        name = inst.argval
+        # If the last top VT in the stack (just popped) is a handle (see [On tensor.register_hook]), we associate
+        # the stored name.
+        if isinstance(loaded_vt, RemovableHandleVariable):
+            new_name = self.output.new_var(name)
+            new_rhv = loaded_vt.clone(last_seen_name=new_name)
+            loaded_vt = self.replace_all(loaded_vt, new_rhv)
+        self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -859,6 +871,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
+        if isinstance(value, RemovableHandleVariable):
+            unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
@@ -1860,6 +1874,28 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
+
+    def store_hook(self, name, value):
+        base = name
+        for i in itertools.count():
+            if name not in self.output.global_scope:
+                src = GlobalSource(name)
+                self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                self.output.install_global(name, value)
+                break
+            name = f"{base}_{i}"
+
+        return src
+
+    def store_handle(self, name, value):
+        base = name
+        for i in itertools.count():
+            if name not in self.output.global_scope:
+                self.output.install_global(name, value)
+                break
+            name = f"{base}_{i}"
+
+        return name
 
     @property
     def fake_mode(self):

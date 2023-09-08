@@ -1471,6 +1471,7 @@ def assert_no_fake_params_or_buffers(gm):
         else:
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
+    gm.graph.print_tabular()
     for name, buffer in gm.named_buffers():
         assert not isinstance(
             buffer, torch._subclasses.FakeTensor

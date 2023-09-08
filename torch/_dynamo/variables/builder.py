@@ -169,6 +169,7 @@ class GraphArg:
     # Then we cannot only keep a weak reference to it.  This lets you
     # stash a strong reference too.
     example_strong_ref: Optional[torch.Tensor] = None
+    has_symbols = True
 
     @property
     def example(self):
