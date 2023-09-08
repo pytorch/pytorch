@@ -207,6 +207,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "exponential": {f16},
     "geometric": {f16},
     "log_normal": {f16},
+    "masked_scatter": {f16, f32, f64},
     ("max", "reduction_with_dim"): {b8},
     ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
