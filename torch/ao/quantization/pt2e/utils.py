@@ -166,13 +166,14 @@ def fold_bn_weights_into_conv_node(
     setattr(m, weight_attr_name, fused_weight)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
+        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
     else:
         bias_attr_name = weight_attr_name + "_bias"
+        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
         with m.graph.inserting_before(conv_node):
             get_bias_node = m.graph.get_attr(bias_attr_name)
         # NOTE: here we assume the bias of conv is not quantized!
         conv_args[2] = get_bias_node
-    setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
     conv_node.args = tuple(conv_args)
 
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
