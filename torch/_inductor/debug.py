@@ -11,7 +11,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, List
+from typing import Any, Dict, List
 from unittest.mock import patch
 
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
@@ -181,7 +181,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 def update_orig_fx_node_name_to_buf_name(
     nodes: SchedulerNodeList,
-    node_name_to_buf_name: dict[str, str],
+    node_name_to_buf_name: Dict[str, str],
     parent_buf_name: str = None,
     n_origins: int = 0,
 ):
@@ -214,7 +214,7 @@ def update_orig_fx_node_name_to_buf_name(
                 )
 
 
-def get_node_name_to_buf_meta(node_name_to_buf_name: dict[str, str]):
+def get_node_name_to_buf_meta(node_name_to_buf_name: Dict[str, str]):
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
