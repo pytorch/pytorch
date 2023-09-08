@@ -728,6 +728,10 @@ static struct PyModuleDef _module = {
 } // namespace
 
 PyObject* torch_c_dynamo_guards_init() {
+  PyObject* m = PyModule_Create(&_module);
+  if (m == nullptr)
+    return nullptr;
+
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
   TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
@@ -745,10 +749,6 @@ PyObject* torch_c_dynamo_guards_init() {
   NNModuleGuardType.tp_dealloc = (destructor)NNModuleGuard_dealloc;
   NNModuleGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
 
-  PyObject* m;
-  if (PyType_Ready(&TensorGuardsType) < 0)
-    return nullptr;
-
   GlobalStateGuardType.tp_name = "torch._C._dynamo.guards.GlobalStateGuard";
   GlobalStateGuardType.tp_basicsize = sizeof(GlobalStateGuard);
   GlobalStateGuardType.tp_itemsize = 0;
@@ -758,14 +758,13 @@ PyObject* torch_c_dynamo_guards_init() {
   GlobalStateGuardType.tp_init = (initproc)GlobalStateGuard_init;
   GlobalStateGuardType.tp_new = PyType_GenericNew;
 
+  if (PyType_Ready(&TensorGuardsType) < 0)
+    return nullptr;
+
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
   if (PyType_Ready(&NNModuleGuardType) < 0)
-    return nullptr;
-
-  auto m = PyModule_Create(&_module);
-  if (m == nullptr)
     return nullptr;
 
   Py_INCREF(&TensorGuardsType);
