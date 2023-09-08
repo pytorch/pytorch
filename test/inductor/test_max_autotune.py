@@ -30,6 +30,8 @@ torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+_CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+
 
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
@@ -217,6 +219,7 @@ class TestDoBench(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -247,6 +250,7 @@ class TestDoBench(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
             }
         ):
             Y = mm(a, a, bias)
@@ -320,6 +324,7 @@ class TestDoBench(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
             }
         ):
             # No broadcast
@@ -435,8 +440,5 @@ class TestDoBench(TestCase):
 
 if __name__ == "__main__":
     # Set env to make it work in CI.
-    os.environ["TORCHINDUCTOR_CUTLASS_DIR"] = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
-    )
     if HAS_CUDA:
         run_tests()
