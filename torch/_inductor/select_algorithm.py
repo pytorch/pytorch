@@ -8,7 +8,7 @@ import textwrap
 import time
 from io import StringIO
 
-from typing import Any, Dict, List, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -340,6 +340,7 @@ class TritonTemplateKernel(TritonKernel):
     def call_kernel(self, name: str):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
+        call_args = [str(a) for a in call_args]
 
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -354,7 +355,7 @@ class TritonTemplateKernel(TritonKernel):
                 device_index=V.graph.scheduler.current_device.index,
             )
         else:
-            call_args = ", ".join(call_args)
+            call_args = ", ".join(call_args)  # type: ignore[assignment]
             stream_name = wrapper.write_get_cuda_stream(
                 V.graph.scheduler.current_device.index
             )
@@ -744,7 +745,19 @@ class ErrorFromChoice(RuntimeError):
 
 
 class AlgorithmSelectorCache(PersistentCache):
-    def __call__(self, name, choices: List[ChoiceCaller], input_nodes, layout):
+    def __call__(
+        self,
+        name,
+        choices: List[ChoiceCaller],
+        input_nodes,
+        layout,
+        # optional dict mapping arg indices to the functions
+        # generating a torch.Tensor for that input from the
+        # corresponding ir.Buffer. if passed for a given
+        # arg, the function will be called instead of
+        # generating a random torch.Tensor for benchmarking.
+        input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+    ):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
@@ -758,7 +771,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         @functools.lru_cache(None)
         def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout)
+            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
         def autotune(choices):
             return make_benchmark_fn()(choices)
@@ -791,10 +804,15 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         input_nodes,
         layout,
+        input_gen_fns=None,
     ):
+        if input_gen_fns is None:
+            input_gen_fns = {}
+
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): cls.benchmark_example_value(x) for x in input_nodes
+            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+            for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = [

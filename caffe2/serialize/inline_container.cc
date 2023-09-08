@@ -368,7 +368,11 @@ size_t PyTorchStreamReader::getRecord(
       iter != nullptr,
       "Failed to create zip reader iter: ",
       mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
-
+  std::vector<uint8_t> buffer;
+  if (buf == nullptr) {
+    buffer.resize(chunk_size);
+    buf = buffer.data();
+  }
   for (size_t offset = 0; offset < stat.m_uncomp_size; offset += chunk_size) {
     size_t want_size =
         std::min(chunk_size, (size_t)stat.m_uncomp_size - offset);

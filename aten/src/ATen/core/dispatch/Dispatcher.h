@@ -18,10 +18,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
 
-#ifndef NDEBUG
-#include <iostream>
-#endif
-
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();
@@ -749,7 +745,7 @@ namespace std {
 
 template <>
 struct hash<c10::OperatorHandle> {
-  size_t operator()(c10::OperatorHandle op) const noexcept {
+  size_t operator()(const c10::OperatorHandle& op) const noexcept {
     return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
   }
 };
