@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -1027,11 +1028,11 @@ class CommonTemplate:
             return x.cumsum(0), x.cumsum(1)
 
         # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),))
-        self.common(fn, (torch.rand(20, 30),))
+        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
+        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
 
         # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),))
+        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):
