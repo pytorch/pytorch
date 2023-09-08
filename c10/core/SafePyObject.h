@@ -33,7 +33,7 @@ struct C10_API SafePyObject {
 
   ~SafePyObject() {
     if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*is_tensor*/ false);
+      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
     }
   }
 

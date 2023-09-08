@@ -7,7 +7,7 @@
 #include <ATen/ATen.h>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/inductor/proxy_executor.h>
+#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 
 #define AOT_VECTOR_SIZE_CHECK(vec, expected_size) \
   {                                               \
