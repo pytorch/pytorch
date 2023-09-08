@@ -627,7 +627,7 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             torchdynamo.exc.UserError,
-            r"^(?!.*fall back to eager).*"
+            r"^(Dynamic control flow is not supported).*"
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
