@@ -76,6 +76,12 @@ function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
 
+# Defined in torch/csrc/jit/python/script_init.cpp
+ResolutionCallback = Callable[[str], Callable[..., Any]]
+ClassVar = TypeVar("ClassVar", bound=type)
+P = ParamSpec("P")
+R = TypeVar("R", covariant=True)  # return value
+
 
 # Throws an error if a jit function is pickled.
 # Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
@@ -1077,13 +1083,6 @@ def create_script_list(obj, type_hint=None):
         zero copy overhead.
     """
     return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
-
-
-# Defined in torch/csrc/jit/python/script_init.cpp
-ResolutionCallback = Callable[[str], Callable[..., Any]]
-ClassVar = TypeVar("ClassVar", bound=type)
-P = ParamSpec("P")
-R = TypeVar("R", covariant=True)  # return value
 
 
 @overload

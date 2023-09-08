@@ -36,6 +36,9 @@ from torch.testing._comparison import default_tolerances
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 
+R = TypeVar("R", covariant=True)  # return type (always covariant)
+P = ParamSpec("P")
+
 
 def _create_interpreter_name_lookup_fn(frames_up=1):
     def _get_interpreter_name_for_var(var):
@@ -1222,10 +1225,6 @@ class TopLevelTracedModule(TracedModule):
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
-
-
-R = TypeVar("R", covariant=True)  # return type (always covariant)
-P = ParamSpec("P")
 
 
 def _script_if_tracing(fn: Callable[P, R]) -> Callable[P, R]:
