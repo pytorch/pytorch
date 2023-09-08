@@ -5,6 +5,7 @@ from typing import Callable, cast, Dict, Iterable, Optional, Sequence, Set, Tupl
 import torch
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
@@ -16,7 +17,6 @@ from torch.distributed._tensor.ops.utils import (
 )
 
 from torch.distributed._tensor.placement_types import DTensorSpec, Placement, Replicate
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
 aten = torch.ops.aten

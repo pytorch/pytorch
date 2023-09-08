@@ -8,6 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
+from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
     OpInfo,
@@ -19,9 +20,8 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed._tensor.random import is_rng_supported_mesh
 from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
-from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 def _is_random_op(op):
