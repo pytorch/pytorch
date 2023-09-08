@@ -372,7 +372,14 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 push and self.push(value)
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
-            eval_result = value.evaluate_expr(self.output)
+            from torch.fx.experimental.symbolic_shapes import (
+                GuardOnDataDependentSymNode,
+            )
+
+            try:
+                eval_result = value.evaluate_expr(self.output)
+            except GuardOnDataDependentSymNode:
+                unimplemented("")
             if truth_fn(eval_result):
                 push and self.push(value)
                 self.jump(inst)
