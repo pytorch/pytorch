@@ -796,10 +796,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = inst.argval
         # If the last top VT in the stack (just popped) is a handle (see [On tensor.register_hook]), we associate
         # the stored name.
-        if isinstance(loaded_vt, RemovableHandleVariable):
-            new_name = self.output.new_var(name)
-            new_rhv = loaded_vt.clone(last_seen_name=new_name)
-            loaded_vt = self.replace_all(loaded_vt, new_rhv)
+        loaded_vt = loaded_vt.rename(self, name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):

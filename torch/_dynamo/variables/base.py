@@ -297,6 +297,10 @@ class VariableTracker(metaclass=HasPostInit):
     def num_parameters(self):
         unimplemented(f"num_parameters: {self}")
 
+    def rename(self, tx, name):
+        # no-op
+        return self
+
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         unimplemented(f"hasattr: {repr(self)}")
 
