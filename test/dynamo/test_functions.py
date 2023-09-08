@@ -1266,6 +1266,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         lambda3 = functools.partial(multiply, y=torch.randn(3, 3))
         x = torch.randn(3, 3)
         fn(lambda3, lambda3, x)
+
         self.assertEqual(cnts.frame_count, 3)  # Recompile! func id changed
 
 
