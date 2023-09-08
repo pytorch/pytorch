@@ -117,6 +117,12 @@ inline Variable valueToTensor(
     scalar = Scalar(THPUtils_unpackDouble(value));
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
+  } else if (torch::is_symint(value)) {
+    scalar = Scalar(py::cast<SymInt>(value));
+  } else if (torch::is_symfloat(value)) {
+    scalar = Scalar(py::cast<SymFloat>(value));
+  } else if (torch::is_symbool(value)) {
+    scalar = Scalar(py::cast<SymBool>(value));
   } else {
     throw TypeError(
         "can't assign a %s to a %s",
@@ -126,7 +132,7 @@ inline Variable valueToTensor(
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
   // device
-  if (device == at::kCPU) {
+  if (device == at::kCPU && !scalar.isSymbolic()) {
     return at::lift_fresh(
         at::indexing::scalarToTensor(scalar, options, device));
   } else {
