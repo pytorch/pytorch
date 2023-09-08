@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import os
 import unittest
 
 from typing import List
@@ -8,7 +9,6 @@ import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
-from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -196,7 +196,6 @@ class TestDoBench(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(not try_import_cutlass(), "requires cutlass package")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
     def test_max_autotune_cutlass_backend_regular_mm(
@@ -226,7 +225,6 @@ class TestDoBench(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(not try_import_cutlass(), "requires cutlass package")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
     def test_max_autotune_cutlass_backend_mm_bias(
@@ -291,7 +289,6 @@ class TestDoBench(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
-    @unittest.skipIf(not try_import_cutlass(), "requires cutlass package")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
     def test_max_autotune_cutlass_backend_addmm(
@@ -437,5 +434,9 @@ class TestDoBench(TestCase):
 
 
 if __name__ == "__main__":
+    # Set env to make it work in CI.
+    os.environ["TORCHINDUCTOR_CUTLASS_DIR"] = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
+    )
     if HAS_CUDA:
         run_tests()
