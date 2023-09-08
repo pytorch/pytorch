@@ -1178,7 +1178,7 @@ inline bool should_use_acc_buffer(at::TensorIterator& iter) {
   if (!at::isReducedFloatingType(iter.common_dtype())) {
     return false;
   }
-  if (ndim < 3) {
+  if (ndim < 2) {
     return false;
   }
   auto out_strides = iter.strides(0);
@@ -1201,7 +1201,7 @@ TORCH_IMPL_FUNC(sum_out)
     result.zero_();
   } else {
     // Here is a limitation of TensorIterator reductions for permuted input with lower precision on CPU.
-    // Consider the case: TensorIterator coalesces such input and output to >= 3 dims tensors,
+    // Consider the case: TensorIterator coalesces such input and output to >= 2 dims tensors,
     // and the output stride is [0, 0, x, x, ...] with x >= 0 (two reduced dimensions and non-reduced dims).
     // Since the reduction loop only operates on two dimensions at a time,
     // the intermediate sums is forced to do accumulation in the second reduced dim with lower precision.
