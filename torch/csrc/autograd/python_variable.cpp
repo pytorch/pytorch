@@ -678,8 +678,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // resizable (have to define a custom allocator in that case)
   Tensor tensor;
   if (r.idx == 0) {
-    TORCH_CHECK(!r.toDispatchKeySetOptional(13),
-                "This overload of _make_wrapper_subclass does not support _extra_dispatch_keys");
+    TORCH_CHECK(
+        !r.toDispatchKeySetOptional(13),
+        "This overload of _make_wrapper_subclass does not support _extra_dispatch_keys");
     tensor = at::for_blob(nullptr, r.intlist(1))
                  .strides(r.intlistOptional(2))
                  .storage_offset(r.toInt64Optional(3))
