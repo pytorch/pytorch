@@ -709,7 +709,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 
             def wrap_name(module_key):
-                return NNModuleVariable(target, type(target), module_key, **options)
+                return NNModuleVariable(type(target), module_key, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN

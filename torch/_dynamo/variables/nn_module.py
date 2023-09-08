@@ -74,14 +74,10 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = ["module", "module_type", "module_key"]
+    _nonvar_fields = ["module_type", "module_key"]
 
-    def __init__(
-        self, module: torch.nn.Module, module_type: type, module_key: str, **kwargs
-    ):
+    def __init__(self, module_type: type, module_key: str, **kwargs):
         super().__init__(**kwargs)
-        assert module_type is type(module)
-        self.module = module
         self.module_type = module_type
         self.module_key = module_key
         assert self.source

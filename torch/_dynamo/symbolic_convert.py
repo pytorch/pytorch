@@ -2296,14 +2296,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
-        if (
-            args
-            and isinstance(args[0], NNModuleVariable)
-            and isinstance(args[0].module, torch.fx.GraphModule)
-        ):
-            code_context.get_context(args[0].module.forward.__code__)[
-                "orig_graphmodule"
-            ] = args[0].module
+        if args and isinstance(args[0], NNModuleVariable):
+            module = parent.output.get_submodule(args[0].module_key)
+            if isinstance(module, torch.fx.GraphModule):
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
