@@ -1258,7 +1258,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
         pre = m(data)
         cnt.clear()
-        torch._dynamo.reset()
 
         with torch._dynamo.optimize(cnt, nopython=False):
             opt_pre = m(data)
@@ -1267,8 +1266,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             out1 = m(data)
 
         out_post = m(data)
-        self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 2)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
@@ -1784,8 +1783,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             handle = getattr(m, hook_type)(hook_func)
             grad2 = opt(m, input)
             frame_count2 = cnt.frame_count
-            # Some backward hooks lead to graph breaks so frame_count may be 2 or 3
-            self.assertGreaterEqual(frame_count2, 2)
+            self.assertGreaterEqual(frame_count2, 1)
             self.assertEqual(grad2, torch.full_like(grad2, expected_grad))
 
             # Running again should not recompile
@@ -1893,6 +1891,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             the eval_frame entrypoint to Module.__call__?
         """
 
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", False)
     def test_hooks_inner(self):
         class TestModule(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -1937,7 +1936,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("__nn_module_guard" in failure_reason)
+        self.assertTrue("forward_hooks.keys" in failure_reason)
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
@@ -1957,11 +1956,61 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         m._forward_hooks[handle.id] = new_forward_hook
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
-        self.assertTrue("__nn_module_guard" in failure_reason)
+        self.assertTrue("___check_obj_id(L['m']._forward_hooks" in failure_reason)
+
+    @patch.object(torch._dynamo.config, "skip_nnmodule_hook_guards", True)
+    def test_hooks_skip_guards(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return 2 * x + 1
+
+        m = TestModule()
+
+        def forward_hook(
+            module: torch.nn.Module, inputs: Tuple[torch.Tensor], output: torch.Tensor
+        ) -> torch.Tensor:
+            return 2 * output + 1
+
+        handle = m.register_forward_hook(forward_hook)
+
+        def outer_func(tensor):
+            x = tensor * 2 + 1
+            y = m(x)
+            return y
+
+        inp = torch.tensor(1.0, requires_grad=True)
+
+        failure_reason = None
+
+        def guard_fail_fn(failure):
+            nonlocal failure_reason
+            failure_reason = failure[0]
+
+        cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_func = torch._dynamo.optimize(
+            guard_fail_fn=guard_fail_fn,
+            backend=cc,
+        )(outer_func)
+
+        m = TestModule()
+        handle = m.register_forward_hook(forward_hook)
+        failure_reason = None
+        self.assertEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
+        self.assertEqual(cc.op_count, 6)
+
+        # if we remove the hook, dynamo shouldn't notice
+        handle.remove()
+        self.assertNotEqual(compiled_func(inp), outer_func(inp))
+        self.assertEqual(compiled_func(inp).item(), 15)
+        self.assertEqual(cc.frame_count, 1)
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        activations = dict()
+        compiled_activations = dict()
+        eager_activations = dict()
+        activations = None
 
         def save_activations(name, mod, inp, out):
             activations[name] = inp
@@ -1971,19 +2020,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 partial(save_activations, name)
             )
 
-        model = torch.compile(model, backend="aot_eager")
+        compiled_model = torch.compile(model, backend="aot_eager")
 
+        activations = compiled_activations
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
-            activations.clear()
+            compiled_activations.clear()
+            x = torch.randn((20, 10))
+            pred = compiled_model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        activations = eager_activations
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            eager_activations.clear()
             x = torch.randn((20, 10))
             pred = model(x)
             loss = pred.sum()
             loss.backward()
 
-        print(f"Recorded Layers: {activations.keys()}\n\n")
-        print(f"Expected Layers: {forward_handles.keys()}")
+        print(f"Recorded Layers: {compiled_activations.keys()}\n\n")
+        print(f"Expected Layers: {eager_activations.keys()}")
+
+        self.assertTrue(compiled_activations.keys() == eager_activations.keys())
         self.assertTrue(activations.keys() == forward_handles.keys())
 
     def test_hooks_allowed_modules(self):
@@ -2033,7 +2095,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             pred = model(x)
             loss = pred.sum()
             loss.backward()
-        self.assertEqual(len(activations), 5)
+        self.assertEqual(len(activations), 6)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_hooks_allowed_modules_compiles_self_contained(self):
