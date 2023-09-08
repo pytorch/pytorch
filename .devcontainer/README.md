@@ -68,3 +68,5 @@ To build pytorch from source, simply run:
 The process involves compiling thousands of files, and would take a long time. Fortunately, the compiled objects can be useful for your next build. When you modify some files, you only need to compile the changed files the next time.
 
 Note that only contents in the `pytorch` directory are saved to disk. This directory is mounted to the docker image, while other contents in the docker image are all temporary, and will be lost if docker restarts the image or the server reboots.
+
+For an in-depth understanding of Dev Container and its caveats, please refer to [the full documentation](https://code.visualstudio.com/docs/devcontainers/containers).
