@@ -255,6 +255,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.gelu_,
             aten.gelu_backward,
             aten.glu_backward,
+            aten.hann_window.periodic,
             aten.hardshrink,
             aten.hardsigmoid,
             aten.hardsigmoid_,
