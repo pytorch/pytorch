@@ -22,7 +22,6 @@ logger.setLevel(logging.WARNING)
 __all__ = ["PortNodeMetaForQDQ"]
 
 _METADATA_TO_PORT = [
-    "nn_module_stack",
     "stack_trace",
     "quantization_tag",
 ]
@@ -167,6 +166,12 @@ class PortNodeMetaForQDQ(_ExportPassBase):
           - Quantized [Q-> DQ -> Conv -> Q -> DQ -> AvgPool -> Q -> DQ -> choose_params -> Q -> DQ -> Linear]
           - Quantized [Q-> [DQ -> Conv -> Q] -> [DQ -> AvgPool -> Q] -> DQ -> [choose_params -> Q -> DQ -> Linear]]
           - Note first Q does not inherit metadata from any nodes
+    NB:
+    - The best place for porting metadata is during observer conversion to q/dq. This is because it precisely
+      knows which quantization spec is converted to q/dq and thus from where the metadata should be ported.
+      However, since FX and PT2E quant workflow are on a common code-base, this hurts readability quite a bit.
+      Doing it via a separate pass, helps readability of the code. Once we are able to refactor PT2E quant
+      code, this pass should like to be integrated in the refactored variant of "convert" step.
     """
 
     def call(self, graph_module: torch.fx.GraphModule) -> PassResult:

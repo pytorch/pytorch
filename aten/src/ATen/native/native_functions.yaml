@@ -4090,6 +4090,7 @@
   device_guard: False
   dispatch:
     CompositeImplicitAutograd: narrow_symint
+    NestedTensorCPU, NestedTensorCUDA: narrow_nested_symint
 
 - func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
   variants: function, method
@@ -4317,6 +4318,7 @@
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   dispatch:
     CPU: pixel_shuffle_cpu
+    MPS: pixel_shuffle_mps
     CompositeExplicitAutogradNonFunctional: math_pixel_shuffle
   autogen: pixel_shuffle.out
   tags: core
@@ -4324,6 +4326,7 @@
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
     CPU: pixel_unshuffle_cpu
+    MPS: pixel_unshuffle_mps
     CompositeExplicitAutogradNonFunctional: math_pixel_unshuffle
   autogen: pixel_unshuffle.out
 
@@ -15084,3 +15087,9 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+- func: _invoke_hook(Tensor grad, int x) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _invoke_hook
+  tags: core

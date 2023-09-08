@@ -180,7 +180,7 @@ def get_decompositions(
 
 
 def remove_decompositions(
-    decompositions: Dict[OpOverload, Callable],
+    decompositions: Dict[torch._ops.OperatorBase, Callable],
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
 ) -> None:
     """

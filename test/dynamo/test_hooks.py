@@ -234,7 +234,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.grad, torch.Tensor([2.0]))
 
     def test_intermediary_hooks_same_on_aot_eager(self):
-        def my_hook(grad, k=0):
+        def my_hook(grad, *, k=0):
             return grad + k
 
         class MyMod(torch.nn.Module):

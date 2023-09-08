@@ -28,6 +28,10 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     XNNPACKQuantizer,
     get_symmetric_quantization_config,
 )
+from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
+    OP_TO_ANNOTATOR,
+    QuantizationConfig,
+)
 from torch.ao.quantization.quantizer.composable_quantizer import (  # noqa: F811
     ComposableQuantizer,
 )
@@ -444,7 +448,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertEqual(
             type(output_fq_mod.activation_post_process), MovingAverageMinMaxObserver
         )
-        self.assertEqual(output_fq_mod.dtype, torch.qint8)
+        self.assertEqual(output_fq_mod.dtype, torch.int8)
         self.assertEqual(output_fq_mod.quant_min, -128)
         self.assertEqual(output_fq_mod.quant_max, 127)
 
@@ -495,7 +499,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         self.assertEqual(
             type(conv_input_fq_mod.activation_post_process), MovingAverageMinMaxObserver
         )
-        self.assertEqual(conv_input_fq_mod.dtype, torch.qint8)
+        self.assertEqual(conv_input_fq_mod.dtype, torch.int8)
         self.assertEqual(conv_input_fq_mod.quant_min, -128)
         self.assertEqual(conv_input_fq_mod.quant_max, 127)
         self.assertTrue(conv_input_node.op, "placeholder")
@@ -515,7 +519,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             type(conv_weight_fq_mod.activation_post_process),
             expected_weight_observer_type,
         )
-        self.assertEqual(conv_weight_fq_mod.dtype, torch.qint8)
+        self.assertEqual(conv_weight_fq_mod.dtype, torch.int8)
         self.assertEqual(conv_weight_fq_mod.quant_min, -127)
         self.assertEqual(conv_weight_fq_mod.quant_max, 127)
 
@@ -1277,6 +1281,66 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
+    def test_int16(self):
+        class Int16ActQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                # using int32 to simulate int16
+                int16_qspec = QuantizationSpec(
+                    dtype=torch.int16,
+                    quant_min=-2**15,
+                    quant_max=2**15 - 1,
+                    qscheme=torch.per_tensor_affine,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_observer,
+                )
+                int8_qspec = QuantizationSpec(
+                    dtype=torch.int8,
+                    quant_min=-128,
+                    quant_max=127,
+                    qscheme=torch.per_tensor_symmetric,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_weight_observer,
+                )
+                quantization_config = QuantizationConfig(
+                    input_activation=int16_qspec,
+                    weight=int8_qspec,
+                    bias=None,
+                    output_activation=int16_qspec,
+                )
+                OP_TO_ANNOTATOR["conv2d"](model, quantization_config)
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        quantizer = Int16ActQuantizer()
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv2d.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        ]
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        self._test_quantizer(
+            M().eval(),
+            example_inputs,
+            Int16ActQuantizer(),
+            node_occurrence,
+            node_list,
+        )
+
     def test_add_and_inplace_add(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
@@ -1651,7 +1715,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs_2d = (torch.randn(9, 8),)
         example_inputs_4d = (torch.randn(9, 10, 11, 8),)
         for example_inputs in [example_inputs_2d, example_inputs_4d]:
-            # program capture
             self._test_quantizer(
                 m_eager,
                 example_inputs,

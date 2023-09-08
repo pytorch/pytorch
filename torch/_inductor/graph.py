@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import logging
 import operator
@@ -589,7 +590,10 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
-            base_name = target.name().split(".")[0]
+            if isinstance(target, functools.partial):
+                base_name = target.func.__name__.split(".")[0]
+            else:
+                base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:

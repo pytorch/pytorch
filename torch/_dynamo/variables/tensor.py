@@ -15,6 +15,7 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
+from torch._higher_order_ops.invoke import invoke
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
@@ -36,7 +37,8 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .lists import ShapeVariable, SizeVariable
+from .lists import SizeVariable
+from torch._higher_order_ops.invoke import invoke
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -52,6 +54,13 @@ supported_const_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+
+hook_registry = []
+
+
+def record_hook(*args, real_hook, pos):
+    grad = args[0]
+    return invoke(real_hook, grad)
 
 
 class TensorVariable(VariableTracker):
@@ -229,7 +238,7 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            result = ShapeVariable(sizes, **options)
+            result = SizeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -674,6 +683,12 @@ class TensorVariable(VariableTracker):
                 # Intermediary
                 from .builder import GraphArg
 
+                original_fn = fn
+                fn = functools.partial(
+                    record_hook, real_hook=fn, pos=len(hook_registry)
+                )
+                # fn = torch._dynamo.disable(fn)
+
                 new_name = tx.store_handle("intermed_handle", handle)
                 handle_variable.as_global = new_name
 
@@ -686,7 +701,12 @@ class TensorVariable(VariableTracker):
                 # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
                 # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
                 # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
+
+                # hook_registry.append(original_fn)
+                hook_registry.append(original_fn)
+
                 self.as_proxy().register_hook(hook_proxy)
+
                 if fn_var.source:
                     tx.output.guards.add(
                         fn_var.source.make_guard(GuardBuilder.ID_MATCH)
@@ -699,11 +719,7 @@ class TensorVariable(VariableTracker):
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
-            if (
-                name == "new"
-                and len(args) == 1
-                and isinstance(args[0], (SizeVariable, ShapeVariable))
-            ):
+            if name == "new" and len(args) == 1 and isinstance(args[0], SizeVariable):
                 name = "new_empty"
             return wrap_fx_proxy(
                 tx,

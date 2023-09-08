@@ -73,5 +73,10 @@ Tensor _fw_primal(const Tensor& self, int64_t level) {
   return at::alias(self);
 }
 
+Tensor _invoke_hook(const Tensor& grad, int64_t x) {
+  return at::alias(grad);
+}
+
+
 } // namespace native
 } // namespace at
