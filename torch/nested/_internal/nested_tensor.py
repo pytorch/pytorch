@@ -18,8 +18,8 @@ def get_tensor_id(tensor):
 
 
 class NestedTensor(torch.Tensor):
-    values: torch.Tensor  # type: ignore[assignment]
-    offsets: torch.Tensor
+    _values: torch.Tensor  # type: ignore[assignment]
+    _offsets: torch.Tensor
     _size: Tuple[int, int, int]
 
     __torch_function__ = torch._C._disabled_torch_function_impl
@@ -48,7 +48,7 @@ class NestedTensor(torch.Tensor):
         # if r.requires_grad:
         #     raise ValueError(
         #         "buffer should not require grad when constructing NestedTensor")
-        r.values = values.detach() if values.requires_grad else values
+        r._values = values.detach() if values.requires_grad else values
         return r
 
     def __init__(self, values, *, offsets=None, **kwargs):
@@ -65,8 +65,14 @@ class NestedTensor(torch.Tensor):
         D = values.shape[1]
         B = offsets.shape[0] - 1
         self._size = (B, ragged_dim, D)
-        self.offsets = offsets
+        self._offsets = offsets
         return
+
+    def values(self):
+        return self._values
+
+    def offsets(self):
+        return self._offsets
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -95,8 +101,8 @@ class NestedTensor(torch.Tensor):
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: NestedTensor):  # type: ignore[override]
-        ctx.save_for_backward(x.offsets)
-        return x.values
+        ctx.save_for_backward(x.offsets())
+        return x.values()
 
     @staticmethod
     def backward(ctx, gO: torch.Tensor):  # type: ignore[override]
@@ -112,7 +118,7 @@ class ViewNestedFromBuffer(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, gO: NestedTensor):  # type: ignore[override]
-        return gO.values, None, None
+        return gO.values(), None, None
 
 
 # Need to make it obvious that users should be passing in offsets
