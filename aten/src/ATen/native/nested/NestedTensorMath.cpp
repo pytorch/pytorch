@@ -914,30 +914,109 @@ Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Gene
   return self;
 }
 
+// returns true if the sizes are compatible to be concatenated along the specified dim
+// sizes should match outside of the dim of concatenation
+static bool can_cat_nested_sizes(const Tensor& nested_sizes1, const Tensor& nested_sizes2, int64_t cat_dim) {
+  if (nested_sizes1.sizes() != nested_sizes2.sizes()) {
+    return false;
+  }
+
+  auto nested_sizes1_ptr = nested_sizes1.data_ptr<int64_t>();
+  auto nested_sizes2_ptr = nested_sizes2.data_ptr<int64_t>();
+  const auto num_components = nested_sizes1.size(0);
+  const auto num_dims = nested_sizes1.size(1);
+  for (auto c : c10::irange(num_components)) {
+    for (auto d : c10::irange(num_dims)) {
+      // subtract 1 to account for batch dim
+      auto component_cat_dim = cat_dim - 1;
+      if (d == component_cat_dim) {
+        continue;
+      }
+      if (nested_sizes1_ptr[c * num_dims + d] != nested_sizes2_ptr[c * num_dims + d]) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+// cat a list of NTs that are representable as jagged
+static Tensor cat_nested_as_jagged(
+    const MaterializedITensorListRef& tensors,
+    int64_t dim) {
+  const auto first_item = tensors[0].get();
+  const auto first_item_dim = first_item.dim();
+  const auto first_item_batch_size = first_item.size(0);
+  std::vector<Tensor> jagged_views;
+  for (auto i : c10::irange(tensors.size())) {
+    auto t = tensors[i].get();
+    TORCH_CHECK(t.is_nested(),
+        "cat(): expected each tensor in given list to be nested");
+    TORCH_CHECK(t.is_contiguous(),
+        "cat(): only contiguous nested tensors are supported");
+    if (i > 0) {
+      TORCH_CHECK(
+          can_cat_nested_sizes(
+              get_nested_tensor_impl(first_item)->get_nested_sizes(),
+              get_nested_tensor_impl(t)->get_nested_sizes(),
+              dim),
+          "cat(): expected all nested tensors to have matching ragged structures outside of the concatenated dim");
+    }
+    // only support inputs in the form (B, *, D_0, D_1, ...)
+    // i.e. require at most a single ragged dim next to the batch dim
+    auto *nt_impl = get_nested_tensor_impl(t);
+    std::vector<int64_t> jagged_size;
+    jagged_size.push_back(-1);
+    for (auto d : c10::irange(first_item_dim - 2)) {
+      TORCH_CHECK(nt_impl->opt_size(d + 2).has_value(),
+          "cat(): only nested tensors with a single ragged dim next to the batch dim are supported");
+      jagged_size.push_back(nt_impl->size(d + 2));
+    }
+    auto jagged = nt_impl->get_buffer().view(jagged_size);
+    jagged_views.push_back(jagged);
+  }
+
+  // view each of the NTs as jagged for the cat() call
+  auto new_buffer = at::cat(jagged_views, dim - 1);
+
+  // wrap result into nested tensor
+  const auto component_dim = first_item_dim - 1;
+  auto new_dim_size = new_buffer.size(dim - 1);
+  auto new_sizes = get_nested_tensor_impl(tensors[0].get())->get_nested_sizes().clone();
+  auto new_sizes_ptr = new_sizes.data_ptr<int64_t>();
+  for (const auto i : c10::irange(first_item_batch_size)) {
+    new_sizes_ptr[i * component_dim + (dim - 1)] = new_dim_size;
+  }
+  return at::detail::make_tensor<NestedTensorImpl>(
+      new_buffer.view(-1), new_sizes);
+}
+
 static Tensor cat_nested_impl(
     const MaterializedITensorListRef& tensors,
     int64_t dim) {
-  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].get().dim());
-  TORCH_CHECK(
-      wrapped == 0,
-      "NestedTensors can only be concatenated along dimension 0. Got ",
-      dim,
-      " instead.");
-  std::vector<at::Tensor> buffers;
-  std::vector<at::Tensor> sizes;
-  for (const auto i : c10::irange(tensors.size())) {
-    const Tensor& t = tensors[i];
-    TORCH_CHECK(
-        t.is_nested(), "Expected each tensor in given list to be nested.");
-    TORCH_CHECK(
-        t.is_contiguous(),
-        "Expected each tensor in given list to be contiguous.");
-    auto t_ptr = get_nested_tensor_impl(t);
-    buffers.push_back(t_ptr->get_buffer().view({-1}));
-    sizes.push_back(t_ptr->get_nested_sizes());
+  dim = maybe_wrap_dim(dim, tensors[0].get());
+  if (dim == 0) {
+    // handle simple case of dim=0: concat NT components
+    std::vector<at::Tensor> buffers;
+    std::vector<at::Tensor> sizes;
+    for (const auto i : c10::irange(tensors.size())) {
+      const Tensor& t = tensors[i];
+      TORCH_CHECK(
+          t.is_nested(), "Expected each tensor in given list to be nested.");
+      TORCH_CHECK(
+          t.is_contiguous(),
+          "Expected each tensor in given list to be contiguous.");
+      auto t_ptr = get_nested_tensor_impl(t);
+      buffers.push_back(t_ptr->get_buffer().view({-1}));
+      sizes.push_back(t_ptr->get_nested_sizes());
+    }
+    return at::detail::make_tensor<NestedTensorImpl>(
+        at::cat(buffers).view({-1}), at::cat(sizes, 0));
   }
-  return at::detail::make_tensor<NestedTensorImpl>(
-      at::cat(buffers).view({-1}), at::cat(sizes, 0));
+
+  // NB: support for other dims is restricted to nested tensors representable as jagged
+  return cat_nested_as_jagged(tensors, dim);
 }
 
 Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {

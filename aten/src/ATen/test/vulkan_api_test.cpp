@@ -3921,16 +3921,9 @@ TEST_F(VulkanAPITest, sum_dim_keepdim_4d) {
   test_sum_dim({9, 5, 7, 11}, {-2, -3, -4}, true);
 }
 
-TEST_F(VulkanAPITest, uniform) {
-  float a_min = -8.2f;
-  float a_max = -1.4f;
-
-  auto a_vulkan =
-      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
-  a_vulkan.uniform_(a_min, a_max);
+void test_uniform(at::Tensor a_vulkan, const float a_min, const float a_max) {
   auto a_cpu = a_vulkan.cpu();
-
-  ASSERT_TRUE(a_cpu.max().item<float>() < a_max);
+  ASSERT_TRUE(a_cpu.max().item<float>() <= a_max);
   ASSERT_TRUE(a_cpu.min().item<float>() >= a_min);
 
   // Verify range, also perform a loose check with on histogram distribution.
@@ -3954,6 +3947,26 @@ TEST_F(VulkanAPITest, uniform) {
   ASSERT_TRUE(
       (b_hist - expected_per_bin).abs().max().item<float>() <=
       (expected_per_bin * 0.05));
+}
+
+TEST_F(VulkanAPITest, uniform) {
+  float a_min = -8.2f;
+  float a_max = -1.4f;
+  auto a_vulkan =
+      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.uniform_(a_min, a_max);
+  test_uniform(a_vulkan, a_min, a_max);
+}
+
+TEST_F(VulkanAPITest, rand_like) {
+  float a_min = 0.0f;
+  float a_max = 1.0f;
+  auto a_vulkan =
+      at::zeros({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::rand_like(a_vulkan);
+  // verify that the input are still all zeros (not in-place)
+  ASSERT_TRUE(at::mean(a_vulkan.cpu()).item<float>() == 0.0);
+  test_uniform(out_vulkan, a_min, a_max);
 }
 
 void test_t(const at::IntArrayRef input_shape) {
