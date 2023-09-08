@@ -42,15 +42,19 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
         tx.restore_graphstate(checkpoint)
 
 
-def raise_hard_error_if_graph_break(fn):
-    @functools.wraps(fn)
-    def graph_break_as_hard_error(*args, **kwargs):
-        try:
-            return fn(*args, **kwargs)
-        except Unsupported as e:
-            raise UncapturedHigherOrderOpError(e.msg) from e
+def raise_hard_error_if_graph_break(reason):
+    def deco(fn):
+        @functools.wraps(fn)
+        def graph_break_as_hard_error(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Unsupported as e:
+                msg = " Scroll up to find out what causes the graph break."
+                raise UncapturedHigherOrderOpError(reason + msg) from e
 
-    return graph_break_as_hard_error
+        return graph_break_as_hard_error
+
+    return deco
 
 
 @contextlib.contextmanager
@@ -316,7 +320,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
-    @raise_hard_error_if_graph_break
+    @raise_hard_error_if_graph_break(
+        reason="Cond doesn't work unless it is captured completely with torch.compile."
+    )
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -400,22 +406,16 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def speculate_branch(branch):
             # NB: 0 is predicate
             ix = 1 if branch else 2
-            try:
-                # TODO: Support kwargs
-                ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
-                    tx,
-                    args[ix],
-                    operands,
-                    {},
-                    graph_checkpoint,
-                    checkpoint,
-                    "cond",
-                )
-            # Reraise because we want to suggest workarounds
-            except Unsupported as e:
-                raise unimplemented(
-                    "Cond doesn't work unless it is captured completely with torch.compile"
-                ) from e
+            # TODO: Support kwargs
+            ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
+                tx,
+                args[ix],
+                operands,
+                {},
+                graph_checkpoint,
+                checkpoint,
+                "cond",
+            )
 
             if not isinstance(ret_val, TensorVariable):
                 unimplemented(
