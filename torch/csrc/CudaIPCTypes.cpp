@@ -139,8 +139,8 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 CudaIPCSentData::CudaIPCSentData(
     std::string handle,
-    uint64_t offset,
-    uint64_t* counter_ptr,
+    int64_t offset,
+    int64_t* counter_ptr,
     at::Device device)
     : handle_(std::move(handle)),
       offset_(offset),
@@ -206,7 +206,7 @@ CudaIPCSentData::~CudaIPCSentData() {
 #endif
 }
 
-uint64_t CudaIPCSentData::counter_value() {
+int64_t CudaIPCSentData::counter_value() {
   return *counter_ptr_;
 }
 
