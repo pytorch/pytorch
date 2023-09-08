@@ -3125,6 +3125,10 @@ else:
             dst._neg_view().copy_(src)
             self.assertEqual(dst, src.neg(), exact_dtype=False)
 
+            # issue: https://github.com/pytorch/pytorch/issues/106051
+            dst._neg_view().copy_(dst)
+            self.assertEqual(dst, src, exact_dtype=False)
+
         for dst_dtype, src_dtype in [
                 (torch.complex64, torch.complex64),
                 (torch.complex128, torch.complex64),
