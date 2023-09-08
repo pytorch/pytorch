@@ -22,7 +22,7 @@ struct C10_API SafePyObject {
   // Steals a reference to data
   SafePyObject(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
       : data_(data), pyinterpreter_(pyinterpreter) {}
-  SafePyObject(SafePyObject&& other) noexcept
+  SafePyObject(SafePyObject&& other)
       : data_(std::exchange(other.data_, nullptr)),
         pyinterpreter_(other.pyinterpreter_) {}
 

@@ -78,7 +78,7 @@ class either final {
     return *this;
   }
 
-  either<Left, Right>& operator=(either<Left, Right>&& rhs) noexcept {
+  either<Left, Right>& operator=(either<Left, Right>&& rhs) {
     _destruct();
     _side = rhs._side;
     if (_side == Side::left) {
