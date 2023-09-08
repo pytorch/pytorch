@@ -3,6 +3,7 @@ import logging
 import re
 from typing import Dict, List, Optional, Tuple
 
+from ...config import cuda as inductor_cuda_config
 from ...ir import Buffer, FixedLayout, IRNode, Layout
 from ..common import IndentedBuffer
 
@@ -398,7 +399,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             num_3x_ops,
             num_2x_ops,
         )
-        return list(res.values())
+        return list(res.values())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         sizes = self.output_node.get_size()

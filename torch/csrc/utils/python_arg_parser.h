@@ -1095,8 +1095,8 @@ inline at::Storage PythonArgs::storage(
     is_typed_storage = false;
     storage_scalar_type = at::ScalarType::Undefined;
   } else {
-    storage =
-        createStorageGetType(args[i], storage_scalar_type, is_typed_storage);
+    std::tie(storage, storage_scalar_type, is_typed_storage) =
+        createStorageGetType(args[i]);
   }
   return storage;
 }

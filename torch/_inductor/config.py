@@ -68,6 +68,9 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
+# TODO: capture whether the graph is from export
+from_export = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -446,6 +449,11 @@ class cuda:
             os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
         ),
     )
+
+    # Configures the maximum number of CUTLASS configs to profile in max_autotune.
+    # By default it's None, so that all CUTLASS configs are tuned.
+    # This is mainly used to reduce test time in CI.
+    cutlass_max_profiling_configs = None
 
     # Path to CUDA NVCC.
     # NVCC search order:

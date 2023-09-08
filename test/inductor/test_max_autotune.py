@@ -220,6 +220,7 @@ class TestDoBench(TestCase):
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -251,6 +252,7 @@ class TestDoBench(TestCase):
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             Y = mm(a, a, bias)
@@ -325,6 +327,7 @@ class TestDoBench(TestCase):
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             # No broadcast
