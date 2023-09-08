@@ -691,7 +691,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   return lookup(e->next, frame, e, index + 1);
 }
 
-inline static PyObject* eval_custom_code(
+inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -829,6 +829,23 @@ inline static PyObject* eval_custom_code(
 
   #endif
 
+  return result;
+}
+
+// This wrapper function adds a profiler event
+inline static PyObject* eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    int throw_flag) {
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  PyObject* result = eval_custom_code_impl(
+    tstate,
+    frame,
+    code,
+    throw_flag
+  );
+  _pytorch_record_function_exit(rf);
   return result;
 }
 

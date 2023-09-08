@@ -14,7 +14,7 @@ cm3leon_generate,fail_to_run,0
 dcgan,pass,0
 densenet121,pass,0
 detectron2_fcos_r_50_fpn,fail_to_run,0
-dlrm,fail_to_run,0
+dlrm,pass,0
 doctr_det_predictor,fail_to_run,0
 doctr_reco_predictor,fail_to_run,0
 drq,fail_to_run,0
@@ -24,7 +24,7 @@ functorch_maml_omniglot,pass,0
 hf_Albert,pass,0
 hf_Bart,pass,0
 hf_BigBird,fail_to_run,0
-hf_DistilBert,fail_to_run,0
+hf_DistilBert,pass,0
 hf_GPT2,pass,0
 hf_GPT2_large,pass_due_to_skip,0
 hf_Reformer,fail_to_run,0
@@ -46,7 +46,7 @@ phlippe_densenet,pass,0
 phlippe_resnet,pass,0
 pyhpc_equation_of_state,pass,0
 pyhpc_isoneutral_mixing,fail_to_run,0
-pyhpc_turbulent_kinetic_energy,fail_to_run,0
+pyhpc_turbulent_kinetic_energy,pass,0
 pytorch_CycleGAN_and_pix2pix,pass,0
 pytorch_stargan,fail_to_run,0
 pytorch_unet,pass,0

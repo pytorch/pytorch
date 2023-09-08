@@ -1014,7 +1014,6 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  install_timm
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then

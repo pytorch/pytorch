@@ -10,12 +10,12 @@ BlenderbotForCausalLM,pass_due_to_skip,0
 BlenderbotSmallForCausalLM,fail_to_run,0
 BlenderbotSmallForConditionalGeneration,fail_to_run,0
 CamemBert,pass,0
-DebertaForMaskedLM,fail_to_run,0
-DebertaForQuestionAnswering,fail_to_run,0
+DebertaForMaskedLM,fail_accuracy,0
+DebertaForQuestionAnswering,fail_accuracy,0
 DebertaV2ForMaskedLM,pass_due_to_skip,0
-DebertaV2ForQuestionAnswering,fail_to_run,0
-DistilBertForMaskedLM,fail_to_run,0
-DistilBertForQuestionAnswering,fail_to_run,0
+DebertaV2ForQuestionAnswering,fail_accuracy,0
+DistilBertForMaskedLM,pass,0
+DistilBertForQuestionAnswering,pass,0
 DistillGPT2,pass,0
 ElectraForCausalLM,pass,0
 ElectraForQuestionAnswering,pass,0
