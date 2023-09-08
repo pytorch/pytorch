@@ -1290,6 +1290,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 3)  # Recompile! Different arg keys
 
+        lambda6 = lambda x: x + x
+        fn2(lambda6, lambda6, [x])
+        self.assertEqual(
+            cnts.frame_count, 4
+        )  # Recompile! input is no longer a functools partial
+
 
 def udf_mul(x, y):
     return x * y

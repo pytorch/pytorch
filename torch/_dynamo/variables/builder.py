@@ -494,6 +494,7 @@ class VariableBuilder:
                 )(v)
 
             guards = {
+                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS),
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             }
