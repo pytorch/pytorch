@@ -77,7 +77,7 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
   c10::SymNode ne(const c10::SymNode& other) override {
     c10::optional<int64_t> c = other->singleton_int();
-    bool ret = c.has_value() && val_ != *c;
+    bool ret = !c.has_value() || val_ != *c;
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(ret));
   }
 
@@ -86,8 +86,8 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   // range seems to be [2, int64_t::max()] (1) since sizes are non-negative, and
   // (2) we need to get past 0/1 specialization checks.
   c10::SymNode ge(const c10::SymNode& other) override {
-    if (other->singleton_int().has_value()) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    if (auto mb_si = other->singleton_int()) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *mb_si));
     }
     c10::optional<int64_t> c = other->constant_int();
     TORCH_CHECK(c.has_value());
