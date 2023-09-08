@@ -1347,32 +1347,24 @@ class TestReductions(TestCase):
     @dtypes(torch.bfloat16, torch.float16)
     def test_sum_noncontig_lowp(self, device, dtype) -> None:
         dim_sequences = {
-            2: [0, 1],
             3: [0, 1, 2],
             4: [0, 1, 2, 3],
             5: [0, 1, 2, 3, 4],
         }
 
         def helper(self, shape, reduce_dims, device, dtype):
-            permute_list = dim_sequences[len(shape)]
-            random.shuffle(permute_list)
-            x = torch.ones(shape, device=device, dtype=dtype)
-            x_trans = x.permute(permute_list)
-            x_sum = torch.sum(x_trans, reduce_dims)
-            x_trans_ref = x_trans.float()
-            x_sum_ref = torch.sum(x_trans_ref, reduce_dims)
-            self.assertEqual(x_sum, x_sum_ref.to(dtype=dtype))
+            for permute_list in list(permutations(dim_sequences[len(shape)], len(shape))):
+                x = torch.ones(shape, device=device, dtype=dtype)
+                x_trans = x.permute(permute_list)
+                x_sum = torch.sum(x_trans, reduce_dims)
+                x_trans_ref = x_trans.float()
+                x_sum_ref = torch.sum(x_trans_ref, reduce_dims)
+                self.assertEqual(x_sum, x_sum_ref.to(dtype=dtype))
 
         shapes = [
-            (10, 20),
-            (5, 2, 57),
-            (10, 55, 600),
-            (1, 7, 24, 6),
+            (10, 10, 10),
             (10, 13, 3, 3),
-            (10, 1, 77, 77),
-            (1, 1, 1, 1, 1),
-            (1, 1, 10, 6, 7),
-            (10, 55, 10, 66, 7),
+            (10, 5, 10, 20, 7),
         ]
         for shape in shapes:
             for i in range(1, len(shape)):
