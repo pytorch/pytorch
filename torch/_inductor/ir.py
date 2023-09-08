@@ -5786,7 +5786,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         return False
 
     def get_mutation_names(self):
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
     @classmethod
     def create(
@@ -5824,7 +5824,7 @@ class AllReduce(InPlaceCollectiveKernel):
         self.reduce_op = reduce_op
 
     def get_mutation_names(self):
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
     @classmethod
     def create(
