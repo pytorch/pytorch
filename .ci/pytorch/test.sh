@@ -298,6 +298,8 @@ test_inductor() {
   # TODO: need a faster way to build
   BUILD_AOT_INDUCTOR_TEST=1 python setup.py develop
   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aot_inductor
+  # bdist_wheel doesn't contain CUTLASS scripts / header files. Run test_max_autotune after torch is setup under develop mode.
+  python test/run_test.py --include inductor/test_max_autotune.py --verbose
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
