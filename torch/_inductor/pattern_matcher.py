@@ -421,12 +421,14 @@ class _TargetArgsExpr(_TargetExpr):
                 return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
             else:
                 _args, _kwargs = normalized_args_and_kwargs
-                if len(_args) != len(self.args) or len(_kwargs) != len(self.kwargs):
+                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
+                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+                else:
                     return FailedMatch(
                         f"function_mismatch: node={node}, pattern={self}"
                     )
-        elif len(_kwargs) > len(self.kwargs):
-            return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+        else:
+            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
 
         node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
