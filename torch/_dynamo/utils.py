@@ -405,18 +405,13 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    if sys.version_info < (3, 9):
-        return isinstance(value, typing._GenericAlias)
-    else:
-        return isinstance(
-            value,
-            (
-                typing.TypeVar,
-                typing._SpecialGenericAlias,
-                typing._UnionGenericAlias,
-                typing._SpecialForm,
-            ),
-        )
+    # typing._Final covers almost all typing types:
+    #   - Any
+    #   - Union
+    #   - Optional
+    #   - Dict
+    #   - List
+    return isinstance(value, typing._Final)
 
 
 def is_numpy_int_type(value):
