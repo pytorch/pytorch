@@ -22,7 +22,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
@@ -87,6 +87,7 @@ from .dicts import (
 from .distributed import (
     DeviceMeshVariable,
     PlacementClassVariable,
+    PlacementVariable,
     ProcessGroupVariable,
 )
 from .functions import (
@@ -187,6 +188,9 @@ class GraphArg:
 
     def erase(self):
         self._example = None
+
+    def __eq__(self, other):
+        return self.source.name() == other.source.name()
 
 
 @dataclasses.dataclass
@@ -408,7 +412,7 @@ class VariableBuilder:
             # store key variables in global location for reconstruction
             for key in value.keys():
                 if self.tensor_can_be_dict_key(key):
-                    self.tx.store_dict_key(global_key_name(key), key)
+                    self.tx.store_global_weakref(global_key_name(key), key)
 
             def index_source(key):
                 if self.tensor_can_be_dict_key(key):
@@ -666,6 +670,14 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return PlacementVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -883,8 +895,7 @@ class VariableBuilder:
         if (
             source.guard_source().is_nn_module()
             or get_static_address_type(value) is not None
-            and not source.guard_source().is_fsdp_module()
-        ):
+        ) and not source.guard_source().is_fsdp_module():
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
@@ -1284,8 +1295,8 @@ def wrap_fx_proxy_cls(
 
         # Handle recursive calls here
         elif (
-            isinstance(example_value, FakeTensor)
-            and example_value.fake_mode is tx.fake_mode
+            is_fake(example_value)
+            and maybe_get_fake_mode(example_value) is tx.fake_mode
         ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 

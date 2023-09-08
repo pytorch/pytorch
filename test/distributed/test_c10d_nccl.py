@@ -1100,6 +1100,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Both rank 0 and 1 will use the same CUDA device resulting in ncclInvalidUsage
         with self.assertRaises(dist.DistBackendError) as cm:
             dist.broadcast(torch.tensor([1, 2, 3]).cuda(), 0)
+        self.assertTrue(isinstance(cm.exception, dist.DistError))
 
         self.assertIsInstance(cm.exception, RuntimeError)
 
@@ -3064,7 +3065,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="nccl", rank=self.rank, world_size=self.world_size, store=store
         )
 
-        with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
+        with self.assertRaisesRegex(TypeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
 
     @requires_nccl()

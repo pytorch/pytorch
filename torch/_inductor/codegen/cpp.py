@@ -110,10 +110,16 @@ VECTORIZABLE_RTYPES = {
 }
 
 PYTHON_TO_CPP = {
+    "Tensor": "at::Tensor",
     "int": "long",
     "float": "double",
     "bool": "bool",
+    "str": "std::string",
     "ScalarType": "c10::ScalarType",
+    "MemoryFormat": "at::MemoryFormat",
+    "Layout": "at::Layout",
+    "Device": "at::Device",
+    "number": "at::Scalar",
 }
 
 CONTAINER_PYTHON_TO_CPP = {
@@ -2635,6 +2641,7 @@ class CppKernelProxy(CppKernel):
                         node.run(vars, ())
 
         scalar_kernel = codegen_kernel(CppKernel)
+        V.graph.removed_buffers |= scalar_kernel.removed_buffers
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:
