@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -118,11 +119,11 @@ inline Variable valueToTensor(
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
   } else if (torch::is_symint(value)) {
-    scalar = Scalar(py::cast<SymInt>(value));
+    scalar = Scalar(py::cast<c10::SymInt>(value));
   } else if (torch::is_symfloat(value)) {
-    scalar = Scalar(py::cast<SymFloat>(value));
+    scalar = Scalar(py::cast<c10::SymFloat>(value));
   } else if (torch::is_symbool(value)) {
-    scalar = Scalar(py::cast<SymBool>(value));
+    scalar = Scalar(py::cast<c10::SymBool>(value));
   } else {
     throw TypeError(
         "can't assign a %s to a %s",
