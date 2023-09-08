@@ -1423,10 +1423,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
         exp_graph = """\
-def forward(self, pred_1, x_1):
+def forward(self, arg0_1, arg1_1):
     body_graph_0 = self.body_graph_0
-    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
-  body_graph_0 = x_1 = pred_1 = None
+    map_impl = torch.ops.map_impl(body_graph_0, 1, arg1_1, arg0_1);  body_graph_0 = arg1_1 = arg0_1 = None
     getitem = map_impl[0];  map_impl = None
     return getitem
 """
