@@ -508,7 +508,7 @@ RangeValue::RangeValue(
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
           << "all inputs of range must be ints, found " << typ->repr_str()
-          << " in argument " << c10::guts::to_string(i);
+          << " in argument " << std::to_string(i);
     }
   }
 
