@@ -2472,7 +2472,7 @@ class CPUReproTests(TestCase):
     def test_linear_with_no_default_contiguous_input(self):
         mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
         temp = torch.randn(1, 16, 1, 1)
-        v = torch.ops.inductor._reinterpret_tensor(temp, [1, 16], [0, 1], 0)
+        v = torch.as_strided(temp, [1, 16], [0, 1], 0)
         self.assertTrue(v.is_contiguous())
         with torch.no_grad():
             self.common(
