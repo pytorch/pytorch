@@ -27,6 +27,14 @@ class TestComplexTensor(TestCase):
         torch.set_default_dtype(default_dtype)
         self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
 
+    @dtypes(*complex_types())
+    def test_conj_copy(self, device, dtype):
+        # issue: https://github.com/pytorch/pytorch/issues/106051
+        x1 = torch.tensor([5 + 1j, 2 + 2j], device=device, dtype=dtype)
+        xc1 = torch.conj(x1)
+        x1.copy_(xc1)
+        self.assertEqual(x1, torch.tensor([5 - 1j, 2 - 2j], device=device, dtype=dtype))
+
     @onlyCPU
     @dtypes(*complex_types())
     def test_eq(self, device, dtype):
