@@ -6,6 +6,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 
+
+__all__ = [
+    "ShapeEnvEvent",
+    "record_shapeenv_event",
+    "replay_shape_env_events",
+    "FakeTensorMeta",
+    "shape_env_check_state_equal",
+    "NotEqualError",
+]
+
 # [Note: Recording ShapeEnv Events]
 # =================================
 #
@@ -198,15 +208,20 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+            if isinstance(args[0], ShapeEnv) and args[0].is_recording:
+                # If ShapeEnv is already recording an event, call the wrapped
+                # function directly.
+                #
+                # NB: here, we skip the check of whether all ShapeEnv instances
+                # are equal, in favor of a faster dispatch.
+                return fn(*args, **kwargs)
+
             # Retrieve an instance of ShapeEnv.
             # Assumption: the collection of args and kwargs may not reference
             # different ShapeEnv instances.
             self = _extract_shape_env_and_assert_equal(args, kwargs)
-
-            # If ShapeEnv is already recording an event, call the wrapped
-            # function directly.
-            if self.is_recording:
-                return fn(*args, **kwargs)
 
             # Otherwise, start recording and call the function.
             with self.recording():
