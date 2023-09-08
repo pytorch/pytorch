@@ -1652,6 +1652,18 @@ def main():
                 options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
             )
 
+        def __str__(self):
+            s = f"Name: {self.name}\n"
+            s += "  Parallel tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
+            )
+            s += "  Serial tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if must_serial(test)
+            )
+            return s.strip()
+
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
@@ -1671,6 +1683,9 @@ def main():
             True,
         ),
     ]
+
+    for test_batch in test_batches:
+        print(test_batch)
 
     if options.dry_run:
         return
