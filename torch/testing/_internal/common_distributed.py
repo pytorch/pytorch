@@ -1184,7 +1184,7 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
     # Just manually implement the most important part of the dynamo behavior to reset/clear.
     torch.cuda.set_device(rank)
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '6788'
+    os.environ['MASTER_PORT'] = '6789'
     if init_pg:
         c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
