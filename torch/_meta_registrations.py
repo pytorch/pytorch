@@ -2642,11 +2642,6 @@ def meta_complex(real, imag):
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
-@register_meta(aten.view.dtype)
-def view_dtype(self, dtype):
-    return utils.clone_preserve_strides(self).to(dtype)
-
-
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
@@ -2891,6 +2886,7 @@ def meta__foreach_binop__list(self, other, alpha=1):
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
         aten._foreach_div_.Scalar,
+        aten._foreach_maximum_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
@@ -4729,14 +4725,16 @@ def meta__scaled_dot_product_flash(
     head_dim = query.size(3)
 
     max_seqlen_batch_k = key.size(2)
+    Nnz_q = batch_size * max_seqlen_batch_q
+
+    query_t = query.transpose(1, 2)
+    query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
+    attention = torch.empty_like(query_reshaped, device=query.device)
+    attention = attention.view(
+        batch_size, max_seqlen_batch_q, num_heads, head_dim
+    ).transpose(1, 2)
+
     if device_hint(query) == "cpu":
-        Nnz_q = batch_size * max_seqlen_batch_q
-        query_t = query.transpose(1, 2)
-        query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
-        attention = torch.empty_like(query_reshaped, device=query.device)
-        attention = attention.view(
-            batch_size, max_seqlen_batch_q, num_heads, head_dim
-        ).transpose(1, 2)
         logsumexp = torch.empty(
             (
                 batch_size,
@@ -4757,12 +4755,9 @@ def meta__scaled_dot_product_flash(
             torch.empty((), dtype=torch.long, device="meta"),
             torch.empty((), dtype=query.dtype, device=query.device),
         )
-
-    # Cuda Path
-    query_t = query.transpose(1, 2)
-    attention = torch.empty_like(query_t).transpose(1, 2)
+    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
     logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_batch_q),
+        (batch_size, num_heads, max_seqlen_q),
         dtype=torch.float,
         device=query.device,
     )
@@ -4781,7 +4776,7 @@ def meta__scaled_dot_product_flash(
         elif max_seqlen_batch_k <= 256:
             max_seqlen_k = 256
         debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
+            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
             dtype=query.dtype,
             device=query.device,
         )
@@ -4796,8 +4791,8 @@ def meta__scaled_dot_product_flash(
     return (
         attention,
         logsumexp,
-        None,
-        None,
+        cumulative_sequence_length_q,
+        cumulative_sequence_length_k,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
         torch.empty((), dtype=torch.long, device="meta"),
