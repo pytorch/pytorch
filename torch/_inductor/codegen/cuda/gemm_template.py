@@ -299,10 +299,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         ):
             return None
 
-        # Skip sparse and grouped kernels
+        # Only keep GemmUniversal kernels
         if op.gemm_kind not in {
-            # cutlass_lib.GemmKind.Sparse,
-            # cutlass_lib.GemmKind.Grouped,
             cutlass_lib.GemmKind.Universal,
             cutlass_lib.GemmKind.Universal3x,
         }:
