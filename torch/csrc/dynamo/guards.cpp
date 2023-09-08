@@ -768,10 +768,6 @@ PyObject* torch_c_dynamo_guards_init() {
   if (m == nullptr)
     return nullptr;
 
-  m = PyModule_Create(&_module);
-  if (m == NULL)
-    return NULL;
-
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);
