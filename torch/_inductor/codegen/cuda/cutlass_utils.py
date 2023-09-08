@@ -2,7 +2,6 @@ import functools
 import logging
 import os
 import sys
-import tempfile
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -10,6 +9,7 @@ import sympy
 
 import torch
 
+from ...codecache import cache_dir
 from ...config import cuda as inductor_cuda_config
 from ...ir import Layout
 from .cuda_env import get_cuda_arch, get_cuda_version
@@ -53,7 +53,7 @@ def try_import_cutlass() -> bool:
         inductor_cuda_config.cutlass_dir, "tools/library/scripts"
     )
     tmp_cutlass_py_full_path = os.path.abspath(
-        os.path.join(tempfile.gettempdir(), "torch_cutlass_script")
+        os.path.join(cache_dir(), "torch_cutlass_script")
     )
 
     if os.path.isdir(cutlass_py_full_path):
@@ -146,7 +146,7 @@ def gen_ops() -> List[Any]:
     import cutlass_generator  # type: ignore[import]
     import cutlass_manifest  # type: ignore[import]
 
-    arch = _normalize_cuda_arch(get_cuda_arch())
+    arch = get_cuda_arch()
     version = get_cuda_version()
     if arch is None or version is None:
         log.error(
@@ -157,6 +157,7 @@ def gen_ops() -> List[Any]:
             version,
         )
         return list()
+    arch = _normalize_cuda_arch(arch)
     args = CUTLASSArgs(architectures=arch, cuda_version=version)
     manifest = cutlass_manifest.Manifest(args)
 

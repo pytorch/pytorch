@@ -1135,30 +1135,40 @@ def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
-def has_free_symbols(itr):
-    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
-
-
-def is_dynamic(*args):
-    from . import ir
-
-    for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
-            ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
-                return True
-        elif not isinstance(t, ir.IRNode):
-            continue
-        else:
-            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
-
-    return False
-
-
 def is_linux() -> bool:
     return platform.system() == "Linux"
+
+
+# A utility function for easier AOTInductor testing
+aot_inductor_launcher = """
+    #include <c10/cuda/CUDAStream.h>
+    #include <torch/csrc/inductor/aot_runtime/interface.h>
+
+    void run(
+            std::vector<at::Tensor>& input_tensors,
+            std::vector<at::Tensor>& output_tensors) {
+        AOTInductorModelContainerHandle container_handle;
+        AOT_INDUCTOR_ERROR_CHECK(
+            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
+        const auto stream_id = cuda_stream.stream();
+        AOTInductorStreamHandle stream_handle =
+            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+        AOTInductorTensorHandle inputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
+        AOTInductorTensorHandle outputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
+        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+            container_handle,
+            inputs_handle,
+            input_tensors.size(),
+            outputs_handle,
+            output_tensors.size(),
+            stream_handle,
+            proxy_executor_handle));
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+    }
+"""
