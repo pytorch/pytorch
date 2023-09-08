@@ -3967,6 +3967,40 @@ def scaled_dot_product_flash_attention(
     output, _ = aten._scaled_dot_product_attention_math.default(
         query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
     )
+    # Why this change?
+    # In pre-dispatch export scaled_dot_product_attention is executed via
+    # * flash_attention.
+    # flash_attention allocates output tensor as (N, L, H, E)
+    #   it then tranposes that to get (N, H, L, E) which is supposed to be the return
+    # tensor dim for scaled_dot_product_attention
+    # assume x: [N, H, L, E] is the output sdpa
+    # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
+    # (L, N, H, E) dim tensor
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+    # During pre autograd dispatch call to contiguous is not traced because
+    # flash_attention output after the x.permute is already contiguous
+    # on which the view is valid
+    # However, during 2nd stage export, post-dispatch, we run _match variant
+    # instead of flash* to get the decomposition. _match variant returns
+    # x: [N, H, L, E] applying x.permute(2, 0, 1, 3) returns
+    # x: [L, N, H, E] and without converting this to contiguous tensor
+    # subsequent view is not valid and the export fails
+    # solution is to maintain the return tensor view from the decomp to be
+    # exactly same as *flash* variant.
+    # flash variants output is contiguous as [N, L, H, E]
+    # _match variant out is contiguous as [N, H, L, E]
+    # out = out.tranpose(1, 2).contiguous gets output as contiguous
+    # in [N, L, H, E].
+    # Subsrequent tranpose(1, 2) then returns a view on which
+    # aforementioned code snippet, as showm below, is valid
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+
+    # Really the invairant you want to maintain is:
+    # pre-dispatch op-output and its decomposed representation must
+    # return tensor with same view and dims
+    output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
     return (
         output.transpose(1, 2),
         logsumexp,

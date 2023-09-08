@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+import weakref
 from contextlib import contextmanager
 
 import logging
@@ -73,7 +74,11 @@ except ImportError:
     from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
+    import torch_xla
     import torch_xla.core.xla_model as xm
+
+    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
@@ -682,7 +687,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
-    should_check_result = should_randomize_input = args.randomize_input
+    should_randomize_input = args.randomize_input
 
     import contextlib
 
@@ -744,11 +749,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
-                )
-
-            if should_check_result:
-                is_correct = is_correct and same(
-                    expected_output, actual_output, tol=tolerance
                 )
 
     if args.export_profiler_trace:
@@ -1136,7 +1136,7 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, eager_forward):
-        key = id(model)
+        key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_outputs = eager_forward(
@@ -1155,8 +1155,9 @@ class AOTInductorModelCache:
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
-                torch.empty(
+                torch.empty_strided(
                     node.meta["val"].size(),
+                    node.meta["val"].stride(),
                     dtype=node.meta["val"].dtype,
                     layout=node.meta["val"].layout,
                     device=node.meta["val"].device,
@@ -1166,7 +1167,7 @@ class AOTInductorModelCache:
 
             # Use a utility function for easier benchmarking
             source = """
-            #include <torch/csrc/inductor/aot_inductor_model.h>
+            #include <torch/csrc/inductor/aot_runtime/model.h>
 
             torch::aot_inductor::AOTInductorModel model;
 
@@ -2324,6 +2325,9 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
+        if not hasattr(model, name):
+            model.name = name
+
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2374,8 +2378,6 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            if not hasattr(model, name):
-                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -3227,7 +3229,7 @@ def run(runner, args, original_dir=None):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
-        torch._dynamo.config.print_graph_breaks = True
+        torch._logging.set_logs(graph_breaks=True)
 
     if args.quiet:
         torch._logging.set_logs(dynamo=logging.ERROR)

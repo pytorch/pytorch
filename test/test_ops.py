@@ -2183,4 +2183,5 @@ instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
+    TestCase._default_dtype_check_enabled = True
     run_tests()

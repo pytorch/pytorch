@@ -576,7 +576,7 @@ void expectCallsConcatUnboxed(DispatchKey dispatch_key) {
 TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernel_whenRegistered_thenCanBeCalledUnboxed) {
   auto registrar = RegisterOperators().op("_test::my_op(Tensor dummy, str a, str b, int c) -> str", torch::RegisterOperators::options()
     .kernel(DispatchKey::CPU, [] (const Tensor& tensor1, std::string a, const std::string& b, int64_t c) {
-      return a + b + std::to_string(c);
+      return a + b + c10::guts::to_string(c);
     }));
   expectCallsConcatUnboxed(DispatchKey::CPU);
 }

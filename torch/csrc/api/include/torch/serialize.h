@@ -67,7 +67,7 @@ void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
   serialize::OutputArchive archive(std::make_shared<jit::CompilationUnit>());
   for (const auto i : c10::irange(tensor_vec.size())) {
     auto& value = tensor_vec[i];
-    archive.write(std::to_string(i), value);
+    archive.write(c10::to_string(i), value);
   }
   archive.save_to(std::forward<SaveToArgs>(args)...);
 }
@@ -135,7 +135,7 @@ void load(std::vector<torch::Tensor>& tensor_vec, LoadFromArgs&&... args) {
   // the serialized `std::vector<torch::Tensor>`.
   size_t index = 0;
   torch::Tensor value;
-  while (archive.try_read(std::to_string(index), value)) {
+  while (archive.try_read(c10::to_string(index), value)) {
     tensor_vec.push_back(std::move(value));
     value = torch::Tensor();
     index++;
