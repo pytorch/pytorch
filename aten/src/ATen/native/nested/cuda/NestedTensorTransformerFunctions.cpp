@@ -679,7 +679,16 @@ inline auto sdpa_nested_preprocessing(
 
 } // namespace
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, Tensor, Tensor, Tensor>
+std::tuple<
+    Tensor,
+    Tensor,
+    Tensor,
+    Tensor,
+    int64_t,
+    int64_t,
+    Tensor,
+    Tensor,
+    Tensor>
 _scaled_dot_product_flash_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
@@ -701,12 +710,8 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
       max_seqlen_batch_kv,
       output_shape) = sdpa_nested_preprocessing(query, key, value);
 
-  auto
-      [attention,
-       logsumexp,
-       philox_seed,
-       philox_offset,
-       debug_attn_mask] =
+  Tensor attention, log_sumexp, debug_attn_mask, philox_seed, philox_offset;
+  std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_buffer_reshaped,
           key_buffer_reshaped,
@@ -723,7 +728,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(
       attention,
-      logsumexp,
+      log_sumexp,
       cumulative_sequence_length_q,
       cumulative_sequence_length_kv,
       max_seqlen_batch_q,
