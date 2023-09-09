@@ -2095,9 +2095,10 @@ def _index_add(
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     )
     index_size = index.size(0) if index.ndim == 1 else 1
+    tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
     torch._check(
-        tensor.size(dim) == index_size,
-        lambda: f"Number of indices ({index_size}) should be equal to source.size(dim) ({tensor.size(dim)}), for {dim=}",
+        tensor_size == index_size,
+        lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
