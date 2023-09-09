@@ -29,10 +29,10 @@ pip_install \
   transformers==4.32.1
 
 pip_install coloredlogs packaging
-retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230908001
+retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230824005
 
 pip_install onnx==1.14.1
-pip_install onnxscript-preview==0.1.0.dev20230828 --no-deps
+pip_install onnxscript==0.1.0.dev20230909 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
