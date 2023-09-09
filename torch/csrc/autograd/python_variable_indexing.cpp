@@ -119,11 +119,11 @@ inline Variable valueToTensor(
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
   } else if (torch::is_symint(value)) {
-    scalar = Scalar(py::cast<c10::SymInt>(value));
+    scalar = Scalar(py::cast<c10::SymInt>(py::handle(value)));
   } else if (torch::is_symfloat(value)) {
-    scalar = Scalar(py::cast<c10::SymFloat>(value));
+    scalar = Scalar(py::cast<c10::SymFloat>(py::handle(value)));
   } else if (torch::is_symbool(value)) {
-    scalar = Scalar(py::cast<c10::SymBool>(value));
+    scalar = Scalar(py::cast<c10::SymBool>(py::handle(value)));
   } else {
     throw TypeError(
         "can't assign a %s to a %s",
