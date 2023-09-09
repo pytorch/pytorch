@@ -425,9 +425,7 @@ class SideEffects:
             cg.extend_output(create_call_function(1, True))
             if hasattr(handle, "last_seen_name") and handle.last_seen_name:
                 # register_hook stored with variable name assigned to the handle
-                cg.extend_output(
-                    [cg.create_store(handle.last_seen_name)]
-                )
+                cg.extend_output([cg.create_store(handle.last_seen_name)])
             else:
                 # register_hook stored w/o a variable name assigned to the handle
                 cg.extend_output([create_instruction("POP_TOP")])
