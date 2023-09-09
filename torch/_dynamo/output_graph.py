@@ -628,12 +628,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         *names,
         **options,
     ):
-        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
-        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
-        # but route here fore registration of children.
-        if is_dynamic_nn_module(target) and not getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
+        if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -641,25 +636,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
-
-        if is_dynamic_nn_module(target) and getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
-            name = "_".join(map(str, names))
-            base = name
-            for i in itertools.count():
-                if name not in self.nn_modules:
-                    self.nn_modules[name] = target
-                    break
-                name = f"{base}_{i}"
-            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
-            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
-            vt = variables.nn_module.FSDPManagedNNModuleVariable(
-                target,
-                name,
-                **options,
-            )
-            return self.side_effects.track_object_existing(source, target, vt)
 
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer
@@ -696,15 +672,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(target, check_forward_hooks=True):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
-                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
-                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
-                    "to ensure recompiling after changing hooks."
-                    f"{nnmodule_doc_url_msg} ",
-                )
             if nnmodule_has_hooks(
                 target, check_backward_hooks=True, check_state_dict_hooks=True
             ):
@@ -832,6 +799,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
+        # NB: Typically (i.e., for graph compile from RETURN_VALUE),
+        # symbolic_locals will be empty at this point, as prune_dead_locals
+        # will clear out all of symbolic_locals because RETURN_VALUE is the
+        # last instruction and no more locals are used.  The fanciness here
+        # is only needed for partial graphs.
         for k, v in tx.symbolic_locals.items():
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
@@ -1378,6 +1350,11 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        log.debug(
+            "create_graph_input %s %s",
+            name,
+            source.name() if source is not None else "(none)",
+        )
         if source is None:
             assert (
                 self.parent is not None

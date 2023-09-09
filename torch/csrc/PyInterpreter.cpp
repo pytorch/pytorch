@@ -35,7 +35,7 @@ struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
   std::string name() const override;
 
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
+  void decref(PyObject* pyobj, bool is_tensor) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
@@ -189,15 +189,15 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-// NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
+// NOTE [PyInterpreter::decref takes an `is_tensor` arg]
 // Before calling PyInterpreter::decref, we must statically know if the
-// pyobj has a PyObjectSlot or not.
-// - If it has a PyObjectSlot, we need to be careful about PyObject resurrection
-// - If it does not have a PyObjectSlot, we can freely decref
+// pyobj is a Tensor or not.
+// - If it is a tensor, we need to be careful about PyObject resurrection
+// - If it is not a tensor, we can freely decref
 // One alternative to this is using PyObject_IsInstance
 // to get at this information. However, we don't want to risk an incorrect
 // `__instancecheck__` changing the semantics here.
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
+void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool is_tensor)
     const {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
@@ -207,33 +207,23 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
 
   pybind11::gil_scoped_acquire gil;
   // Two possibilities:
-  // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or
-  // Storage. Then we must be careful about PyObject resurrection (see
+  // 1. We are decref-ing a tensor. Then we must be careful about
+  // PyObject resurrection (this only applies to Tensors, see
   // THPVariable_clear).
   // 2. We are decref-ing some other Python object. We don't do
   // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (has_pyobj_slot && Py_REFCNT(pyobj) > 1) {
-    if (THPVariable_Check(pyobj)) {
-      // It's still alive!  This can happen if a weak ref resurrected
-      // the PyObject without flipping ownership.  At this point it is
-      // too late to rescue the object, so just stub out the PyObject
-      // so that it fails on subsequent uses.  Don't raise an error here;
-      // you're probably in a destructor.
-      TORCH_WARN(
-          "Deallocating Tensor that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "Tensor and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this tensor via the PyObject will now fail.");
-      ((THPVariable*)pyobj)->cdata =
-          c10::MaybeOwned<torch::autograd::Variable>();
-    } else if (THPStorage_Check(pyobj)) {
-      TORCH_WARN(
-          "Deallocating UntypedStorage that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this storage via the PyObject will now fail.");
-      ((THPStorage*)pyobj)->cdata = c10::MaybeOwned<c10::Storage>();
-    }
+  if (is_tensor && Py_REFCNT(pyobj) > 1) {
+    // It's still alive!  This can happen if a weak ref resurrected
+    // the PyObject without flipping ownership.  At this point it is
+    // too late to rescue the object, so just stub out the PyObject
+    // so that it fails on subsequent uses.  Don't raise an error here;
+    // you're probably in a destructor.
+    TORCH_WARN(
+        "Deallocating Tensor that still has live PyObject references.  "
+        "This probably happened because you took out a weak reference to "
+        "Tensor and didn't call _fix_weakref() after dereferencing it.  "
+        "Subsequent accesses to this tensor via the PyObject will now fail.");
+    ((THPVariable*)pyobj)->cdata = c10::MaybeOwned<torch::autograd::Variable>();
   }
   Py_DECREF(pyobj);
 };
@@ -558,8 +548,8 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  c10::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  c10::optional<PyObject*> mb_obj =
+      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
   py::handle(mb_obj.value()).attr(attr_name) = capsule;
