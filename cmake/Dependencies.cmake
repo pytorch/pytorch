@@ -1879,6 +1879,7 @@ if(USE_KINETO)
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
         ${CUDA_SOURCE_DIR}/lib
         ${CUDA_SOURCE_DIR}/lib64
+        $ENV{CUPTI_LIBRARY_DIR}
         NO_DEFAULT_PATH)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
@@ -1886,6 +1887,7 @@ if(USE_KINETO)
         ${CUDA_INCLUDE_DIRS}
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/include
+        $ENV{CUPTI_INCLUDE_DIR}
         NO_DEFAULT_PATH)
 
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
