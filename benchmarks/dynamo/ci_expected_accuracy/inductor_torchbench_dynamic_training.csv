@@ -9,6 +9,7 @@ basic_gnn_edgecnn,pass,25
 basic_gnn_gcn,pass,14
 basic_gnn_gin,pass,8
 basic_gnn_sage,pass,8
+clip,pass,8
 dcgan,pass,8
 dlrm,pass,8
 drq,pass,7
