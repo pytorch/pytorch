@@ -9,7 +9,6 @@ import torch._inductor
 
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
-from torch._inductor.utils import aot_inductor_launcher
 
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -36,9 +35,21 @@ class AOTInductorModelRunner:
             options=options,
         )
 
+        # Use a utility function for easier testing
+        source = """
+        #include <torch/csrc/inductor/aot_runtime/model.h>
+
+        torch::aot_inductor::AOTInductorModel model;
+
+        void run(
+                const std::vector<at::Tensor>& input_tensors,
+                std::vector<at::Tensor>& output_tensors) {
+            model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
+        }
+        """
         optimized = torch.utils.cpp_extension.load_inline(
             name="aot_inductor",
-            cpp_sources=[aot_inductor_launcher],
+            cpp_sources=[source],
             functions=["run"],
             extra_ldflags=[so_path],
             with_cuda=True,
