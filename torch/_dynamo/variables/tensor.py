@@ -1,4 +1,3 @@
-import functools
 import inspect
 import operator
 import types
@@ -15,7 +14,6 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
-from torch._higher_order_ops.invoke import invoke
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
@@ -38,7 +36,6 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
-from torch._higher_order_ops.invoke import invoke
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -54,13 +51,6 @@ supported_const_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
-
-hook_registry = []
-
-
-def record_hook(*args, real_hook, pos):
-    grad = args[0]
-    return invoke(real_hook, grad)
 
 
 class TensorVariable(VariableTracker):
@@ -681,36 +671,7 @@ class TensorVariable(VariableTracker):
             src = tx.store_hook(name, fn)
             if not self.source:
                 # Intermediary
-                from .builder import GraphArg
-
-                original_fn = fn
-                fn = functools.partial(
-                    record_hook, real_hook=fn, pos=len(hook_registry)
-                )
-                # fn = torch._dynamo.disable(fn)
-
-                new_name = tx.store_handle("intermed_handle", handle)
-                handle_variable.as_global = new_name
-
-                hook_proxy = tx.output.root_tracer.create_graph_input(
-                    name, type(fn), source=src
-                )
-                grapharg = GraphArg(src, fn, False, None)
-                grapharg.has_symbols = False
-                hook_proxy.node.meta["grapharg"] = grapharg
-                # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
-                # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
-                # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
-
-                # hook_registry.append(original_fn)
-                hook_registry.append(original_fn)
-
-                self.as_proxy().register_hook(hook_proxy)
-
-                if fn_var.source:
-                    tx.output.guards.add(
-                        fn_var.source.make_guard(GuardBuilder.ID_MATCH)
-                    )
+                unimplemented("Intermediary tensors with registered hooks - NYI")
             else:
                 fn_var.source = src
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)

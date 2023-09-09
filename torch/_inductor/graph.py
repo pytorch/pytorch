@@ -1,4 +1,3 @@
-import functools
 import hashlib
 import logging
 import operator
@@ -562,7 +561,7 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
-        assert isinstance(example, torch.Tensor)
+        assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -594,10 +593,7 @@ class GraphLowering(torch.fx.Interpreter):
             return target(*args, **kwargs)
 
         if target not in lowerings:
-            if isinstance(target, functools.partial):
-                base_name = target.func.__name__.split(".")[0]
-            else:
-                base_name = target.name().split(".")[0]
+            base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
