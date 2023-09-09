@@ -3,11 +3,12 @@
 """Light smoke test switching between numpy to pytorch random streams.
 """
 from contextlib import contextmanager
+
+import numpy as _np
 import pytest
 
 import torch._numpy as tnp
 from torch._numpy.testing import assert_equal
-import numpy as _np
 
 
 @contextmanager
@@ -20,14 +21,34 @@ def control_stream(use_numpy=False):
         tnp.random.USE_NUMPY_RANDOM = oldstate
 
 
-def test_uniform():
-    r = tnp.random.uniform(0, 1, size=10)
+@pytest.mark.parametrize("use_numpy", [True, False])
+def test_uniform(use_numpy):
+    with control_stream(use_numpy):
+        r = tnp.random.uniform(0, 1, size=10)
+    assert isinstance(r, tnp.ndarray)
+
+
+@pytest.mark.parametrize("use_numpy", [True, False])
+def test_uniform_scalar(use_numpy):
+    # default `size` means a python scalar return
+    with control_stream(use_numpy):
+        r = tnp.random.uniform(0, 1)
+    assert isinstance(r, float)
 
 
 def test_shuffle():
     x = tnp.arange(10)
     tnp.random.shuffle(x)
 
+
+@pytest.mark.parametrize("use_numpy", [True, False])
+def test_choice(use_numpy):
+    kwds = dict(size=3, replace=False, p=[0.1, 0, 0.3, 0.6, 0])
+    with control_stream(use_numpy):
+        tnp.random.seed(12345)
+        x = tnp.random.choice(5, **kwds)
+        x_1 = tnp.random.choice(tnp.arange(5), **kwds)
+        assert_equal(x, x_1)
 
 
 def test_numpy_global():

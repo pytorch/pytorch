@@ -42,10 +42,28 @@ def deco_stream(func):
         if USE_NUMPY_RANDOM is False:
             return func(*args, **kwds)
         elif USE_NUMPY_RANDOM is True:
-            from numpy import random as nr
+            import numpy as _np
 
-            f = getattr(nr, func.__name__)
-            return f(*args, **kwds)
+            from ._ndarray import ndarray
+
+            f = getattr(_np.random, func.__name__)
+
+            # numpy funcs accept numpy ndarrays, unwrap
+            args = tuple(
+                arg.tensor.numpy() if isinstance(arg, ndarray) else arg for arg in args
+            )
+            kwds = {
+                key: val.tensor.numpy() if isinstance(val, ndarray) else val
+                for key, val in kwds.items()
+            }
+
+            value = f(*args, **kwds)
+
+            # `value` can be either _np.ndarray or python scalar (or None)
+            if value is not None and isinstance(value, _np.ndarray):
+                value = ndarray(torch.as_tensor(value))
+
+            return value
         else:
             raise ValueError(f"USE_NUMPY_RANDOM={USE_NUMPY_RANDOM} not understood.")
 
@@ -64,7 +82,7 @@ def random_sample(size=None):
         size = ()
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.empty(size, dtype=dtype).uniform_()
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream
@@ -82,7 +100,7 @@ def uniform(low=0.0, high=1.0, size=None):
         size = ()
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.empty(size, dtype=dtype).uniform_(low, high)
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream
@@ -98,7 +116,7 @@ def normal(loc=0.0, scale=1.0, size=None):
         size = ()
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.empty(size, dtype=dtype).normal_(loc, scale)
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream
@@ -118,7 +136,7 @@ def randint(low, high=None, size=None):
     if high is None:
         low, high = 0, low
     values = torch.randint(low, high, size=size)
-    return array_or_scalar(values, int, return_scalar=size is None)
+    return array_or_scalar(values, int, return_scalar=size == ())
 
 
 @deco_stream
