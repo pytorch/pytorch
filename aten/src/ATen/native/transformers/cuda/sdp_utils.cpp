@@ -241,7 +241,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
       check_runtime_disabled_flash,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
-      check_for_attn_mask,
+      check_for_attn_mask_flash,
       check_head_dim_size_flash,
       check_for_seq_len_0_nested_tensor,
       check_nonzero_sequence_lengths,

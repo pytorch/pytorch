@@ -44,7 +44,7 @@ bool use_flash_attention_cpp(sdp_params params, bool debug) {
       check_for_dropout,
       check_tensor_shapes,
       check_batch_size_and_num_heads,
-      check_for_attn_mask,
+      check_for_attn_mask_flash,
       check_head_dim_size_cpp,
       check_nonzero_sequence_lengths,
       check_last_dim_stride_equals_1);

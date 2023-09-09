@@ -255,10 +255,10 @@ inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_attn_mask(sdp_params params, bool debug) {
+inline bool check_for_attn_mask_flash(sdp_params params, bool debug) {
   if (params.attn_mask.has_value()) {
     if (debug) {
-      TORCH_WARN("Both fused kernels do not support non-null attn_mask.");
+      TORCH_WARN("Flash Attention does not support non-null attn_mask.");
     }
     return false;
   }
