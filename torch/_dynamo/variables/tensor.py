@@ -644,6 +644,39 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "register_hook":
+            # see [On tensor.register_hook]
+            assert len(args) == 1
+            fn_var = args[0]
+
+            if isinstance(fn_var, variables.NestedUserFunctionVariable):
+                # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
+                # This should not be onerous to support when needed.
+                unimplemented("NYI - lambda variables as hooks")
+            elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+                fn = fn_var.func
+                name = fn_var.func.fn.__name__
+            else:
+                fn = fn_var.fn
+                name = fn_var.fn.__name__
+
+            handle = self.as_proxy().node.meta["example_value"].register_hook(fn)
+
+            handle_variable = variables.user_defined.RemovableHandleVariable(
+                handle,
+                last_seen_name=None,
+                mutable_local=variables.base.MutableLocal(),
+                **options,
+            )
+            src = tx.store_hook(name, fn)
+            if not self.source:
+                # Intermediary
+                unimplemented("Intermediary tensors with registered hooks - NYI")
+            else:
+                fn_var.source = src
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            return handle_variable
+
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.

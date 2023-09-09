@@ -105,7 +105,11 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    RemovableHandleVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -788,7 +792,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        self.symbolic_locals[inst.argval] = self.pop()
+        loaded_vt = self.pop()
+        name = inst.argval
+        # If the last top VT in the stack (just popped) is a handle (see [On tensor.register_hook]), we associate
+        # the stored name.
+        loaded_vt = loaded_vt.rename(self, name)
+        self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -859,6 +868,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
+        if isinstance(value, RemovableHandleVariable):
+            unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
@@ -1861,6 +1872,28 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
+    def store_hook(self, name, value):
+        base = name
+        for i in itertools.count():
+            if name not in self.output.global_scope:
+                src = GlobalSource(name)
+                self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                self.output.install_global(name, value)
+                break
+            name = f"{base}_{i}"
+
+        return src
+
+    def store_handle(self, name, value):
+        base = name
+        for i in itertools.count():
+            if name not in self.output.global_scope:
+                self.output.install_global(name, value)
+                break
+            name = f"{base}_{i}"
+
+        return name
+
     @property
     def fake_mode(self):
         return self._fake_mode
@@ -2032,16 +2065,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
             self.init_local_index_guards_hack()
-
-            # Additionally, we need to add guards for self, if it is a NNModule. The
-            # outer invocation of Module.__call__ is a use of "self" that's not seen
-            # by the tracer. Practically, this is useful for catching modifications
-            # to the module's hooks that would otherwise be missed.
-            if "self" in self.symbolic_locals:
-                val = self.symbolic_locals["self"]
-                if isinstance(val, NNModuleVariable):
-                    local_guards = VariableTracker.propagate(val)["guards"]
-                    self.output.guards.update(local_guards)
 
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:

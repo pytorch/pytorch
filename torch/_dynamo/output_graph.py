@@ -696,6 +696,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
+            if nnmodule_has_hooks(target, check_forward_hooks=True):
+                torch._logging.warning_once(
+                    log,
+                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
+                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
+                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
+                    "to ensure recompiling after changing hooks."
+                    f"{nnmodule_doc_url_msg} ",
+                )
             if nnmodule_has_hooks(
                 target, check_backward_hooks=True, check_state_dict_hooks=True
             ):
@@ -875,6 +884,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
+            self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -886,6 +896,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
+            self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass2)

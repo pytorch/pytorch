@@ -13,9 +13,10 @@ import torch.nn
 
 from .. import variables
 from ..allowed_functions import is_allowed
+from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -176,6 +177,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
+
+        elif self.value == functools.partial:
+            subargs = args[1:]
+            subargs_real_values = []
+            subkwargs = {}
+            for subarg in subargs:
+                if isinstance(subarg, variables.UserFunctionVariable):
+                    subargs_real_values.append(subarg.fn)
+                elif isinstance(
+                    subarg,
+                    (variables.UserDefinedObjectVariable, variables.ConstantVariable),
+                ):
+                    subargs_real_values.append(subarg.value)
+                else:
+                    unimplemented("partial function call with non-constant arguments")
+            for k, v in kwargs.items():
+                if isinstance(v, variables.UserFunctionVariable):
+                    subkwargs[k] = v.fn
+                elif isinstance(
+                    v, (variables.UserDefinedObjectVariable, variables.ConstantVariable)
+                ):
+                    subkwargs[k] = v.value
+                else:
+                    unimplemented("partial function call with non-constant arguments")
+
+            new_fn = functools.partial(args[0].fn, *subargs_real_values, **subkwargs)
+            return variables.functions.UserFunctionVariable(new_fn, **options)
 
         return super().call_function(tx, args, kwargs)
 
@@ -378,6 +406,27 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.TorchVariable(self.value.func, **options).call_function(
                 tx, partial_args, partial_kwargs
             )
+        elif istype(self.value, functools.partial):
+            from .builder import VariableBuilder
+
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            args_source = AttrSource(self.source, "args")
+            partial_args = []
+            for i, arg in enumerate(self.value.args):
+                args_item_source = GetItemSource(args_source, i)
+                arg_vt = VariableBuilder(tx, args_item_source)(arg)
+                partial_args.append(arg_vt)
+            partial_args.extend(args)
+
+            kwargs_source = AttrSource(self.source, "keywords")
+            partial_kwargs = {}
+            for k, kwarg in enumerate(self.value.keywords.items()):
+                kwargs_item_source = GetItemSource(kwargs_source, k)
+                kwarg_vt = VariableBuilder(tx, kwargs_item_source)(kwarg)
+                partial_kwargs[k] = kwarg_vt
+
+            partial_kwargs.update(kwargs)
+            return variables.UserFunctionVariable(self.value.func, **options)
         elif callable(self.value):
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
@@ -590,3 +639,33 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
     # TODO Handle getattr for _length_per_key and _offset_per_key properly.
+
+
+class RemovableHandleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        last_seen_name=None,
+        as_global=None,
+        value_type=None,
+        mutable_local=None,
+        **kwargs,
+    ):
+        super().__init__(value, value_type, **kwargs)
+        # associated later, see code symbolic_convert and On dynamo tensor_hooks
+        self.last_seen_name = last_seen_name
+        self.mutable_local = mutable_local
+        self.as_global = as_global
+
+    def reconstruct(self, codegen):
+        if self.as_global:
+            return [codegen.create_load_global(self.as_global, False, add=True)]
+        if self.last_seen_name:
+            # It is an invariant that at this point, a STORE_FAST was executed for this name.
+            return [codegen.create_load(self.last_seen_name)]
+        return super().reconstruct(codegen)
+
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        new_vt = self.clone(last_seen_name=new_name)
+        return tx.replace_all(self, new_vt)
