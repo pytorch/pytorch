@@ -74,6 +74,7 @@ exclude_patterns = [
     '**/fb/**',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
     'torch/csrc/utils/pythoncapi_compat.h',
+    'aten/src/ATen/dlpack.h',
 ]
 init_command = [
     'python3',

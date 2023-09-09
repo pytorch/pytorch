@@ -31,6 +31,7 @@ from ..utils import (
     green_text,
     is_welford_reduction,
     next_power_of_2,
+    Placeholder,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -1446,6 +1447,8 @@ class TritonKernel(Kernel):
         if self._load_mask:
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix
+        reduction_sizes = ["None" for _ in self.range_trees]
+        reduction_sizes[-1] = ":"
 
         # Say we have
         #     tmp0 = ops.constant(1, torch.int64)
@@ -1667,56 +1670,6 @@ class TritonKernel(Kernel):
             DeferredLine(name, f"tl.store({var} + ({index}), {value}, {mask})")
         )
 
-    def scan(self, dtype, scan_op, value):
-        assert self.inside_reduction
-        default = triton_constant(ir.Reduction.default_value(scan_op, dtype))
-        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
-        self.filter_masks(masks)
-        masks = sorted(masks)
-        if self._load_mask:
-            masks.append(self._load_mask)
-        reduction_range_prefix = self.range_trees[-1].prefix
-
-        value = self.cse.generate(
-            self.compute, f"tl.broadcast_to({value}, {self.dense_size_str()})"
-        )
-
-        dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
-        acc_type = triton_acc_type(dtype)
-        cond = " & ".join(masks)
-
-        if self.persistent_reduction:
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default})"
-            )
-            result_var = self.cse.generate(
-                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
-            )
-        else:
-            accumulator = self.cse.newvar()
-            self.body.writeline(
-                f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
-            )
-
-            masked_value = self.cse.generate(
-                self.compute, f"tl.where({cond}, {value}, {default})"
-            )
-            combine_fn = ir.get_reduction_combine_fn(scan_op, dtype)
-            partial_reduce = self.cse.generate(
-                self.compute, self.reduction_resize(f"tl.{scan_op}({value}, {dim})")
-            )
-            acc_next = combine_fn(accumulator, partial_reduce)
-            partial_scan = self.cse.generate(
-                self.compute, f"tl.cum{scan_op}({masked_value}, {dim})"
-            )
-            result_var = self.cse.generate(
-                self.compute, combine_fn(accumulator, partial_scan)
-            )
-            self.compute.writeline(f"{accumulator} = {acc_next}")
-
-        result_var.mask_vars = masks
-        return result_var
-
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,
@@ -1820,7 +1773,7 @@ class TritonKernel(Kernel):
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
-                    f"KERNEL_NAME.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -1832,7 +1785,7 @@ class TritonKernel(Kernel):
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return KERNEL_NAME.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
+                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
@@ -1927,7 +1880,7 @@ class TritonKernel(Kernel):
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
-            "kernel_name": "DESCRIPTIVE_KRNL_NAME",
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
         }
 
         for tree in self.range_trees:
@@ -1978,7 +1931,9 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         code.splice(heuristics_line)
-        code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
+        code.writeline(
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
+        )
         self.codegen_body()
         with code.indent():
             self.codegen_static_numels(code)
@@ -2231,11 +2186,8 @@ class TritonScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule = []
-
-        # Writes with a reduced shape, meaning they are only present once the
-        # reduction loop has ended
-        current_loop_reduced_writes = set()
-        current_loop_has_writes = False
+        current_loop_writes = set()
+        is_current_reductions = set()
         done = set()
 
         def fits_in_main_body(n):
@@ -2248,24 +2200,9 @@ class TritonScheduling(BaseScheduling):
             _, (node_numel, node_rnumel) = n.group
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
-        def schedule_node_in_loop(n):
-            nonlocal current_loop_has_writes
-            done.add(n)
-            node_schedule.append(n)
-            current_loop_has_writes = True
-            # A scan is modelled as a reduction in the scheduler but has a
-            # full sized output that can be used inside the loop body
-            if (
-                n.is_reduction()
-                and isinstance(n, scheduler.SchedulerNode)
-                and not isinstance(n.node.data, ir.Scan)
-            ):
-                current_loop_reduced_writes.add(n.get_name())
-
         @contextlib.contextmanager
         def end_current_reduction_loop():
-            nonlocal current_loop_has_writes
-            if current_loop_has_writes:
+            if current_loop_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
                     if (
@@ -2275,7 +2212,10 @@ class TritonScheduling(BaseScheduling):
                             current_loop_writes & other_node.recursive_predecessors
                         )
                     ):
-                        schedule_node_in_loop(node)
+                        done.add(node)
+                        current_loop_writes.add(node.get_name())
+                        is_current_reductions.add(node.is_reduction())
+                        node_schedule.append(node)
 
             if node_schedule and node_schedule[-1] is EnableReduction:
                 node_schedule.pop()
@@ -2283,8 +2223,8 @@ class TritonScheduling(BaseScheduling):
                 node_schedule.append(DisableReduction)
             yield
             node_schedule.append(EnableReduction)
-            current_loop_reduced_writes.clear()
-            current_loop_has_writes = False
+            current_loop_writes.clear()
+            is_current_reductions.clear()
 
         for index, node in enumerate(nodes):
             if node in done:
@@ -2294,19 +2234,20 @@ class TritonScheduling(BaseScheduling):
             def requires_closing_previous_reduction(node, node_schedule):
                 if rnumel == 1:
                     return False
-                if not current_loop_reduced_writes & node.recursive_predecessors:
+                if not current_loop_writes & node.recursive_predecessors:
                     return False
                 assert node_schedule and not isinstance(
                     node_schedule[-1], (EnableReduction, DisableReduction)
                 )
-                return bool(current_loop_reduced_writes)
+                return True in is_current_reductions
 
             if fits_in_main_body(node):
                 if requires_closing_previous_reduction(node, node_schedule):
                     with end_current_reduction_loop():
                         pass  # need to start a new reduction loop
-
-                schedule_node_in_loop(node)
+                current_loop_writes.add(node.get_name())
+                is_current_reductions.add(node.is_reduction())
+                node_schedule.append(node)
             elif fits_outside_reduction(node):
                 with end_current_reduction_loop():
                     node_schedule.append(node)
@@ -2559,11 +2500,11 @@ class TritonScheduling(BaseScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
-            # DESCRIPTIVE_KRNL_NAME is used for profiling purposes; it shows the full kernel name
+            # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
             # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
-            src_code = src_code.replace("DESCRIPTIVE_KRNL_NAME", kernel_name)
-            src_code = src_code.replace("KERNEL_NAME", subs_name)
+            src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

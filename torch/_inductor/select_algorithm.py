@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
 from .codegen.triton_utils import config_of, signature_to_meta
 
-from .utils import do_bench, sympy_dot, sympy_product, unique
+from .utils import do_bench, Placeholder, sympy_dot, sympy_product, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,7 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
+        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
         return (
             f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
@@ -517,7 +518,7 @@ class TritonTemplate:
 
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
-                kernel_name="KERNEL_NAME",
+                kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
                 use_jit=False,
                 **kernel_options,

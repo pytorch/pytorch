@@ -44,7 +44,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, decode_device, is_dynamic, pad_listlike, sympy_product
+from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -423,6 +423,13 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
+        def is_dynamic(*args):
+            return any(
+                isinstance(t, TensorBox)
+                and any(x.free_symbols for x in t.data.get_size())  # type: ignore[attr-defined]
+                for t in args
+            )
+
         # group by device, whether any of the inputs are dynamic, and whether their types match
         # (proxy for type promotion)
         def group_args(arg_pairs):
@@ -1864,6 +1871,8 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.cumsum, require_dense, warn=False)
+make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1884,6 +1893,7 @@ make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten._scaled_mm.default)
 
+# TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
@@ -1903,6 +1913,7 @@ make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
+make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -4141,21 +4152,6 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
     return inner
 
 
-def _make_scan_inner(x, *, axis, dtype):
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    size = x.get_size()
-    axis = _validate_reduction_axis(x, axis)[0]
-
-    return dict(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=x.make_loader(),
-        size=x.get_size(),
-        axis=axis,
-    )
-
-
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
@@ -4486,38 +4482,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
-
-
-fallback_cumsum = fallback_handler(aten.cumsum)
-fallback_cumprod = fallback_handler(aten.cumprod)
-
-
-@register_lowering(aten.cumsum)
-def cumsum(x, axis=None, dtype=None):
-    if (
-        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    ) and dtype is None:
-        dtype = torch.int64
-
-    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="sum")
-    if result is None:
-        return fallback_cumsum(x, dim=axis, dtype=dtype)
-    return result
-
-
-@register_lowering(aten.cumprod)
-def cumprod(x, axis=None, dtype=None):
-    if (
-        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    ) and dtype is None:
-        dtype = torch.int64
-
-    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="prod")
-    if result is None:
-        return fallback_cumprod(x, dim=axis, dtype=dtype)
-    return result
 
 
 @register_lowering(aten.prod)
