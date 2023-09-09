@@ -177,15 +177,27 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // Flag to just run a frame normally
 #define SKIP_CODE ((void*)0x1)
 
-bool is_dynamo_compiling = false;
-static PyObject* guard_fail_hook = NULL;
-static PyObject* guard_error_hook = NULL;
-const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
+// Note: All globally shared variables must be added here,
+// which is tied to module state.
+// This makes ths module thread-safe (through the GIL),
+// and prepares the module to be converted to PEP 489,
+// which will allow it to support multiple interpreters
+// eventually (PEP 554, CPython 3.13).
+// When CPython eventually adopts nogil, we can easily
+// use their new atomic APIs for this structure.
+typedef struct {
+  bool is_dynamo_compiling;
+  PyObject* guard_fail_hook;
+  PyObject* guard_error_hook;
+  // Points to the extra scratch space on the code object
+  Py_ssize_t extra_index;;
+} eval_frame_mod_state;
 
-// Points to the extra scratch space on the code object
-static Py_ssize_t extra_index = -1;
-
+// TODO (kenjin): Check, this might not be multi-interpreter safe.
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
+
+static eval_frame_mod_state *get_module_state();
+const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
@@ -499,8 +511,13 @@ inline static ExtraState* get_extra_state(PyCodeObject* code) {
   //  - code: Borrowed
   // return
   //  - extra_state: Borrowed.
+
+  eval_frame_mod_state *st = get_module_state();
+  CHECK(st != NULL);
+
   ExtraState* extra = NULL;
-  _PyCode_GetExtra((PyObject*)code, extra_index, (void*)&extra);
+
+  _PyCode_GetExtra((PyObject*)code, st->extra_index, (void*)&extra);
   return extra;
 }
 
@@ -545,9 +562,11 @@ inline static void set_extra_state(PyCodeObject* code, ExtraState* extra_state) 
   // the code object. Otherwise, we will first free up the old extra state
   // (which is also the new extra state) and write something invalid on the
   // scratch space.
+  eval_frame_mod_state *st = get_module_state();
+  CHECK(st != NULL);
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(old_extra_state == NULL || old_extra_state == SKIP_CODE || old_extra_state != extra_state);
-  _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  _PyCode_SetExtra((PyObject*)code, st->extra_index, extra_state);
 }
 
 inline static ExtraState* init_and_set_extra_state(PyCodeObject* code) {
@@ -654,10 +673,14 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   PyObject *f_locals = frame->f_locals;
   PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
   if (unlikely(valid == NULL)) {
-    if (guard_error_hook != NULL) {
+    eval_frame_mod_state *st = get_module_state();
+    if(st == NULL) {
+      return NULL;
+    }
+    if (st->guard_error_hook != NULL) {
       PyObject *type = NULL, *value = NULL, *traceback = NULL;
       PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
+      PyObject* r = call_guard_fail_hook(st->guard_error_hook, e, index, f_locals);
       if (r == NULL) {
         return NULL;
       }
@@ -681,8 +704,14 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     }
     return (PyObject*)e->code;
   }
-  if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
+
+  eval_frame_mod_state *st = get_module_state();
+  if(st == NULL) {
+    return NULL;
+  }
+
+  if (unlikely(st->guard_fail_hook != NULL)) {
+    PyObject* r = call_guard_fail_hook(st->guard_fail_hook, e, index, f_locals);
     if (r == NULL) {
       return NULL;
     }
@@ -1038,7 +1067,7 @@ static PyObject* decrement_working_threads(PyThreadState* tstate) {
   Py_RETURN_NONE;
 }
 
-static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
+static PyObject* set_eval_frame(eval_frame_mod_state *st, PyObject* new_callback, PyThreadState* tstate) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
@@ -1061,22 +1090,25 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   // is installed.
   eval_frame_callback_set(new_callback);
 
-  is_dynamo_compiling = !(new_callback == Py_None);
+  st->is_dynamo_compiling = !(new_callback == Py_None);
   return old_callback;
 }
 
-static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
+static PyObject* set_eval_frame_py(PyObject* mod, PyObject* callback) {
   if (callback != Py_None && callback != Py_False &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
     return NULL;
   }
+  eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+  CHECK(st != NULL);
+
   DEBUG_TRACE(
       "python enabled=%d and is run_only=%d",
       callback != Py_None,
       callback == Py_False);
-  return set_eval_frame(callback, PyThreadState_GET());
+  return set_eval_frame(st, callback, PyThreadState_GET());
 }
 
 static PyObject* reset_code(PyObject* dummy, PyObject* code) {
@@ -1113,19 +1145,25 @@ static PyObject* skip_code(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static PyObject* set_guard_fail_hook(PyObject* dummy, PyObject* obj) {
+static PyObject* set_guard_fail_hook(PyObject* mod, PyObject* obj) {
   if (obj == Py_None) {
     obj = NULL;
   }
-  Py_XSETREF(guard_fail_hook, Py_XNewRef(obj));
+  eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+  CHECK(st != NULL);
+
+  Py_XSETREF(st->guard_fail_hook, Py_XNewRef(obj));
   Py_RETURN_NONE;
 }
 
-static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
+static PyObject* set_guard_error_hook(PyObject* mod, PyObject* obj) {
   if (obj == Py_None) {
     obj = NULL;
   }
-  Py_XSETREF(guard_error_hook, Py_XNewRef(obj));
+  eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+  CHECK(st != NULL);
+
+  Py_XSETREF(st->guard_error_hook, Py_XNewRef(obj));
   Py_RETURN_NONE;
 }
 
@@ -1139,20 +1177,20 @@ static PyMethodDef _methods[] = {
     {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
-static struct PyModuleDef _module = {
-    PyModuleDef_HEAD_INIT,
-    "torch._C._dynamo.eval_frame",
-    "Module containing hooks to override eval_frame",
-    -1,
-    _methods};
 
 
-PyObject* torch_c_dynamo_eval_frame_init(void) {
-  extra_index = _PyEval_RequestCodeExtraIndex(destroy_extra_state);
-  if (extra_index < 0) {
+static int eval_frame_mod_exec(PyObject *mod) {
+  eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+  CHECK(st != NULL);
+  st->is_dynamo_compiling = false;
+  st->guard_fail_hook = NULL;
+  st->guard_error_hook = NULL;
+
+  st->extra_index = _PyEval_RequestCodeExtraIndex(destroy_extra_state);
+  if (st->extra_index < 0) {
     PyErr_SetString(PyExc_RuntimeError,
                     "dynamo: unable to register extra index");
-    return NULL;
+    return -1;
   }
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
@@ -1161,29 +1199,104 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   Py_INCREF(Py_None);
   eval_frame_callback_set(Py_None);
 
-  PyObject* module = PyModule_Create(&_module);
-  if (module == NULL) {
-    return NULL;
-  }
-
-#if IS_PYTHON_3_11_PLUS
+  #if IS_PYTHON_3_11_PLUS
   if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
-    return NULL;
+    goto failure;
   }
+  // TODO (kenjin) convert this to heap type. This operation will leak references on interpreter finalization IIRC.
   Py_INCREF(&THPPyInterpreterFrameType);
-  if (PyModule_AddObject(module, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) != 0) {
-    return NULL;
+  if (PyModule_AddObject(mod, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) < 0) {
+    // Need to decref on failure as PyModule_AddObject only steals a reference on success.
+    Py_DECREF(&THPPyInterpreterFrameType);
+    goto failure;
   }
 #endif
 
 
   if (PyType_Ready(&CacheEntryType) < 0) {
+    goto failure;
+  }
+  // TODO (kenjin) convert this to heap type. This operation will leak references on interpreter finalization IIRC.
+  Py_INCREF(&CacheEntryType);
+  if (PyModule_AddObject(mod, "_CacheEntry", (PyObject *) &CacheEntryType) < 0) {
+      Py_DECREF(&CacheEntryType);
+      goto failure;
+  }
+  return 0;
+
+failure:
+  PyThread_tss_delete(&eval_frame_callback_key);
+  Py_DECREF(Py_None);
+  return -1;
+}
+
+static PyModuleDef_Slot eval_frame_module_slots[] = {
+    {Py_mod_exec, eval_frame_mod_exec},
+    {0, NULL}
+};
+
+static int eval_frame_module_traverse(PyObject *mod, visitproc visit, void *arg) {
+    eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+    CHECK(st != NULL);
+    Py_VISIT(st->guard_fail_hook);
+    Py_VISIT(st->guard_error_hook);
+    return 0;
+}
+
+static int eval_frame_module_clear(PyObject *mod) {
+    eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+    CHECK(st != NULL);
+    Py_CLEAR(st->guard_fail_hook);
+    Py_CLEAR(st->guard_error_hook);
+    return 0;
+}
+
+static struct PyModuleDef _module = {
+    PyModuleDef_HEAD_INIT,
+    "torch._C._dynamo.eval_frame",
+    "Module containing hooks to override eval_frame",
+    sizeof(eval_frame_mod_state),
+    _methods,
+    NULL,
+    eval_frame_module_traverse,
+    eval_frame_module_clear
+};
+
+inline static eval_frame_mod_state *get_module_state() {
+  // Note: O(1) operation in CPython
+  PyObject *mod = PyState_FindModule(&_module);
+  if (mod == NULL) {
     return NULL;
   }
-  Py_INCREF(&CacheEntryType);
-  if (PyModule_AddObject(module, "_CacheEntry", (PyObject *) &CacheEntryType) < 0) {
-      Py_DECREF(&CacheEntryType);
-      return NULL;
+  eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
+  CHECK(st != NULL);
+  return st;
+}
+
+bool get_is_dynamo_compiling() {
+  eval_frame_mod_state *st = get_module_state();
+  if (st == NULL) {
+    // Module not yet initialized.
+    return false;
+  }
+  return (int)st->is_dynamo_compiling;
+}
+
+PyObject* torch_c_dynamo_eval_frame_init(void) {
+
+  PyObject* module = PyModule_Create(&_module);
+  if (module == NULL) {
+    return NULL;
+  }
+  
+  if (eval_frame_mod_exec(module) < 0) {
+    Py_DECREF(module);
+    return NULL;
+  }
+
+  if (PyState_AddModule(module, &_module) < 0) {
+    Py_DECREF(module);
+    return NULL;
   }
 
   return module;

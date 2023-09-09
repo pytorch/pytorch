@@ -549,7 +549,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
-  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
+  if (get_is_dynamo_compiling() && size1 > 0 && THPVariable_Check(args[i])) {
     auto& var = THPVariable_Unpack(args[i]);
     if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
@@ -966,7 +966,7 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
   // convert FakeTensor to SymInt
   // expect empty sizes, numel = 1
   // and ScalarType::Int
-  if (is_dynamo_compiling && THPVariable_Check(obj)) {
+  if (get_is_dynamo_compiling() && THPVariable_Check(obj)) {
     auto& var = THPVariable_Unpack(obj);
 
     if (var.numel() != 1 || !var.sizes().empty() ||
