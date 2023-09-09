@@ -159,7 +159,6 @@ inductor_skips = defaultdict(dict)
 
 
 inductor_skips["cpu"] = {
-    "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
 }
@@ -262,6 +261,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.instance_norm": {f16},
     "nn.functional.local_response_norm": {f16},
     "nn.functional.normalize": {f16},
+    "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.soft_margin_loss": {f16},
     "nn.functional.softsign": {f16},
     "nn.functional.triplet_margin_loss": {f16},
@@ -277,6 +277,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     ("std_mean", "unbiased"): {f16},
     "to_sparse": {f16, f32, f64},
+    "uniform": {f16, f32, f64},
 }
 
 
@@ -340,13 +341,15 @@ test_skips_or_fails = (
 )
 
 
-def wrapper_noop_set_seed(op, *args, **kwargs):
+def wrapper_set_seed(op, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
-    wrapper_noop_set_seed
-)
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(
@@ -355,8 +358,6 @@ torch._dynamo.variables.torch.tensor_dunder_fns.append(
 
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
-    # We have better precision than eager
-    ("cumsum", "cuda", f16): {"reference_in_float": True},
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
     "empty_permuted": {"assert_equal": False},
