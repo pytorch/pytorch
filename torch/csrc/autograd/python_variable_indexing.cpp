@@ -281,7 +281,7 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
     return false;
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  if (n >= 32) {
+  if (n > 1) {
     return false;
   }
   for (Py_ssize_t i = 0; i < n; i++) {
