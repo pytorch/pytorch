@@ -222,7 +222,7 @@ def timed(model: Callable[..., Any], example_inputs, times: int = 1) -> float:
 
 def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
-    took = torch.median(timings)
+    took = torch.median(timings)/times
     print(f"{took/baseline:.6f}")
     return took
 
