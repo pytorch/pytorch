@@ -1146,6 +1146,15 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = np.random.randn(2, 2)
         return x - x
 
+    def test_manual_seed(self):
+        @torch.compile
+        def foo():
+            torch.manual_seed(3)
+            return torch.randint(0, 5, (5,))
+
+        self.assertEqual(foo(), foo())
+        self.assertEqual(foo(), foo())
+
     @make_test
     def test_partials_torch_op_kwarg(x):
         par_mul = functools.partial(torch.mul, other=torch.ones(10, 10))

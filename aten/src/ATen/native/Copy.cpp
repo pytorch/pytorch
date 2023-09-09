@@ -253,9 +253,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       self.storage_offset() == src.storage_offset() &&
       self.strides().equals(src.strides()) &&
       self.sizes().equals(src.sizes()) &&
-      self.scalar_type() == src.scalar_type() &&
-      self.is_conj() == src.is_conj() &&
-      self.is_neg() == src.is_neg()
+      self.scalar_type() == src.scalar_type()
     );
   if (is_same_data) {
     return self;

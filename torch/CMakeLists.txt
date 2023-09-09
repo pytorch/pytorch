@@ -385,9 +385,10 @@ endif()
 
 add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
-  COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
   COMMAND
-    "${PYTHON_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+    "${PYTHON_EXECUTABLE}" -c \"from pathlib import Path\; Path('${TOOLS_PATH}/generate_torch_version.py').touch()\"
+  COMMAND
+    "${PYTHON_EXECUTABLE}" ${TOOLS_PATH}/generate_torch_version.py
       --is-debug=${TORCH_VERSION_DEBUG}
       --cuda-version=${CUDA_VERSION}
       --hip-version=${HIP_VERSION}
