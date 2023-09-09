@@ -663,9 +663,9 @@ class TensorVariable(VariableTracker):
                 # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
                 # This should not be onerous to support when needed.
                 unimplemented("NYI - lambda variables as hooks")
-            elif isinstance(fn_var.fn, functools.partial):
-                fn = fn_var.fn
-                name = fn_var.fn.func.__name__
+            elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+                fn = fn_var.func
+                name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
                 name = fn_var.fn.__name__

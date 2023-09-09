@@ -77,6 +77,7 @@ from .utils import (
 log = logging.getLogger(__name__)
 bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 recompiles_log = torch._logging.getArtifactLogger(__name__, "recompiles")
+GlobalStateGuard = torch._C._dynamo.guards.GlobalStateGuard
 
 
 class Tracker:
@@ -102,10 +103,7 @@ class Tracker:
 input_codes = Tracker()
 output_codes = Tracker()
 
-
-initial_grad_state = None
-initial_deterministic_algorithms_state = None
-initial_torch_function_state = None
+initial_global_state = None
 
 
 @functools.wraps(original_forward_from_src)
@@ -128,7 +126,9 @@ def wrap_convert_context(fn):
 
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
+        guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
+        prior_deterministic = torch.are_deterministic_algorithms_enabled()
         py_rng_state = random.getstate()
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
@@ -141,11 +141,15 @@ def wrap_convert_context(fn):
         finally:
             cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
+            torch.use_deterministic_algorithms(prior_deterministic)
             random.setstate(py_rng_state)
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+            assert (
+                guards.check()
+            ), "Global state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -345,16 +349,8 @@ def convert_frame_assert(
         if not has_tensor_in_frame(frame):
             return None
 
-        global initial_grad_state
-        initial_grad_state = torch.is_grad_enabled()
-
-        global initial_deterministic_algorithms_state
-        initial_deterministic_algorithms_state = (
-            torch.are_deterministic_algorithms_enabled()
-        )
-
-        global initial_torch_function_state
-        initial_torch_function_state = torch._C._is_torch_function_enabled()
+        global initial_global_state
+        initial_global_state = GlobalStateGuard()
 
         global FRAME_COUNTER
         if "_id" not in frame_state:

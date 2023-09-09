@@ -68,6 +68,63 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v.grad, torch.tensor([3.0, 6.0, 9.0]))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_tensor_register_hook_multi_handle_return(self):
+        def fn(x, y, z):
+            handle = x.register_hook(lambda grad: grad * 2)
+            h2 = handle
+            z = z * z
+            return x, y * y, z, handle, h2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch._dynamo.optimize(cnts)(fn)
+        v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
+        v, y, z, h, h2 = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))
+        v.backward(torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(v.grad, torch.tensor([2.0, 4.0, 6.0]))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertNotEqual(h, None)
+        self.assertNotEqual(h2, None)
+        self.assertEqual(h2, h)
+
+    def test_tensor_register_hook_repeated_handle_return(self):
+        def fn(x, y, z):
+            handle = x.register_hook(lambda grad: grad * 2)
+            h2 = handle
+            z = z * z
+            return x, y * y, z, handle, handle
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch._dynamo.optimize(cnts)(fn)
+        v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
+        v, y, z, h, h2 = fn(v, torch.randn([2, 2]), torch.randn([2, 2]))
+        v.backward(torch.tensor([1.0, 2.0, 3.0]))
+        self.assertEqual(v.grad, torch.tensor([2.0, 4.0, 6.0]))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertNotEqual(h, None)
+        self.assertNotEqual(h2, None)
+        self.assertEqual(h2, h)
+
+    def test_tensor_register_hook_repeated_handle_not_local(self):
+        def fn(x, y, z, mod):
+            mod.handle = x.register_hook(lambda grad: grad * 2)
+            z = z * z
+            return x, y * y, z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = torch._dynamo.optimize(cnts)(fn)
+        v = torch.tensor([0.0, 0.0, 0.0], requires_grad=True)
+
+        mod = torch.nn.Module()
+        mod.handle = None
+
+        v, y, z = fn(v, torch.randn([2, 2]), torch.randn([2, 2]), mod)
+        v.backward(torch.tensor([1.0, 2.0, 3.0]))
+
+        self.assertEqual(v.grad, torch.tensor([2.0, 4.0, 6.0]))
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.assertNotEqual(mod.handle, None)
+
     def test_tensor_only_register_hook_in_graph_local(self):
         def local_hook(grad):
             return grad * 2

@@ -601,3 +601,30 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.orig_fn}"
             )
         return super().call_function(tx, args, kwargs)
+
+
+class FunctoolsPartialVariable(VariableTracker):
+    def __init__(self, func, args, keywords, **kwargs):
+        super().__init__(**kwargs)
+        self.func = func
+        assert isinstance(args, list)
+        self.args = args
+        assert isinstance(keywords, dict)
+        self.keywords = keywords
+
+        self.guards.update(VariableTracker.propagate(func)["guards"])
+        for arg in args:
+            self.guards.update(VariableTracker.propagate(arg)["guards"])
+        for val in keywords.values():
+            self.guards.update(VariableTracker.propagate(val)["guards"])
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate([self])
+        merged_args = self.args + args
+        merged_kwargs = {**self.keywords, **kwargs}
+
+        return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
+            options
+        )

@@ -796,10 +796,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         name = inst.argval
         # If the last top VT in the stack (just popped) is a handle (see [On tensor.register_hook]), we associate
         # the stored name.
-        if isinstance(loaded_vt, RemovableHandleVariable):
-            new_name = self.output.new_var(name)
-            new_rhv = loaded_vt.clone(last_seen_name=new_name)
-            loaded_vt = self.replace_all(loaded_vt, new_rhv)
+        loaded_vt = loaded_vt.rename(self, name)
         self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
@@ -2068,16 +2065,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
             self.init_local_index_guards_hack()
-
-            # Additionally, we need to add guards for self, if it is a NNModule. The
-            # outer invocation of Module.__call__ is a use of "self" that's not seen
-            # by the tracer. Practically, this is useful for catching modifications
-            # to the module's hooks that would otherwise be missed.
-            if "self" in self.symbolic_locals:
-                val = self.symbolic_locals["self"]
-                if isinstance(val, NNModuleVariable):
-                    local_guards = VariableTracker.propagate(val)["guards"]
-                    self.output.guards.update(local_guards)
 
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
