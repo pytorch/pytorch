@@ -283,12 +283,11 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         out = torch.randn(1, requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        fn = torch._dynamo.optimize(cnts, nopython=False)(f)
+        fn = torch._dynamo.optimize(cnts, nopython=True)(f)
         res = fn(out)
         res.backward()
         self.assertEqual(res, f(out))
-        # Will be 1 when we support hooks on intermediaries
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(out.grad, torch.Tensor([2.0]))
 
     def test_intermediary_hooks_same_on_aot_eager(self):
@@ -316,7 +315,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         aot_out[0].backward(torch.ones(4))
 
         x2 = torch.ones(4, requires_grad=True)
-        dynamo_out = torch._dynamo.optimize("aot_eager")(mod)(x2)
+        dynamo_out = torch._dynamo.optimize("aot_eager", nopython=True)(mod)(x2)
         dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(dynamo_out, aot_out)
@@ -350,7 +349,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         aot_out[0].backward(torch.ones(4))
 
         x2 = torch.ones(4, requires_grad=True)
-        dynamo_out = torch._dynamo.optimize("inductor")(mod)(x2)
+        dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2)
         dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(dynamo_out, aot_out)
@@ -381,12 +380,11 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         x1 = torch.ones(4, requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        comp_mod = torch._dynamo.optimize(cnts)(mod)
+        comp_mod = torch._dynamo.optimize(cnts, nopython=True)(mod)
         comp_out = comp_mod(x1)
         comp_out[0].backward(torch.ones(4))
 
-        # Will be 1 when we support hooks on intermediaries
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
         my_hook = my_hook2  # noqa: F811
         self.assertEqual(x0.grad, x1.grad)
 
@@ -395,7 +393,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         comp_out = comp_mod(x1)
 
-        # Will be 2 when we support hooks on intermediaries
-        self.assertEqual(cnts.frame_count, 4)
+        self.assertEqual(cnts.frame_count, 2)
         comp_out[0].backward(torch.ones(4))
         self.assertEqual(x0.grad, x1.grad)

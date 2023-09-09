@@ -401,7 +401,10 @@ class SideEffects:
             # because we are running residuals firmly before .backward() can be run, it is sound to invoke
             # `register_hook` on a known tensor.
             #
-            # For tensors without a source, we graph break for now.
+            # For tensors without a source, the behavior is similar to the above case, except instead of doing the register_hook
+            # call in residuals, we write a register_hook call to the graph. As fx does not understand function
+            # argument, we manually lift the argument up to an input, and use that to register hooks.
+            # This is done so that we can preserve the hook registration without graph breaking.
             #
             # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
             # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
@@ -416,21 +419,33 @@ class SideEffects:
             #     - Issue a register_hook call on the tensor, linking to the globally stored function.
             #     - Incorporate a handle if one was established in the eager phase.
             #  - For tensors without sources:
-            #    - We graph break
+            #    - We don't generate any instructions for registering a hook.
+            #    - We lift the fn up as an input.
+            #    - We then manually insert a register_hook call into the graph.
             # - The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
-            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
-            cg(tensor)
-            cg.extend_output([cg.create_load_attr("register_hook")])
-            cg(hook)
-            cg.extend_output(create_call_function(1, True))
-            if hasattr(handle, "last_seen_name") and handle.last_seen_name:
-                # register_hook stored with variable name assigned to the handle
-                cg.extend_output(
-                    [cg.create_store(handle.last_seen_name)]
-                )
+            if tensor.source:
+                cg(tensor)
+                cg.extend_output([cg.create_load_attr("register_hook")])
+                cg(hook)
+                cg.extend_output(create_call_function(1, True))
+                if hasattr(handle, "last_seen_name") and handle.last_seen_name:
+                    # register_hook stored with variable name assigned to the handle
+                    cg.extend_output(
+                        [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
+                    )
+                else:
+                    # register_hook stored w/o a variable name assigned to the handle
+                    cg.extend_output([create_instruction("POP_TOP")])
             else:
-                # register_hook stored w/o a variable name assigned to the handle
-                cg.extend_output([create_instruction("POP_TOP")])
+                if (
+                    handle.as_global
+                    and hasattr(handle, "last_seen_name")
+                    and handle.last_seen_name
+                ):
+                    cg(handle)
+                    cg.extend_output(
+                        [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
+                    )
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
