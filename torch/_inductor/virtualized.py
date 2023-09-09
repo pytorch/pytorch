@@ -267,18 +267,18 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler = _ops._set_handler
-    get_ops_handler = _ops._get_handler
-    set_graph_handler = _graph._set_handler
-    set_real_inputs = _real_inputs._set_handler
-    get_real_inputs = _real_inputs._get_handler
-    set_fake_mode = _fake_mode._set_handler
-    get_fake_mode = _fake_mode._get_handler
-    set_kernel_handler = _kernel._set_handler
-    set_debug_handler = _debug._set_handler
-    set_interpreter_handler = _interpreter._set_handler
-    set_aot_compilation = _aot_compilation._set_handler
-    get_aot_compilation = _aot_compilation._get_handler
+    set_ops_handler: Callable[[Any], Any] = _ops._set_handler
+    get_ops_handler: Callable[[], Any] = _ops._get_handler
+    set_graph_handler: Callable[[Any], Any] = _graph._set_handler
+    set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
+    get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
+    set_fake_mode: Callable[[Any], Any] = _fake_mode._set_handler
+    get_fake_mode: Callable[[], Any] = _fake_mode._get_handler
+    set_kernel_handler: Callable[[Any], Any] = _kernel._set_handler
+    set_debug_handler: Callable[[Any], Any] = _debug._set_handler
+    set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
+    set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
+    get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
 
     @property
     def ops(self) -> MockHandler:  # type: ignore[valid-type]
