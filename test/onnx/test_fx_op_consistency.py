@@ -202,16 +202,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
     ),
     xfail(
-        "arange",
-        dtypes=(torch.uint8, torch.int8),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
-    ),
-    xfail(
-        "arange",
-        dtypes=(torch.int16, torch.int32),
-        reason="AssertionError: The values for attribute 'shape' do not match",
-    ),
-    xfail(
         "argmax",
         dtypes=(
             torch.int16,
