@@ -51,7 +51,7 @@ class SchemaCheckMode(TorchDispatchMode):
             ):
                 return not (
                     before.size() == after.size()
-                    and torch.allclose(before, after, equal_nan=True)
+                    and torch.equal(before.view(torch.int8), after.view(torch.int8))
                     and md[0] == after.stride()
                     and md[1] == after._typed_storage()._cdata
                 )
