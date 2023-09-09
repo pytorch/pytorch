@@ -206,6 +206,10 @@ class TestDoBench(TestCase):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         def mm(a, b):
@@ -237,6 +241,9 @@ class TestDoBench(TestCase):
         """
         Make sure autotuning mm in sub processes work without crashes.
         """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
@@ -303,6 +310,9 @@ class TestDoBench(TestCase):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
 
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
