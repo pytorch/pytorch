@@ -177,9 +177,7 @@ def has_tensor_in_frame(frame):
             return seen_ids[obj_id]
         seen_ids[obj_id] = False
 
-        if isinstance(obj, (torch.Tensor, torch.nn.Module)) or (
-            istype(obj, type) and issubclass(obj, torch.nn.Module)
-        ):
+        if isinstance(obj, (torch.Tensor, torch.nn.Module)):
             seen_ids[obj_id] = True
             return seen_ids[obj_id]
         elif istype(obj, (list, tuple)):
@@ -478,7 +476,6 @@ def _compile(
     ) -> Optional[GuardedCode]:
         nonlocal output
         for attempt in itertools.count():
-            CompileContext.get().attempt = attempt
             try:
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code

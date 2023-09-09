@@ -41,7 +41,7 @@ from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -1146,9 +1146,21 @@ class AOTInductorModelCache:
                 for node in output_node.args[0]
             ]
 
+            # Use a utility function for easier benchmarking
+            source = """
+            #include <torch/csrc/inductor/aot_runtime/model.h>
+
+            torch::aot_inductor::AOTInductorModel model;
+
+            void run(
+                    const std::vector<at::Tensor>& input_tensors,
+                    std::vector<at::Tensor>& output_tensors) {
+                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
+            }
+            """
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
-                cpp_sources=[aot_inductor_launcher],
+                cpp_sources=[source],
                 functions=["run"],
                 extra_ldflags=[so_path],
                 with_cuda=True,
@@ -2294,9 +2306,6 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
-        if not hasattr(model, name):
-            model.name = name
-
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2347,6 +2356,8 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
+            if not hasattr(model, name):
+                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 

@@ -6,6 +6,7 @@ import torch._numpy as np
 from pytest import raises as assert_raises
 
 from torch._numpy import (
+    asfarray,
     common_type,
     iscomplex,
     iscomplexobj,
@@ -13,6 +14,7 @@ from torch._numpy import (
     isposinf,
     isreal,
     isrealobj,
+    mintypecode,
     nan_to_num,
     real_if_close,
 )

@@ -21,7 +21,6 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._dynamo.utils import should_force_inline
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
@@ -106,11 +105,7 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import (
-    UserDefinedClassVariable,
-    UserDefinedObjectVariable,
-    UserDefinedVariable,
-)
+from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -2038,16 +2033,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             self.init_local_index_guards_hack()
 
-            # Additionally, we need to add guards for self, if it is a NNModule. The
-            # outer invocation of Module.__call__ is a use of "self" that's not seen
-            # by the tracer. Practically, this is useful for catching modifications
-            # to the module's hooks that would otherwise be missed.
-            if "self" in self.symbolic_locals:
-                val = self.symbolic_locals["self"]
-                if isinstance(val, NNModuleVariable):
-                    local_guards = VariableTracker.propagate(val)["guards"]
-                    self.output.guards.update(local_guards)
-
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
@@ -2169,20 +2154,8 @@ class InstructionTranslator(InstructionTranslatorBase):
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
-    def symbolic_locals_contain_module_class(self):
-        for v in self.symbolic_locals.values():
-            if isinstance(v, UserDefinedClassVariable) and issubclass(
-                v.as_python_constant(), torch.nn.Module
-            ):
-                return True
-        return False
-
     def RETURN_VALUE(self, inst):
-        if (
-            self.output.count_calls() == 0
-            and not self.symbolic_locals_contain_module_class()
-            and not self.export
-        ):
+        if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
@@ -2211,9 +2184,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
-        if should_force_inline(func):
-            return True
-
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2237,19 +2207,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if (
-                hasattr(func, "fn")
-                and hasattr(func.fn, "_origin")
-                and func.fn._origin
-                in [
-                    produce_trampoline_autograd_fwd,
-                    produce_trampoline_autograd_apply,
-                    produce_trampoline_autograd_bwd,
-                ]
-            ):
+            if hasattr(func.fn, "_origin") and func.fn._origin in [
+                produce_trampoline_autograd_fwd,
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+            ]:
                 # Known sound
                 return
-
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
