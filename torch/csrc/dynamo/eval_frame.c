@@ -190,7 +190,7 @@ typedef struct {
   PyObject* guard_fail_hook;
   PyObject* guard_error_hook;
   // Points to the extra scratch space on the code object
-  Py_ssize_t extra_index;;
+  Py_ssize_t extra_index;
 } eval_frame_mod_state;
 
 // TODO (kenjin): Check, this might not be multi-interpreter safe.
@@ -1288,7 +1288,7 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   if (module == NULL) {
     return NULL;
   }
-  
+
   if (eval_frame_mod_exec(module) < 0) {
     Py_DECREF(module);
     return NULL;
