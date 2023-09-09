@@ -250,27 +250,31 @@ class TestMatmulMixedDtypes(TestCase):
             assert nrows % 64 == 0
             assert ncols % 64 == 0
 
-            # permute_B_rows_for_mixed_gemm
-            outp = torch.empty_like(inp)
-            outp[0::16] = inp[0::16]
-            outp[1::16] = inp[1::16]
-            outp[2::16] = inp[8::16]
-            outp[3::16] = inp[9::16]
-            outp[4::16] = inp[2::16]
-            outp[5::16] = inp[3::16]
-            outp[6::16] = inp[10::16]
-            outp[7::16] = inp[11::16]
-            outp[8::16] = inp[4::16]
-            outp[9::16] = inp[5::16]
-            outp[10::16] = inp[12::16]
-            outp[11::16] = inp[13::16]
-            outp[12::16] = inp[6::16]
-            outp[13::16] = inp[7::16]
-            outp[14::16] = inp[14::16]
-            outp[15::16] = inp[15::16]
-
             # subbyte_transpose
-            outp = outp.T.contiguous()
+            tmp = inp.T.contiguous()
+
+            # permute_B_rows_for_mixed_gemm
+            # (permute cols actually, as transpose is applied first here)
+            outp = torch.empty_like(tmp)
+            outp[:,0::16] = tmp[:,0::16]
+            outp[:,1::16] = tmp[:,1::16]
+            outp[:,2::16] = tmp[:,8::16]
+            outp[:,3::16] = tmp[:,9::16]
+            outp[:,4::16] = tmp[:,2::16]
+            outp[:,5::16] = tmp[:,3::16]
+            outp[:,6::16] = tmp[:,10::16]
+            outp[:,7::16] = tmp[:,11::16]
+            outp[:,8::16] = tmp[:,4::16]
+            outp[:,9::16] = tmp[:,5::16]
+            outp[:,10::16] = tmp[:,12::16]
+            outp[:,11::16] = tmp[:,13::16]
+            outp[:,12::16] = tmp[:,6::16]
+            outp[:,13::16] = tmp[:,7::16]
+            outp[:,14::16] = tmp[:,14::16]
+            outp[:,15::16] = tmp[:,15::16]
+
+            # make sure the output is contiguous, for reorderings that follow
+            outp = outp.contiguous()
 
             # interleave_column_major_tensor
             magic0 = 2
