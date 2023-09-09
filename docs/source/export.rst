@@ -4,18 +4,20 @@ torch.export
 =====================
 
 .. warning::
-    This feature is a prototype under active development and there WILL BE breaking changes in the future.
+    This feature is a prototype under active development and there WILL BE
+    BREAKING CHANGES in the future.
 
 
 Overview
 --------
 
-``torch.export`` is a one-shot process for a sound, full-program capture of a
-PyTorch model into a standardized representation ahead-of-time (AOT). It is
-designed to streamline and standardize the way PyTorch interacts with various
-systems and platforms.
+:func:`torch.export.export` takes an arbitrary Python callable (a
+:class:`torch.nn.Module`, a function or a method) and produces a traced graph
+representing only the Tensor computation of the function in an Ahead-of-Time
+(AOT) fashion, which can subsequently be executed with different outputs or
+serialized.
 
-``torch.export`` maintains a clean intermediate representation (IR) with the
+``torch.export`` produces a clean intermediate representation (IR) with the
 following invariants. More specifications about the IR can be found here (coming
 soon!).
 
@@ -55,13 +57,24 @@ Existing frameworks
 ^^^^^^^^^^^^^^^^^^^
 
 :func:`torch.compile` also utilizes the same PT2 stack as ``torch.export``, but
-is slightly different in that it is a JIT compiler. When :func:`torch.compile`
-runs into an untraceable part of a model, it will "graph break" and fall back to
-running the program in the eager Python runtime. In comparison, ``torch.export``
-aims to get a full graph representation of a PyTorch model, so it will error out
-when something untraceable is reached. Since ``torch.export`` produces a full
-graph disjoint from any Python features or runtime, this graph can then be
-saved, loaded, and run in different environments and languages.
+is slightly different:
+
+* **JIT vs. AOT**: :func:`torch.compile` is a JIT compiler whereas
+  which is not intended to be used to produce compiled artifacts outside of
+  deployment.
+
+* **Partial vs. Full Graph Capture**: When :func:`torch.compile` runs into an
+  untraceable part of a model, it will "graph break" and fall back to running
+  the program in the eager Python runtime. In comparison, ``torch.export`` aims
+  to get a full graph representation of a PyTorch model, so it will error out
+  when something untraceable is reached. Since ``torch.export`` produces a full
+  graph disjoint from any Python features or runtime, this graph can then be
+  saved, loaded, and run in different environments and languages.
+
+* **Usability tradeoff**: Since :func:`torch.compile` is able to fallback to the
+  Python runtime whenever it reaches something untraceable, it is a lot more
+  flexible. ``torch.export`` will instead require users to provide more
+  information or rewrite their code to make it traceable.
 
 Compared to :func:`torch.fx.symbolic_trace`, ``torch.export`` traces using
 TorchDynamo which operates at the Python bytecode level, giving it the ability
@@ -69,7 +82,7 @@ to trace arbitrary Python constructs not limited by what Python operator
 overloading supports. Additionally, ``torch.export`` keeps fine-grained track of
 tensor metadata, so that conditionals on things like tensor shapes do not
 fail tracing. In general, ``torch.export`` is expected to work on more user
-programs, but produce lower-level graphs (at the ``torch.ops.aten`` operator
+programs, and produce lower-level graphs (at the ``torch.ops.aten`` operator
 level). Note that users can still use :func:`torch.fx.symbolic_trace` as a
 preprocessing step before ``torch.export``.
 
@@ -150,8 +163,8 @@ Inspecting the ``ExportedProgram``, we can note the following:
   program, along with records of the original code for easy debugging.
 
 * The graph contains only ``torch.ops.aten`` operators found in the
-  :ref:`Core ATen IR <torch.compiler_ir>` opset, and is fully functional,
-  without any inplace operators such as ``torch.add_``.
+  :ref:`Core ATen IR <torch.compiler_ir>` opset and custom operators, and is
+  fully functional, without any inplace operators such as ``torch.add_``.
 
 * The parameters (weight and bias to conv) are lifted as inputs to the graph,
   resulting in no ``get_attr`` nodes in the graph, which previously existed in
@@ -170,8 +183,8 @@ Expressing Dynamism
 
 By default ``torch.export`` will trace the program assuming all input shapes are
 **static**, and specializing the exported program to those dimensions. However,
-some dimensions, such as a batch dimension, are not expected to not be the same
-all the time. Such dimensions must be marked dynamic using the
+some dimensions, such as a batch dimension, can be dynamic and vary from run to
+run. Such dimensions must be marked dynamic using the
 :func:`torch.export.dynamic_dim` API, and passed into
 :func:`torch.export.export` through the ``constraints`` argument. An example:
 
@@ -190,11 +203,12 @@ all the time. Such dimensions must be marked dynamic using the
             self.branch2 = torch.nn.Sequential(
                 torch.nn.Linear(128, 64), torch.nn.ReLU()
             )
+            self.buffer = torch.ones(32)
 
         def forward(self, x1, x2):
             out1 = self.branch1(x1)
             out2 = self.branch2(x2)
-            return (out1, out2)
+            return (out1 + self.buffer, out2)
 
     example_args = (torch.randn(32, 64), torch.randn(32, 128))
     constraints = [
@@ -211,38 +225,41 @@ all the time. Such dimensions must be marked dynamic using the
     print(exported_program)
     """
     ExportedProgram:
-        class GraphModule(torch.nn.Module):
-            def forward(self, arg0_1: f32[32, 64], arg1_1: f32[32], arg2_1: f32[64, 128], arg3_1: f32[64], arg4_1: f32[s0, 64], arg5_1: f32[s1, 128]):
-                # code: out1 = self.branch1(x1)
-                permute: f32[64, 32] = torch.ops.aten.permute.default(arg0_1, [1, 0]);
-                addmm: f32[s0, 32] = torch.ops.aten.addmm.default(arg1_1, arg4_1, permute);
-                relu: f32[s0, 32] = torch.ops.aten.relu.default(addmm);
+    class GraphModule(torch.nn.Module):
+        def forward(self, arg0_1: f32[32, 64], arg1_1: f32[32], arg2_1: f32[64, 128], arg3_1: f32[64], arg4_1: f32[32], arg5_1: f32[s0, 64], arg6_1: f32[s0, 128]):
+            # code: out1 = self.branch1(x1)
+            permute: f32[64, 32] = torch.ops.aten.permute.default(arg0_1, [1, 0]);
+            addmm: f32[s0, 32] = torch.ops.aten.addmm.default(arg1_1, arg5_1, permute);
+            relu: f32[s0, 32] = torch.ops.aten.relu.default(addmm);
 
-                # code: out2 = self.branch2(x2)
-                permute_1: f32[128, 64] = torch.ops.aten.permute.default(arg2_1, [1, 0]);
-                addmm_1: f32[s1, 64] = torch.ops.aten.addmm.default(arg3_1, arg5_1, permute_1);
-                relu_1: f32[s1, 64] = torch.ops.aten.relu.default(addmm_1);
-                return (relu, relu_1)
+            # code: out2 = self.branch2(x2)
+            permute_1: f32[128, 64] = torch.ops.aten.permute.default(arg2_1, [1, 0]);
+            addmm_1: f32[s0, 64] = torch.ops.aten.addmm.default(arg3_1, arg6_1, permute_1);
+            relu_1: f32[s0, 64] = torch.ops.aten.relu.default(addmm_1);  addmm_1 = None
 
-    Graph signature: ExportGraphSignature(parameters=['L__self___branch1_0.weight', 'L__self___branch1_0.bias', 'L__self___branch2_0.weight', 'L__self___branch2_0.bias'], buffers=[], user_inputs=['arg4_1', 'arg5_1'], user_outputs=['relu', 'relu_1'], inputs_to_parameters={'arg0_1': 'L__self___branch1_0.weight', 'arg1_1': 'L__self___branch1_0.bias', 'arg2_1': 'L__self___branch2_0.weight', 'arg3_1': 'L__self___branch2_0.bias'}, inputs_to_buffers={}, buffers_to_mutate={}, backward_signature=None, assertion_dep_token=None)
-    Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806), s1: RangeConstraint(min_val=2, max_val=9223372036854775806)}
-    Equality constraints: [(InputDim(input_name='arg4_1', dim=0), InputDim(input_name='arg5_1', dim=0))]
+            # code: return (out1 + self.buffer, out2)
+            add: f32[s0, 32] = torch.ops.aten.add.Tensor(relu, arg4_1);
+            return (add, relu_1)
+
+    Graph signature: ExportGraphSignature(parameters=['branch1.0.weight', 'branch1.0.bias', 'branch2.0.weight', 'branch2.0.bias'], buffers=['L__self___buffer'], user_inputs=['arg5_1', 'arg6_1'], user_outputs=['add', 'relu_1'], inputs_to_parameters={'arg0_1': 'branch1.0.weight', 'arg1_1': 'branch1.0.bias', 'arg2_1': 'branch2.0.weight', 'arg3_1': 'branch2.0.bias'}, inputs_to_buffers={'arg4_1': 'L__self___buffer'}, buffers_to_mutate={}, backward_signature=None, assertion_dep_token=None)
+    Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
+    Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
     """
 
 Some additional things to note:
 
 * Through the :func:`torch.export.dynamic_dim` API, we specified the first
-  dimension of each input to be dynamic. Looking at the inputs ``arg4_1`` and
-  ``arg5_1``, they have a symbolic shape of (s0, 64) and (s1, 128), instead of
+  dimension of each input to be dynamic. Looking at the inputs ``arg5_1`` and
+  ``arg6_1``, they have a symbolic shape of (s0, 64) and (s0, 128), instead of
   the (32, 64) and (32, 128) shaped tensors that we passed in as example inputs.
-  ``s0`` and ``s1`` are symbols representing that this dimension can be a range
+  ``s0`` is a symbol representing that this dimension can be a range
   of values.
 
 * ``exported_program.range_constraints`` describes the ranges of each symbol
-  appearing in the graph. In this case, we see that ``s0`` and ``s1`` have
-  the range [2, inf]. For technical reasons that are difficult to explain here,
-  they are assumed to be not 0 or 1. This is not a bug, and does not necessarily
-  mean that the exported program will not work for dimensions 0 or 1. See
+  appearing in the graph. In this case, we see that ``s0`` has the range
+  [2, inf]. For technical reasons that are difficult to explain here, they are
+  assumed to be not 0 or 1. This is not a bug, and does not necessarily mean
+  that the exported program will not work for dimensions 0 or 1. See
   `The 0/1 Specialization Problem <https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit?fbclid=IwAR3HNwmmexcitV0pbZm_x1a4ykdXZ9th_eJWK-3hBtVgKnrkmemz6Pm5jRQ#heading=h.ez923tomjvyk>`_
   for an in-depth discussion of this topic.
 
@@ -250,19 +267,16 @@ Some additional things to note:
   required to be equal. Since we specified in the constraints that the first
   dimension of each argument is equivalent,
   (``dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0)``),
-  we see in the equality constraints the tuple specifying that ``arg4_1``
-  dimension 0 and ``arg5_1`` dimension 0 are equal.
+  we see in the equality constraints the tuple specifying that ``arg5_1``
+  dimension 0 and ``arg6_1`` dimension 0 are equal.
 
 
 Serialization
 ^^^^^^^^^^^^^
 
 To save the ``ExportedProgram``, users can use the :func:`torch.export.save` and
-:func:`torch.export.load` APIs. It will serialize the ``ExportedProgram`` to a
-Python dataclass, and then save it as a JSON format. The ``state_dict`` will be
-saved to a file separate from the serialized ``ExportedProgram``.
-
-A convention is to save the ``ExportedProgram`` using a ``.pt2`` file extension.
+:func:`torch.export.load` APIs. A convention is to save the ``ExportedProgram``
+using a ``.pt2`` file extension.
 
 An example:
 
@@ -278,7 +292,7 @@ An example:
     exported_program = torch.export.export(MyModule(), torch.randn(5))
 
     torch.export.save(exported_program, 'exported_program.pt2')
-    saved_exported_program = torch.export.save('exported_program.pt2')
+    saved_exported_program = torch.export.load('exported_program.pt2')
 
 
 Specialization
@@ -329,6 +343,9 @@ Non-tensor inputs
 
 ``torch.export`` also specializes the traced graph based on the values of inputs
 that are not ``torch.Tensor``, such as ``int``, ``float``, ``bool``, and ``str``.
+However, we will likely change this in the near future to not specialize on
+inputs of primitive types.
+
 For example:
 
 ::
