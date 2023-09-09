@@ -120,11 +120,29 @@ def normal(loc=0.0, scale=1.0, size=None):
 
 
 @deco_stream
-@normalizer
 def shuffle(x: ArrayLike):
-    perm = torch.randperm(x.shape[0])
-    xp = x[perm]
-    x.copy_(xp)
+    # no @normalizer because we need to shuffle e.g. lists in-place
+    from ._ndarray import ndarray
+
+    if isinstance(x, torch.Tensor):
+        _shuffle_tensor_inplace(x)
+    elif isinstance(x, ndarray):
+        _shuffle_tensor_inplace(x.tensor)
+    else:
+        # untyped code path. Apply the permutation in-place
+        # cf https://stackoverflow.com/questions/16501424/algorithm-to-apply-permutation-in-constant-memory-space/41472796#41472796
+        perm = torch.randperm(len(x)).tolist()
+        for i in range(len(x)):
+            idx = perm[i]
+            while idx < i:
+                idx = perm[idx]
+            x[i], x[idx] = x[idx], x[i]
+
+
+def _shuffle_tensor_inplace(t):
+    perm = torch.randperm(t.shape[0])
+    xp = t[perm]
+    t.copy_(xp)
 
 
 @deco_stream

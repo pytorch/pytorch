@@ -36,9 +36,37 @@ def test_uniform_scalar(use_numpy):
     assert isinstance(r, float)
 
 
-def test_shuffle():
-    x = tnp.arange(10)
-    tnp.random.shuffle(x)
+class TestShuffle:
+    @pytest.mark.parametrize("use_numpy", [True, False])
+    def test_list(self, use_numpy):
+        x = [1, 2, 3]
+        ax = tnp.asarray(x)
+
+        tnp.random.seed(1234)
+        tnp.random.shuffle(x)
+
+        tnp.random.seed(1234)
+        tnp.random.shuffle(ax)
+
+        assert isinstance(x, list)
+        assert isinstance(ax, tnp.ndarray)
+        assert_equal(x, ax)
+
+    @pytest.mark.parametrize("use_numpy", [True, False])
+    def test_2d_list(self, use_numpy):
+        # np.shuffle only shuffles the first axis
+        x = [[1, 2, 3], [4, 5, 6]]
+        ax = tnp.asarray(x)
+
+        tnp.random.seed(1234)
+        tnp.random.shuffle(x)
+
+        tnp.random.seed(1234)
+        tnp.random.shuffle(ax)
+
+        assert isinstance(x, list)
+        assert isinstance(ax, tnp.ndarray)
+        assert_equal(x, ax)
 
 
 @pytest.mark.parametrize("use_numpy", [True, False])
@@ -51,28 +79,28 @@ def test_choice(use_numpy):
         assert_equal(x, x_1)
 
 
-def test_numpy_global():
-    with control_stream(use_numpy=True):
-        tnp.random.seed(12345)
-        x = tnp.random.uniform(0, 1, size=11)
+class TestNumpyGlobal:
+    def test_numpy_global(self):
+        with control_stream(use_numpy=True):
+            tnp.random.seed(12345)
+            x = tnp.random.uniform(0, 1, size=11)
 
-    # check that the stream is identical to numpy's
-    _np.random.seed(12345)
-    x_np = _np.random.uniform(0, 1, size=11)
-    assert_equal(x, tnp.asarray(x_np))
+        # check that the stream is identical to numpy's
+        _np.random.seed(12345)
+        x_np = _np.random.uniform(0, 1, size=11)
+        assert_equal(x, tnp.asarray(x_np))
 
-    # switch to the pytorch stream, variates differ
-    with control_stream(use_numpy=False):
-        tnp.random.seed(12345)
-        x_1 = tnp.random.uniform(0, 1, size=11)
+        # switch to the pytorch stream, variates differ
+        with control_stream(use_numpy=False):
+            tnp.random.seed(12345)
+            x_1 = tnp.random.uniform(0, 1, size=11)
 
-    assert not (x_1 == x).all()
+        assert not (x_1 == x).all()
 
-
-def test_wrong_global():
-    with control_stream("oops"):
-        with pytest.raises(ValueError):
-            tnp.random.rand()
+    def test_wrong_global(self):
+        with control_stream("oops"):
+            with pytest.raises(ValueError):
+                tnp.random.rand()
 
 
 if __name__ == "__main__":
