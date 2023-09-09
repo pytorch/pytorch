@@ -60,11 +60,15 @@ find_package(CUDAToolkit REQUIRED)
 
 cmake_policy(POP)
 
+# resolve symlinks: GH-108931
+file(REAL_PATH CUDA_INCLUDE_DIRS _inc_cuda)
+file(REAL_PATH CUDAToolkit_INCLUDE_DIR _inc_ctk)
 if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
-    NOT CUDA_INCLUDE_DIRS STREQUAL CUDAToolkit_INCLUDE_DIR)
-  message(FATAL_ERROR "Found two conflicting CUDA installs:\n"
-                      "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' and\n"
-                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
+   NOT _inc_cuda STREQUAL _inc_ctk)
+      message(FATAL_ERROR "Found two conflicting CUDA installs:\n"
+                          "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' (${_inc_cuda}) and\n"
+                          "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}' (${_inc_ctk})")
+  endif()
 endif()
 
 if(NOT TARGET CUDA::nvToolsExt)
