@@ -1,7 +1,7 @@
 import itertools
 import operator
 from dataclasses import dataclass
-from typing import Callable, Dict, List, NamedTuple, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F
@@ -605,45 +605,81 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
-def _annotate_add_relu(
+def _annotate_binary_op_relu(
     gm: torch.fx.GraphModule,
+    wanted_sources: List[Any],
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
     fused_partitions = find_sequential_partitions(
-        gm, [torch.add, torch.nn.ReLU], filter_fn
+        gm, wanted_sources + [torch.nn.ReLU], filter_fn
     )
     annotated_partitions = []
     for fused_partition in fused_partitions:
-        add_partition, relu_partition = fused_partition
-        annotated_partitions.append(add_partition.nodes + relu_partition.nodes)
+        op_partition, relu_partition = fused_partition
+        annotated_partitions.append(op_partition.nodes + relu_partition.nodes)
         if len(relu_partition.output_nodes) > 1:
             raise ValueError("Relu partition has more than one output node")
         relu_node = relu_partition.output_nodes[0]
-        if len(add_partition.output_nodes) > 1:
-            raise ValueError("add partition has more than one output node")
-        add_node = add_partition.output_nodes[0]
+        if len(op_partition.output_nodes) > 1:
+            raise ValueError("op partition has more than one output node")
+        op_node = op_partition.output_nodes[0]
 
-        if _is_annotated([relu_node, add_node]):
+        if _is_annotated([relu_node, op_node]):
             continue
 
         input_act_qspec = get_input_act_qspec(quantization_config)
         output_act_qspec = get_output_act_qspec(quantization_config)
 
         input_qspec_map = {}
-        input_act0 = add_node.args[0]
+        input_act0 = op_node.args[0]
         if isinstance(input_act0, Node):
             input_qspec_map[input_act0] = input_act_qspec
 
-        input_act1 = add_node.args[1]
+        input_act1 = op_node.args[1]
         if isinstance(input_act1, Node):
             input_qspec_map[input_act1] = input_act_qspec
 
-        add_node.meta["quantization_annotation"] = QuantizationAnnotation(
+        op_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map=input_qspec_map,
             _annotated=True,
         )
         relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            output_qspec=output_act_qspec,
+            _annotated=True,
+        )
+    return annotated_partitions
+
+
+def _annotate_binary_op(
+    gm: torch.fx.GraphModule,
+    wanted_sources: List[Any],
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    op_partitions = get_source_partitions(gm.graph, wanted_sources, filter_fn)
+    op_partitions = list(itertools.chain(*op_partitions.values()))
+    annotated_partitions = []
+    for op_partition in op_partitions:
+        annotated_partitions.append(op_partition.nodes)
+        op_node = op_partition.output_nodes[0]
+        if _is_annotated([op_node]):
+            continue
+
+        input_act_qspec = get_input_act_qspec(quantization_config)
+        output_act_qspec = get_output_act_qspec(quantization_config)
+
+        input_qspec_map = {}
+        input_act0 = op_node.args[0]
+        if isinstance(input_act0, Node):
+            input_qspec_map[input_act0] = input_act_qspec
+
+        input_act1 = op_node.args[1]
+        if isinstance(input_act1, Node):
+            input_qspec_map[input_act1] = input_act_qspec
+
+        op_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
             output_qspec=output_act_qspec,
             _annotated=True,
         )
@@ -655,80 +691,17 @@ def _annotate_add(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    add_partitions = get_source_partitions(
-        gm.graph, [operator.add, torch.add, operator.iadd], filter_fn
+    return _annotate_binary_op(
+        gm, [operator.add, torch.add, operator.iadd], quantization_config, filter_fn
     )
-    add_partitions = list(itertools.chain(*add_partitions.values()))
-    annotated_partitions = []
-    for add_partition in add_partitions:
-        annotated_partitions.append(add_partition.nodes)
-        add_node = add_partition.output_nodes[0]
-        if _is_annotated([add_node]):
-            continue
-
-        input_act_qspec = get_input_act_qspec(quantization_config)
-        output_act_qspec = get_output_act_qspec(quantization_config)
-
-        input_qspec_map = {}
-        input_act0 = add_node.args[0]
-        if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
-
-        input_act1 = add_node.args[1]
-        if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
-
-        add_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            output_qspec=output_act_qspec,
-            _annotated=True,
-        )
-    return annotated_partitions
 
 
-def _annotate_mul_relu(
+def _annotate_add_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    fused_partitions = find_sequential_partitions(
-        gm, [torch.mul, torch.nn.ReLU], filter_fn
-    )
-    annotated_partitions = []
-    for fused_partition in fused_partitions:
-        mul_partition, relu_partition = fused_partition
-        annotated_partitions.append(mul_partition.nodes + relu_partition.nodes)
-        if len(relu_partition.output_nodes) > 1:
-            raise ValueError("Relu partition has more than one output node")
-        relu_node = relu_partition.output_nodes[0]
-        if len(mul_partition.output_nodes) > 1:
-            raise ValueError("mul partition has more than one output node")
-        mul_node = mul_partition.output_nodes[0]
-
-        if _is_annotated([relu_node, mul_node]):
-            continue
-
-        input_act_qspec = get_input_act_qspec(quantization_config)
-        output_act_qspec = get_output_act_qspec(quantization_config)
-
-        input_qspec_map = {}
-        input_act0 = mul_node.args[0]
-        if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
-
-        input_act1 = mul_node.args[1]
-        if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
-
-        mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            _annotated=True,
-        )
-        relu_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=output_act_qspec,
-            _annotated=True,
-        )
-    return annotated_partitions
+    return _annotate_binary_op_relu(gm, [torch.add], quantization_config, filter_fn)
 
 
 def _annotate_mul(
@@ -736,35 +709,35 @@ def _annotate_mul(
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    mul_partitions = get_source_partitions(
-        gm.graph, [operator.mul, torch.mul, operator.imul], filter_fn
+    return _annotate_binary_op(
+        gm, [operator.mul, torch.mul, operator.imul], quantization_config, filter_fn
     )
-    mul_partitions = list(itertools.chain(*mul_partitions.values()))
-    annotated_partitions = []
-    for mul_partition in mul_partitions:
-        annotated_partitions.append(mul_partition.nodes)
-        mul_node = mul_partition.output_nodes[0]
-        if _is_annotated([mul_node]):
-            continue
 
-        input_act_qspec = get_input_act_qspec(quantization_config)
-        output_act_qspec = get_output_act_qspec(quantization_config)
 
-        input_qspec_map = {}
-        input_act0 = mul_node.args[0]
-        if isinstance(input_act0, Node):
-            input_qspec_map[input_act0] = input_act_qspec
+def _annotate_mul_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    return _annotate_binary_op_relu(gm, [torch.mul], quantization_config, filter_fn)
 
-        input_act1 = mul_node.args[1]
-        if isinstance(input_act1, Node):
-            input_qspec_map[input_act1] = input_act_qspec
 
-        mul_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            input_qspec_map=input_qspec_map,
-            output_qspec=output_act_qspec,
-            _annotated=True,
-        )
-    return annotated_partitions
+def _annotate_sub(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    return _annotate_binary_op(
+        gm, [operator.sub, torch.sub, operator.isub], quantization_config, filter_fn
+    )
+
+
+def _annotate_sub_relu(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    return _annotate_binary_op_relu(gm, [torch.sub], quantization_config, filter_fn)
 
 
 # TODO: remove Optional in return type, fix annotated_partitions logic
@@ -823,6 +796,8 @@ OP_TO_ANNOTATOR = {
     "add_relu": _annotate_add_relu,
     "mul": _annotate_mul,
     "mul_relu": _annotate_mul_relu,
+    "sub": _annotate_sub,
+    "sub_relu": _annotate_sub_relu,
     "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
     # input output only gru
     "gru_io_only": _annotate_gru_io_only,

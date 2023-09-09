@@ -25,6 +25,7 @@ _EQUIVALENT_TYPES: List[Set] = [
     {torch.nn.Hardtanh, torch.nn.functional.hardtanh, torch.nn.functional.hardtanh_},
     {torch.add, operator.add, operator.iadd, "add", "add_"},
     {torch.mul, operator.mul, operator.imul},
+    {torch.sub, operator.sub, operator.isub},
 ]
 
 

@@ -330,10 +330,13 @@ class XNNPACKQuantizer(Quantizer):
         self._annotate_linear(model, config, filter_fn)
         self._annotate_conv2d_patterns(model, config, filter_fn)
         self._annotate_max_pool2d(model, config, filter_fn)
-        self._annotate_add_patterns(model, config, filter_fn)
+        OP_TO_ANNOTATOR["add_relu"](model, config, filter_fn)
+        OP_TO_ANNOTATOR["add"](model, config, filter_fn)
         OP_TO_ANNOTATOR["mul_relu"](model, config, filter_fn)
         OP_TO_ANNOTATOR["mul"](model, config, filter_fn)
         OP_TO_ANNOTATOR["cat"](model, config, filter_fn)
+        OP_TO_ANNOTATOR["sub_relu"](model, config, filter_fn)
+        OP_TO_ANNOTATOR["sub"](model, config, filter_fn)
         self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
         self._annotate_gru_io_only(model, config, filter_fn)
         return model
@@ -453,31 +456,6 @@ class XNNPACKQuantizer(Quantizer):
         filter_fn: Optional[Callable[[Node], bool]] = None,
     ) -> Optional[List[List[Node]]]:
         return OP_TO_ANNOTATOR["max_pool2d"](gm, quantization_config, filter_fn)
-
-    def _annotate_add_patterns(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> None:
-        self._annotate_add_relu(gm, quantization_config, filter_fn)
-        self._annotate_add(gm, quantization_config, filter_fn)
-
-    def _annotate_add_relu(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["add_relu"](gm, quantization_config, filter_fn)
-
-    def _annotate_add(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[Callable[[Node], bool]] = None,
-    ) -> Optional[List[List[Node]]]:
-        return OP_TO_ANNOTATOR["add"](gm, quantization_config, filter_fn)
 
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass
