@@ -53,9 +53,9 @@
 #include "cutlass/platform/platform.h"
 
 //#include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
-#ifdef ENABLE_BF16
+//#ifdef ENABLE_BF16
 #include <cuda_bf16.h>
-#endif
+//#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -155,7 +155,8 @@ public:
     CUTLASS_DEVICE
     void dequantize(FragmentDequantizedOperand& operand_frag, const FragmentScale& scale_frag)
     {
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800) && defined(ENABLE_BF16))
+//#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800) && defined(ENABLE_BF16))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800))
         using _MmaOperandB        = typename ArchMmaOperator::FragmentB;
         using ExpandedMmaOperandB = Array<typename _MmaOperandB::Element, kExpansionFactor * _MmaOperandB::kElements>;
         static_assert(ExpandedMmaOperandB::kElements * MmaOperator::MmaIterations::kColumn

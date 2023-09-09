@@ -27,46 +27,16 @@
 namespace at {
 namespace native {
 
-Tensor
-_fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
-              const Tensor& bias) {
 #ifndef USE_ROCM
-    // For now, only CC 8.x devices are supported.
-    const auto dprops = at::cuda::getCurrentDeviceProperties();
-    const auto is_sm8x = dprops->major == 8;
-    TORCH_CHECK(is_sm8x,
-                "_fp16_uint8_mm: Supported only on GPUs with compute "
-                "capability 8.x");
+template<typename ElementInputA>
+Tensor
+mixed_dtypes_mm_dispatch_dtype(
+    const Tensor& input, const Tensor& weight, const Tensor& scale,
+    const Tensor& bias) {
+  const int length_m = input.size(0);
+  const int length_k = weight.size(0);
+  const int length_n = weight.size(1);
 
-  // Check arguments dimensions.
-  TORCH_CHECK(self.dim() == 2,
-              "_fp16_uint8_mm: Expected self argument to be 2D tensor, got ",
-              self.dim(), " dims");
-  TORCH_CHECK(mat2.dim() == 2,
-              "_fp16_uint8_mm: Expected mat2 argument to be 2D tensor, got ",
-              mat2.dim(), " dims");
-
-  // Check arguments datatypes.
-  TORCH_CHECK(self.dtype() == at::kHalf,
-              "_fp16_uint8_mm: The self datatype ", self.dtype(),
-              " is not supported");
-  TORCH_CHECK(mat2.dtype() == at::kByte,
-              "_fp16_uint8_mm: The mat2 datatype ", mat2.dtype(),
-              " is not supported");
-  TORCH_CHECK(scale.dtype() == at::kHalf,
-              "_fp16_uint8_mm: The scale datatype ", scale.dtype(),
-              " is not supported");
-  TORCH_CHECK(bias.dtype() == at::kHalf,
-              "_fp16_uint8_mm: The bias datatype ", bias.dtype(),
-              " is not supported");
-
-  // FIXME: add all the other checks!
-
-  const int length_m = self.size(0);
-  const int length_k = mat2.size(0);
-  const int length_n = mat2.size(1);
-
-  using ElementInputA = cutlass::half_t;
   using ElementInputB = uint8_t;
   using ElementOutput = ElementInputA;
 
@@ -89,10 +59,14 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
   constexpr auto ElementsPerAccessB = 128 / cutlass::sizeof_bits<ElementInputB>::value;
   constexpr auto ElementsPerAccessC = ElementsPerAccessA;
   constexpr auto Stages = 4;
-  constexpr auto split_k_factor = 1; // FIXME: wrong results if !=1,
-                                     // even if GemmFpAIntB
-                                     // instantiated with SplitKSerial
-                                     // set to false.
+  constexpr auto SplitKFactor = 1; // Wrong outputs if !=1, even if
+                                   // GemmFpAIntB instantiated with
+                                   // SplitKSerial set to false.
+
+  // Check for current CUTLASS limitations w.r.t. weight sizes.
+  TORCH_CHECK(length_k % 64 == 0 && length_n % 64 == 0,
+              "mixed_dtypes_mm_dispatch_dtype: Number of rows/columns of the "
+              "weight matrix must be divisible by ", 64);
 
   using ElementAccumulator = float;
 
@@ -132,18 +106,18 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
 
   using Gemm = cutlass::gemm::device::GemmUniversalBase<GemmKernel>;
 
-  auto result = self.new_empty({length_m, length_n});
+  auto output = input.new_empty({length_m, length_n});
 
   const auto ldb = length_k * GemmKernel::kInterleave;
 
   typename Gemm::Arguments arguments(
       {length_m, length_n, length_k},
-      {(ElementInputA*)self.data_ptr(), length_k},
-      {(ElementInputB*)mat2.data_ptr(), ldb},
+      {(ElementInputA*)input.data_ptr(), length_k},
+      {(ElementInputB*)weight.data_ptr(), ldb},
       {(ElementInputA*)scale.data_ptr(), 0},
       {(ElementInputA*)bias.data_ptr(), 0},
-      {(ElementOutput*)result.data_ptr(), length_n},
-      split_k_factor,
+      {(ElementOutput*)output.data_ptr(), length_n},
+      SplitKFactor,
       {ElementAccumulator(1.f), ElementAccumulator(0.f)});
 
   Gemm gemm_op;
@@ -157,7 +131,7 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
 
   // Allocate workspace for CUTLASS mixed datatypes GEMM kernel.
   const auto workspace_size = Gemm::get_workspace_size(arguments);
-  auto workspace = self.new_empty({(int64_t)workspace_size},
+  auto workspace = input.new_empty({(int64_t)workspace_size},
                                   at::TensorOptions().dtype(at::kByte));
 
   // Initialize CUTLASS mixed datatypes GEMM object.
@@ -171,7 +145,107 @@ _fp16_uint8_mm(const Tensor& self, const Tensor& mat2, const Tensor& scale,
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  return result;
+  return output;
+}
+#endif
+
+Tensor
+_fp16_uint8_mm(const Tensor& input, const Tensor& weight, const Tensor& scale,
+               const Tensor& bias) {
+#ifndef USE_ROCM
+  // For now, only CC 8.x devices are supported.
+  const auto dprops = at::cuda::getCurrentDeviceProperties();
+  const auto is_sm8x = dprops->major == 8;
+  TORCH_CHECK(is_sm8x,
+              "_fp16_uint8_mm: Supported only on GPUs with compute capability "
+              "8.x");
+
+  // Validate datatypes of input tensors.
+  TORCH_CHECK(input.dtype() == at::kHalf ||
+              input.dtype() == at::kBFloat16,
+              "_fp16_uint8_mm: The input datatype ", input.dtype(),
+              " is not supported");
+  TORCH_CHECK(weight.dtype() == at::kByte,
+              "_fp16_uint8_mm: The weight datatype ", weight.dtype(),
+              " is not supported");
+  TORCH_CHECK(scale.dtype() == input.dtype(),
+              "_fp16_uint8_mm: Expected scale datatype ", input.dtype(),
+              " but got", scale.dtype());
+  TORCH_CHECK(bias.dtype() == input.dtype(),
+              "_fp16_uint8_mm: Expected bias datatype ", input.dtype(),
+              " but got", bias.dtype());
+
+  // Squash the batch dimensions of the input tensor with its
+  // next-to-last dimensions.
+  const auto input_sizes = input.sizes().vec();
+  const auto input_2d = input.reshape({-1, input_sizes.back()});
+
+  // Validate layouts of input tensors.
+  TORCH_CHECK(input_2d.layout() == Layout::Strided,
+              "_fp16_uint8_mm: Expected input argument to be strided, but got "
+              "layout ", input_2d.layout());
+  TORCH_CHECK(input_2d.dim() == 2,
+              "_fp16_uint8_mm: Expected input argument to be 2D tensor, got ",
+              input_2d.dim(), " dims");
+  const auto strides_input = input_2d.strides();
+  TORCH_CHECK(strides_input[0] > 1 && strides_input[1] == 1,
+              "_fp16_uint8_mm: Invalid strides for input argument: row "
+              "stride = ", strides_input[0], ", column stride = ",
+              strides_input[1]);
+  TORCH_CHECK(weight.layout() == Layout::Strided,
+              "_fp16_uint8_mm: Expected inpu argument to be strided, but got "
+              "layout ", weight.layout());
+  TORCH_CHECK(weight.dim() == 2,
+              "_fp16_uint8_mm: Expected weight argument to be 2D tensor, got ",
+              weight.dim(), " dims");
+  const auto strides_weight = weight.strides();
+  TORCH_CHECK(strides_weight[0] > 1 && strides_weight[1] == 1,
+              "_fp16_uint8_mm: Invalid strides for weight argument: row "
+              "stride = ", strides_weight[0], ", column stride = ",
+              strides_weight[1]);
+  TORCH_CHECK(scale.dim() == 1,
+              "_fp16_uint8_mm: Expected scale argument to be 1D tensor, got ",
+              scale.dim(), " dims");
+  TORCH_CHECK(bias.dim() == 1,
+              "_fp16_uint8_mm: Expected bias argument to be 1D tensor, got ",
+              bias.dim(), " dims");
+
+  // Validate sizes of input tensors.
+  TORCH_CHECK(input_2d.size(1) == weight.size(0),
+              "_fp16_uint8_mm: Expected input argument to have ",
+              weight.size(0), " columns, but got ", input_2d.size(1));
+  TORCH_CHECK(scale.size(0) == weight.size(1),
+              "_fp16_uint8_mm: Expected scale argument to have ",
+              weight.size(1), " elements, but got ", scale.size(0));
+  if (bias.numel() != 0) {
+      TORCH_CHECK(bias.size(0) == weight.size(1),
+                  "_fp16_uint8_mm: Expected bias argument to have ",
+                  weight.size(1), " elements, but got ", bias.size(0));
+  }
+
+
+  Tensor output;
+  AT_DISPATCH_SWITCH(
+      input.scalar_type(),
+      "_fp16_uint8_mm",
+      AT_DISPATCH_CASE(
+          at::ScalarType::Half,
+          [&]() {
+            output = mixed_dtypes_mm_dispatch_dtype<cutlass::half_t>(
+                input_2d, weight, scale, bias);
+            return;
+          })
+      AT_DISPATCH_CASE(
+          at::ScalarType::BFloat16,
+          [&]() {
+            output = mixed_dtypes_mm_dispatch_dtype<cutlass::bfloat16_t>(
+                input_2d, weight, scale, bias);
+            return;
+          }));
+
+  auto output_sizes = input_sizes;
+  output_sizes.back() = weight.size(1);
+  return output.reshape(output_sizes);
 #else
   AT_ERROR("_fp16_uint8_mm: ROCm doesn't support CUTLASS");
   return Tensor{};
