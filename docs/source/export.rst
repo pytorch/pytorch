@@ -17,6 +17,52 @@ representing only the Tensor computation of the function in an Ahead-of-Time
 (AOT) fashion, which can subsequently be executed with different outputs or
 serialized.
 
+::
+
+    import torch
+    from torch.export import export
+
+    def f(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        a = torch.sin(x)
+        b = torch.cos(y)
+        return a + b
+
+    example_args = (torch.randn(10, 10), torch.randn(10, 10))
+
+    exported_program: torch.export.ExportedProgram = export(
+        f, args=example_args
+    )
+    print(exported_program)
+
+.. code-block::
+
+    ExportedProgram:
+        class GraphModule(torch.nn.Module):
+            def forward(self, arg0_1: f32[10, 10], arg1_1: f32[10, 10]):
+                # code: a = torch.sin(x)
+                sin: f32[10, 10] = torch.ops.aten.sin.default(arg0_1);
+
+                # code: b = torch.cos(y)
+                cos: f32[10, 10] = torch.ops.aten.cos.default(arg1_1);
+
+                # code: return a + b
+                add: f32[10, 10] = torch.ops.aten.add.Tensor(sin, cos);
+                return (add,)
+
+        Graph signature: ExportGraphSignature(
+            parameters=[],
+            buffers=[],
+            user_inputs=['arg0_1', 'arg1_1'],
+            user_outputs=['add'],
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
+            assertion_dep_token=None,
+        )
+        Range constraints: {}
+        Equality constraints: []
+
 ``torch.export`` produces a clean intermediate representation (IR) with the
 following invariants. More specifications about the IR can be found here (coming
 soon!).
@@ -136,26 +182,45 @@ example:
         M(), args=example_args, kwargs=example_kwargs
     )
     print(exported_program)
-    """
+
+.. code-block::
+
     ExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[16, 3, 3, 3], arg1_1: f32[16], arg2_1: f32[1, 3, 256, 256], arg3_1: f32[1, 16, 256, 256]):
+
                 # code: a = self.conv(x)
-                convolution: f32[1, 16, 256, 256] = torch.ops.aten.convolution.default(arg2_1, arg0_1, arg1_1, [1, 1], [1, 1], [1, 1], False, [0, 0], 1);
+                convolution: f32[1, 16, 256, 256] = torch.ops.aten.convolution.default(
+                    arg2_1, arg0_1, arg1_1, [1, 1], [1, 1], [1, 1], False, [0, 0], 1
+                );
 
                 # code: a.add_(constant)
                 add: f32[1, 16, 256, 256] = torch.ops.aten.add.Tensor(convolution, arg3_1);
 
                 # code: return self.maxpool(self.relu(a))
                 relu: f32[1, 16, 256, 256] = torch.ops.aten.relu.default(add);
-                max_pool2d_with_indices = torch.ops.aten.max_pool2d_with_indices.default(relu, [3, 3], [3, 3]);
+                max_pool2d_with_indices = torch.ops.aten.max_pool2d_with_indices.default(
+                    relu, [3, 3], [3, 3]
+                );
                 getitem: f32[1, 16, 85, 85] = max_pool2d_with_indices[0];
                 return (getitem,)
 
-    Graph signature: ExportGraphSignature(parameters=['L__self___conv.weight', 'L__self___conv.bias'], buffers=[], user_inputs=['arg2_1', 'arg3_1'], user_outputs=['getitem'], inputs_to_parameters={'arg0_1': 'L__self___conv.weight', 'arg1_1': 'L__self___conv.bias'}, inputs_to_buffers={}, buffers_to_mutate={}, backward_signature=None, assertion_dep_token=None)
-    Range constraints: {}
-    Equality constraints: []
-    """
+        Graph signature: ExportGraphSignature(
+            parameters=['L__self___conv.weight', 'L__self___conv.bias'],
+            buffers=[],
+            user_inputs=['arg2_1', 'arg3_1'],
+            user_outputs=['getitem'],
+            inputs_to_parameters={
+                'arg0_1': 'L__self___conv.weight',
+                'arg1_1': 'L__self___conv.bias',
+            },
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
+            assertion_dep_token=None,
+        )
+        Range constraints: {}
+        Equality constraints: []
 
 Inspecting the ``ExportedProgram``, we can note the following:
 
@@ -223,28 +288,50 @@ run. Such dimensions must be marked dynamic using the
       M(), args=example_args, constraints=constraints
     )
     print(exported_program)
-    """
+
+.. code-block::
+
     ExportedProgram:
-    class GraphModule(torch.nn.Module):
-        def forward(self, arg0_1: f32[32, 64], arg1_1: f32[32], arg2_1: f32[64, 128], arg3_1: f32[64], arg4_1: f32[32], arg5_1: f32[s0, 64], arg6_1: f32[s0, 128]):
-            # code: out1 = self.branch1(x1)
-            permute: f32[64, 32] = torch.ops.aten.permute.default(arg0_1, [1, 0]);
-            addmm: f32[s0, 32] = torch.ops.aten.addmm.default(arg1_1, arg5_1, permute);
-            relu: f32[s0, 32] = torch.ops.aten.relu.default(addmm);
+        class GraphModule(torch.nn.Module):
+            def forward(self, arg0_1: f32[32, 64], arg1_1: f32[32], arg2_1: f32[64, 128], arg3_1: f32[64], arg4_1: f32[32], arg5_1: f32[s0, 64], arg6_1: f32[s0, 128]):
 
-            # code: out2 = self.branch2(x2)
-            permute_1: f32[128, 64] = torch.ops.aten.permute.default(arg2_1, [1, 0]);
-            addmm_1: f32[s0, 64] = torch.ops.aten.addmm.default(arg3_1, arg6_1, permute_1);
-            relu_1: f32[s0, 64] = torch.ops.aten.relu.default(addmm_1);  addmm_1 = None
+                # code: out1 = self.branch1(x1)
+                permute: f32[64, 32] = torch.ops.aten.permute.default(arg0_1, [1, 0]);
+                addmm: f32[s0, 32] = torch.ops.aten.addmm.default(arg1_1, arg5_1, permute);
+                relu: f32[s0, 32] = torch.ops.aten.relu.default(addmm);
 
-            # code: return (out1 + self.buffer, out2)
-            add: f32[s0, 32] = torch.ops.aten.add.Tensor(relu, arg4_1);
-            return (add, relu_1)
+                # code: out2 = self.branch2(x2)
+                permute_1: f32[128, 64] = torch.ops.aten.permute.default(arg2_1, [1, 0]);
+                addmm_1: f32[s0, 64] = torch.ops.aten.addmm.default(arg3_1, arg6_1, permute_1);
+                relu_1: f32[s0, 64] = torch.ops.aten.relu.default(addmm_1);  addmm_1 = None
 
-    Graph signature: ExportGraphSignature(parameters=['branch1.0.weight', 'branch1.0.bias', 'branch2.0.weight', 'branch2.0.bias'], buffers=['L__self___buffer'], user_inputs=['arg5_1', 'arg6_1'], user_outputs=['add', 'relu_1'], inputs_to_parameters={'arg0_1': 'branch1.0.weight', 'arg1_1': 'branch1.0.bias', 'arg2_1': 'branch2.0.weight', 'arg3_1': 'branch2.0.bias'}, inputs_to_buffers={'arg4_1': 'L__self___buffer'}, buffers_to_mutate={}, backward_signature=None, assertion_dep_token=None)
-    Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
-    Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
-    """
+                # code: return (out1 + self.buffer, out2)
+                add: f32[s0, 32] = torch.ops.aten.add.Tensor(relu, arg4_1);
+                return (add, relu_1)
+
+        Graph signature: ExportGraphSignature(
+            parameters=[
+                'branch1.0.weight',
+                'branch1.0.bias',
+                'branch2.0.weight',
+                'branch2.0.bias',
+            ],
+            buffers=['L__self___buffer'],
+            user_inputs=['arg5_1', 'arg6_1'],
+            user_outputs=['add', 'relu_1'],
+            inputs_to_parameters={
+                'arg0_1': 'branch1.0.weight',
+                'arg1_1': 'branch1.0.bias',
+                'arg2_1': 'branch2.0.weight',
+                'arg3_1': 'branch2.0.bias',
+            },
+            inputs_to_buffers={'arg4_1': 'L__self___buffer'},
+            buffers_to_mutate={},
+            backward_signature=None,
+            assertion_dep_token=None,
+        )
+        Range constraints: {s0: RangeConstraint(min_val=2, max_val=9223372036854775806)}
+        Equality constraints: [(InputDim(input_name='arg5_1', dim=0), InputDim(input_name='arg6_1', dim=0))]
 
 Some additional things to note:
 
@@ -321,13 +408,14 @@ branch that is being taken with the given sample inputs. For example:
     example_inputs = (torch.rand(10, 2),)
     exported_program = export(fn, example_inputs)
     print(exported_program)
-    """
+
+.. code-block::
+
     ExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[10, 2]):
                 add: f32[10, 2] = torch.ops.aten.add.Tensor(arg0_1, 1);
                 return (add,)
-    """
 
 The conditional of (``x.shape[0] > 5``) does not appear in the
 ``ExportedProgram`` because the example inputs have the static
@@ -361,15 +449,16 @@ For example:
     example_inputs = (torch.rand(2, 2), 1, 3)
     exported_program = export(fn, example_inputs)
     print(exported_program)
-    """
+
+.. code-block::
+
     ExportedProgram:
-    class GraphModule(torch.nn.Module):
-        def forward(self, arg0_1: f32[2, 2], arg1_1, arg2_1):
-            add: f32[2, 2] = torch.ops.aten.add.Tensor(arg0_1, 1);
-            add_1: f32[2, 2] = torch.ops.aten.add.Tensor(add, 1);
-            add_2: f32[2, 2] = torch.ops.aten.add.Tensor(add_1, 1);
-            return (add_2,)
-    """
+        class GraphModule(torch.nn.Module):
+            def forward(self, arg0_1: f32[2, 2], arg1_1, arg2_1):
+                add: f32[2, 2] = torch.ops.aten.add.Tensor(arg0_1, 1);
+                add_1: f32[2, 2] = torch.ops.aten.add.Tensor(add, 1);
+                add_2: f32[2, 2] = torch.ops.aten.add.Tensor(add_1, 1);
+                return (add_2,)
 
 Because integers are specialized, the ``torch.ops.aten.add.Tensor`` operations
 are all computed with the inlined constant ``1``, rather than ``arg1_1``.
