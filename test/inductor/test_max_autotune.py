@@ -4,10 +4,15 @@ import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
+from torch._inductor.autotune_process import TestBenchmarkRequest, TuningProcessPool
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
-from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
+from torch._inductor.select_algorithm import (
+    AlgorithmSelectorCache,
+    ChoiceCaller,
+    TritonTemplateCaller,
+)
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -118,7 +123,8 @@ class TestDoBench(TestCase):
             self.assertNotEqual(0, child.exitcode)
 
     @parametrize("autotune_in_subproc", (True, False))
-    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
+    @parametrize("autotune_multi_device", (True, False))
+    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc, autotune_multi_device):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
@@ -134,7 +140,11 @@ class TestDoBench(TestCase):
         d = torch.randn(k, n).cuda()
 
         with config.patch(
-            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc}
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": autotune_in_subproc,
+                "autotune_multi_device": autotune_multi_device,
+            }
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
@@ -316,6 +326,42 @@ class TestDoBench(TestCase):
             y1 = compiled_fn(x1, w, b, mul1)
             y1_expected = fn(x1, w, b, mul1)
             torch.testing.assert_close(y1, y1_expected)
+
+
+class TestTritonTemplateCaller(TritonTemplateCaller):
+    def __init__(self, bmreq: TestBenchmarkRequest):
+        self.bmreq = bmreq
+
+    def __str__(self) -> str:
+        return "test"
+
+
+@instantiate_parametrized_tests
+class TestTuningProcess(TestCase):
+    @parametrize("autotune_multi_device", (True, False))
+    def test_tuning_pool(self, autotune_multi_device):
+        with config.patch({"autotune_multi_device": autotune_multi_device}):
+            tuning_pool = TuningProcessPool()
+            tuning_pool.initialize(1)
+
+            # First cause the tuning process to crash.
+            bmreq = TestBenchmarkRequest(value=None)
+            choice = TestTritonTemplateCaller(bmreq)
+
+            timings = tuning_pool.benchmark([choice])
+            self.assertTrue(choice in timings)
+            self.assertEqual(timings[choice], float("inf"))
+
+            # Then send another request and make sure the sub-process
+            # has restarted and is operational.
+            value = 3.14
+            choice.bmreq.value = value
+
+            timings = tuning_pool.benchmark([choice])
+            self.assertTrue(choice in timings)
+            self.assertEqual(timings[choice], value)
+
+            tuning_pool.terminate()
 
 
 if __name__ == "__main__":

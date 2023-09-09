@@ -270,11 +270,13 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    for choice in choices:
-                        timings[choice] = benchmark(choice)
-                        local_cache.setdefault(name, {})
-                        local_cache[name].setdefault(inputs, {})
-                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                    timings = benchmark(choices)
+                    assert all(choice in timings for choice in choices)
+
+                    local_cache.setdefault(name, {})
+                    local_cache[name].setdefault(inputs, {})
+                    for choice, timing in timings.items():
+                        local_cache[name][inputs][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
