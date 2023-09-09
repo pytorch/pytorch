@@ -2,11 +2,11 @@ name,accuracy,graph_breaks
 AlbertForMaskedLM,pass,6
 AllenaiLongformerBase,pass,10
 BartForCausalLM,pass,14
-BertForMaskedLM,pass,9
-BertForQuestionAnswering,pass,9
+BertForMaskedLM,pass,6
+BertForQuestionAnswering,pass,6
 BlenderbotSmallForCausalLM,pass,14
 BlenderbotSmallForConditionalGeneration,pass,26
-CamemBert,pass,9
+CamemBert,pass,6
 DebertaForMaskedLM,pass,6
 DebertaForQuestionAnswering,pass,6
 DebertaV2ForMaskedLM,pass_due_to_skip,0
@@ -32,8 +32,8 @@ PLBartForCausalLM,pass,14
 PLBartForConditionalGeneration,pass,31
 PegasusForCausalLM,pass,14
 PegasusForConditionalGeneration,pass,24
-RobertaForCausalLM,pass,9
-RobertaForQuestionAnswering,pass,9
+RobertaForCausalLM,pass,6
+RobertaForQuestionAnswering,pass,6
 Speech2Text2ForCausalLM,pass,14
 T5ForConditionalGeneration,pass,6
 T5Small,pass,6
