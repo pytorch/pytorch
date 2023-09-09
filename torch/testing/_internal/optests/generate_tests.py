@@ -146,6 +146,18 @@ def generate_opcheck_tests(
                 result = method(*args, **kwargs)
             return result
 
+        if pytestmark := new_method.__dict__.get('pytestmark'):
+            import pytest
+            new_pytestmark = []
+            for mark in pytestmark:
+                if isinstance(mark, pytest.Mark) and mark.name == 'parametrize':
+                    argnames, argvalues = mark.args
+                    assert not mark.kwargs, "NYI"
+                    new_pytestmark.append(pytest.mark.parametrize(argnames, (next(iter(argvalues)),)))
+                else:
+                    new_pytestmark.append(mark)
+            new_method.__dict__['pytestmark'] = new_pytestmark
+
         if new_method_name in additional_decorators:
             for dec in additional_decorators[new_method_name]:
                 new_method = dec(new_method)
