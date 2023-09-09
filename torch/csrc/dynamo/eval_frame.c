@@ -182,7 +182,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 // This makes ths module thread-safe (through the GIL),
 // and prepares the module to be converted to PEP 489,
 // which will allow it to support multiple interpreters
-// eventually (PEP 554, CPython 3.13).
+// eventually (PEP 684, CPython 3.12 & PEP 554, CPython 3.13).
 // When CPython eventually adopts nogil, we can easily
 // use their new atomic APIs for this structure.
 typedef struct {
@@ -1178,8 +1178,17 @@ static PyMethodDef _methods[] = {
     {NULL, NULL, 0, NULL}};
 
 
+// Temporarily disable support for multiple interpreters
+static bool loaded = false;
 
 static int eval_frame_mod_exec(PyObject *mod) {
+  if (loaded) {
+    PyErr_SetString(PyExc_ImportError,
+                    "cannot load eval_frame module more than once per process");
+    return -1;
+  }
+  loaded = true;
+
   eval_frame_mod_state *st = (eval_frame_mod_state *)PyModule_GetState(mod);
   CHECK(st != NULL);
   st->is_dynamo_compiling = false;
@@ -1263,7 +1272,7 @@ static struct PyModuleDef _module = {
 };
 
 inline static eval_frame_mod_state *get_module_state() {
-  // Note: O(1) operation in CPython
+  // Note: O(1) operation in CPython. basically the cost of indexing a Python list.
   PyObject *mod = PyState_FindModule(&_module);
   if (mod == NULL) {
     return NULL;
@@ -1284,6 +1293,8 @@ bool get_is_dynamo_compiling() {
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
 
+  // TODO (kenjin): Support multi-phase initialization (PEP 489) once
+  // CPython 3.13 arrives with multiple interpreters (PEP 554).
   PyObject* module = PyModule_Create(&_module);
   if (module == NULL) {
     return NULL;

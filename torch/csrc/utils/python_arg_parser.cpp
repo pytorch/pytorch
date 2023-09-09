@@ -4,11 +4,11 @@
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_torch_function_mode.h>
 #include <torch/csrc/utils/torch_dispatch_mode.h>
-#include <torch/csrc/dynamo/eval_frame.h>
 
 #include <ATen/ATen.h>
 #include <ATen/PythonTorchFunctionTLS.h>
@@ -847,7 +847,6 @@ static bool is_int_or_symint(PyObject* obj) {
   if (THPUtils_checkIndex(obj)) {
     return true;
   }
-
 
   // FakeTensor(..., size=()) is qualified for SymInt param
   if (get_is_dynamo_compiling() && THPVariable_Check(obj)) {
