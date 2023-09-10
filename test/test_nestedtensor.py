@@ -113,7 +113,9 @@ def random_nt_from_dims(dims, device=None, dtype=None):
 
 # Creates an NT matching another NT's number of components and
 # shape / ragged structure for all dims specified to be -1.
-def random_nt_from_similar(other, dims):
+def random_nt_from_similar(other, dims=None):
+    if dims is None:
+        return torch.randn_like(other)
     assert len(dims) == other.dim()
     assert dims[0] == -1 or dims[0] == other.size(0)
 
@@ -548,7 +550,7 @@ class TestNestedTensor(TestCase):
             self.assertEqual(nt_ub, t_like)
 
     def test_cat(self):
-        # === dim=0 case ===
+        # dim=0 success case
         # No constraints on ragged structures matching.
         x = random_nt_from_dims([5, None, 10])
         y = random_nt_from_dims([3, 4, None])
@@ -557,17 +559,81 @@ class TestNestedTensor(TestCase):
                 output.unbind(), itertools.chain(x.unbind(), y.unbind())):
             self.assertEqual(out_component, xy_component)
 
-        # === dim=-1 case ===
-        # Other dims must match.
+        # dim=-1 success case
         # shape (B, *, D)
         x = random_nt_from_dims([5, None, 10])
         # shape (B, *, D'); same structure as x but dim=-1 differs
         y = random_nt_from_similar(x, dims=[-1, -1, 8])
-        # Not supported yet!
-        with self.assertRaisesRegex(RuntimeError,
-                                    "NestedTensors can only be concatenated along dimension 0"):
-            # should be shape (B, *, D + D') when supported
-            output = torch.cat([x, y], dim=-1)
+        # should be shape (B, *, D + D') when supported
+        output = torch.cat([x, y], dim=-1)
+        for out_component, x_component, y_component in zip(output.unbind(), x.unbind(), y.unbind()):
+            self.assertEqual(out_component, torch.cat([x_component, y_component], dim=-1))
+
+        # dim between 0 and -1 success case
+        x = random_nt_from_dims([5, None, 2, 3])
+        # same structure as x but dim=2 differs
+        y = random_nt_from_similar(x, dims=[-1, -1, 4, -1])
+        output = torch.cat([x, y], dim=2)
+        for out_component, x_component, y_component in zip(output.unbind(), x.unbind(), y.unbind()):
+            self.assertEqual(out_component, torch.cat([x_component, y_component], dim=1))
+
+        # error case: mixed NT / dense inputs
+        x = random_nt_from_dims([5, None, 2])
+        y = torch.randn(5, 3, 2)
+        with self.assertRaisesRegex(
+                RuntimeError, "expected each tensor in given list to be nested"):
+            torch.cat([x, y], dim=-1)
+
+        # error case: NTs with different dims
+        x = random_nt_from_dims([5, None, 2])
+        y = random_nt_from_dims([5, None, 2, 3])
+        with self.assertRaisesRegex(
+                RuntimeError, "expected all nested tensors to have matching ragged structures outside of the concatenated dim"):
+            torch.cat([x, y], dim=-1)
+
+        # error case: non-contiguous NT
+        x, y = random_nt_noncontiguous_pair((2, 3, 4), dtype=torch.float32)
+        # transpose to put ragged dim next to batch dim
+        x, y = x.transpose(-2, -1), y.transpose(-2, -1)
+        with self.assertRaisesRegex(
+                RuntimeError, "only contiguous nested tensors are supported"):
+            torch.cat([x, y], dim=-1)
+
+        # error case: multiple ragged dims in inputs
+        x = random_nt_from_dims([5, None, None, 2])
+        y = random_nt_from_similar(x)
+        with self.assertRaisesRegex(
+                RuntimeError, "only nested tensors with a single ragged dim next to the batch dim are supported"):
+            torch.cat([x, y], dim=-1)
+
+        # error case: ragged dim not next to batch dim
+        x = random_nt_from_dims([5, 2, None])
+        y = random_nt_from_similar(x)
+        with self.assertRaisesRegex(
+                RuntimeError, "only nested tensors with a single ragged dim next to the batch dim are supported"):
+            torch.cat([x, y], dim=1)
+
+        # error case: NTs with different batch sizes
+        x = random_nt_from_dims([5, None, 2])
+        y = random_nt_from_dims([3, None, 2])
+        with self.assertRaisesRegex(
+                RuntimeError, "expected all nested tensors to have matching ragged structures outside of the concatenated dim"):
+            torch.cat([x, y], dim=-1)
+
+        # error case: NTs with different ragged structures
+        x = torch.nested.nested_tensor([
+            torch.randn(2, 6),
+            torch.randn(4, 6),
+            torch.randn(5, 6),
+        ])
+        y = torch.nested.nested_tensor([
+            torch.randn(5, 6),
+            torch.randn(4, 6),
+            torch.randn(2, 6),
+        ])
+        with self.assertRaisesRegex(
+                RuntimeError, "expected all nested tensors to have matching ragged structures outside of the concatenated dim"):
+            torch.cat([x, y], dim=-1)
 
 
 class TestNestedTensorDeviceType(TestCase):

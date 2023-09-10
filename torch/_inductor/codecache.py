@@ -302,13 +302,13 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra: str = ""):
-    hashing_str = code
+def code_hash(code: Union[str, bytes], extra: str = ""):
+    hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra != "":
-        hashing_str = hashing_str + "||" + extra
+        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
     return (
         "c"
-        + base64.b32encode(hashlib.sha256(hashing_str.encode("utf-8")).digest())[:51]
+        + base64.b32encode(hashlib.sha256(hashing_str).digest())[:51]
         .decode("utf-8")
         .lower()
     )
@@ -327,10 +327,10 @@ def get_path(basename: str, extension: str, specified_dir: str = ""):
 
 
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
-    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    assert hash_type in ["code", "cubin", "hsaco"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type == "cubin":
+    if hash_type == "cubin" or "hsaco":
         return code_hash(repr(content))
 
 
@@ -656,12 +656,20 @@ def pick_vec_isa():
     return invalid_vec_isa
 
 
+def get_compile_only(compile_only=True):
+    return "-c" if compile_only else ""
+
+
 def get_shared(shared=True):
     return "-shared -fPIC" if shared else ""
 
 
 def get_warning_all_flag(warning_all=True):
     return "-Wall" if warning_all else ""
+
+
+def get_glibcxx_abi_build_flags():
+    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
 
 
 def cpp_flags():
@@ -801,10 +809,13 @@ def get_include_and_linking_paths(
             else:
                 macros = f"-D{macros}"
         if cuda:
-            if config.is_fbcode():
-                libs += ["cuda"]
+            if torch.version.hip is not None:
+                libs += ["c10_hip", "torch_hip"]
             else:
-                libs += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libs += ["cuda"]
+                else:
+                    libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -884,6 +895,7 @@ def cpp_compile_command(
     vec_isa: VecISA = invalid_vec_isa,
     cuda=False,
     aot_mode=False,
+    compile_only=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -908,14 +920,24 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {get_glibcxx_abi_build_flags()}
             {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
+            {get_compile_only(compile_only)}
             -o {out_name}
         """,
     ).strip()
+
+
+def run_command_and_check(cmd: str):
+    cmd = shlex.split(cmd)
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        raise exc.CppCompileError(cmd, e.output) from e
 
 
 class CudaKernelParamCache:
@@ -924,13 +946,19 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            "cubin",
-            hash_type="cubin",
-            specified_dir=config.aot_inductor_output_path,
+            bin_type,
+            hash_type=bin_type,
+            specified_dir=config.aot_inductor.output_path,
         )
-        params["cubin_path"] = path
+
+        if torch.version.hip is None:
+            params["cubin_path"] = path
+        else:
+            params["hsaco_path"] = path
+
         cls.cache[key] = params
 
     @classmethod
@@ -951,12 +979,41 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
+        if config.is_fbcode():
+            ld_command = build_paths.ld()
+            objcopy_command = build_paths.objcopy()
+        else:
+            ld_command = "ld"
+            objcopy_command = "objcopy"
         key, input_path = write(
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
+
+        def _to_bytes(t: torch.Tensor) -> bytes:
+            # This serializes the tensor's untyped_storage to bytes by accessing
+            # the raw data of the underlying structure.
+            import ctypes
+
+            t_cpu = t.untyped_storage().cpu()
+            raw_array = ctypes.cast(
+                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
+            )
+
+            return bytes(raw_array.contents)
+
+        aot_constants = b""
+        for tensor in graph.constants.values():
+            aot_constants += _to_bytes(tensor)
+
+        consts_key, consts_path = write(
+            aot_constants,
+            "bin",
+            specified_dir=config.aot_inductor.output_path,
+        )
+
         if key not in cls.cache:
             from filelock import FileLock
 
@@ -973,20 +1030,61 @@ class AotCodeCache:
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path,
-                            output=output_so,
-                            vec_isa=picked_vec_isa,
-                            cuda=cuda,
-                            aot_mode=graph.aot_mode,
-                        )
+                    output_o = os.path.splitext(input_path)[0] + ".o"
+                    cmd = cpp_compile_command(
+                        input=input_path,
+                        output=output_o,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                        compile_only=True,
                     )
-                    log.debug("aot compilation command: %s", " ".join(cmd))
-                    try:
-                        subprocess.check_call(cmd)
-                    except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output) from e
+                    log.debug("aot compilation command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    consts_o = os.path.splitext(consts_path)[0] + ".o"
+                    cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                    run_command_and_check(cmd)
+                    log.debug("aot constant binary command: %s", cmd)
+
+                    cmd = (
+                        f"{objcopy_command} --rename-section"
+                        " .data=.lrodata,alloc,load,readonly,data,contents"
+                        f" {consts_o} {consts_o}"
+                    )
+                    log.debug("aot constant obj command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    cmd = f"rm {consts_path}"
+                    log.debug("aot constant bin removal command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    symbol_list = []
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+                    )
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_size {consts_o}"
+                    )
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+                    )
+                    log.debug(
+                        "aot constant binary redefine symbol: %s", " ".join(symbol_list)
+                    )
+                    for cmd in symbol_list:
+                        run_command_and_check(cmd)
+
+                    cmd = cpp_compile_command(
+                        input=f"{output_o} {consts_o}",
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                    )
+                    log.debug("aot linkage command: %s", cmd)
+                    run_command_and_check(cmd)
                 else:
                     log.debug(
                         "aot_inductor dynamic library already exist: %s", output_so
