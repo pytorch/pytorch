@@ -41,12 +41,16 @@ C10_ALWAYS_INLINE vint64 vec_signed(const vfloat64& vec_in) {
 #endif
 
 #if !defined(vec_neg)
-at::vec::Vectorized<float> C10_ALWAYS_INLINE neg() {
-  return at::vec::Vectorized<float>(0) - *this;
+C10_ALWAYS_INLINE vfloat32 vec_neg(const vfloat32& vec_in) {
+  vfloat32 vec_out;
+  __asm__("xvnegsp %x0,%x1" : "=wf"(vec_out) : "wf"(vec_in));
+  return vec_out;
 }
 
-at::vec::Vectorized<double> C10_ALWAYS_INLINE neg() {
-  return at::vec::Vectorized<double>(0) - *this;
+C10_ALWAYS_INLINE vfloat64 vec_neg(const vfloat64& vec_in) {
+  vfloat64 vec_out;
+  __asm__("xvnegdp %x0,%x1" : "=wd"(vec_out) : "wd"(vec_in));
+  return vec_out;
 }
 
 at::vec::Vectorized<int16_t> C10_ALWAYS_INLINE neg() {
