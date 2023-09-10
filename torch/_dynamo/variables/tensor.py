@@ -38,7 +38,6 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
-from torch._higher_order_ops.invoke import invoke
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -664,7 +663,8 @@ class TensorVariable(VariableTracker):
                 # This should not be onerous to support when needed.
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
-                fn = fn_var.func
+                # The real fn got desugared, we need to put it back together
+                fn = fn_var.as_python_constant()
                 name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
@@ -687,7 +687,6 @@ class TensorVariable(VariableTracker):
                 fn = functools.partial(
                     record_hook, real_hook=fn, pos=len(hook_registry)
                 )
-                # fn = torch._dynamo.disable(fn)
 
                 new_name = tx.store_handle("intermed_handle", handle)
                 handle_variable.as_global = new_name

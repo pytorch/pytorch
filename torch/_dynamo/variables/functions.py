@@ -628,3 +628,10 @@ class FunctoolsPartialVariable(VariableTracker):
         return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
             options
         )
+
+    def as_python_constant(self):
+        return functools.partial(
+            self.func.fn,
+            *[arg.as_python_constant for arg in self.args],
+            **{k: v.as_python_constant() for k, v in self.keywords.items()},
+        )
