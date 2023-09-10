@@ -1,9 +1,9 @@
 from enum import Enum
+from typing import Type, TypeVar
 
-from typing import Callable, Type, TypeVar
+from typing_extensions import ParamSpec, assert_never, assert_type
 
-from torch import jit, nn, ScriptDict, ScriptFunction, ScriptList, Tensor
-from typing_extensions import assert_never, assert_type, ParamSpec
+from torch import ScriptDict, ScriptFunction, ScriptList, Tensor, jit, nn
 
 P = ParamSpec("P")
 R = TypeVar("R", covariant=True)
@@ -28,8 +28,8 @@ assert_type(jit.script([0]), ScriptList)
 assert_type(jit.script(nn.Linear(2, 2)), jit.RecursiveScriptModule)
 
 # ScripFunction
-relu: Callable[[Tensor, bool], Tensor] = nn.functional.relu  # forget argument names
-assert_type(jit.script(relu), ScriptFunction[[Tensor, bool], Tensor])
+# NOTE: can't use assert_type because of parameter names
+relu: ScriptFunction[[Tensor, bool], Tensor] = jit.script(nn.functional.relu)
 
 # can't script nn.Module class
 assert_never(jit.script(nn.Linear))
