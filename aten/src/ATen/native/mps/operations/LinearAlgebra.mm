@@ -573,50 +573,50 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
+
 static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
                                                 bool lower,
                                                 Tensor& out,
                                                 const Tensor& info) {
   using namespace mps;
 
-  // Initialize info tensor
-  int64_t batchSize = A.sizes().size() > 2 ? A.size(0) : 1;
-  info.resize_({batchSize});
-  info.fill_(0);
-  //info is on mps device
-  // info has shape : [batch_size]
+  TORCH_CHECK(A.size(-2) == A.size(-1), "A must be square");
+  TORCH_CHECK(A.allclose(A.transpose(-2, -1)), "A must be symetric");
 
+  info.zero_();
 
-  //TODO perform checks
   Tensor A_t = A.clone();
-
-  at::native::resize_output(out, A.sizes());
-
-  out.zero_();
-  
-  if (A.numel() == 0 || out.numel() == 0) {
-    return out;
-  }
-
   Tensor A_ = A_t;
   if (!A_t.is_contiguous()) {
     A_ = A_t.clone(at::MemoryFormat::Contiguous);
   }
-
+  at::native::resize_output(out, A.sizes());
+  out.zero_();
+  if (A.numel() == 0 || out.numel() == 0) {
+    return out;
+  }
+  
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
-  id<MTLBuffer> infoBuffer = getMTLBufferStorage(info);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-
-
+  uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
+  
+  // create a tensor for each batch element so we can save the status to it
+  // NOTE This is a workaraound as I could not get
+  // MPSMatrixDecompositionCholesky to write the status to a certain index in a buffer
+  std:vector<Tensor> stati = std::vector<Tensor>();
+  for (const auto i : c10::irange(batchSize)) {
+    Tensor status = at::zeros({1}, A.options().dtype(kInt));
+    stati.push_back(status);
+  }
 
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
-      uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
+      
       uint64_t aRows = A_.size(-2);
       uint64_t aCols = A_.size(-1);
       uint64_t aElemSize = A_.element_size();
@@ -628,80 +628,61 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(filter, " cholesky_mps", {A_});
 
-      MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
+      MPSMatrixDescriptor* matrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                     columns:aCols
                                                                                    matrices:batchSize
                                                                                    rowBytes:aCols * aElemSize
                                                                                 matrixBytes:aRows * aCols * aElemSize
                                                                                    dataType:getMPSDataType(A_)];
 
-      MPSMatrixDescriptor* solutionMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
-                                                                                    columns:aCols
-                                                                                   matrices:batchSize
-                                                                                   rowBytes:aCols * aElemSize
-                                                                                matrixBytes:aRows * aCols * aElemSize
-                                                                                   dataType:getMPSDataType(out)];
-
-      MPSMatrixDescriptor* infoMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                                                    columns:1
-                                                                                   matrices:batchSize
-                                                                                   rowBytes:sizeof(int)
-                                                                                matrixBytes:sizeof(int)
-                                                                                   dataType:getMPSDataType(info)];
-      //init status to write to (empty)
-      id<MTLBuffer> status = [device newBufferWithLength:sizeof(int) options:MTLResourceStorageModeShared];
-      if (status) {
-    int* statusPtr = (int*)[status contents];
-  *statusPtr = 42; // Set the initial content to 42
-  
-  NSLog(@"Status Value: %d", *statusPtr);
-  }
-  else {
-    NSLog(@"Failed to allocate status buffer");
-  }
-
-             // Add a completion handler to the command buffer here
-    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> commandBuffer) {
-      // Your completion code here
-      int* statusPtr = (int*)[status contents];
-      int statusVal = *statusPtr;
-      NSLog(@"Status Value: %d", statusVal);
-      // Update the 'info' tensor here based on statusVal
-      // ...
-    }];
-
-      
-
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
 
         MPSMatrix* sourceMatrix = [[[MPSMatrix alloc] initWithBuffer:aBuffer
                                                               offset:(A_t.storage_offset() + aBatchOffset) * aElemSize
-                                                          descriptor:sourceMatrixDesc] autorelease];
+                                                          descriptor:matrixDesc] autorelease];
 
         MPSMatrix* solutionMatrix = [[[MPSMatrix alloc] initWithBuffer:outBuffer
                                                                 offset:(out.storage_offset() + aBatchOffset) * aElemSize
-                                                            descriptor:solutionMatrixDesc] autorelease];
+                                                            descriptor:matrixDesc] autorelease];
+        id<MTLBuffer> statusBuffer = getMTLBufferStorage(stati[i]);
 
-  
         [filter encodeToCommandBuffer:commandBuffer
                         sourceMatrix:sourceMatrix
                         resultMatrix:solutionMatrix
-                        status:status];
+                        status:statusBuffer];
 
       }
       getMPSProfiler().endProfileKernel(filter);
     }
   });
 
-  // TODO: idk why this has to be done
-  // otherwise it sould just have the input data
+
+  // read status buffers adn check if all went well
+  // status codes: https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus
+  for (const auto i : c10::irange(batchSize)) {
+    Tensor status = stati[i];
+    int status_val = status.item<int>();
+    // 0 is success
+    if (status_val != 0) {
+      // check what dimension failed
+      // TODO
+      // for now just say its the 1st
+      info[0] = 1;
+      // break here because one matrix failed to be decomposed
+      // so we don't have to check the rest
+      break;
+    }
+  }
+
+  // set upper/lower triangle to 0
   if (lower) {
     out.tril_(0);
   }
   else {
     out.triu_(0);
   }
+
   return out;
 }
 

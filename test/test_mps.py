@@ -3664,17 +3664,6 @@ class TestMPS(TestCaseMPS):
 
             self.assertTrue(torch.allclose(cpu_L, mps_L.to('cpu')), msg=f"cpu_L: {cpu_L}\nmps_L: {mps_L}")
 
-        #m = generate_non_positive_definite_matrix(3).to('mps')
-
-        m = torch.randn(3, 3, device='mps', dtype=torch.float32)
-        mps_L = torch.linalg.cholesky(m, upper=False)
-        print(m)
-        print(mps_L)
-        print(mps_L @ mps_L.t())
-
-
-
-        """
         # test lower tri
         [helper_2D(dtype, False) for dtype in [torch.float32]]
         [helper_3D(dtype, False) for dtype in [torch.float32]]
@@ -3682,7 +3671,9 @@ class TestMPS(TestCaseMPS):
         # test upper tri
         [helper_2D(dtype, True) for dtype in [torch.float32]]
         [helper_3D(dtype, True) for dtype in [torch.float32]]
-        """
+
+        # TODO: test for non-positive-definite matri
+        
 
     def test_nansum(self):
         def helper(dtype, noncontiguous, dim):
