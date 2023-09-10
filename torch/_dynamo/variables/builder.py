@@ -1584,7 +1584,7 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic = DimDynamic.STATIC
         else:
-            dynamic = DimDynamic.DUCK
+            dynamic = DimDynamic.DYNAMIC
 
         dynamic_dims.append(dynamic)
 
