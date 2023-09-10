@@ -3721,7 +3721,6 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.cholesky(A, out=out)
 
-
         wrong_device = 'cpu'
         out = torch.empty(0, device=wrong_device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have device"):

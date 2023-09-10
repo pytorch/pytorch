@@ -582,6 +582,12 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
 
   TORCH_CHECK(A.size(-2) == A.size(-1), "A must be square");
   TORCH_CHECK(A.allclose(A.transpose(-2, -1)), "A must be symetric");
+  
+  at::native::resize_output(out, A.sizes());
+  out.zero_();
+  if (A.numel() == 0 || out.numel() == 0) {
+    return out;
+  }
 
   info.zero_();
 
@@ -590,19 +596,24 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
   if (!A_t.is_contiguous()) {
     A_ = A_t.clone(at::MemoryFormat::Contiguous);
   }
-  at::native::resize_output(out, A.sizes());
-  out.zero_();
-  if (A.numel() == 0 || out.numel() == 0) {
-    return out;
-  }
   
+  //uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
+  // flattened batch size 
+  int64_t batchSize = A_.sizes().size() > 2 ? A.numel() / (A.size(-2) * A.size(-1)) : 1;
+  
+
+  // Reshape the input tensor to 2D with shape [flattened_batch_size, n, n]
+  A_ = A_.reshape({batchSize, A.size(-2), A.size(-1)});
+  out = out.reshape({batchSize, A.size(-2), A.size(-1)});
+  Tensor info_flat = info.reshape({batchSize});
+  
+
+
   id<MTLBuffer> aBuffer = getMTLBufferStorage(A_);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  uint64_t batchSize = A_.sizes().size() > 2 ? A_.size(0) : 1;
-  
   // create a tensor for each batch element so we can save the status to it
   // NOTE This is a workaraound as I could not get
   // MPSMatrixDecompositionCholesky to write the status to a certain index in a buffer
@@ -657,7 +668,6 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
     }
   });
 
-  bool batched = A.sizes().size() > 2;
   // read status buffers adn check if all went well
   // status codes: https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus
   for (const auto i : c10::irange(batchSize)) {
@@ -667,14 +677,10 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
     if (status_val != 0) {
         // Find the problematic dimension
         Tensor out_diagonal, input_diagonal;
-        if (!batched) {
-            out_diagonal = out.diag();
-            input_diagonal = A.diag();
-        } else {
-            out_diagonal = out[i].diag();
-            input_diagonal = A[i].diag();
-        }
 
+        out_diagonal = out[i].diag();
+        input_diagonal = A_[i].diag();
+        
         Tensor diff = out_diagonal.sub(input_diagonal).abs();
         int64_t fail_dim;
 
@@ -684,15 +690,16 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
             // all zeros, so we likely failed at the last dimension
             fail_dim = diff.numel() - 1;
         }
-        if (batched) {
-          info[i] = fail_dim + 1;
-        }else{
-          // info is scalar of shape []
-          info.fill_(fail_dim + 1);
-        }
+
+        info_flat[i] = fail_dim + 1;
+
       // NOTE we could break here because the error only shows the 1st failure anyway
     }
   }
+
+  // reshape the output to the original shape
+  out = out.reshape(A.sizes());
+  info.copy_(info_flat.reshape(info.sizes()));
 
   // set upper/lower triangle to 0
   if (lower) {
