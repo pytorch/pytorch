@@ -428,7 +428,7 @@ def mps_ops_modifier(ops):
         'kthvalue': None,
         'lcm': None,
         'lgamma': None,
-        #'linalg.cholesky': None,
+        'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
         'linalg.detsingular': None,
@@ -3630,7 +3630,7 @@ class TestMPS(TestCaseMPS):
                            (torch.full(full_shape, val2, dtype=dtype2, device='mps')),
                     getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
                            (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
-                
+
     def test_cholesky_compare_cpu(self):
         def generate_positive_definite_matrix(n):
             A = torch.rand(n, n)
@@ -3800,7 +3800,7 @@ class TestMPS(TestCaseMPS):
         batches = ((), (2, ), (2, 1))
         for n, batch in itertools.product(ns, batches):
             run_test(n, batch)
-        
+
 
     def test_nansum(self):
         def helper(dtype, noncontiguous, dim):
