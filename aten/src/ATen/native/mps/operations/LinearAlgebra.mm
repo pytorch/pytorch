@@ -657,7 +657,7 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
     }
   });
 
-
+  bool batched = A.sizes().size() > 2;
   // read status buffers adn check if all went well
   // status codes: https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus
   for (const auto i : c10::irange(batchSize)) {
@@ -665,13 +665,32 @@ static Tensor& linalg_cholesky_ex_mps_impl(const Tensor& A,
     int status_val = status.item<int>();
     // 0 is success
     if (status_val != 0) {
-      // check what dimension failed
-      // TODO
-      // for now just say its the 1st
-      info[0] = 1;
-      // break here because one matrix failed to be decomposed
-      // so we don't have to check the rest
-      break;
+        // Find the problematic dimension
+        Tensor out_diagonal, input_diagonal;
+        if (!batched) {
+            out_diagonal = out.diag();
+            input_diagonal = A.diag();
+        } else {
+            out_diagonal = out[i].diag();
+            input_diagonal = A[i].diag();
+        }
+
+        Tensor diff = out_diagonal.sub(input_diagonal).abs();
+        int64_t fail_dim;
+
+        if (diff.nonzero().numel() > 0) {
+            fail_dim = diff.nonzero().min().item<int64_t>();
+        } else {
+            // all zeros, so we likely failed at the last dimension
+            fail_dim = diff.numel() - 1;
+        }
+        if (batched) {
+          info[i] = fail_dim + 1;
+        }else{
+          // info is scalar of shape []
+          info.fill_(fail_dim + 1);
+        }
+      // NOTE we could break here because the error only shows the 1st failure anyway
     }
   }
 

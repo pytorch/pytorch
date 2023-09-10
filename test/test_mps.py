@@ -3631,16 +3631,11 @@ class TestMPS(TestCaseMPS):
                     getattr(torch.tensor(val1, dtype=dtype1, device='cpu'), binop)
                            (torch.full(full_shape, val2, dtype=dtype2, device='cpu')))
                 
-    def test_cholesky(self):
+    def test_cholesky_compare_cpu(self):
         def generate_positive_definite_matrix(n):
             A = torch.rand(n, n)
-            B = torch.mm(A, A.t())  # Make it symmetric and positive-definite
-            return B
-        
-        def generate_non_positive_definite_matrix(n):
-            A = torch.rand(n, n)
-            B = torch.mm(A, A.t())  # Make it symmetric and positive-definite
-            B[0, 0] = -1
+            # Make it symmetric and positive-definite
+            B = torch.mm(A, A.t())
             return B
 
         def helper_2D(dtype, upper=False):
@@ -3672,7 +3667,140 @@ class TestMPS(TestCaseMPS):
         [helper_2D(dtype, True) for dtype in [torch.float32]]
         [helper_3D(dtype, True) for dtype in [torch.float32]]
 
-        # TODO: test for non-positive-definite matri
+    def test_cholesky_errors_and_warnings(self):
+        device = 'mps'
+        dtype = torch.float32
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        # cholesky requires the input to be a square matrix or batch of square matrices
+        A = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            torch.linalg.cholesky(A)
+        A = torch.randn(2, 2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            torch.linalg.cholesky(A)
+        with self.assertRaisesRegex(np.linalg.LinAlgError, r'Last 2 dimensions of the array must be square'):
+            np.linalg.cholesky(A.cpu().numpy())
+
+        # cholesky requires the input to be at least 2 dimensional tensor
+        A = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
+            torch.linalg.cholesky(A)
+        with self.assertRaisesRegex(np.linalg.LinAlgError,
+                                    r'1-dimensional array given\. Array must be at least two-dimensional'):
+            np.linalg.cholesky(A.cpu().numpy())
+
+        # if the input matrix is not positive definite, an error should be raised
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A[-1, -1] = 0  # Now A is not positive definite
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'minor of order 3 is not positive-definite'):
+            torch.linalg.cholesky(A)
+        with self.assertRaisesRegex(np.linalg.LinAlgError, r'Matrix is not positive definite'):
+            np.linalg.cholesky(A.cpu().numpy())
+
+        # if at least one matrix in the batch is singular, an error should be raised
+        A = torch.eye(3, 3, dtype=dtype, device=device)
+        A = A.reshape((1, 3, 3))
+        A = A.repeat(5, 1, 1)
+        A[4, -1, -1] = 0  # Now A[4] is not positive definite
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 4\): The factorization could not be completed'):
+            torch.linalg.cholesky(A)
+
+        # if out tensor with wrong shape is passed a warning is given
+        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
+        out = torch.empty(2, 3, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.cholesky(A, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should be safely castable
+        out = torch.empty(*A.shape, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
+            torch.linalg.cholesky(A, out=out)
+
+
+        wrong_device = 'cpu'
+        out = torch.empty(0, device=wrong_device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have device"):
+            torch.linalg.cholesky(A, out=out)
+
+    def test_cholesky(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        device = 'mps'
+        dtype = torch.float32
+
+        def run_test(shape, batch, contiguous):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            if A.numel() > 0 and not contiguous:
+                A = A.mT
+                self.assertFalse(A.is_contiguous())
+            expected_L = np.linalg.cholesky(A.cpu().numpy())
+            actual_L = torch.linalg.cholesky(A)
+
+            # For fp32 individual entries in matrices can differ between PyTorch and NumPy
+            # Let's compare the norms of matrices instead
+            if A.numel() > 0 and dtype in [torch.float32]:
+                # axis is specified to calculate matrix norm for batched input
+                expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
+                actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
+                # Compare the norms with standard tolerances
+                self.assertEqual(actual_norm, expected_norm)
+                # and individual values with a higher tolerance
+                self.assertEqual(actual_L, expected_L, atol=1e-2, rtol=1e-5)
+            else:
+                self.assertEqual(actual_L, expected_L)
+
+        shapes = (0, 3, 5)
+        batches = ((), (3, ), (2, 2))
+        larger_input_case = [(100, (5, ), True)]
+        for shape, batch, contiguous in list(itertools.product(shapes, batches, (True, False))) + larger_input_case:
+            run_test(shape, batch, contiguous)
+
+        # check the out= variant
+        A = random_hermitian_pd_matrix(3, 3, dtype=dtype, device=device)
+        out = torch.empty_like(A)
+        ans = torch.linalg.cholesky(A, out=out)
+        self.assertEqual(ans, out)
+        expected = torch.linalg.cholesky(A)
+        self.assertEqual(expected, out)
+
+        # check the upper= variant
+        expected = torch.linalg.cholesky(A).mH
+        actual = torch.linalg.cholesky(A, upper=True)
+        self.assertEqual(expected, actual)
+
+    def test_cholesky_ex(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        device = 'mps'
+        dtype = torch.float32
+
+        def run_test(n, batch):
+            A = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
+            expected_L = np.linalg.cholesky(A.cpu().numpy())
+            expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
+            actual_L, actual_info = torch.linalg.cholesky_ex(A)
+
+            # For fp32 individual entries in matrices can differ between PyTorch and NumPy
+            # Let's compare the norms of matrices instead
+            if A.numel() > 0 and dtype in [torch.float32, torch.complex64]:
+                # axis is specified to calculate matrix norm for batched input
+                expected_norm = np.linalg.norm(expected_L, ord=1, axis=(-2, -1))
+                actual_norm = torch.linalg.norm(actual_L, ord=1, axis=(-2, -1))
+                # Compare the norms with standard tolerances
+                self.assertEqual(actual_norm, expected_norm)
+                # and individual values with a higher tolerance
+                self.assertEqual(actual_L, expected_L, atol=1e-2, rtol=1e-5)
+            else:
+                self.assertEqual(actual_L, expected_L)
+            self.assertEqual(actual_info, expected_info)
+
+        ns = (0, 3, 5)
+        batches = ((), (2, ), (2, 1))
+        for n, batch in itertools.product(ns, batches):
+            run_test(n, batch)
         
 
     def test_nansum(self):
