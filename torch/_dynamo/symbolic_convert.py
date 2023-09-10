@@ -796,8 +796,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def STORE_FAST(self, inst):
         loaded_vt = self.pop()
         name = inst.argval
-        # If the last top VT in the stack (just popped) is a handle (see [On tensor.register_hook]), we associate
-        # the stored name.
+        # Optionally, since we stored this object at a name, we can pass this info down
+        # to the object for it to use (Can be useful in reconstruction).
         loaded_vt = loaded_vt.rename(self, name)
         self.symbolic_locals[name] = loaded_vt
 
@@ -1876,6 +1876,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def store_hook(self, name, value):
         base = name
+        assert callable(value), "Illegal construction - hook must be callable!"
         for i in itertools.count():
             if name not in self.output.global_scope:
                 src = GlobalSource(name)
@@ -1887,6 +1888,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         return src
 
     def store_handle(self, name, value):
+        assert isinstance(
+            value, torch.utils.hooks.RemovableHandle
+        ), "Handle must be a torch hook handle"
         base = name
         for i in itertools.count():
             if name not in self.output.global_scope:
