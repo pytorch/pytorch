@@ -350,7 +350,7 @@ class TestSelectAlgorithm(TestCase):
         cfg = torch.backends.cuda.matmul
         restore = cfg.allow_fp16_reduced_precision_reduction
         try:
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+            cfg.allow_fp16_reduced_precision_reduction = True
             @torch.compile
             def foo(a, b):
                 return torch.mm(a, b)
@@ -370,7 +370,7 @@ class TestSelectAlgorithm(TestCase):
         cfg = torch.backends.cuda.matmul
         restore = cfg.allow_fp16_reduced_precision_reduction
         try:
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = True
+            cfg.allow_fp16_reduced_precision_reduction = True
             @torch.compile
             def foo(a, b):
                 return torch.bmm(a, b)
