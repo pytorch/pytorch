@@ -646,7 +646,7 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_modern_gpu(index):
-    cc_major = torch.cuda.get_device_capability(0)[0]
+    cc_major = torch.cuda.get_device_capability(index)[0]
     if cc_major < 8:  # V100
         log.warning("Compute capability too small to use max_autotune_gemm mode")
         return False
