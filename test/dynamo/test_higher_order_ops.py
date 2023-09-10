@@ -914,19 +914,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # expected_num_wrap_args = 2 because in this case,
-            # we take the `else` branch and `y` is not lifted.
-            self._test_wrap_simple(f, (x, y, 8), 2)
+        self._test_wrap_simple(f, (x, y, 8), 2)
 
     def test_wrap_unsupported_kwarg(self):
         def f(x, y, z):
