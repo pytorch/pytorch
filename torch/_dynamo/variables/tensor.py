@@ -654,7 +654,7 @@ class TensorVariable(VariableTracker):
                 # This should not be onerous to support when needed.
                 unimplemented("NYI - lambda variables as hooks")
             elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
-                fn = fn_var.func
+                fn = fn_var.as_python_constant()
                 name = fn_var.func.fn.__name__
             else:
                 fn = fn_var.fn
