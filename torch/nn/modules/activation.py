@@ -1109,9 +1109,12 @@ class MultiheadAttention(Module):
         """
 
         why_not_fast_path = ''
-        if ((attn_mask is not None and torch.is_floating_point(attn_mask))
-           or (key_padding_mask is not None) and torch.is_floating_point(key_padding_mask)):
-            why_not_fast_path = "floating-point masks are not supported for fast path."
+        if attn_mask is not None and torch.is_floating_point(attn_mask):
+            if not torch.logical_or(attn_mask.eq(0.0), attn_mask.eq(-float("inf"))).all():
+                why_not_fast_path = "floating-point attn mask tensor includes values other than 0 or -inf"
+        elif key_padding_mask is not None and torch.is_floating_point(key_padding_mask):
+            if not torch.logical_or(key_padding_mask.eq(0.0), key_padding_mask.eq(-float("inf"))).all():
+                why_not_fast_path = "floating-point key padding mask tensor includes values other than 0 or -inf"
 
         is_batched = query.dim() == 3
 
