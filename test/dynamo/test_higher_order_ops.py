@@ -20,7 +20,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -217,6 +217,16 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
+
+    def test_symint_input(self):
+        def f(x):
+            i = x.size(0)
+            return wrap(lambda x, i: x.view(i), x, i)
+
+        x = torch.randn(3, 1)
+        self._test_wrap_simple(
+            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
+        )
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -968,6 +978,27 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         result = f(x)
         self.assertEqual(result, (x.sin(), x.sin()))
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_map_symint_input(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=False)
+
+        ref = fn(x, y)
+        res = compiled_fn(x, y)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
