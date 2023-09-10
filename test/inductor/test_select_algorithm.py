@@ -351,6 +351,7 @@ class TestSelectAlgorithm(TestCase):
         restore = cfg.allow_fp16_reduced_precision_reduction
         try:
             cfg.allow_fp16_reduced_precision_reduction = True
+
             @torch.compile
             def foo(a, b):
                 return torch.mm(a, b)
@@ -366,11 +367,33 @@ class TestSelectAlgorithm(TestCase):
 
     @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
     @patches
+    def test_mm_bf16_acc(self):
+        cfg = torch.backends.cuda.matmul
+        restore = cfg.allow_fp16_reduced_precision_reduction
+        try:
+            cfg.allow_fp16_reduced_precision_reduction = True
+
+            @torch.compile
+            def foo(a, b):
+                return torch.mm(a, b)
+
+            out = foo(
+                torch.randn(8, 32, device="cuda", dtype=torch.bfloat16),
+                torch.randn(32, 8, device="cuda", dtype=torch.bfloat16),
+            )
+            assert out.dtype == torch.bfloat16
+            self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        finally:
+            cfg.allow_fp16_reduced_precision_reduction = restore
+
+    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patches
     def test_bmm_fp16_acc(self):
         cfg = torch.backends.cuda.matmul
         restore = cfg.allow_fp16_reduced_precision_reduction
         try:
             cfg.allow_fp16_reduced_precision_reduction = True
+
             @torch.compile
             def foo(a, b):
                 return torch.bmm(a, b)
@@ -383,6 +406,7 @@ class TestSelectAlgorithm(TestCase):
             self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
         finally:
             cfg.allow_fp16_reduced_precision_reduction = restore
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_modern_gpu

@@ -1805,6 +1805,7 @@ class CommonTemplate:
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
+
         self.common(
             fn,
             (

@@ -126,18 +126,21 @@ int8_mm_configs = functools.partial(
 
 def mm_grid(m, n, meta):
     """
-    The CUDA grid size for matmul triton templates.
+    The CUDA grid size for matmul triton templates.s
     """
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), 1, 1)
 
 
 def acc_type(dtype):
     mm_cfg = torch.backends.cuda.matmul
-    cast_fp16 = dtype == torch.float16 and not mm_cfg.allow_fp16_reduced_precision_reduction
-    # BF16 dot acc is currently not supported in Triton backend: https://github.com/openai/triton/issues/1080
-    # TODO(jon-chuang): Uncomment below once supported.
-    cast_bf16 = dtype == torch.bfloat16 # and not mm_cfg.allow_bf16_reduced_precision_reduction
-    if (cast_fp16 or cast_bf16):
+    cast_fp16 = (
+        dtype == torch.float16 and not mm_cfg.allow_fp16_reduced_precision_reduction
+    )
+    # BF16 dot acc is currently neither supported in NVIDIA Tensor Cores
+    # nor in Triton (via wmma/wgmma)
+    # https://github.com/openai/triton/pull/1258#issuecomment-1709385295
+    cast_bf16 = dtype == torch.bfloat16
+    if cast_fp16 or cast_bf16:
         return "tl.float32"
     return f"tl.{dtype}".replace("torch.", "")
 
