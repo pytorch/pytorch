@@ -978,3 +978,9 @@ class TestHistogramdd:
         )
         H, edges = histogramdd(x, (2, 3, 3))
         assert all(type(e) is np.ndarray for e in edges)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
