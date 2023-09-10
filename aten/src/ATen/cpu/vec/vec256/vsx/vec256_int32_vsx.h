@@ -238,7 +238,7 @@ class Vectorized<int32_t> {
   }
 
   Vectorized<int32_t> C10_ALWAYS_INLINE neg() const {
-    return {vec_neg(_vec0), vec_neg(_vec1)};
+    return {-_vec0, -_vec1};
   }
 
   DEFINE_MEMBER_UNARY_OP(operator~, int32_t, vec_not)

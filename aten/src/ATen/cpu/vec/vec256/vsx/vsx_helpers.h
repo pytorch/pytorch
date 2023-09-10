@@ -52,18 +52,6 @@ C10_ALWAYS_INLINE vfloat64 vec_neg(const vfloat64& vec_in) {
   __asm__("xvnegdp %x0,%x1" : "=wd"(vec_out) : "wd"(vec_in));
   return vec_out;
 }
-
-at::vec::Vectorized<int16_t> C10_ALWAYS_INLINE neg() {
-  return Vectorized<int16_t>(0) - *this;
-}
-
-at::vec::Vectorized<int32_t> C10_ALWAYS_INLINE neg() {
-  return at::vec::Vectorized<int32_t>(0) - *this;
-}
-
-at::vec::Vectorized<int64_t> C10_ALWAYS_INLINE neg() {
-  return at::vec::Vectorized<int64_t>(0) - *this;
-}
 #endif
 
 #if !defined(vec_sldw)
