@@ -190,7 +190,7 @@ class Vectorized<int64_t> {
   }
 
   Vectorized<int64_t> C10_ALWAYS_INLINE neg() const {
-    return {-_vec0, -_vec1};
+    return Vectorized<int64_t>(0) - *this;
   }
 
   DEFINE_MEMBER_UNARY_OP(operator~, int64_t, vec_not)
