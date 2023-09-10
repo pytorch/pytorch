@@ -41,31 +41,24 @@ C10_ALWAYS_INLINE vint64 vec_signed(const vfloat64& vec_in) {
 #endif
 
 #if !defined(vec_neg)
-C10_ALWAYS_INLINE vfloat32 vec_neg(const vfloat32& vec_in) {
-  vfloat32 vec_out;
-  __asm__("xvnegsp %x0,%x1" : "=wf"(vec_out) : "wf"(vec_in));
-  return vec_out;
+at::vec::Vectorized<float> C10_ALWAYS_INLINE neg() const {
+  return at::vec::Vectorized<float>(0) - *this;
 }
 
-C10_ALWAYS_INLINE vfloat64 vec_neg(const vfloat64& vec_in) {
-  vfloat64 vec_out;
-  __asm__("xvnegdp %x0,%x1" : "=wd"(vec_out) : "wd"(vec_in));
-  return vec_out;
+at::vec::Vectorized<double> C10_ALWAYS_INLINE neg() const {
+  return at::vec::Vectorized<double>(0) - *this;
 }
 
-C10_ALWAYS_INLINE vint16 vec_neg(const vint16& vec_in) {
-  vint16 vint0 = {0, 0, 0, 0 ,0, 0, 0, 0};
-  return vec_vsubuhm(vint0, vec_in);
+at::vec::Vectorized<int16_t> C10_ALWAYS_INLINE neg() const {
+  return Vectorized<int16_t>(0) - *this;
 }
 
-C10_ALWAYS_INLINE vint32 vec_neg(const vint32& vec_in) {
-  vint32 vint0 = {0, 0, 0, 0};
-  return vec_vsubuwm(vint0, vec_in);
+at::vec::Vectorized<int32_t> C10_ALWAYS_INLINE neg() const {
+  return at::vec::Vectorized<int32_t>(0) - *this;
 }
 
-C10_ALWAYS_INLINE vint64 vec_neg(const vint64& vec_in) {
-  vint64 vint0 = {0, 0};
-  return vec_vsubudm(vint0, vec_in);
+at::vec::Vectorized<int64_t> C10_ALWAYS_INLINE neg() const {
+  return at::vec::Vectorized<int64_t>(0) - *this;
 }
 #endif
 
