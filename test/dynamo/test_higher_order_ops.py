@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
 import re
 import unittest
@@ -802,19 +801,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         y = 8
 
-        # When running with dynamic shapes, `y` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # int are not passed as argument and directly
-            # baked into the graph.
-            self._test_wrap_simple(f, (x, y), 2)
+        self._test_wrap_simple(f, (x, y), ifdynstaticdefault(2, 3))
 
     def test_wrap_all_kwarg(self):
         def f(y, x):
@@ -886,20 +873,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         opt(x, y)
         self.assertEqual(counters["stats"]["calls_captured"], 1)
 
-        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # verify that we `do` recompile
-            output = opt(x, y, 8)
-            self.assertEqual(counters["stats"]["calls_captured"], 2)
-            self.assertEqual(output, 2 * x)
+        output = opt(x, y, 8)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(output, 2 * x)
 
     def test_wrap_kwarg_default_else_branch(self):
         def f(x, y, z):
