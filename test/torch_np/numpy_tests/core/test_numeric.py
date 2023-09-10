@@ -2983,3 +2983,9 @@ class TestTensordot:
             arr_0d, arr_0d, ([], [])
         )  # contracting no axes is well defined
         assert_array_equal(ret, arr_0d)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

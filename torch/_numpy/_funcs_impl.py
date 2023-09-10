@@ -1328,6 +1328,16 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
         # set the global state to handle the optimize=... argument, restore on exit
         if opt_einsum.is_available():
             old_strategy = torch.backends.opt_einsum.strategy
+            old_enabled = torch.backends.opt_einsum.enabled
+
+            # torch.einsum calls opt_einsum.contract_path, which runs into
+            # https://github.com/dgasmith/opt_einsum/issues/219
+            # for strategy={True, False}
+            if optimize is True:
+                optimize = "auto"
+            elif optimize is False:
+                torch.backends.opt_einsum.enabled = False
+
             torch.backends.opt_einsum.strategy = optimize
 
         if sublist_format:
@@ -1347,6 +1357,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     finally:
         if opt_einsum.is_available():
             torch.backends.opt_einsum.strategy = old_strategy
+            torch.backends.opt_einsum.enabled = old_enabled
 
     result = maybe_copy_to(out, result)
     return wrap_tensors(result)

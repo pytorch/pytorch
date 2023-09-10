@@ -236,7 +236,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         name: str,
         inputs: str,
-        benchmark: Callable[[Any], float],
+        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -280,11 +280,13 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    for choice in choices:
-                        timings[choice] = benchmark(choice)
-                        local_cache.setdefault(name, {})
-                        local_cache[name].setdefault(inputs, {})
-                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                    timings = benchmark(choices)
+                    assert all(choice in timings for choice in choices)
+
+                    local_cache.setdefault(name, {})
+                    local_cache[name].setdefault(inputs, {})
+                    for choice, timing in timings.items():
+                        local_cache[name][inputs][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -339,13 +341,12 @@ def get_path(
 
 
 def get_hash(
-    content: Union[bytes, str], extra: str = "", hash_type: str = "code"
+    content: Union[str, bytes], extra: str = "", hash_type: str = "code"
 ) -> str:
-    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    assert hash_type in ["code", "cubin", "hsaco"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
     else:
-        assert hash_type == "cubin"
         return code_hash(repr(content))
 
 
@@ -827,10 +828,13 @@ def get_include_and_linking_paths(
             else:
                 macros = f"-D{macros}"
         if cuda:
-            if config.is_fbcode():
-                libs += ["cuda"]
+            if torch.version.hip is not None:
+                libs += ["c10_hip", "torch_hip"]
             else:
-                libs += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libs += ["cuda"]
+                else:
+                    libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -961,13 +965,19 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            "cubin",
-            hash_type="cubin",
+            bin_type,
+            hash_type=bin_type,
             specified_dir=config.aot_inductor.output_path,
         )
-        params["cubin_path"] = path
+
+        if torch.version.hip is None:
+            params["cubin_path"] = path
+        else:
+            params["hsaco_path"] = path
+
         cls.cache[key] = params
 
     @classmethod
