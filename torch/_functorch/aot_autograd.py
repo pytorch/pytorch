@@ -2922,6 +2922,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 kept_flat_args = []
                 kept_input_pos = []
                 unused_nodes = []
+                compile_bwd = True
                 for i, node in enumerate(fw_module.graph.nodes):
                     if node.op == "placeholder":
                         # This should be as simple as rejecting nodes without users. Unfortunately,
@@ -2931,6 +2932,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         # if (len(node.users) == 0))
                         if isinstance(adjusted_flat_args[i], (types.FunctionType, functools.partial)):
                             unused_nodes.append(node)
+                            # We cannot lower a graph to inductor/bwd compilation if we:
+                            # a) Have bwd hooks
+                            # b) are not in compiled autograd
+                            compile_bwd = False
                         else:
                             kept_flat_args.append(adjusted_flat_args[i])
                             kept_input_pos.append(i)
@@ -3015,6 +3020,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         compiled_bw = compiled_bw_func
         metadata = fw_metadata
         num_symints_saved_for_bw = _num_symints_saved_for_bw
+        bypass_compile_bwd = not compile_bwd
 
         @staticmethod
         def _compiled_autograd_key(ctx):
@@ -3226,11 +3232,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     return tuple(out)
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
-                    context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
+                    if CompiledFunction.bypass_compile_bwd and not ctx._is_compiled_autograd_tracing():
+                        CompiledFunction.compiled_bw = bw_module
+                    else:
+                        context = torch._C._DisableAutocast if disable_amp else nullcontext
+                        with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
+                            )
 
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,

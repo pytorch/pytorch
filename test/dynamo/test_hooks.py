@@ -7,7 +7,18 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.compile import nop
+from torch import _inductor as inductor
+from torch._dynamo import compiled_autograd
 from torch._functorch.aot_autograd import aot_module_simplified
+
+
+def compiler_fn(gm):
+    """Same as torch.compile() but counts number of compiles"""
+
+    def inner_compiler(gm_, example_inputs_):
+        return inductor.compile(gm_, example_inputs_)
+
+    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
 
 
 def global_hook_0(grad):
@@ -316,7 +327,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         x2 = torch.ones(4, requires_grad=True)
         dynamo_out = torch._dynamo.optimize("aot_eager", nopython=True)(mod)(x2)
-        dynamo_out[0].backward(torch.ones(4))
+        with compiled_autograd.enable(compiler_fn):
+            dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(dynamo_out, aot_out)
         self.assertEqual(dynamo_out, eager_out)
@@ -325,7 +337,76 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(x0.grad, x2.grad)
 
     def test_intermediary_hooks_same_on_inductor(self):
-        def my_hook(grad, k=0):
+        def my_hook(grad, *, k=0):
+            return grad + k
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                y = x.mul(2)
+                hook1 = functools.partial(my_hook, k=3)
+                hook2 = functools.partial(my_hook, k=4)
+                y.register_hook(hook1)
+                y.register_hook(hook2)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x0 = torch.ones(4, requires_grad=True)
+        eager_out = mod(x0)
+        eager_out[0].backward(torch.ones(4))
+
+        x1 = torch.ones(4, requires_grad=True)
+        mod_compiled = aot_module_simplified(mod, (x1,), nop)
+        aot_out = mod_compiled(x1)
+        aot_out[0].backward(torch.ones(4))
+
+        x2 = torch.ones(4, requires_grad=True)
+        dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2)
+        with compiled_autograd.enable(compiler_fn):
+            dynamo_out[0].backward(torch.ones(4))
+
+        self.assertEqual(dynamo_out, aot_out)
+        self.assertEqual(dynamo_out, eager_out)
+
+        self.assertEqual(x0.grad, x1.grad)
+        self.assertEqual(x0.grad, x2.grad)
+
+    def test_intermediary_hooks_same_on_aot_eager_no_compile_bwd(self):
+        def my_hook(grad, *, k=0):
+            return grad + k
+
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                y = x.mul(2)
+                hook1 = functools.partial(my_hook, k=3)
+                hook2 = functools.partial(my_hook, k=4)
+                y.register_hook(hook1)
+                y.register_hook(hook2)
+                z = y.mul(3)
+                return (z,)
+
+        mod = MyMod()
+        x0 = torch.ones(4, requires_grad=True)
+        eager_out = mod(x0)
+        eager_out[0].backward(torch.ones(4))
+
+        x1 = torch.ones(4, requires_grad=True)
+        mod_compiled = aot_module_simplified(mod, (x1,), nop)
+        aot_out = mod_compiled(x1)
+        aot_out[0].backward(torch.ones(4))
+
+        x2 = torch.ones(4, requires_grad=True)
+        dynamo_out = torch._dynamo.optimize("aot_eager", nopython=True)(mod)(x2)
+        dynamo_out[0].backward(torch.ones(4))
+
+        self.assertEqual(dynamo_out, aot_out)
+        self.assertEqual(dynamo_out, eager_out)
+
+        self.assertEqual(x0.grad, x1.grad)
+        self.assertEqual(x0.grad, x2.grad)
+
+    def test_intermediary_hooks_same_on_inductor_no_compile_bwd(self):
+        def my_hook(grad, *, k=0):
             return grad + k
 
         class MyMod(torch.nn.Module):
