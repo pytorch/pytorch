@@ -590,18 +590,28 @@ class PythonLambdaGuard : public LeafGuard {
   // Saves the lambda function provided by the user. The lambda function
   // represents the check_fn that will be triggered during cache lookup.
   PythonLambdaGuard(py::object lambda) {
-    _lambda = py::reinterpret_borrow<py::function>(lambda);
-    // TODO(janimesh) - Write equivalent C check of obj == NULL, raise exception
-    // if (_lambda == NULL) {
-    //   throw py::value_error("PythonLambdaGuard expected a callable during
-    //   construction");
-    // }
+    if (py::isinstance<py::function>(lambda)) {
+      _lambda = py::cast<py::function>(lambda);
+    } else {
+      throw py::type_error(
+          "PythonLambdaGuard expects a callable as its check_fn");
+    }
   }
 
   // Runs the lambda function with the current f_locals value.
-  bool check(py::object value) override {
-    return py::reinterpret_borrow<py::bool_>(_lambda(value));
+  // TODO - move this to leaf guard class
+  bool check(py::object value) {
+    bool result = run_guards(value);
+    if (result == false) {
+      _fail_count += 1;
+    }
+    return result;
   }
+
+  bool run_guards(py::object value) {
+    return py::cast<bool>(_lambda(value));
+  }
+
 
   std::string repr() const override {
     return "PythonLambdaGuard";
@@ -609,6 +619,7 @@ class PythonLambdaGuard : public LeafGuard {
 
  private:
   py::function _lambda;
+  int _fail_count{0};  // TODO - move this to LeafGuard class
 };
 
 class GuardAccessor {
@@ -696,6 +707,14 @@ class GuardManager {
   }
 
   bool check(py::object value) {
+    bool result = run_guards(value);
+    if (result == false) {
+      _fail_count += 1;
+    }
+    return result;
+  }
+
+  bool run_guards(py::object value) {
     bool result = true;
     for (const auto& guard : _leaf_guards) {
       result &= guard->check(value);
@@ -711,6 +730,7 @@ class GuardManager {
  private:
   std::vector<std::unique_ptr<LeafGuard>> _leaf_guards;
   std::vector<ChildGuardType> _child_guards;
+  int _fail_count{0};
 };
 
 } // namespace
@@ -764,7 +784,7 @@ PyObject* torch_c_dynamo_guards_init() {
   auto py_m = py::handle(m).cast<py::module>();
   py::class_<LeafGuard, std::unique_ptr<LeafGuard>>(py_m, "LeafGuard");
 
-  py::class_<PythonLambdaGuard, std::unique_ptr<PythonLambdaGuard>>(
+  py::class_<PythonLambdaGuard, LeafGuard, std::unique_ptr<PythonLambdaGuard>>(
       py_m, "PythonLambdaGuard")
       .def(py::init<py::object>())
       .def("__call__", &PythonLambdaGuard::check)
