@@ -375,7 +375,7 @@ class TestSelectAlgorithm(TestCase):
         self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
+    from torch._inductor.utils import is_modern_gpu
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
+    if IS_LINUX and HAS_CUDA and is_modern_gpu(0):
         run_tests()
