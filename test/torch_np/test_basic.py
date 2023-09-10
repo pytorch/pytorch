@@ -16,9 +16,6 @@ from torch._numpy.testing import assert_allclose, assert_equal
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 
-from torch.testing._internal.common_cuda import TEST_CUDA
-
-
 # These function receive one array_like arg and return one array_like result
 one_arg_funcs = [
     w.asarray,
