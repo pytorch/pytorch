@@ -289,6 +289,13 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+
+    for dim in range(self.ndim):
+        if self.stride(dim) == 0 and self.size(dim) > 1:
+            raise RuntimeError(
+                "more than one element of the written-to tensor refers to a single memory location"
+            )
+
     intermediate = src.to(self, non_blocking)
     if self.size() != intermediate.size():
         aten.expand_copy.default(intermediate, self.size())
