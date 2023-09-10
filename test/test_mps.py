@@ -207,6 +207,53 @@ def mps_ops_grad_modifier(ops):
         yield op
 
 def mps_ops_modifier(ops):
+    # Supported complex OPS
+    SUPPORTED_COMPLEX_OPS = [
+        'atleast_1d',
+        'atleast_2d',
+        'atleast_3d',
+        'clone',
+        'contiguous',
+        'empty',
+        'empty_permuted',
+        'empty_strided',
+        'eye',
+        'flatten',
+        'full',
+        'imag',
+        'isfinite',
+        'isinf',
+        'isreal',
+        'item',
+        'linspace',
+        'logspace',
+        'nn.functional.feature_alpha_dropoutwithout_train',
+        'nn.functional.unfold',
+        'ones',
+        'positive',
+        'randn',
+        'ravel',
+        'real',
+        'reshape_as',
+        'reshape',
+        'resolve_conj',
+        'resolve_neg',
+        'scalar_tensor',
+        'sgn',
+        'split',
+        'squeeze',
+        'squeezemultiple',
+        't',
+        'unflatten',
+        'unsafe_split',
+        'unsqueeze',
+        'view_as',
+        'view_as_real',
+        'view',
+        'vsplit',
+        'zero_',
+        'zeros',
+    ]
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
         # Top 60
@@ -757,6 +804,9 @@ def mps_ops_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST[key]))
+        # If ops is not supported for complex types, expect it to fail
+        if key not in SUPPORTED_COMPLEX_OPS:
+            addDecorator(op, DecorateInfo(unittest.expectedFailure, dtypes=[torch.complex32, torch.complex64]))
         yield op
 
 def mps_ops_error_inputs_modifier(ops):
@@ -10754,7 +10804,7 @@ class TestConsistency(TestCaseMPS):
     NEW_ALLOW_LIST = defaultdict(list)
     NEW_ALLOW_LIST_GRAD = defaultdict(list)
 
-    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES)
+    @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES + [torch.complex64])
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
 
