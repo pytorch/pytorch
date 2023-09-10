@@ -647,7 +647,7 @@ class DeferredLineBase:
 @functools.lru_cache(None)
 def is_big_gpu(index):
     sms = torch.cuda.get_device_properties(index).multi_processor_count
-    if sms < 80:  # V100
+    if sms < 0:  # V100
         log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
@@ -656,7 +656,7 @@ def is_big_gpu(index):
 def use_triton_template(layout, *, enable_int32=False):
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
-        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+        layout_dtypes.append(torch.int32)
     return (
         (
             config.max_autotune

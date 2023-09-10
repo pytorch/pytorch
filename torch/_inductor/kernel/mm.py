@@ -68,7 +68,7 @@ mm_template = TritonTemplate(
             b = tl.load(B, mask=rk[:, None] < k, other=0.)
         if B_PROLOGUE_CAST_TYPE is not None:
             b = b.to(B_PROLOGUE_CAST_TYPE)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
+        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
 
@@ -118,6 +118,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
+            print("MM OPTIONS", mm_options(config, k, layout))
             mm_template.maybe_append_choice(
                 choices,
                 (mat1, mat2),
