@@ -177,3 +177,9 @@ def test_tanh():
 
 def test_trunc():
     assert_allclose(np.trunc(0.5), trunc(0.5), atol=1e-14, check_dtype=False)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
