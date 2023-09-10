@@ -33,10 +33,10 @@ class StdOutputFormatter : public OutputFormatter {
     auto mean = get_mean(durations_ms);
     auto throughput = iterations / (mean / MS_IN_SECOND);
     return std::string("\n\n====================================\n") +
-        "Predictor benchmark finished with " + c10::to_string(threads) +
-        " threads.\nThroughput:\t\t" + c10::to_string(throughput) +
+        "Predictor benchmark finished with " + std::to_string(threads) +
+        " threads.\nThroughput:\t\t" + std::to_string(throughput) +
         " iterations/s\nVariation:\t\t" +
-        c10::to_string(get_stdev(durations_ms) * 100 / mean) +
+        std::to_string(get_stdev(durations_ms) * 100 / mean) +
         "%\n====================================";
   }
 };

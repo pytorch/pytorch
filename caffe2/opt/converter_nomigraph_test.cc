@@ -10,7 +10,7 @@ TEST(Converter, Basic) {
     // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     if (rand() % 2) {
       NetMutator(&net)
-          .newOp("Conv", {"X", "W" + c10::to_string(i)}, {"X"})
+          .newOp("Conv", {"X", "W" + std::to_string(i)}, {"X"})
           .addArgument("kernel", 3)
           .addArgument("stride", 1)
           .addArgument("pad", 0)
@@ -31,7 +31,7 @@ TEST(Converter, UnknownType) {
   caffe2::NetDef net;
   NetMutator(&net)
       .newOp("NeverSeen", {"X"}, {"X"})
-      .setDeviceOptionName("device_" + c10::to_string(rand() % 2));
+      .setDeviceOptionName("device_" + std::to_string(rand() % 2));
   auto nn = caffe2::convertToNNModule(net);
   auto new_netdef = caffe2::convertToCaffe2Proto(nn);
 }

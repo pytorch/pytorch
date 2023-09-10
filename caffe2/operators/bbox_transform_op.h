@@ -38,7 +38,7 @@ class BBoxTransformOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
-        "weights size " + c10::to_string(weights_.size()) + "must be 4.");
+        "weights size " + std::to_string(weights_.size()) + "must be 4.");
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 

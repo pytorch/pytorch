@@ -189,7 +189,7 @@ private:
       descriptor << "-" << a;
 
     std::string descriptor_sized =
-        descriptor.str() + "-" + c10::to_string(InputSize());
+        descriptor.str() + "-" + std::to_string(InputSize());
     std::string descriptor_var_args = descriptor.str() + "-*";
     if (op_to_key.count(descriptor_sized) > 0) {
       return op_to_key[descriptor_sized];

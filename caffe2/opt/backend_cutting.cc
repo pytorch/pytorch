@@ -330,12 +330,12 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
         }
       }
       labelMap["label"] =
-          op->getName() + " (" + c10::to_string((unsigned long long)node) + ")";
+          op->getName() + " (" + std::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
       if (annotation && isa<Caffe2Annotation>(annotation)) {
         auto device_annotation = dyn_cast<Caffe2Annotation>(annotation);
         labelMap["label"] += "\\n[" + device_annotation->getDevice() +
-            ", pos=" + c10::to_string(pos) + "]";
+            ", pos=" + std::to_string(pos) + "]";
         auto hash = std::hash<std::string>{}(device_annotation->getDevice());
         std::stringstream hex_stream;
         hex_stream << std::hex << hash;
@@ -346,8 +346,8 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
     } else if (isa<Data>(node->data())) {
       auto tensor = dyn_cast<NeuralNetData>(node->data().get());
       labelMap["label"] = tensor->getName();
-      labelMap["label"] += "_" + c10::to_string(tensor->getVersion()) + " " +
-          c10::to_string((unsigned long long)node);
+      labelMap["label"] += "_" + std::to_string(tensor->getVersion()) + " " +
+          std::to_string((unsigned long long)node);
     }
     return labelMap;
   };

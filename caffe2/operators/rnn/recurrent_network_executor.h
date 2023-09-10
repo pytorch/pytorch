@@ -121,7 +121,7 @@ class RecurrentNetworkExecutorBase {
       // avoid conflicting timestep blobs when reusing workspaces, as with
       // the forward-only mode.
       std::string this_timestep_blob =
-          timestep_blob_ + "_rnnexec_t" + c10::to_string(t);
+          timestep_blob_ + "_rnnexec_t" + std::to_string(t);
       BlobGetMutableTensor(ws->CreateBlob(this_timestep_blob), CPU)->Resize(1);
       auto b = ws->GetBlob(this_timestep_blob);
       CAFFE_ENFORCE(b);

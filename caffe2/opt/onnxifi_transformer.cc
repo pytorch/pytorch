@@ -702,7 +702,7 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
 
   // Add model_id and net_pos to the onnxifi model
   AddArgument(kModelId, model_id_, &op);
-  AddArgument(kNetPos, c10::to_string(onnxifi_op_id_++), &op);
+  AddArgument(kNetPos, std::to_string(onnxifi_op_id_++), &op);
 
   // Add output resizing hints
   if (opts_.adjust_batch) {
@@ -728,7 +728,7 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   if (opts_.debug) {
     WriteProtoToTextFile(
         net,
-        "debug_original_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        "debug_original_net_" + std::to_string(onnxifi_op_id) + ".pb_txt",
         false);
   }
   // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -847,11 +847,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaC2(
   if (opts_.debug) {
     WriteProtoToTextFile(
         onnxifi_net,
-        "debug_onnxifi_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        "debug_onnxifi_net_" + std::to_string(onnxifi_op_id) + ".pb_txt",
         false);
     WriteProtoToTextFile(
         net_opt,
-        "debug_optimized_net_" + c10::to_string(onnxifi_op_id) + ".pb_txt",
+        "debug_optimized_net_" + std::to_string(onnxifi_op_id) + ".pb_txt",
         false);
   }
   return net_opt;

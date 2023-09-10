@@ -30,7 +30,7 @@ uint8_t* GetMutableData(int type_index, TensorCPU* tensor) {
   CAFFE_ENFORCE_EQ(
       gTypeMapper.count(type_index),
       1,
-      "Invalid type index " + c10::to_string(type_index) + ".");
+      "Invalid type index " + std::to_string(type_index) + ".");
   return gTypeMapper.at(type_index)(tensor);
 }
 

@@ -69,14 +69,14 @@ DataRandomFiller::DataRandomFiller(
     const auto& op_types = input_types[i];
     CAFFE_ENFORCE(
         op_dims.size() == static_cast<size_t>(op.input_size()),
-        op.name() + " has " + c10::to_string(op.input_size()) +
+        op.name() + " has " + std::to_string(op.input_size()) +
             " inputs; while the input dimension size is " +
-            c10::to_string(op_dims.size()));
+            std::to_string(op_dims.size()));
     CAFFE_ENFORCE(
         op_types.size() == static_cast<size_t>(op.input_size()),
-        op.name() + " has " + c10::to_string(op.input_size()) +
+        op.name() + " has " + std::to_string(op.input_size()) +
             " inputs; while the input type size is " +
-            c10::to_string(op_types.size()));
+            std::to_string(op_types.size()));
 
     for (auto j : c10::irange(op.input_size())) {
       inputs_[op.input(j)] =
@@ -210,14 +210,14 @@ TestDataRandomFiller::TestDataRandomFiller(
 
     CAFFE_ENFORCE(
         op_dims.size() == static_cast<unsigned>(countRequiredInputs),
-        op.name() + " has " + c10::to_string(op.input_size()) +
+        op.name() + " has " + std::to_string(op.input_size()) +
             " (required) inputs; while the input dimension size is " +
-            c10::to_string(op_dims.size()));
+            std::to_string(op_dims.size()));
     CAFFE_ENFORCE(
         op_types.size() == static_cast<unsigned>(countRequiredInputs),
-        op.name() + " has " + c10::to_string(op.input_size()) +
+        op.name() + " has " + std::to_string(op.input_size()) +
             " (required) inputs; while the input type size is " +
-            c10::to_string(op_types.size()));
+            std::to_string(op_types.size()));
 
     int dimCounter = 0;
     for (auto inputIdx = 0; inputIdx < op.input_size(); ++inputIdx) {

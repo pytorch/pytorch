@@ -109,8 +109,8 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
         static_cast<size_t>(OutputSize()) == size + 1,
-        "Expected " + c10::to_string(size + 1) + ", " +
-            " got: " + c10::to_string(size));
+        "Expected " + std::to_string(size + 1) + ", " +
+            " got: " + std::to_string(size));
     bool status = queue->blockingWrite(this->Outputs());
     Output(size)->Resize();
     math::Set<bool, Context>(

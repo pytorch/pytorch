@@ -31,14 +31,14 @@ std::string BackendTransformerBase::getModelId(const NetDef& net) {
       if (arg.has_s()) {
         model_id = arg.s();
       } else if (arg.has_i()) {
-        model_id = c10::to_string(arg.i());
+        model_id = std::to_string(arg.i());
       }
       break;
     }
   }
 
   if (model_id.empty()) {
-    model_id = "unnamed_" + c10::to_string(seq_id++);
+    model_id = "unnamed_" + std::to_string(seq_id++);
   }
   return model_id;
 }

@@ -1252,7 +1252,7 @@ bool ImageInputOp<Context>::Prefetch() {
       max_decode_error_ratio_) {
     throw std::runtime_error(
         "max_decode_error_ratio exceeded " +
-        c10::to_string(max_decode_error_ratio_));
+        std::to_string(max_decode_error_ratio_));
   }
 
   // If the context is not CPUContext, we will need to do a copy in the
