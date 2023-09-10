@@ -2198,7 +2198,62 @@ class ShapeEnv:
             self.name_to_node: Dict[str, torch.fx.Node] = {}
 
     def check_equal(self, other: "ShapeEnv") -> None:
-        shape_env_check_state_equal(self, other)
+        # ShapeEnv fields that are not relevant for the outcome of
+        # ShapeEnv.produce_guards call:
+        #   - Debugging variables
+        #   - Translation validation related variables
+        #   - Events recording related variables
+        non_state_variable_names = (
+            "counter",
+            "log",
+            "var_to_stack",
+            "fx_node_cache",
+            "graph",
+            "validator",
+            "check_recorded_events",
+            "should_record_events",
+            "is_recording",
+            "tracked_fakes",
+            "events",
+        )
+
+        # Mapping of the value of each to-be-compared field into the values that
+        # should actually be compared.
+        #
+        # You should modify this if, for example, the field that holds state and
+        # debugging information. e.g. ShapeGuard holds the actual guard (sympy.Expr)
+        # and the stack when it was added to the set of guards. In order to compare
+        # it, we throw away the stack information.
+        def map_value(key: str, value: Any) -> Any:
+            if key in ("unbacked_symfloat_counter", "unbacked_symint_counter"):
+                from copy import copy
+
+                # For itertools.count(), we compare the next integer returned
+                # by the count iterators. Not that we need to copy the iterator
+                # first. Otherwise we are mutating the object.
+                return next(copy(value))
+            elif key == "guards":
+                # Transform the list of ShapeGuard into a list of expressions.
+                return [g.expr for g in value]
+            elif key == "var_to_guards":
+                # Transform the tuple of optional ShapeGuards of each entry into
+                # a tuple of optional expressions.
+                return {
+                    s: (
+                        lb.expr if lb is not None else None,
+                        ub.expr if ub is not None else None,
+                    )
+                    for s, (lb, ub) in value.items()
+                }
+            elif key == "deferred_runtime_asserts":
+                # Transform the list of RuntimeAsserts into a list of expressions.
+                return {s: [ra.expr for ra in ras] for s, ras in value.items()}
+            elif key == "name_to_node":
+                # Compare just the set of keys is the same.
+                return set(value.keys())
+            return value
+
+        shape_env_check_state_equal(self, other, non_state_variable_names, map_value)
 
     def snapshot_tracked_fakes(self) -> Optional[List[Any]]:
         if self.tracked_fakes is None:

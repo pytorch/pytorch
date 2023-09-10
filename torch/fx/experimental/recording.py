@@ -34,7 +34,7 @@ __all__ = [
 # ShapeEnv events recording is used for reconstructing the ShapeEnv in an
 # arbitrary state in time.
 #
-# Being able to abritrarily replay events like so is useful, mainly for
+# Being able to arbitrarily replay events like so is useful, mainly for
 # translation validation bisection. i.e. if a ValidationException has been
 # raised, find the earliest point in time where the translation validation
 # fails.
@@ -89,7 +89,7 @@ class ShapeEnvEvent:
         from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymTypes
 
         # Special handling for the constructor event.
-        if self.f == ShapeEnv:
+        if self.f is ShapeEnv:
             assert shape_env is None and self.args is None and self.kwargs is not None
             return ShapeEnv(**self.kwargs)
 
@@ -194,6 +194,21 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 # This decorator should be used at every function that mutates the state of
 # ShapeEnv in some way that affects the resulting issued guards (i.e. when
 # ShapeEnv.produce_guards is called).
+#
+# save_tracked_fakes: saves a snapshot of the TrackedFake list.
+# This is used when calling ShapeEnv.produce_guards at arbitrary points in time.
+#
+# When to save the list of TrackedFake?
+# =====================================
+# We should save the list of TrackedFake whenever the translation validation
+# bisection may actually stop and call the produce_guards method at the moment
+# right after the recorded function was played. In other words, since the
+# bisection bisects through torch._assert calls, we should save in all methods
+# that adds a torch._assert call to the symbolic shapes FX graph.
+#
+# At the moment, there are 2 methods that save the list:
+#   - ShapeEnv.evaluate_expr
+#   - ShapeEnv.defer_runtime_assert
 def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
     def decorator(fn: Callable) -> Callable:
         assert callable(fn)
@@ -332,33 +347,14 @@ class FakeTensorMeta:
 
 # Checks whether the state of two ShapeEnv are equal w.r.t. the guards
 # returned by ShapeEnv.produce_guards.
-def shape_env_check_state_equal(env1, env2):
-    # ShapeEnv fields that are not relevant for the outcome of
-    # ShapeEnv.produce_guards call:
-    #   - Debugging variables
-    #   - Translation validation related variables
-    #   - Events recording related variables
-    state_variable_names = (
-        "counter",
-        "log",
-        "var_to_stack",
-        "fx_node_cache",
-        "graph",
-        "validator",
-        "check_recorded_events",
-        "should_record_events",
-        "is_recording",
-        "tracked_fakes",
-        "events",
-    )
-
+def shape_env_check_state_equal(env1, env2, non_state_variable_names, map_value):
     # Collect and remove variables that don't necessarily represent the state
     # of a ShapeEnv. Note: we copy the dictionary so that we don't modify the
     # instance itself.
     env1_vars = vars(env1).copy()
     env2_vars = vars(env2).copy()
 
-    for v in state_variable_names:
+    for v in non_state_variable_names:
         env1_vars.pop(v)
         env2_vars.pop(v)
 
@@ -412,36 +408,6 @@ def shape_env_check_state_equal(env1, env2):
             for k, val1, val2 in mapped_dict
             if val1 != val2
         ]
-
-    # Function for mapping the value of each field compared.
-    def map_value(key: str, value: Any) -> Any:
-        if key in ("unbacked_symfloat_counter", "unbacked_symint_counter"):
-            from copy import copy
-
-            # For itertools.count(), we compare the next integer returned
-            # by the count iterators. Not that we need to copy the iterator
-            # first. Otherwise we are mutating the object.
-            return next(copy(value))
-        elif key == "guards":
-            # Transform the list of ShapeGuard into a list of expressions.
-            return [g.expr for g in value]
-        elif key == "var_to_guards":
-            # Transform the tuple of optional ShapeGuards of each entry into
-            # a tuple of optional expressions.
-            return {
-                s: (
-                    lb.expr if lb is not None else None,
-                    ub.expr if ub is not None else None,
-                )
-                for s, (lb, ub) in value.items()
-            }
-        elif key == "deferred_runtime_asserts":
-            # Transform the list of RuntimeAsserts into a list of expressions.
-            return {s: [ra.expr for ra in ras] for s, ras in value.items()}
-        elif key == "name_to_node":
-            # Compare just the set of keys is the same.
-            return set(value.keys())
-        return value
 
     # Accumulate the mismatching fields.
     errors = compare_vars(map_value)
