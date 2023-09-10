@@ -95,7 +95,13 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False, *, allow_rhs_unbacked=False):
+def compare_tensor_meta(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    check_strides=False,
+    *,
+    allow_rhs_unbacked=False,
+):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.

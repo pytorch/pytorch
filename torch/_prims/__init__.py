@@ -637,7 +637,7 @@ def _clone_meta(
             dtype=input.dtype,
             layout=input.layout,
             device=input.device,
-            requires_grad=input.requires_grad,
+            requires_grad=False,
             memory_format=memory_format,
         )
 
@@ -649,7 +649,7 @@ def _clone_meta(
         dtype=input.dtype,
         layout=input.layout,
         device=input.device,
-        requires_grad=input.requires_grad,
+        requires_grad=False,
     )
 
 
