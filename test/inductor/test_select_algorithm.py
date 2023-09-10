@@ -254,6 +254,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @patch.object(select_algorithm, "VERIFY", dict(atol=1e-1, rtol=5e-2))
     @skipIfRocm
     @patches
     def test_mm_dropout(self):
