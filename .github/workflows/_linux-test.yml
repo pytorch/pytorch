@@ -84,7 +84,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@nvidia-docker-hotfix
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
       - name: Lock NVIDIA A100 40GB Frequency
