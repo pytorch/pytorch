@@ -3,9 +3,12 @@
 """Light smoke test switching between numpy to pytorch random streams.
 """
 from contextlib import contextmanager
+from functools import partial
 
 import numpy as _np
 import pytest
+
+import torch._dynamo.config as config
 
 import torch._numpy as tnp
 from torch._numpy.testing import assert_equal
@@ -13,8 +16,6 @@ from torch._numpy.testing import assert_equal
 
 @contextmanager
 def control_stream(use_numpy=False):
-    import torch._dynamo.config as config
-
     oldstate = config.use_numpy_random_stream
     config.use_numpy_random_stream = use_numpy
     try:
@@ -25,34 +26,31 @@ def control_stream(use_numpy=False):
 
 @pytest.mark.parametrize("use_numpy", [True, False])
 @pytest.mark.parametrize(
-    "name, arg",
+    "func",
     [
-        ("normal", ()),
-        ("rand", ()),
-        ("randint", (0, 5)),
-        ("randn", ()),
-        ("random", ()),
-        ("random_sample", ()),
-        ("sample", ()),
-        ("uniform", ()),
+        tnp.random.normal,
+        tnp.random.rand,
+        partial(tnp.random.randint, 0, 5),
+        tnp.random.randn,
+        tnp.random.random,
+        tnp.random.random_sample,
+        tnp.random.sample,
+        tnp.random.uniform,
     ],
 )
 class TestScalarReturn:
-    def test_scalar(self, name, arg, use_numpy):
+    def test_scalar(self, func, use_numpy):
         # default `size` means a python scalar return
-        func = getattr(tnp.random, name)
         with control_stream(use_numpy):
-            r = func(*arg)
+            r = func()
         assert isinstance(r, (int, float))
 
-    def test_array(self, name, arg, use_numpy):
-        func = getattr(tnp.random, name)
+    def test_array(self, func, use_numpy):
         with control_stream(use_numpy):
-            if name in ["rand", "randn"]:
-                arg = arg + (10,)
-                r = func(*arg)
+            if func in (tnp.random.rand, tnp.random.randn):
+                r = func(10)
             else:
-                r = func(*arg, size=10)
+                r = func(size=10)
         assert isinstance(r, tnp.ndarray)
 
 
@@ -118,11 +116,6 @@ class TestNumpyGlobal:
             x_1 = tnp.random.uniform(0, 1, size=11)
 
         assert not (x_1 == x).all()
-
-    def test_wrong_global(self):
-        with control_stream("oops"):
-            with pytest.raises(ValueError):
-                tnp.random.rand()
 
 
 if __name__ == "__main__":

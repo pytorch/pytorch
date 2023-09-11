@@ -42,9 +42,9 @@ def use_numpy_random():
 def deco_stream(func):
     @functools.wraps(func)
     def inner(*args, **kwds):
-        if use_numpy_random() is False:
+        if not use_numpy_random():
             return func(*args, **kwds)
-        elif use_numpy_random() is True:
+        else:
             import numpy
 
             from ._ndarray import ndarray
@@ -67,10 +67,6 @@ def deco_stream(func):
                 value = ndarray(torch.as_tensor(value))
 
             return value
-        else:
-            raise ValueError(
-                f"config.use_numpy_random_stream = {use_numpy_random()} not understood."
-            )
 
     return inner
 
@@ -126,22 +122,20 @@ def normal(loc=0.0, scale=1.0, size=None):
 
 
 @deco_stream
-def shuffle(x: ArrayLike):
-    # no @normalizer because we need to shuffle e.g. lists in-place
+def shuffle(x):
+    # no @normalizer because we do not cast e.g. lists to tensors
     from ._ndarray import ndarray
 
     if isinstance(x, torch.Tensor):
-        _shuffle_tensor_inplace(x)
+        tensor = x
     elif isinstance(x, ndarray):
-        _shuffle_tensor_inplace(x.tensor)
+        tensor = x.tensor
     else:
         raise NotImplementedError("We do not random.shuffle lists in-place")
 
-
-def _shuffle_tensor_inplace(t):
-    perm = torch.randperm(t.shape[0])
-    xp = t[perm]
-    t.copy_(xp)
+    perm = torch.randperm(tensor.shape[0])
+    xp = tensor[perm]
+    tensor.copy_(xp)
 
 
 @deco_stream
