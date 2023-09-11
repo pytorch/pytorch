@@ -22,7 +22,8 @@ from torch._inductor import ir
 from torch._inductor.codecache import CUDACodeCache, DLLWrapper, PyCodeCache
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.common import ChoiceCaller
+    from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+    from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
 from .utils import do_bench_using_profiling
@@ -230,7 +231,7 @@ class TuningProcessPool:
                 p.wait()
             self.processes = None
 
-    def target(self, choice: ChoiceCaller) -> float:
+    def target(self, choice: Union[TritonTemplateCaller, CUDATemplateCaller]) -> float:
         """
         Entry point for the thread-pool helper threads: Wait for an open TuningProcess,
         remove it from the queue, execute the benchmark in that subprocess, and return
@@ -255,8 +256,8 @@ class TuningProcessPool:
 
     def benchmark(
         self,
-        choices: List[ChoiceCaller],
-    ) -> Dict[ChoiceCaller, float]:
+        choices: List[Union[TritonTemplateCaller, CUDATemplateCaller]],
+    ) -> Dict[Union[TritonTemplateCaller, CUDATemplateCaller], float]:
         """
         Benchmark each choice in a separate process.
         """
@@ -389,7 +390,7 @@ class BenchmarkRequest:
             bench_elapse = time.time() - start_ts
             log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
-                self.module_cache_key,
+                str(self),
                 load_elapse,
                 create_tensor_elapse,
                 bench_elapse,
@@ -539,7 +540,9 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 
-def benchmark_in_sub_process(choices: List[ChoiceCaller]) -> Dict[ChoiceCaller, float]:
+def benchmark_in_sub_process(
+    choices: List[Union[TritonTemplateCaller, CUDATemplateCaller]]
+) -> Dict[Union[TritonTemplateCaller, CUDATemplateCaller], float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """
