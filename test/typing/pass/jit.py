@@ -2,9 +2,9 @@ from enum import Enum
 from typing import Type, TypeVar
 
 import pytest
-from typing_extensions import ParamSpec, assert_never, assert_type
 
-from torch import ScriptDict, ScriptFunction, ScriptList, jit, nn
+from torch import jit, nn, ScriptDict, ScriptFunction, ScriptList
+from typing_extensions import assert_never, assert_type, ParamSpec
 
 P = ParamSpec("P")
 R = TypeVar("R", covariant=True)

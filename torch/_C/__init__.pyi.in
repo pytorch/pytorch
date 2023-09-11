@@ -968,7 +968,7 @@ class ScriptFunction(CallableGeneric[P, ReturnVal]):
     def qualified_name(self) -> str: ...
 
 # NOTE: switch to collections.abc.Callable in python 3.9
-class ScriptMethod(CallableGeneric[P, ReturnVal]):
+class ScriptMethod(Generic[P, ReturnVal]):
     graph: Graph
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnVal: ...
     @property
