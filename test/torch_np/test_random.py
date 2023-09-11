@@ -95,6 +95,7 @@ def test_choice(use_numpy):
     with control_stream(use_numpy):
         tnp.random.seed(12345)
         x = tnp.random.choice(5, **kwds)
+        tnp.random.seed(12345)
         x_1 = tnp.random.choice(tnp.arange(5), **kwds)
         assert_equal(x, x_1)
 
