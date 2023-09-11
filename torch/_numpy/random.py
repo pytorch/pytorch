@@ -85,8 +85,9 @@ def random_sample(size=None):
     return array_or_scalar(values, return_scalar=size == ())
 
 
-@deco_stream
 def rand(*size):
+    if size == ():
+        size = None
     return random_sample(size)
 
 
@@ -107,7 +108,7 @@ def uniform(low=0.0, high=1.0, size=None):
 def randn(*size):
     dtype = _dtypes_impl.default_dtypes().float_dtype
     values = torch.randn(size, dtype=dtype)
-    return array_or_scalar(values, return_scalar=size is None)
+    return array_or_scalar(values, return_scalar=size == ())
 
 
 @deco_stream

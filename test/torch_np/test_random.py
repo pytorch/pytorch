@@ -22,18 +22,36 @@ def control_stream(use_numpy=False):
 
 
 @pytest.mark.parametrize("use_numpy", [True, False])
-def test_uniform(use_numpy):
-    with control_stream(use_numpy):
-        r = tnp.random.uniform(0, 1, size=10)
-    assert isinstance(r, tnp.ndarray)
+@pytest.mark.parametrize(
+    "name, arg",
+    [
+        ("normal", ()),
+        ("rand", ()),
+        ("randint", (0, 5)),
+        ("randn", ()),
+        ("random", ()),
+        ("random_sample", ()),
+        ("sample", ()),
+        ("uniform", ()),
+    ],
+)
+class TestScalarReturn:
+    def test_scalar(self, name, arg, use_numpy):
+        # default `size` means a python scalar return
+        func = getattr(tnp.random, name)
+        with control_stream(use_numpy):
+            r = func(*arg)
+        assert isinstance(r, (int, float))
 
-
-@pytest.mark.parametrize("use_numpy", [True, False])
-def test_uniform_scalar(use_numpy):
-    # default `size` means a python scalar return
-    with control_stream(use_numpy):
-        r = tnp.random.uniform(0, 1)
-    assert isinstance(r, float)
+    def test_array(self, name, arg, use_numpy):
+        func = getattr(tnp.random, name)
+        with control_stream(use_numpy):
+            if name in ["rand", "randn"]:
+                arg = arg + (10,)
+                r = func(*arg)
+            else:
+                r = func(*arg, size=10)
+        assert isinstance(r, tnp.ndarray)
 
 
 class TestShuffle:
@@ -58,7 +76,7 @@ class TestShuffle:
         tnp.random.shuffle(ax)
 
         assert isinstance(ax, tnp.ndarray)
-        assert not(ax == ox).all()
+        assert not (ax == ox).all()
 
     @pytest.mark.parametrize("use_numpy", [True, False])
     def test_shuffle_list(self, use_numpy):
