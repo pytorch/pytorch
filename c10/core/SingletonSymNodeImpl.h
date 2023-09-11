@@ -87,15 +87,36 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   // (2) we need to get past 0/1 specialization checks.
   c10::SymNode ge(const c10::SymNode& other) override {
     if (auto mb_si = other->singleton_int()) {
-      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *mb_si));
+      return SymNode(
+          c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *mb_si));
     }
     c10::optional<int64_t> c = other->constant_int();
     TORCH_CHECK(c.has_value());
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c <= 2));
   }
 
+  c10::SymNode gt(const c10::SymNode& other) override {
+    if (auto mb_si = other->singleton_int()) {
+      return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+    }
+    c10::optional<int64_t> c = other->constant_int();
+    TORCH_CHECK(c.has_value());
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(*c < 2));
+  }
+
   c10::SymNode lt(const c10::SymNode& other) override {
     return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(false));
+  }
+
+  c10::SymNode le(const c10::SymNode& other) override {
+    if (auto mb_si = other->singleton_int()) {
+      return SymNode(
+          c10::make_intrusive<ConstantSymNodeImpl<bool>>(val_ == *mb_si));
+    }
+    c10::optional<int64_t> c = other->constant_int();
+    TORCH_CHECK(c.has_value());
+    return SymNode(c10::make_intrusive<ConstantSymNodeImpl<bool>>(
+        *c >= std::numeric_limits<int64_t>::max()));
   }
 
   c10::optional<int64_t> singleton_int() override {
@@ -114,7 +135,6 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
   DEFINE_BINARY_NOT_SUPPORTED(pow)
   DEFINE_BINARY_NOT_SUPPORTED(floordiv)
   DEFINE_BINARY_NOT_SUPPORTED(mod)
-  DEFINE_BINARY_NOT_SUPPORTED(gt)
   DEFINE_BINARY_NOT_SUPPORTED(sym_min)
   DEFINE_BINARY_NOT_SUPPORTED(sym_max)
   DEFINE_BINARY_NOT_SUPPORTED(sym_and)
