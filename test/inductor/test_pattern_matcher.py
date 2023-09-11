@@ -8,6 +8,9 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.fx_passes.serialized_patterns.central_index import (
+    get_serialized_pattern,
+)
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
     gen_pattern,
@@ -811,6 +814,28 @@ class TestPaternMatcher(TestCase):
             exec(pattern_pp, env)
             pattern_2 = env["output"]
             self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
+
+    def test_fuse_attention_all_patterns_serialized(self):
+        from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
+
+        for key, kwargs in _get_sfdp_patterns():
+            gen_kwargs = {
+                key: kwargs[key]
+                for key in (
+                    "search_fn",
+                    "example_inputs",
+                    "trace_fn",
+                    "scalar_workaround",
+                )
+            }
+            pattern = gen_pattern(**gen_kwargs)
+            pattern_pp = PatternPrettyPrinter.run(pattern)
+
+            search_fn_pattern = get_serialized_pattern(key)
+            if search_fn_pattern is None:
+                continue
+
+            self.assertEqual(pattern_pp, PatternPrettyPrinter.run(search_fn_pattern))
 
 
 if __name__ == "__main__":

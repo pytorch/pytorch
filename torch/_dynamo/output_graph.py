@@ -672,15 +672,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(target, check_forward_hooks=True):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
-                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
-                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
-                    "to ensure recompiling after changing hooks."
-                    f"{nnmodule_doc_url_msg} ",
-                )
             if nnmodule_has_hooks(
                 target, check_backward_hooks=True, check_state_dict_hooks=True
             ):
@@ -1359,6 +1350,11 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        log.debug(
+            "create_graph_input %s %s",
+            name,
+            source.name() if source is not None else "(none)",
+        )
         if source is None:
             assert (
                 self.parent is not None
