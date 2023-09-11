@@ -6,6 +6,12 @@ from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import (
+    dispatch_functionalize,
+    FunctionalTensor,
+    FunctionalTensorMode,
+    unset_functional_temporarily,
+)
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import (
@@ -42,6 +48,20 @@ def export_tracepoint_dispatch_mode(*args, **kwargs):
 @_export_tracepoint.py_impl(FakeTensorMode)
 def export_tracepoint_fake_tensor_mode(*args, **kwargs):
     return args
+
+
+@_export_tracepoint.py_impl(FunctionalTensorMode)
+def export_tracepoint_functional_tensor_mode(*args, **kwargs):
+    from torch._functorch.aot_autograd import from_fun, to_fun
+
+    unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, args)
+    unwrapped_kwargs = pytree.tree_map_only(FunctionalTensor, from_fun, kwargs)
+
+    functional_export_tracepoint = dispatch_functionalize(_export_tracepoint)
+
+    with unset_functional_temporarily():
+        out = functional_export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
+        return pytree.tree_map_only(torch.Tensor, to_fun, out)
 
 
 @_export_tracepoint.py_impl(DispatchKey.Functionalize)
