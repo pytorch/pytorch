@@ -474,7 +474,7 @@ AOTITorchError aoti_torch_convolution(
     at::Tensor output_tensor;
     aoti_tensor_to_aten_tensor(input, input_tensor);
     aoti_tensor_to_aten_tensor(weight, weight_tensor);
-    ndim;
+    (void)ndim; // get around the unused variable warning
     c10::IntArrayRef stride_ref(stride, len_stride);
     c10::IntArrayRef padding_ref(padding, len_padding);
     c10::IntArrayRef dilation_ref(dilation, len_dilation);
