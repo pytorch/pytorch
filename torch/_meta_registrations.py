@@ -290,6 +290,9 @@ def meta_copy_(self, src, non_blocking=False):
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
 
+    if self.numel() == 0:
+        return self
+
     for dim in range(self.ndim):
         if self.stride(dim) == 0 and self.size(dim) > 1:
             raise RuntimeError(
