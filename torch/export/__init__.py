@@ -927,7 +927,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
 
 def export(
     f: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
