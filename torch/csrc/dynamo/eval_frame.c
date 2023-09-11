@@ -653,6 +653,13 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   }
   PyObject *f_locals = frame->f_locals;
   PyObject* valid = PyObject_CallOneArg(e->check_fn, f_locals);
+
+  PyObject* guard_manager = PyObject_GetAttrString(e->check_fn, "guard_manager");
+  PyObject* guard_manager_check = PyObject_GetAttrString(guard_manager, "check");
+  PyObject* valid_with_guard_manager = PyObject_CallOneArg(guard_manager_check, f_locals);
+
+  fprintf(stderr, "%s - check_fn result from old - %p and new - %p\n", get_frame_name(frame), valid, valid_with_guard_manager);
+
   if (unlikely(valid == NULL)) {
     if (guard_error_hook != NULL) {
       PyObject *type = NULL, *value = NULL, *traceback = NULL;

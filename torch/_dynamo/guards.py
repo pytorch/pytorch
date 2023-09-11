@@ -49,7 +49,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import LocalSource, TypeSource
+from .source import LocalSource, TypeSource, AttrSource, ChainedSource, GetItemSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -71,6 +71,7 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
+GuardManager = torch._C._dynamo.guards.GuardManager
 
 
 # For user stack printing
@@ -169,6 +170,7 @@ class GuardBuilder(GuardBuilderBase):
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
+        root_guard_manager,
         user_scope: Optional[Dict[str, object]],
         check_fn_manager: CheckFunctionManager,
         *,
@@ -178,6 +180,7 @@ class GuardBuilder(GuardBuilderBase):
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
+        self.root_guard_manager = root_guard_manager
         if user_scope:
             scope = {"L" if local else "G": user_scope}
         else:
@@ -255,11 +258,36 @@ class GuardBuilder(GuardBuilderBase):
 
         return name
 
+    def get_guard_manager(self, guard):
+        def visit(source):
+            if isinstance(source, LocalSource):
+                return self.root_guard_manager.__getitem__(source.local_name)
+
+            if isinstance(source, ChainedSource):
+                base_manager = visit(source.base)
+                if isinstance(source, AttrSource):
+                    return base_manager.__getattr__(source.member)
+                elif isinstance(source, GetItemSource):
+                    return base_manager.__getitem__(source.index)
+
+            raise NotImplementedError(f"Unknown source type {type(source)}")
+
+        return visit(guard.originating_source)
+
+
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        def guard_fn(value):
+            return check_type_id(value, obj_id)
+        def failure_reason_fn(value):
+            return f"Expected {t} but found {type(value)}"
+
+        guard_manager = self.get_guard_manager(guard)
+        guard_manager.add_lambda_guard(guard_fn, failure_reason_fn)
+        assert guard_manager.check(self.get(guard.name)), "Guard should eval to True"
         self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
@@ -892,10 +920,13 @@ class CheckFunctionManager:
             assert builder is not None
             return builder.arg_ref(source.name())
 
+
+        self.root_guard_manager = GuardManager()
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
+            self.root_guard_manager,
             combine_scopes(output_graph.global_scope, output_graph.local_scope),
             self,
             local=True,
@@ -904,6 +935,7 @@ class CheckFunctionManager:
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
+            self.root_guard_manager,
             output_graph.global_scope,
             self,
             local=False,
@@ -942,6 +974,7 @@ class CheckFunctionManager:
         # queryable data structure such that this information is already present
         # in some form.
         self.check_fn.id_matched_objs = local_builder.id_matched_objs
+        self.check_fn.guard_manager = self.root_guard_manager
 
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn

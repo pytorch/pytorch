@@ -1,3 +1,4 @@
+import torch
 from torch._C._dynamo import guards
 
 
@@ -49,6 +50,11 @@ class Pair:
         self.y = y
 
 
+class PairImpostor:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
 f_locals = {
     "foo": 5,
     "bar": Pair(1, 2),
@@ -86,3 +92,14 @@ print(
     guard_manager.check_with_debug_info(f_locals1),
     guard_manager.check_with_debug_info(f_locals1),  # This time it fails much faster
 )
+
+
+def fn(x, foo, bar):
+    return x * foo * bar.x * bar.y
+
+opt_fn = torch.compile(fn, backend="eager")
+opt_fn(torch.randn(4), 5, Pair(1, 2))
+opt_fn(torch.randn(4), 5, Pair(1, 2))
+opt_fn(torch.randn(4), 5, Pair(1, 2))
+print("---", flush=True)
+opt_fn(torch.randn(4), 5, PairImpostor(1, 2))
