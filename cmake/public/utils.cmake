@@ -537,12 +537,12 @@ endfunction()
 # CHeck if given flag is supported and append it to provided outputvar
 # Also define HAS_UPPER_CASE_FLAG_NAME variable
 # Usage:
-#   append_torch_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
-function(append_torch_cxx_flag_if_supported flag outputvar)
+#   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
+function(append_cxx_flag_if_supported flag outputvar)
     string(TOUPPER "HAS${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
     # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GCC")
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       string(REGEX REPLACE "Wno-" "W" new_flag "${flag}")
     else()
       set(new_flag ${flag})
@@ -556,7 +556,7 @@ endfunction()
 
 function(target_compile_options_if_supported target flag)
   set(_compile_options "")
-  append_torch_cxx_flag_if_supported("${flag}" _compile_options)
+  append_cxx_flag_if_supported("${flag}" _compile_options)
   if(NOT "${_compile_options}" STREQUAL "")
     target_compile_options(${target} PRIVATE ${flag})
   endif()
