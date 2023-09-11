@@ -38,35 +38,37 @@ def test_uniform_scalar(use_numpy):
 
 class TestShuffle:
     @pytest.mark.parametrize("use_numpy", [True, False])
-    def test_list(self, use_numpy):
-        x = [1, 2, 3]
-        ax = tnp.asarray(x)
-
-        tnp.random.seed(1234)
-        tnp.random.shuffle(x)
+    def test_1d(self, use_numpy):
+        ax = tnp.asarray([1, 2, 3, 4, 5, 6])
+        ox = ax.copy()
 
         tnp.random.seed(1234)
         tnp.random.shuffle(ax)
 
-        assert isinstance(x, list)
         assert isinstance(ax, tnp.ndarray)
-        assert_equal(x, ax)
+        assert not (ax == ox).all()
 
     @pytest.mark.parametrize("use_numpy", [True, False])
-    def test_2d_list(self, use_numpy):
+    def test_2d(self, use_numpy):
         # np.shuffle only shuffles the first axis
-        x = [[1, 2, 3], [4, 5, 6]]
-        ax = tnp.asarray(x)
-
-        tnp.random.seed(1234)
-        tnp.random.shuffle(x)
+        ax = tnp.asarray([[1, 2, 3], [4, 5, 6]])
+        ox = ax.copy()
 
         tnp.random.seed(1234)
         tnp.random.shuffle(ax)
 
-        assert isinstance(x, list)
         assert isinstance(ax, tnp.ndarray)
-        assert_equal(x, ax)
+        assert not(ax == ox).all()
+
+    @pytest.mark.parametrize("use_numpy", [True, False])
+    def test_shuffle_list(self, use_numpy):
+        # on eager, we refuse to shuffle lists
+        # under dynamo, we always fall back to numpy
+        # NB: this means that the random stream is different for
+        # shuffling a list or an array when USE_NUMPY_STREAM == False
+        x = [1, 2, 3]
+        with pytest.raises(NotImplementedError):
+            tnp.random.shuffle(x)
 
 
 @pytest.mark.parametrize("use_numpy", [True, False])

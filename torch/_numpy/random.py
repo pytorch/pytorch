@@ -129,14 +129,7 @@ def shuffle(x: ArrayLike):
     elif isinstance(x, ndarray):
         _shuffle_tensor_inplace(x.tensor)
     else:
-        # untyped code path. Apply the permutation in-place
-        # cf https://stackoverflow.com/questions/16501424/algorithm-to-apply-permutation-in-constant-memory-space/41472796#41472796
-        perm = torch.randperm(len(x)).tolist()
-        for i in range(len(x)):
-            idx = perm[i]
-            while idx < i:
-                idx = perm[idx]
-            x[i], x[idx] = x[idx], x[i]
+        raise NotImplementedError("We do not random.shuffle lists in-place")
 
 
 def _shuffle_tensor_inplace(t):
