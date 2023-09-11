@@ -5,10 +5,12 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
+#include <c10/util/static_tracepoint.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -32,6 +34,9 @@
 #include <set>
 #include <utility>
 #include <vector>
+
+TORCH_SDT_DEFINE_SEMAPHORE(malloc)
+TORCH_SDT_DEFINE_SEMAPHORE(free)
 
 namespace c10 {
 
@@ -804,6 +809,10 @@ class CachingAllocatorConfig {
 #endif
   }
 
+  static bool release_lock_on_cudamalloc() {
+    return instance().m_release_lock_on_cudamalloc;
+  }
+
   // This is used to round-up allocation size to nearest power of 2 divisions.
   // More description below in function roundup_power2_next_division
   // As ane example, if we want 4 divisions between 2's power, this can be done
@@ -844,7 +853,8 @@ class CachingAllocatorConfig {
   CachingAllocatorConfig()
       : m_max_split_size(std::numeric_limits<size_t>::max()),
         m_garbage_collection_threshold(0),
-        m_expandable_segments(false) {
+        m_expandable_segments(false),
+        m_release_lock_on_cudamalloc(false) {
     m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
   }
 
@@ -869,6 +879,7 @@ class CachingAllocatorConfig {
   std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<bool> m_expandable_segments;
+  std::atomic<bool> m_release_lock_on_cudamalloc;
 };
 
 void CachingAllocatorConfig::lexArgs(
@@ -1096,6 +1107,14 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
           i < config.size() && (config[i] == "True" || config[i] == "False"),
           "Expected a single True/False argument for expandable_segments");
       m_expandable_segments = (config[i] == "True");
+    } else if (config[i] == "release_lock_on_cudamalloc") {
+      used_native_specific_option = true;
+      consumeToken(config, ++i, ':');
+      ++i;
+      TORCH_CHECK(
+          i < config.size() && (config[i] == "True" || config[i] == "False"),
+          "Expected a single True/False argument for release_lock_on_cudamalloc");
+      m_release_lock_on_cudamalloc = (config[i] == "True");
     } else {
       TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", config[i]);
     }
@@ -1107,7 +1126,7 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
 
   if (used_cudaMallocAsync && used_native_specific_option) {
     TORCH_WARN(
-        "backend:cudaMallocAsync ignores max_split_size_mb, roundup_bypass_threshold_mb,"
+        "backend:cudaMallocAsync ignores max_split_size_mb,"
         "roundup_power2_divisions, and garbage_collect_threshold.");
   }
 }
@@ -1346,15 +1365,19 @@ class DeviceCachingAllocator {
         garbage_collect_cached_blocks();
       }
       // Attempt allocate
-      block_found = alloc_block(params, false, context)
+      // WARNING: alloc_block may release the allocator lock when calling
+      // cudaMalloc. So far this function has not modified allocator state, but
+      // keep in mind that any observed allocator state may change across calls
+      // to alloc_block since it may release the lock.
+      block_found = alloc_block(params, false, context, lock)
           // Free enough available cached blocks to satisfy alloc and retry
           // alloc.
           || (release_available_cached_blocks(params) &&
-              alloc_block(params, false, context))
+              alloc_block(params, false, context, lock))
           // Free all non-split cached blocks and retry alloc.
           || (C10_LIKELY(captures_underway == 0) &&
               release_cached_blocks(context) &&
-              alloc_block(params, true, context));
+              alloc_block(params, true, context, lock));
     }
 
     if (!block_found) {
@@ -2633,10 +2656,16 @@ class DeviceCachingAllocator {
     }
   }
 
+  // This function assumes that global lock has been taken whle calling into
+  // this function. We do cudaMalloc sync call in this function which
+  // can be expensive while holding the lock. Hence, we pass-in the lock to the
+  // function to temporarily release the lock before cudaMalloc call and acquire
+  // it back again after the call so that other threads dont get blocked.
   bool alloc_block(
       AllocParams& p,
       bool isRetry,
-      const std::shared_ptr<GatheredContext>& ctx) {
+      const std::shared_ptr<GatheredContext>& ctx,
+      std::unique_lock<std::recursive_mutex>& lock) {
     // Defensively checks for preexisting CUDA error state.
     C10_CUDA_CHECK(cudaGetLastError());
 
@@ -2665,7 +2694,20 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      p.err = cudaMallocMaybeCapturing(&ptr, size);
+      if (CachingAllocatorConfig::release_lock_on_cudamalloc()) {
+        // At scope exit, acquire the lock again. This provides safety against
+        // any potential exceptions in the cudaMallocMaybeCapturing function.
+        auto sg = c10::make_scope_exit([&]() { lock.lock(); });
+        lock.unlock();
+        p.err = cudaMallocMaybeCapturing(&ptr, size);
+      } else {
+        p.err = cudaMallocMaybeCapturing(&ptr, size);
+      }
+      if (CachingAllocatorConfig::release_lock_on_cudamalloc()) {
+        TORCH_CHECK(
+            lock.owns_lock(), "Failed to acquire lock after cudaMalloc");
+      }
+
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
           // If this is the first attempt (!isRetry), we can forgive and clear
@@ -3193,9 +3235,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
-    int device = 0;
-    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
+    for (auto& allocator : device_allocator) {
+      allocator->attachOutOfMemoryObserver(std::move(observer));
+    }
   }
 
   void emptyCache() override {
@@ -3306,6 +3348,10 @@ class NativeCachingAllocator : public CUDAAllocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
+      if (TORCH_SDT_IS_ENABLED(malloc)) {
+        TORCH_SDT_WITH_SEMAPHORE(malloc, &r, device, size, 0);
+      }
+
       // Allocator declars allocate const!?
       const_cast<NativeCachingAllocator*>(this)->malloc(
           &r, device, size, cuda::getCurrentCUDAStream(device));
@@ -3483,6 +3529,10 @@ class NativeCachingAllocator : public CUDAAllocator {
 NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
+  if (TORCH_SDT_IS_ENABLED(free)) {
+    TORCH_SDT_WITH_SEMAPHORE(free, ptr);
+  }
+
   allocator.free(ptr);
 }
 

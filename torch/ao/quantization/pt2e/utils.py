@@ -1,22 +1,111 @@
+import operator
+import types
+
 import torch
+from torch._export import capture_pre_autograd_graph
 from torch.fx import (
-    Graph,
     GraphModule,
     Node,
 )
-from torch.fx.subgraph_rewriter import replace_pattern_with_filters
-import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-import copy
-import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
+
+# Makes sure that quantized_decomposed ops are registered
+from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
+
+from torch.ao.quantization.quantizer import QuantizationAnnotation
+
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
 ]
+
+_QUANTIZE_OPS = [
+    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+    torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.quantize_per_channel.default,
+]
+
+
+_DEQUANTIZE_OPS = [
+    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+    torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.dequantize_per_channel.default,
+]
+
+
+def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
+    """
+    Assuming dest is one of the ops inserted by quant workflow, this function
+    finds if source and dest are connected. Assumption is that only quant workflow
+    inserted ops exist between source and dest
+    """
+    quant_workflow_ops = _QUANTIZE_OPS + _DEQUANTIZE_OPS
+    quant_workflow_ops.append(torch.ops.quantized_decomposed.choose_qparams.tensor)
+    while dest.target in quant_workflow_ops:
+        if not isinstance(dest.args[0], torch.fx.Node):
+            raise ValueError(f"expected arg[0] of quant workflow ops to be a node but found {dest.args[0]}")
+        dest = dest.args[0]
+    return (dest == source)
+
+
+def _find_q_dq_node_for_user(
+    produer: torch.fx.Node, user: torch.fx.Node
+) -> Tuple[Any, Any]:
+    """
+    Find d, dq pair corresponding to [producer ... -> q -> dq -> user]
+    Utils works by finding dq arg of user and ensuring it is connected to
+    producer
+    """
+    dq_node = None
+    for n in user.args:
+        if isinstance(n, torch.fx.Node) and n.op == "call_function" and n.target in _DEQUANTIZE_OPS:
+            if _is_connected(produer, n):
+                dq_node = n
+                break
+    if dq_node is None:
+        for n in user.kwargs:
+            if isinstance(n, torch.fx.Node) and n.op == "call_function" and n.target in _DEQUANTIZE_OPS:
+                if _is_connected(produer, n):
+                    dq_node = n
+                    break
+    if dq_node is None:
+        return (None, None)
+
+    q_node = None
+    if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:
+        q_node = dq_node.args[0]
+    return (q_node, dq_node)
+
+
+
+def _is_sym_size_node(node: Node):
+    return (
+        node.op == "call_function"
+        and node.target == torch.ops.aten.sym_size.default
+        or node.target == torch.ops.aten.sym_numel.default
+        or node.target == torch.ops.aten.sym_numel
+        or node.target == torch.ops.aten.sym_size
+    )
+
+
+def _filter_sym_size_users(node: torch.fx.Node) -> List[torch.fx.Node]:
+    node_users = list(filter((lambda x: (_is_sym_size_node(x) is False)), node.users))
+    return node_users
+
+
+def _is_valid_annotation(annotation: QuantizationAnnotation) -> bool:
+    if annotation is None:
+        return False
+    input_qspec_map = annotation.input_qspec_map
+    output_qspec = annotation.output_qspec
+    if len(input_qspec_map) == 0 and output_qspec is None:
+        return False
+    return True
+
 
 def _get_tensor_constant_from_node(node, m):
     if node is None:
@@ -42,10 +131,12 @@ def fold_bn_weights_into_conv_node(
     bn_node: Node,
     m: GraphModule
 ) -> None:
-    # conv args: input, weight, bias, stride, padding, dilation, transposed, ...
+    # conv2d args: input, weight, bias, stride, padding, dilation, ...
+    # Note: this should also work for conv1d, conv3d and transposed conv1-3d as well with
+    # easy tweaks
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = conv_node.args[6]
+    transpose = not (conv_node.target == torch.ops.aten.conv2d.default)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -67,6 +158,10 @@ def fold_bn_weights_into_conv_node(
 
     # update the weight and bias for conv
     conv_args = list(conv_node.args)
+    # filling in the default bias argument
+    if len(conv_args) == 2:
+        conv_args.append(None)
+
     # calling data since the fused_weight and fused_bias are nn.Parameter
     weight_attr_name = conv_weight_node.target
     assert isinstance(weight_attr_name, str)
@@ -108,11 +203,11 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if n.op != "call_function" or n.target != torch.ops.aten.convolution.default:
+        if n.op != "call_function" or n.target != torch.ops.aten.conv2d.default:
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
-        conv_bias_node = conv_node.args[2]
+        conv_bias_node = conv_node.args[2] if len(conv_node.args) > 2 else None
         fold_bn_weights_into_conv_node(conv_node, conv_weight_node, conv_bias_node, bn_node, m)
 
     m.graph.eliminate_dead_code()
@@ -138,15 +233,10 @@ def get_aten_graph_module(
     """
     Convert the pattern to an FX graph with decomposed aten ops.
     """
-    # Avoid circular imports
-    import torch._dynamo
-    aten_pattern, _ = torch._dynamo.export(
+    aten_pattern = capture_pre_autograd_graph(
         pattern,
-        aten_graph=True,
-        tracing_mode="real",
-    )(
-        *copy.deepcopy(example_inputs),
-        **kwargs,
+        example_inputs,
+        kwargs,
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
@@ -172,73 +262,6 @@ def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
             continue
         if n.target in _MAP:
             n.target = _MAP[n.target]
-
-def _is_dropout_filter(
-    match: "InternalMatch",  # type: ignore[name-defined]
-    original_graph: Graph,
-    pattern_graph: Graph,
-) -> bool:
-    """
-    Match filter for the subgraph rewriter that returns True if the matched
-    graph includes all the ops used in the aten dropout pattern.
-    """
-    ops_to_match = {
-        torch.ops.aten.empty_like.default,
-        torch.ops.aten.bernoulli_.float,
-        torch.ops.aten.div_.Scalar,
-        torch.ops.aten.mul.Tensor,
-    }
-    for n in match.nodes_map.values():
-        if n.target in ops_to_match:
-            ops_to_match.remove(n.target)
-    return len(ops_to_match) == 0
-
-def _replace_dropout_for_eval(m: GraphModule):
-    """
-    Replace the aten training dropout pattern with a noop, intended for eval.
-
-    For models with dropout torch ops (nn.Dropout, F.dropout), calling model.eval()
-    effectively turns these dropout ops into noops. For exported models, however,
-    this is not done automatically, since the aten dropout patterns previously generated
-    for training remain in the graph. Here we rewrite these dropout patterns with noops
-    to avoid incorrectly applying further dropout during eval.
-
-    See https://github.com/pytorch/pytorch/issues/103681.
-    """
-    def dropout_train(x):
-        return F.dropout(x, p=0.5, training=True)
-
-    def dropout_eval(x):
-        return F.dropout(x, p=0.5, training=False)
-
-    example_inputs = (torch.randn(1),)
-    match_pattern = get_aten_graph_module(dropout_train, example_inputs)
-    replacement_pattern = get_aten_graph_module(dropout_eval, example_inputs)
-
-    # Note: The match pattern looks like:
-    #
-    #   empty_like_default = torch.ops.aten.empty_like.default(x)
-    #   bernoulli__float = torch.ops.aten.bernoulli_.float(empty_like_default)
-    #   div__scalar = torch.ops.aten.div_.Scalar(bernoulli__float, 0.5)
-    #   mul_tensor = torch.ops.aten.mul.Tensor(x, div__scalar)
-    #
-    # We need to use `ignore_literals=True` here to handle arbitrary dropout
-    # probability (not just 0.5). However, without a match filter, this would
-    # also match any mul op, since `div__scalar` is also a literal, e.g.:
-    #
-    #   mul_tensor = torch.ops.aten.mul.Tensor(x, 0.8)
-    #
-    # Therefore, we need both `ignore_literals=True` and `_is_dropout_filter`
-    # to make sure we are in fact replacing the dropout pattern.
-
-    replace_pattern_with_filters(
-        m,
-        match_pattern,
-        replacement_pattern,
-        match_filters=[_is_dropout_filter],
-        ignore_literals=True,
-    )
-    m.recompile()
 
 def _is_literal(arg):
     if isinstance(arg, (int, float)):
@@ -410,3 +433,20 @@ def _replace_literals_with_existing_placeholders(
         new_args = tuple(new_args)
         node.args = new_args
     return gm
+
+# TODO: Handle this in export itself and don't wrap the model in another GraphModule
+# in prepare and convert
+def _disallow_eval_train(model: GraphModule):
+    """
+    Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
+    This is useful for exported models, where these methods don't actually behave as expected.
+    """
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
+
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
+    model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]
+    return model

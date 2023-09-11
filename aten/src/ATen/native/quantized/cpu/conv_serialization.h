@@ -171,6 +171,10 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
         optional.emplace_back(static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
       }
     }
+    // create default optional value for bias
+    if (optional.empty()) {
+      optional.emplace_back();
+    }
 
     auto config_a = non_optional[0].accessor<int16_t, 1>();
     std::vector<int64_t> config_vals;

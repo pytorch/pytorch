@@ -1,6 +1,6 @@
 #include <ATen/core/Range.h>
 
-#include <ostream>
+#include <iostream>
 
 namespace at {
 
