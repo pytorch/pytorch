@@ -1,3 +1,6 @@
+import operator
+import types
+
 import torch
 from torch.fx import (
     GraphModule,
@@ -6,14 +9,13 @@ from torch.fx import (
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
     "get_aten_graph_module",
-    "move_model_to_eval",
+    "move_exported_model_to_eval",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -200,6 +202,10 @@ def _replace_dropout_for_eval(m: GraphModule):
 
     See https://github.com/pytorch/pytorch/issues/103681.
     """
+    # Needed to ensure subgraph matches are self-contained
+    m.graph.eliminate_dead_code()
+    m.recompile()
+
     def dropout_train(x):
         return F.dropout(x, p=0.5, training=True)
 
@@ -390,9 +396,9 @@ def _replace_literals_with_existing_placeholders(
         node.args = new_args
     return gm
 
-# TODO: also support move_model_to_train
+# TODO: also support move_exported_model_to_train
 # TODO: also support standalone batchnorm
-def move_model_to_eval(m: GraphModule):
+def move_exported_model_to_eval(m: GraphModule):
     """
     Move an exported GraphModule to eval mode.
 
@@ -401,3 +407,20 @@ def move_model_to_eval(m: GraphModule):
     """
     _replace_dropout_for_eval(m)
     return m
+
+# TODO: Handle this in export itself and don't wrap the model in another GraphModule
+# in prepare and convert
+def _disallow_eval_train(model: GraphModule):
+    """
+    Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
+    This is useful for exported models, where these methods don't actually behave as expected.
+    """
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
+
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
+    model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]
+    return model

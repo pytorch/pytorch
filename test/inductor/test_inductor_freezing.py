@@ -629,7 +629,7 @@ class OptimizeForInferenceQuantizationPT2E(TestCase):
             prepare_model(*example_inputs)
 
             convert_model = convert_pt2e(prepare_model)
-            convert_model.eval()
+            torch.ao.quantization.move_exported_model_to_eval(convert_model)
             compiler_model = compile_fx(convert_model, example_inputs)
 
             # First Run
