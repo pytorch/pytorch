@@ -28,7 +28,6 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -760,6 +759,31 @@ size_t StaticModule::prepareStaticNodeInfos(
 
   return node_idx - node_start;
 }
+
+#ifdef FBCODE_CAFFE2
+thread_local SROperatorObserver* tlsOpObserver = nullptr;
+
+void SROperatorObserver::setCurrentThreadObserver(
+    SROperatorObserver* observer) {
+  tlsOpObserver = observer;
+}
+
+SROperatorObserver* SROperatorObserver::getCurrentThreadObserver() {
+  return tlsOpObserver;
+}
+
+void SROperatorObserver::onStart(const Node* node) {
+  if (tlsOpObserver != nullptr && tlsOpObserver->startCb != nullptr) {
+    tlsOpObserver->startCb(node);
+  }
+}
+
+void SROperatorObserver::onEnd(const Node* node) {
+  if (tlsOpObserver != nullptr && tlsOpObserver->endCb != nullptr) {
+    tlsOpObserver->endCb(node);
+  }
+}
+#endif // FBCODE_CAFFE2
 
 BlockInfo::BlockInfo(uint32_t input_idx, Block& block)
     : input_idx_(input_idx), block_(block) {}
@@ -2053,6 +2077,9 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 }
 
 void ProcessedNode::run() {
+#ifdef FBCODE_CAFFE2
+  SROperatorObserver::onStart(node());
+#endif
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
@@ -2085,6 +2112,9 @@ void ProcessedNode::run() {
   } else {
     DCHECK(verify_no_memory_overlap());
   }
+#endif
+#ifdef FBCODE_CAFFE2
+  SROperatorObserver::onEnd(node());
 #endif
 }
 

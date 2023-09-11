@@ -43,7 +43,11 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDNN
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM80OrLater,
+    TEST_CUDNN,
+)
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -1857,11 +1861,13 @@ class CommonTemplate:
             )
 
     @slowTest
+    @expectedFailureCodegenDynamic
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv bn test")
 
+        # fails dynamic check which bn is fused, and there will not have loops vars.
         input_shapes = {1: (112,), 2: (112, 112), 3: (55, 55, 55)}
         conv_modules = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         bn_modules = {
@@ -3344,6 +3350,10 @@ class CommonTemplate:
         def matmul_with_op(x, y, fn):
             return fn(x @ y)
 
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         foo_opt = torch.compile(matmul_with_op)
 
         # test no-op
@@ -4669,6 +4679,16 @@ class CommonTemplate:
         args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
         self.common(fn, args)
 
+    def test_adding_tensor_offsets(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x[16:32]
+
+        with torch.no_grad():
+            x = torch.randn(1024, device=self.device)
+            self.assertEqual(fn(x[0:]), x[16:][:16])
+            self.assertEqual(fn(x[128:]), x[128 + 16 :][:16])
+
     # from GPT2ForSequenceClassification
     def test_index_tensor(self):
         def fn(x, y):
@@ -5664,12 +5684,11 @@ class CommonTemplate:
         result, (fw_code, bw_code) = run_fw_bw_and_get_code(
             lambda: run(torch.randn([8, 32], device=self.device))
         )
+
         if self.device == "cuda":
             self.assertEqual(fw_code.count("tl.rand"), 1)
             self.assertEqual(bw_code.count("tl.rand"), 0)
-            expected_kernel = 4
-        else:
-            expected_kernel = 6
+        expected_kernel = 4
 
         self.assertEqual(
             torch._inductor.metrics.generated_kernel_count, expected_kernel
@@ -6197,6 +6216,30 @@ class CommonTemplate:
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
+    @requires_cuda()
+    @torch._inductor.config.patch("layout_optimization", True)
+    def test_inductor_layout_optimization_input_mutations(self):
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+
+        def f(x):
+            x.mul_(2)
+            out = mod(x)
+            return out
+
+        f_compiled = torch.compile(f)
+        x_ref = torch.rand(2, 3, 128, 128, device="cuda")
+        x_test = x_ref.clone().detach()
+        with torch.no_grad():
+            out_ref = f(x_ref)
+            out_test = f_compiled(x_test)
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(out_ref.shape, out_test.shape)
+            # Importantly, since inductor._config.keep_output_stride is True,
+            # the outputs should have matching strides here.
+            self.assertEqual(out_ref.stride(), out_test.stride())
+            self.assertEqual(x_ref, x_test)
+
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x, i):
@@ -6426,6 +6469,7 @@ class CommonTemplate:
             (torch.randn(32), torch.randn(32)),
         )
 
+    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self):
@@ -6732,6 +6776,29 @@ class CommonTemplate:
             return x < y
 
         self.common(fn, (torch.randn(26),))
+
+    def test_scaled_dot_product_attention(self):
+        if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            raise unittest.SkipTest("Can't run flash attention on this platform")
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q.transpose(1, 2).contiguous(),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                scale=0.125,
+            )[:2]
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+            ),
+            atol=2e-4,  # to pass lowp check on GPU
+            rtol=1e-2,  # to pass lowp check on GPU
+        )
 
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
@@ -7157,11 +7224,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch._inductor
 
             def fn():
-                x = torch.empty([100])
-                for _ in range(10):
+                li = []
+                for i in range(10):
+                    x = torch.full([100], i)
                     x = x + 1
+                    li.append(x)
 
-                return x
+                return li
 
             mod = make_fx(fn)()
 
@@ -7179,19 +7248,78 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                             live_tensors[arg] = True
 
                     out = func(*args, **kwargs)
+                    if not isinstance(out, torch.Tensor):
+                        return out
 
                     live_tensors[out] = True
                     max_live_tensors = max(max_live_tensors, len(live_tensors))
-
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.freezing import ConstantFolder
+            from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
             with mode:
-                ConstantFolder(mod).run()
+                UniformValueConstantFolder(mod).run()
 
-            self.assertTrue(max_live_tensors == 2)
+            # there are a couple extra tensors created in `insertable_tensor_check`
+            self.assertTrue(max_live_tensors == 4)
+
+        @skipIfRocm
+        def test_neg_index(self):
+            def test(fn, inps, has_assert: bool, has_wrapping=True):
+                for dynamic in (True, False):
+                    fn_opt = torch.compile(dynamic=dynamic)(fn)
+                    code = run_and_get_triton_code(fn_opt, *inps)
+                    self.assertTrue(("tl.where" in code) is has_wrapping)
+                    self.assertTrue(("device_assert" in code) is has_assert)
+                    self.assertEqual(fn(*inps), fn_opt(*inps))
+
+            def indirect(a, b):
+                return a[b - 1]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.zeros(4, dtype=torch.long, device="cuda")
+            test(indirect, (a, b), has_assert=True)
+
+            def direct(x):
+                return x[:, -1]
+
+            a = torch.rand(1, 64, 32, device="cuda")
+            test(direct, (a,), has_assert=False, has_wrapping=False)
+
+            def flip(a, b):
+                return a[b]
+
+            a = torch.rand(1024, device="cuda")
+            b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device="cuda")
+            test(flip, (a, b), has_assert=True)
+
+            # Constant propagate a constant that's negative
+            def flip_with_index_constant(a):
+                b = torch.arange(start=-1, end=-a.numel() - 1, step=-1, device="cuda")
+                return a[b]
+
+            # Wrapping is constant-folded
+            test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
+
+            # Operation where we can't prove that the index is always positive or negative
+            def pos_and_neg(a):
+                b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device="cuda")
+                return a[b]
+
+            # It has wrapping but no assert
+            test(pos_and_neg, (a,), has_assert=False, has_wrapping=True)
+
+            # We currently don't do constant propagation with float constants
+            def flip_with_index(a):
+                b = 1.0 * torch.arange(
+                    start=-1, end=-a.numel() - 1, step=-1, device="cuda"
+                )
+                b = b.int()
+                return a[b]
+
+            # Constant is propagated as we can prove that the result is always negative.
+            test(flip_with_index_constant, (a,), has_assert=False, has_wrapping=False)
 
         # See https://github.com/pytorch/pytorch/issues/100348
         def test_inductor_detach_view(self):
@@ -7494,6 +7622,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
                 )
                 stderr = proc.communicate()[1]
                 self.assertTrue(
@@ -7507,8 +7636,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 [sys.executable, test_path, "first_arg", "2", "False", "True"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env={**os.environ, "MKL_THREADING_LAYER": "GNU"},
             )
             stderr = proc.communicate()[1]
+
             self.assertTrue(
                 any(
                     "index out of bounds" in err.decode("utf-8")
@@ -7516,6 +7647,62 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 ),
                 "first_arg 2 False True",
             )
+
+        @patch("torch._inductor.config.comment_origin", True)
+        def test_inductor_sequence_nr(self):
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.conv1 = torch.nn.Conv2d(
+                        in_channels=16,
+                        out_channels=16,
+                        kernel_size=(1, 1),
+                        stride=1,
+                        padding="same",
+                        bias=True,
+                    )
+                    self.bn1 = torch.nn.BatchNorm2d(num_features=16)
+                    self.relu1 = torch.nn.ReLU()
+                    self.loss_fn = torch.nn.L1Loss()
+
+                def forward(self, x, target):
+                    y = x
+                    x = self.conv1(x)
+                    x = self.bn1(x)
+                    x = self.relu1(x)
+                    x = x + y
+                    x = torch.flatten(x)
+                    output = self.loss_fn(x, target)
+                    return (output,)
+
+            def get_triton_codegen(optimized_module, args):
+                def run_with_backward():
+                    result = optimized_module(*args)
+                    result[0].backward()
+                    return result
+
+                res, (fwd_code, bwd_code) = run_and_get_code(run_with_backward)
+                return fwd_code, bwd_code
+
+            x = torch.rand(100, 16, 32, 32, requires_grad=True, device="cuda")
+            target = torch.rand(1, device="cuda")
+            args = [x, target]
+            model = Model().cuda()
+            opt_model = torch.compile(model)
+            fwd_code, bwd_code = get_triton_codegen(opt_model, args)
+
+            bwd_seq_nr_set = set()
+            fwd_seq_nr_set = set()
+            for idx, code in enumerate([fwd_code, bwd_code]):
+                seq_nr_set = bwd_seq_nr_set if idx > 0 else fwd_seq_nr_set
+                prefix = "BWD" if idx > 0 else "FWD"
+                for line in code.split("\n"):
+                    if "seq_nr" in line:
+                        res = re.search(r"seq_nr:(\d+)", line)
+                        if res:
+                            seq_nr_set.add(int(res.group(1)))
+
+            self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
         class Model(torch.nn.Module):

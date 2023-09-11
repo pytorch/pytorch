@@ -7,8 +7,7 @@
 #include <ATen/core/type_factory.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ostream>
-#include <sstream>
+#include <iostream>
 #include <utility>
 
 namespace c10 {

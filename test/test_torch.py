@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    TEST_WITH_CROSSREF, skipIfTorchDynamo,
+    TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -3125,6 +3125,10 @@ else:
             dst._neg_view().copy_(src)
             self.assertEqual(dst, src.neg(), exact_dtype=False)
 
+            # issue: https://github.com/pytorch/pytorch/issues/106051
+            dst._neg_view().copy_(dst)
+            self.assertEqual(dst, src, exact_dtype=False)
+
         for dst_dtype, src_dtype in [
                 (torch.complex64, torch.complex64),
                 (torch.complex128, torch.complex64),
@@ -4946,6 +4950,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchDynamo("NotImplementedError: PrimTorch does not support pinned memory")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -6010,6 +6015,7 @@ class TestTorch(TestCase):
                     self.assertEqual(added, -tensor)
 
     @skipIfTorchInductor("AssertionError: RuntimeError not raised by <lambda>")
+    @set_default_dtype(torch.double)
     def test_index_add_correctness(self):
         # Check whether index_add can get correct result when
         # alpha is 1, and dtype of index is torch.long,
@@ -7273,21 +7279,21 @@ tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j, 0.0000+0.j,    nan+infj
         self.assertExpectedInline(str(y), expected_str)
 
         # test dtype
-        torch.set_default_dtype(torch.float)
-        x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
-        self.assertEqual(x.__repr__(), str(x))
-        expected_str = '''\
+        with set_default_dtype(torch.float):
+            x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
+            self.assertEqual(x.__repr__(), str(x))
+            expected_str = '''\
 tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
                 inf], dtype=torch.float64)'''
-        self.assertExpectedInline(str(x), expected_str)
+            self.assertExpectedInline(str(x), expected_str)
 
         # test changing default dtype
-        torch.set_default_dtype(torch.float64)
-        self.assertEqual(x.__repr__(), str(x))
-        expected_str = '''\
+        with set_default_dtype(torch.float64):
+            self.assertEqual(x.__repr__(), str(x))
+            expected_str = '''\
 tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
                 inf])'''
-        self.assertExpectedInline(str(x), expected_str)
+            self.assertExpectedInline(str(x), expected_str)
 
         # test summary
         x = torch.zeros(10000)
@@ -7734,6 +7740,26 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         test_helper((3, 3), (3, 3, 3, 3), torch.channels_last)
         test_helper((3, 3, 3), (3, 3, 3, 3, 3), torch.channels_last_3d)
+
+    def test_dim_order(self):
+        shape = (2, 3, 5, 7)
+
+        t = torch.empty(shape)
+        self.assertSequenceEqual(t.dim_order(), (0, 1, 2, 3), seq_type=tuple)
+        # transpose doesn't really change the underlying physical memory
+        # so expecting dim_order change to reflect that (like strides)
+        self.assertSequenceEqual(t.transpose(0, 1).dim_order(), (1, 0, 2, 3))
+
+        t = torch.empty(shape, memory_format=torch.channels_last)
+        self.assertSequenceEqual(t.dim_order(), (0, 2, 3, 1))
+
+        t = torch.empty((2, 3, 5, 7, 8), memory_format=torch.channels_last_3d)
+        self.assertSequenceEqual(t.dim_order(), (0, 2, 3, 4, 1))
+
+        for dim_order in itertools.permutations(range(4)):
+            self.assertSequenceEqual(
+                dim_order, torch.empty_permuted(shape, dim_order).dim_order()
+            )
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
@@ -8363,7 +8389,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
-    @skipIfTorchInductor("FIXME")
     def test_to(self):
         self._test_to_with_layout(torch.strided)
         is_cuda10_2_or_higher = (
@@ -9247,4 +9272,5 @@ instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()
