@@ -220,10 +220,14 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor(self):
         def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
+            input_split_sizes = input_split_sizes_tensor.tolist()
+            output_split_sizes = output_split_sizes_tensor.tolist()
+            for sz in input_split_sizes + output_split_sizes:
+                torch.export.constrain_as_size(sz)
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
-                output_split_sizes=input_split_sizes_tensor,
-                input_split_sizes=output_split_sizes_tensor,
+                output_split_sizes=output_split_sizes,
+                input_split_sizes=input_split_sizes,
                 tag=tag,
                 ranks=ranks,
                 group_size=group_size,
@@ -260,6 +264,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+            print(f"code: {code}")
             FileCheck() \
                 .check("buf0_inputs = [arg2_1,arg4_1,arg5_1]") \
                 .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=buf0_inputs[1], input_split_sizes=buf0_inputs[2], tag='', ranks=[0, 1], group_size=2)") \

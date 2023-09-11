@@ -305,8 +305,10 @@ def _is_view_op(tgt):
 
 def all_to_all_single(
     self: torch.Tensor,
-    output_split_sizes: Optional[torch.Tensor],
-    input_split_sizes: Optional[torch.Tensor],
+    # output_split_sizes: Optional[torch.Tensor],
+    # input_split_sizes: Optional[torch.Tensor],
+    output_split_sizes: Optional[List[int]],
+    input_split_sizes: Optional[List[int]],
     group: RANK_TYPES,
     tag: str = "",
 ) -> torch.Tensor:
@@ -325,11 +327,11 @@ def all_to_all_single(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
-    int_dtypes = {torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64}
-    if output_split_sizes is not None:
-        assert output_split_sizes.dtype in int_dtypes
-    if input_split_sizes is not None:
-        assert input_split_sizes.dtype in int_dtypes
+    # int_dtypes = {torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64}
+    # if output_split_sizes is not None:
+    #     assert output_split_sizes.dtype in int_dtypes
+    # if input_split_sizes is not None:
+    #     assert input_split_sizes.dtype in int_dtypes
     tag, rankset, group_size = _expand_group(group, tag)
     tensor = torch.ops.c10d_functional.all_to_all_single(self, output_split_sizes, input_split_sizes, tag, rankset, group_size)  # type: ignore[attr-defined]
     return _maybe_wrap_tensor(tensor)
@@ -542,12 +544,14 @@ def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, r
     if output_split_sizes is None:
         return input.new_empty(input.size())
     else:
-        ctx = get_ctx()
-        # `output.shape[0]` is `sum(output_split_sizes)`
-        # which is data-dependent, so we use symint to represent it here.
-        output_shape_first_dim = ctx.create_unbacked_symint()
         out_size = list(input.size())
-        out_size[0] = output_shape_first_dim
+
+        # ctx = get_ctx()
+        # # `output.shape[0]` is `sum(output_split_sizes)`
+        # # which is data-dependent, so we use symint to represent it here.
+        # output_shape_first_dim = ctx.create_unbacked_symint()
+        # out_size[0] = output_shape_first_dim
+        out_size[0] = sum(output_split_sizes)
         return input.new_empty(out_size)
 
 
@@ -560,7 +564,8 @@ def _register_ops():
         "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-        "all_to_all_single(Tensor input, Tensor? output_split_sizes, Tensor? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+        # "all_to_all_single(Tensor input, Tensor? output_split_sizes, Tensor? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+        "all_to_all_single(Tensor input, int[] output_split_sizes, int[] input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
     ]
 
     my_module = sys.modules[__name__]
