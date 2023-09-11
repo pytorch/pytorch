@@ -7,7 +7,6 @@ import pytest
 
 import torch._numpy as np
 
-from numpy.lib.shape_base import apply_along_axis, apply_over_axes
 from pytest import raises as assert_raises
 from torch._numpy import (
     array_split,
@@ -131,6 +130,7 @@ class TestPutAlongAxis:
         assert_equal(take_along_axis(a, ai, axis=1), 20)
 
 
+@pytest.mark.xfail(reason="apply_along_axis not implemented")
 class TestApplyAlongAxis:
     def test_simple(self):
         a = np.ones((20, 10), "d")
@@ -140,21 +140,18 @@ class TestApplyAlongAxis:
         a = np.ones((10, 101), "d")
         assert_array_equal(apply_along_axis(len, 0, a), len(a) * np.ones(a.shape[1]))
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_3d(self):
         a = np.arange(27).reshape((3, 3, 3))
         assert_array_equal(
             apply_along_axis(np.sum, 0, a), [[27, 30, 33], [36, 39, 42], [45, 48, 51]]
         )
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_scalar_array(self, cls=np.ndarray):
         a = np.ones((6, 3)).view(cls)
         res = apply_along_axis(np.sum, 0, a)
         assert_(isinstance(res, cls))
         assert_array_equal(res, np.array([6, 6, 6]).view(cls))
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_0d_array(self, cls=np.ndarray):
         def sum_to_0d(x):
             """Sum x, returning a 0d array of the same class"""
@@ -170,7 +167,6 @@ class TestApplyAlongAxis:
         assert_(isinstance(res, cls))
         assert_array_equal(res, np.array([3, 3, 3, 3, 3, 3]).view(cls))
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_axis_insertion(self, cls=np.ndarray):
         def f1to2(x):
             """produces an asymmetric non-square matrix from x"""
@@ -209,7 +205,6 @@ class TestApplyAlongAxis:
         assert_equal(type(actual), type(expected))
         assert_equal(actual, expected)
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_axis_insertion_ma(self):
         def f1to2(x):
             """produces an asymmetric non-square matrix from x"""
@@ -225,7 +220,6 @@ class TestApplyAlongAxis:
         assert_array_equal(res[:, :, 1].mask, f1to2(a[:, 1]).mask)
         assert_array_equal(res[:, :, 2].mask, f1to2(a[:, 2]).mask)
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_tuple_func1d(self):
         def sample_1d(x):
             return x[1], x[0]
@@ -233,7 +227,6 @@ class TestApplyAlongAxis:
         res = np.apply_along_axis(sample_1d, 1, np.array([[1, 2], [3, 4]]))
         assert_array_equal(res, np.array([[2, 1], [4, 3]]))
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_empty(self):
         # can't apply_along_axis when there's no chance to call the function
         def never_call(x):
@@ -253,7 +246,6 @@ class TestApplyAlongAxis:
         assert_equal(actual, np.ones(10))
         assert_raises(ValueError, np.apply_along_axis, empty_to_1, 0, a)
 
-    @pytest.mark.xfail(reason="TODO: implement")
     def test_with_iterable_object(self):
         # from issue 5248
         d = np.array([[{1, 11}, {2, 22}, {3, 33}], [{4, 44}, {5, 55}, {6, 66}]])
@@ -267,7 +259,7 @@ class TestApplyAlongAxis:
             assert_equal(type(actual[i]), type(expected[i]))
 
 
-@pytest.mark.xfail(reason="TODO: implement")
+@pytest.mark.xfail(reason="apply_over_axes not implemented")
 class TestApplyOverAxes:
     def test_simple(self):
         a = np.arange(24).reshape(2, 3, 4)
