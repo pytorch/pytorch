@@ -843,10 +843,6 @@ def array_equiv(a1: ArrayLike, a2: ArrayLike):
     return _tensor_equal(a1_t, a2_t)
 
 
-def mintypecode():
-    raise NotImplementedError
-
-
 def nan_to_num(
     x: ArrayLike, copy: NotImplementedType = True, nan=0.0, posinf=None, neginf=None
 ):
@@ -857,14 +853,6 @@ def nan_to_num(
         return re + 1j * im
     else:
         return torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
-
-
-def asfarray():
-    raise NotImplementedError
-
-
-def block(*args, **kwds):
-    raise NotImplementedError
 
 
 # ### put/take_along_axis ###
