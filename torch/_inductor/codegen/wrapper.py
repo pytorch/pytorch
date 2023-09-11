@@ -801,7 +801,11 @@ class WrapperCodeGen(CodeGen):
         new_name = new.get_name()
         del_line = ""
         if old_name not in V.graph.get_output_names():
-            del_line = f"; {self.make_buffer_free(old)}"
+            if V.graph.aot_mode:
+                # no RC in the AOT mode and free is statically planned
+                del_line = ";"
+            else:
+                del_line = f"; {self.make_buffer_free(old)}"
         if old.get_size() == new.get_size() and old.get_stride() == new.get_stride():
             return (
                 f"{self.declare}{new_name} = {old_name}{del_line}  {self.comment} reuse"
