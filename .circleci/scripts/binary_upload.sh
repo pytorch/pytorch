@@ -48,6 +48,7 @@ do_backup() {
 conda_upload() {
   (
     set -x
+    ls ${PKG_DIR}
     retry \
     ${ANACONDA} \
     upload  \
