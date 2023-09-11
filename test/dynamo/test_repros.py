@@ -886,10 +886,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # by guarding on the exact values of `Tensor repeats` arg
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.op_count, """12""")
         else:
             self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """16""")
+            self.assertExpectedInline(cnt.op_count, """18""")
 
     def test_boxes_len(self):
         def fn(boxes):

@@ -573,6 +573,7 @@ class CompileContext:
             return None
         return TraceId(self.compile_id, self.attempt)
 
+    @staticmethod
     def get_capture_dynamic_output_shape_ops():
         self = CompileContext.get()
         if self is None:
