@@ -2271,6 +2271,21 @@ def forward(self, x):
         ):
             torch._export.export(qux, (t,), constraints=constraints)
 
+    def test_untracked_inputs_in_constraints(self):
+        from copy import copy
+
+        def foo(x, y):
+            return y + 1
+
+        x = torch.randn(2)
+        y = torch.randn(5, 4)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
+
+        example_inputs = (copy(x), y)
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+            ep(torch.randn(3), y)
+
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
