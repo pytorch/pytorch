@@ -2976,11 +2976,13 @@ def fn():
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 1)
 
+        from torch._dynamo.utils import counters
+
         torch._dynamo.reset()
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn_has_breaks)
+        counters.clear()
+        opt_fn = torch.compile(fn_has_breaks)
         opt_fn(x)
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(len(counters["graph_break"]), 1)
 
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
