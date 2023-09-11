@@ -344,7 +344,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         ):
-            dynamic_only = op.name in ("NumpyNMSCustomOp", "NumpyNonzeroCustomOp")
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
             operator_compile_check(
@@ -352,7 +351,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
                 args,
                 kwargs,
                 supports_autograd=op.supports_autograd,
-                dynamic_only=dynamic_only,
                 fullgraph=False,  # Dynamo graph breaks on CustomOp today
             )
 
