@@ -172,7 +172,13 @@ class FunctionalTensorMode(TorchDispatchMode):
             assert torch._is_functional_tensor(x)
 
         def wrap(x):
-            return FunctionalTensor(x)
+            # Only wrap our outputs in subclasses if the inner functionalization call
+            # also wrapped outputs into FunctionalTensorWrappers.
+            # When can this happen? e.g. `torch.div(2, 2)`
+            assert not isinstance(x, FunctionalTensor)
+            if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
+                return FunctionalTensor(x)
+            return x
 
         any_functional_inputs = False
 
@@ -203,9 +209,8 @@ class FunctionalTensorMode(TorchDispatchMode):
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 old_apply_views = torch._functionalize_enable_reapply_views(True)
                 outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                pytree.tree_map_only(torch.Tensor, assert_is_functional, outs_unwrapped)
-
                 outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
+
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)
@@ -235,3 +240,14 @@ def maybe_disable_functional_mode():
     finally:
         if maybe_func_mode is not None:
             torch._C._set_dispatch_mode(maybe_func_mode)
+
+# TODO: clean up the redundancy here,
+# unify on a single context manager for all mode keys.
+@contextlib.contextmanager
+def unset_functional_temporarily():
+    old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+    try:
+        yield old
+    finally:
+        if old is not None:
+            torch._C._set_dispatch_mode(old)

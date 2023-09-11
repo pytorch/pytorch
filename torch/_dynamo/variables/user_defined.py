@@ -10,7 +10,6 @@ import types
 from typing import Dict, List
 
 import torch.nn
-from torch._guards import TracingContext
 
 from .. import variables
 from ..allowed_functions import is_allowed
@@ -590,8 +589,4 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    def var_getattr(self, tx, name):
-        if self.source is not None and name in ("_length_per_key", "_offset_per_key"):
-            with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
-                return super().var_getattr(tx, name)
-        return super().var_getattr(tx, name)
+    # TODO Handle getattr for _length_per_key and _offset_per_key properly.
