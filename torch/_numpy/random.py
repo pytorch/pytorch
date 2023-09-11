@@ -29,20 +29,24 @@ __all__ = [
     "randint",
     "shuffle",
     "uniform",
-    "USE_NUMPY_RANDOM",
 ]
 
 
-USE_NUMPY_RANDOM = False
+def use_numpy_random():
+    # local import to avoid ref cycles
+    import torch._dynamo.config as config
+
+    return config.use_numpy_random_stream
 
 
 def deco_stream(func):
     @functools.wraps(func)
     def inner(*args, **kwds):
-        if USE_NUMPY_RANDOM is False:
+        if use_numpy_random() is False:
             return func(*args, **kwds)
-        elif USE_NUMPY_RANDOM is True:
+        elif use_numpy_random() is True:
             import numpy
+
             from ._ndarray import ndarray
 
             f = getattr(numpy.random, func.__name__)
@@ -64,7 +68,9 @@ def deco_stream(func):
 
             return value
         else:
-            raise ValueError(f"USE_NUMPY_RANDOM={USE_NUMPY_RANDOM} not understood.")
+            raise ValueError(
+                f"config.use_numpy_random_stream = {use_numpy_random()} not understood."
+            )
 
     return inner
 

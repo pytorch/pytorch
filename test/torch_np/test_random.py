@@ -13,12 +13,14 @@ from torch._numpy.testing import assert_equal
 
 @contextmanager
 def control_stream(use_numpy=False):
-    oldstate = tnp.random.USE_NUMPY_RANDOM
-    tnp.random.USE_NUMPY_RANDOM = use_numpy
+    import torch._dynamo.config as config
+
+    oldstate = config.use_numpy_random_stream
+    config.use_numpy_random_stream = use_numpy
     try:
         yield
     finally:
-        tnp.random.USE_NUMPY_RANDOM = oldstate
+        config.use_numpy_random_stream = oldstate
 
 
 @pytest.mark.parametrize("use_numpy", [True, False])
