@@ -861,17 +861,17 @@ class TestCommon(TestCase):
                     self.assertEqual(original_ptrs, final_ptrs)
 
             # Case 0: out= with the correct shape, dtype, and device
-            #   but NaN values for floating point and complex tensors, and
-            #   maximum values for integer tensors.
+            #   but NaN values for floating point and complex tensors,
+            #   maximum values for integer tensors, and True for bool tensors.
             #   Expected behavior: out= values have no effect on the computation.
             def _case_zero_transform(t):
-                try:
+                if t.dtype == torch.bool:
+                    return torch.full_like(t, True)
+                elif t.dtype.is_floating_point or t.dtype.is_complex:
+                    return torch.zeros_like(t)
+                else:
                     info = torch.iinfo(t.dtype)
                     return torch.full_like(t, info.max)
-                except TypeError as te:
-                    # for non-integer types fills with NaN
-                    return torch.full_like(t, float("nan"))
-
 
             _compare_out(_case_zero_transform)
 
