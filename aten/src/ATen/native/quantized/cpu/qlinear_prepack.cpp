@@ -7,6 +7,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -281,6 +282,27 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
         bias});
   return ret_ptr;
 }
+
+inline at::Tensor pack_weight_to_onednn_tensor(
+    const at::Tensor& weight,
+    c10::optional<torch::List<int64_t>>& input_shape) {
+  std::vector<int64_t> w_dims = weight.sizes().vec();
+  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
+  wei.transpose_(0, 1); // oneDNN requires transposed weight
+  ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
+  ideep::attr_t op_attr;
+  op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  auto w_desc = ideep::matmul_forward::expected_weights_desc(
+      wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8, op_attr);
+  ideep::tensor expected_weight(w_desc);
+  expected_weight.feed_from(wei);
+  auto packed_weight = at::native::new_with_itensor_mkldnn(
+      std::move(expected_weight),
+      optTypeMetaToScalarType(weight.options().dtype_opt()),
+      weight.options().device_opt());
+  return packed_weight;
+}
+
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -383,6 +405,19 @@ class QLinearPackWeightFp16Legacy final {
   }
 };
 
+class QLinearPackWeightInt8Onednn final {
+ public:
+  static at::Tensor run(
+    at::Tensor weight, // Not QTensor
+    c10::optional<torch::List<int64_t>> input_shape) {
+#if AT_MKLDNN_ENABLED()
+    return pack_weight_to_onednn_tensor(weight, input_shape);
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.");
+#endif
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
@@ -404,6 +439,10 @@ TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
   register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16::run));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_prepack_fp16_legacy"), TORCH_FN(QLinearPackWeightFp16Legacy::run));
+}
+
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"), TORCH_FN(QLinearPackWeightInt8Onednn::run));
 }
 
 } // namespace

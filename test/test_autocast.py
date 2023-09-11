@@ -140,6 +140,9 @@ class TestAutocastCPU(TestCase):
             with torch.cpu.amp.autocast():
                 m(x, (hx, cx))
 
+    def test_autocast_disabled_with_fp32_dtype(self):
+        with torch.autocast(device_type='cpu', dtype=torch.float32, enabled=False):
+            _ = torch.ones(10)
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod

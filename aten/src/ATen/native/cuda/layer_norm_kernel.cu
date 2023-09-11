@@ -302,36 +302,6 @@ __global__ __inline__ void vectorized_layer_norm_kernel(
     vectorized_layer_norm_kernel_impl(N, eps, X, gamma, beta, mean, rstd, Y);
   }
 
-template <typename T>
-__global__ void ComputeInternalGradientsCUDAKernel(
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T* gamma,
-    acc_type<T, true>* ds,
-    acc_type<T, true>* db) {
-  using T_ACC = acc_type<T, true>;
-  __shared__ T_ACC ds_shared[C10_WARP_SIZE];
-  __shared__ T_ACC db_shared[C10_WARP_SIZE];
-  const int64_t i = blockIdx.x;
-  T_ACC sum1 = 0;
-  T_ACC sum2 = 0;
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    sum1 +=
-        static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]) * gamma_v;
-    sum2 += static_cast<T_ACC>(dY[index]) * gamma_v;
-  }
-  sum1 = cuda_utils::BlockReduceSum<T_ACC>(sum1, ds_shared);
-  sum2 = cuda_utils::BlockReduceSum<T_ACC>(sum2, db_shared);
-  if (threadIdx.x == 0) {
-    ds[i] = sum1;
-    db[i] = sum2;
-  }
-}
-
 
 template<typename T, typename T_ACC>
 __device__ __inline__ void compute_gI(
@@ -412,51 +382,6 @@ __global__ void layer_norm_grad_input_kernel(
 
     compute_gI(dY, X, mean, rstd, gamma, dX, N, buf);
   }
-
-
-template <typename T, typename T_ACC>
-__global__ void ComputeGradientFusedParamsCUDAKernel(
-    int64_t M,
-    int64_t N,
-    const T_ACC* mean,
-    const T_ACC* rstd,
-    const acc_type<T, true>* ds,
-    const acc_type<T, true>* db,
-    acc_type<T, true>* c1,
-    acc_type<T, true>* c2) {
-  const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
-  if (index < M) {
-    const T_ACC s = T_ACC(1) / static_cast<T_ACC>(N);
-    const T_ACC a = (db[index] * static_cast<T_ACC>(mean[index]) - ds[index]) *
-        static_cast<T_ACC>(rstd[index]) * static_cast<T_ACC>(rstd[index]) *
-        static_cast<T_ACC>(rstd[index]) * s;
-    c1[index] = a;
-    c2[index] =
-        -(a * static_cast<T_ACC>(mean[index]) +
-          db[index] * static_cast<T_ACC>(rstd[index]) * s);
-  }
-}
-
-template <typename T, typename T_ACC>
-__global__ void LayerNormBackwardCUDAKernel(
-    int64_t N,
-    const T* dY,
-    const T* X,
-    const T* gamma,
-    const T_ACC* a,
-    const acc_type<T, true>* b,
-    const acc_type<T, true>* c,
-    T* dX) {
-  const int64_t i = blockIdx.x;
-  for (int64_t j = threadIdx.x; j < N; j += blockDim.x) {
-    const int64_t index = i * N + j;
-    const T_ACC gamma_v =
-        gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[j]);
-    dX[index] =
-        static_cast<T_ACC>(a[i]) * static_cast<T_ACC>(dY[index]) * gamma_v +
-        b[i] * static_cast<T_ACC>(X[index]) + c[i];
-  }
-}
 
 template <typename T, typename T_ACC>
 __global__ void GammaBetaBackwardSimpleCUDAKernel(
