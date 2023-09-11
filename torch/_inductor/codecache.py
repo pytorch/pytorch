@@ -351,7 +351,7 @@ def get_hash(
 
 
 def write(
-    content: Union[bytes, str],
+    content: Union[str, bytes],
     extension: str,
     extra: str = "",
     hash_type: str = "code",
@@ -366,7 +366,7 @@ def write(
     return basename, path
 
 
-def write_atomic(path: str, content: Union[bytes, str]) -> None:
+def write_atomic(path: str, content: Union[str, bytes]) -> None:
     # Write into temporary file first to avoid conflicts between threads
     # Avoid using a named temporary file, as those have restricted permissions
     assert isinstance(
