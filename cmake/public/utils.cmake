@@ -541,6 +541,7 @@ endfunction()
 function(append_torch_cxx_flag_if_supported flag outputvar)
     string(TOUPPER "HAS${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+    # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GCC")
       string(REGEX REPLACE "Wno-" "W" new_flag "${flag}")
     else()
