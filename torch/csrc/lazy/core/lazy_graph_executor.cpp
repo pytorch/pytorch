@@ -330,7 +330,6 @@ bool LazyGraphExecutor::DataCacheArena::TensorComparer::operator()(
 
 auto LazyGraphExecutor::DataCacheArena::GetDataCache(
     const BackendDevice& device) -> DataCache* {
-  
   std::lock_guard<std::mutex> lock(mutex_);
   if (FLAGS_torch_lazy_enable_device_data_cache) {
     auto it = device_caches_.find(device);
@@ -340,9 +339,9 @@ auto LazyGraphExecutor::DataCacheArena::GetDataCache(
     }
     return it->second.get();
   } else {
-      // If cache is disabled then always return a zero size cache
-      static std::unique_ptr<DataCache> s_empty_cache(new DataCache(0));
-      return s_empty_cache.get();
+    // If cache is disabled then always return a zero size cache
+    static std::unique_ptr<DataCache> s_empty_cache(new DataCache(0));
+    return s_empty_cache.get();
   }
 }
 
