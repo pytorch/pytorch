@@ -1952,7 +1952,7 @@ Arguments:
     dim (int): dimension along which to split the tensor
     redistribute (bool, optional):
         Spread the elements evenly across the chunks/splits if the length of the dimension
-        is not perfectly divisible by the number of chunks or split size. 
+        is not perfectly divisible by the number of chunks or split size.
 
         The length of returned tensors differs by at most one element.
 

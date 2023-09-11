@@ -139,7 +139,7 @@ def broadcast_shapes(*shapes):
 
 
 def split(
-    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0, drop_remainder: bool = 0
+    tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0, drop_remainder: bool = False
 ) -> Tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 

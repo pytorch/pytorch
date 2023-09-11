@@ -861,7 +861,12 @@ class Tensor(torch._C.TensorBase):
         r"""See :func:`torch.split`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
-                Tensor.split, (self,), self, split_size, dim=dim, drop_remainder=drop_remainder
+                Tensor.split,
+                (self,),
+                self,
+                split_size,
+                dim=dim,
+                drop_remainder=drop_remainder,
             )
         if isinstance(split_size, Tensor):
             try:
