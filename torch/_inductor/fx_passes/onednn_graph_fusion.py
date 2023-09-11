@@ -37,6 +37,7 @@ class OnednnGraph:
             torch.int32: llga.logical_tensor.s32,
             torch.int8: llga.logical_tensor.s8,
             torch.uint8: llga.logical_tensor.u8,
+            torch.bool: llga.logical_tensor.boolean,
             torch.int64: llga.logical_tensor.dt_undef,
             torch.float64: llga.logical_tensor.dt_undef,
             torch.complex64: llga.logical_tensor.dt_undef,

@@ -959,7 +959,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
-
+        for name, value in self.opaque_ops.items():
+            setattr(mod, name, value)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
         output_code_log.info("Output code written to: %s", mod.__file__)
@@ -1014,3 +1015,4 @@ class GraphLowering(torch.fx.Interpreter):
             and self.graph_inputs[name].get_numel() == 1
             and self.graph_inputs[name].get_device().type == "cpu"
         )
+
