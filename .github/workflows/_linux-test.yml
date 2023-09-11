@@ -77,6 +77,18 @@ jobs:
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload log file
+        uses: ./.github/actions/upload-log
+        with:
+          job-id: ${{ steps.get-job-id.outputs.job-id }}
+
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -252,13 +264,6 @@ jobs:
         if: always() && steps.test.conclusion
         run: |
           cat test/**/*.log || true
-
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Stop monitoring script
         if: always() && steps.monitor-script.outputs.monitor-script-pid
