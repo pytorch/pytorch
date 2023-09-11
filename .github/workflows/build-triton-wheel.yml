@@ -288,4 +288,5 @@ jobs:
           else
             export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN_TEST}"
           fi
+          ls ${{ runner.temp }}/artifacts
           bash .circleci/scripts/binary_upload.sh
