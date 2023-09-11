@@ -1848,7 +1848,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // Therefore, we warn and fall back to the typical recordStream logic:
   TORCH_WARN_ONCE(
       avoidRecordStreams_,
-      "NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
+      "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
       "collectives.");
 
   const auto devices = getDeviceList(tensors);

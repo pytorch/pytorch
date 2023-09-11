@@ -1054,8 +1054,27 @@ static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
+  // We can't just call self.to(device_) here. Why?
+  // We **need** to make sure that the CompositeImplicitAutograd to() kernel runs, so that
+  // if there are any subclasses, they always see the desguared to() call.
+  // We are in a ZeroTensor kernel below autograd, though, which means that `.to()`
+  // will hit the Python key before hitting the composite kernel.
+  // A bit hacky, but ::redispatch() doesn't accept alias keys, so I'm manually using
+  // AutogradCPU since I know that it gets a composite registration.
+  auto self_device = at::_ops::to_dtype_layout::redispatch(
+    c10::DispatchKeySet(c10::DispatchKey::AutogradCPU),
+    self,
+    /*dtype=*/c10::nullopt,
+    /*layout=*/c10::nullopt,
+    /*device=*/device_, false, false, false, c10::nullopt);
+  auto other_device = at::_ops::to_dtype_layout::redispatch(
+    c10::DispatchKeySet(c10::DispatchKey::AutogradCPU),
+    other,
+    /*dtype=*/c10::nullopt,
+    /*layout=*/c10::nullopt,
+    /*device=*/device_, false, false, false, c10::nullopt);
   auto meta_out = at::_ops::add_Tensor::redispatch(
-      meta_dks, self.to(device_), other.to(device_), alpha);
+      meta_dks, self_device, other_device, alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {

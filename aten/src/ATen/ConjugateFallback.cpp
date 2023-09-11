@@ -18,6 +18,10 @@ TORCH_LIBRARY_IMPL(_, Conjugate, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&conjugateFallback>());
 }
 
+TORCH_LIBRARY_IMPL(prims, Conjugate, m) {
+  m.impl("clone", torch::CppFunction::makeFallthrough());
+}
+
 TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
