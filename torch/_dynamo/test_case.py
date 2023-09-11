@@ -5,7 +5,6 @@ import sys
 import torch
 import torch.testing
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
@@ -19,7 +18,7 @@ def run_tests(needs=()):
 
     if (
         TEST_WITH_TORCHDYNAMO
-        or IS_WINDOWS
+        #        or IS_WINDOWS
         or TEST_WITH_CROSSREF
         or sys.version_info >= (3, 12)
     ):

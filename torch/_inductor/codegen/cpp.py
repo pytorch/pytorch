@@ -2866,7 +2866,12 @@ class KernelGroup:
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
 
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        if sys.platform == "win32":
+            code.writeline(
+                f'extern "C" __declspec(dllexport) void {kernel_decl_name}({arg_defs})'
+            )
+        else:
+            code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id

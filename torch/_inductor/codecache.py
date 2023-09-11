@@ -104,7 +104,7 @@ log = logging.getLogger(__name__)
 def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
     if cache_dir is None:
-        cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
+        cache_dir = f"{tempfile.gettempdir()}{os.sep}torchinductor_{getpass.getuser()}"
     os.makedirs(cache_dir, exist_ok=True)
     return cache_dir
 
@@ -453,7 +453,10 @@ def cpp_compiler_search(search: str) -> str:
                 )
                 with lock:
                     cxx = install_gcc_via_conda()
-            subprocess.check_output([cxx, "--version"])
+            if cxx == "cl":
+                subprocess.check_output([cxx, "/nologo", "/?"])
+            else:
+                subprocess.check_output([cxx, "--version"])
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
@@ -565,12 +568,17 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
+            suffix = "so"
+            if sys.platform == "win32":
+                suffix = "dll"
+            output_path = input_path[:-3] + suffix
+            command = cpp_compile_command(
+                input_path, output_path, warning_all=False, vec_isa=self
             )
+            if sys.platform == "win32":
+                build_cmd = shlex.split(command, posix=0)
+            else:
+                build_cmd = shlex.split(command)
             try:
                 # Check build result
                 compile_file(input_path, output_path, build_cmd)
@@ -673,6 +681,8 @@ def get_compile_only(compile_only: bool = True) -> str:
 
 
 def get_shared(shared: bool = True) -> str:
+    if "cl" in config.cpp.cxx:
+        return "/LD" if shared else ""
     return "-shared -fPIC" if shared else ""
 
 
@@ -685,6 +695,8 @@ def get_glibcxx_abi_build_flags() -> str:
 
 
 def cpp_flags() -> str:
+    if "cl" in config.cpp.cxx:
+        return "/std:c++17"
     return "-std=c++17 -Wno-unused-variable"
 
 
@@ -693,7 +705,10 @@ def cpp_wrapper_flags() -> str:
 
 
 def optimization_flags() -> str:
-    base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if "cl" in config.cpp.cxx:
+        base_flags = "/O2 /Ob2 /EHsc /nologo"
+    else:
+        base_flags = "-O3 -ffast-math -fno-finite-math-only"
     if config.is_fbcode():
         # FIXME: passing `-fopenmp` adds libgomp.so to the generated shared library's dependencies.
         # This causes `ldopen` to fail in fbcode, because libgomp does not exist in the default paths.
@@ -704,14 +719,14 @@ def optimization_flags() -> str:
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         # Also, `-march=native` is unrecognized option on M1
         base_flags += " -Xclang"
-    else:
+    elif sys.platform != "win32":
         if platform.machine() == "ppc64le":
             base_flags += " -mcpu=native"
         else:
             base_flags += " -march=native"
 
     # Internal cannot find libgomp.so
-    if not config.is_fbcode():
+    if not config.is_fbcode() and sys.platform != "win32":
         base_flags += " -fopenmp"
     return base_flags
 
@@ -948,6 +963,9 @@ def cpp_compile_command(
         inp_name = input
         out_name = output
         linker_paths = ""  # let the compiler pick
+    output_param = "-o "
+    if "cl" in config.cpp.cxx:
+        output_param = "/Fe"
     return re.sub(
         r"[ \n]+",
         " ",
@@ -961,7 +979,7 @@ def cpp_compile_command(
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
             {get_compile_only(compile_only)}
-            -o {out_name}
+            {output_param} {out_name}
         """,
     ).strip()
 
@@ -1061,7 +1079,10 @@ class AotCodeCache:
                     with open(output_json, "w") as f:
                         f.write(serialized_extern_kernel_nodes)
 
-                output_so = os.path.splitext(input_path)[0] + ".so"
+                suffix = ".so"
+                if sys.platform == "win32":
+                    suffix = ".dll"
+                output_so = os.path.splitext(input_path)[0] + suffix
 
                 if not os.path.exists(output_so):
                     output_o = os.path.splitext(input_path)[0] + ".o"
@@ -1155,6 +1176,7 @@ def cpp_prefix_path() -> str:
 
 def cpp_prefix() -> str:
     filename = cpp_prefix_path()
+    filename = filename.replace("\\", "\\\\")
     if config.is_fbcode():
         # We need relative paths, since we bundle up
         # everything that we compile into a folder for remote compilation.
@@ -1247,13 +1269,18 @@ class CppCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
-                output_path = input_path[:-3] + "so"
+                suffix = "so"
+                if sys.platform == "win32":
+                    suffix = "dll"
+                output_path = input_path[:-3] + suffix
                 if not os.path.exists(output_path):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path, output=output_path, vec_isa=picked_vec_isa
-                        )
+                    command = cpp_compile_command(
+                        input=input_path, output=output_path, vec_isa=picked_vec_isa
                     )
+                    if sys.platform == "win32":
+                        cmd = shlex.split(command, posix=0)
+                    else:
+                        cmd = shlex.split(command)
                     compile_file(input_path, output_path, cmd)
                 cls.cache[key] = cls._load_library(output_path)
                 cls.cache[key].key = key  # type: ignore[attr-defined]
@@ -1350,6 +1377,8 @@ class CppWrapperCodeCache:
             os.makedirs(cpp_wrapper_dir)
 
         ext = "so"
+        if sys.platform == "win32":
+            ext = "dll"
         filepath = os.path.join(cpp_wrapper_dir, f"{name}.{ext}")
         log.debug("Cpp wrapper code path %s", filepath)
 

@@ -66,7 +66,7 @@ SKIP_DIRS = [
     # torch.*
     _module_dir(torch),
     # torchdynamo.*
-    os.path.dirname(__file__) + "/",
+    os.path.dirname(__file__) + os.sep,
     "<frozen importlib",
     "<__array_function__ internals>",
 ] + [
@@ -174,6 +174,8 @@ FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "distributed/_tensor/api.py",
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
 }
+
+FILENAME_ALLOWLIST = {file.replace("/", os.sep) for file in FILENAME_ALLOWLIST}
 
 SKIP_DIRS_RE = None
 
