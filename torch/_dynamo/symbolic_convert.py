@@ -107,6 +107,7 @@ from .variables.tensor import (
 )
 from .variables.torch import TorchVariable
 from .variables.user_defined import (
+    RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
     UserDefinedVariable,
@@ -793,7 +794,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        self.symbolic_locals[inst.argval] = self.pop()
+        loaded_vt = self.pop()
+        name = inst.argval
+        # Optionally, since we stored this object at a name, we can pass this info down
+        # to the object for it to use (Can be useful in reconstruction).
+        loaded_vt = loaded_vt.rename(self, name)
+        self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -864,6 +870,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
+        if isinstance(value, RemovableHandleVariable):
+            unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
@@ -1865,6 +1873,32 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
+
+    def store_hook(self, name, value):
+        base = name
+        assert callable(value), "Illegal construction - hook must be callable!"
+        for i in itertools.count():
+            if name not in self.output.global_scope:
+                src = GlobalSource(name)
+                self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
+                self.output.install_global(name, value)
+                break
+            name = f"{base}_{i}"
+
+        return src
+
+    def store_handle(self, name, value):
+        assert isinstance(
+            value, torch.utils.hooks.RemovableHandle
+        ), "Handle must be a torch hook handle"
+        base = name
+        for i in itertools.count():
+            if name not in self.output.global_scope:
+                self.output.install_global(name, value)
+                break
+            name = f"{base}_{i}"
+
+        return name
 
     @property
     def fake_mode(self):

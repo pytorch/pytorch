@@ -590,3 +590,33 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
     # TODO Handle getattr for _length_per_key and _offset_per_key properly.
+
+
+class RemovableHandleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        last_seen_name=None,
+        as_global=None,
+        value_type=None,
+        mutable_local=None,
+        **kwargs,
+    ):
+        super().__init__(value, value_type, **kwargs)
+        # associated later, see code symbolic_convert and On dynamo tensor_hooks
+        self.last_seen_name = last_seen_name
+        self.mutable_local = mutable_local
+        self.as_global = as_global
+
+    def reconstruct(self, codegen):
+        if self.as_global:
+            return [codegen.create_load_global(self.as_global, False, add=True)]
+        if self.last_seen_name:
+            # It is an invariant that at this point, a STORE_FAST was executed for this name.
+            return [codegen.create_load(self.last_seen_name)]
+        return super().reconstruct(codegen)
+
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        new_vt = self.clone(last_seen_name=new_name)
+        return tx.replace_all(self, new_vt)

@@ -110,7 +110,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn, (types.FunctionType, torch.jit.ScriptFunction)
+            fn, (types.FunctionType, torch.jit.ScriptFunction, functools.partial)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
@@ -604,13 +604,14 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func, args, keywords, **kwargs):
+    def __init__(self, func, args, keywords, original=None, **kwargs):
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
+        self.original = original
 
         self.guards.update(VariableTracker.propagate(func)["guards"])
         for arg in args:
@@ -628,3 +629,20 @@ class FunctoolsPartialVariable(VariableTracker):
         return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
             options
         )
+
+    def as_python_constant(self):
+        if self.original:
+            return self.original
+        else:
+
+            def get_val(v):
+                if isinstance(v, variables.UserDefinedObjectVariable):
+                    return v.value
+                else:
+                    return v.as_python_constant()
+
+            return functools.partial(
+                self.func.fn,
+                *[arg.as_python_constant for arg in self.args],
+                **{k: get_val(v) for k, v in self.keywords.items()},
+            )
