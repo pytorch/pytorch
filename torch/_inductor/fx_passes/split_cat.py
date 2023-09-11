@@ -1,7 +1,7 @@
 import itertools
 import logging
 import operator
-from typing import Callable, List, Sequence, Tuple, Union, Any, Optional
+from typing import Any, Callable, List, Optional, Sequence, Tuple, Union
 
 import numpy
 
