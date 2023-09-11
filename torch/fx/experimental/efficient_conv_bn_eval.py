@@ -57,22 +57,6 @@ def efficient_conv_bn_eval_forward(
     return conv._conv_forward(x, weight_on_the_fly, bias_on_the_fly)
 
 
-def efficient_conv_bn_eval_control(
-    bn: nn.modules.batchnorm._BatchNorm, conv: nn.modules.conv._ConvNd, x: torch.Tensor
-):
-    """This function controls whether to use `efficient_conv_bn_eval_forward`.
-    If the following `bn` is in `eval` mode, then we turn on the special
-    `efficient_conv_bn_eval_forward`.
-    """
-    if not bn.training:
-        # bn in eval mode
-        output = efficient_conv_bn_eval_forward(bn, conv, x)
-        return output
-    else:
-        conv_out = conv._conv_forward(x, conv.weight, conv.bias)
-        return bn(conv_out)
-
-
 def efficient_conv_bn_eval_graph_transform(fx_model):
     """Find consecutive conv+bn calls in the graph, inplace modify the graph
     with the fused operation."""
@@ -105,31 +89,32 @@ def efficient_conv_bn_eval_graph_transform(fx_model):
         # first, and then optimize them later.
         conv_node = node.args[0]
         bn_node = node
-        if modules[bn_node.target].track_running_stats:
+        bn_module = modules[bn_node.target]
+        if bn_module.track_running_stats and not bn_module.training:
             pairs.append([conv_node, bn_node])
 
     for conv_node, bn_node in pairs:
         # set insertion point
-        fx_model.graph.inserting_before(conv_node)
-        # create `get_attr` node to access modules
-        # note that we directly call `create_node` to fill the `name`
-        # argument. `fx_model.graph.get_attr` and
-        # `fx_model.graph.call_function` does not allow the `name` argument.
-        conv_get_node = fx_model.graph.create_node(
-            op="get_attr", target=conv_node.target, name="get_conv"
-        )
-        bn_get_node = fx_model.graph.create_node(
-            op="get_attr", target=bn_node.target, name="get_bn"
-        )
-        # prepare args for the fused function
-        args = (bn_get_node, conv_get_node, conv_node.args[0])
-        # create a new node
-        new_node = fx_model.graph.create_node(
-            op="call_function",
-            target=efficient_conv_bn_eval_control,
-            args=args,
-            name="efficient_conv_bn_eval",
-        )
+        with fx_model.graph.inserting_before(conv_node):
+            # create `get_attr` node to access modules
+            # note that we directly call `create_node` to fill the `name`
+            # argument. `fx_model.graph.get_attr` and
+            # `fx_model.graph.call_function` does not allow the `name` argument.
+            conv_get_node = fx_model.graph.create_node(
+                op="get_attr", target=conv_node.target, name="get_conv"
+            )
+            bn_get_node = fx_model.graph.create_node(
+                op="get_attr", target=bn_node.target, name="get_bn"
+            )
+            # prepare args for the fused function
+            args = (bn_get_node, conv_get_node, conv_node.args[0])
+            # create a new node
+            new_node = fx_model.graph.create_node(
+                op="call_function",
+                target=efficient_conv_bn_eval_forward,
+                args=args,
+                name="efficient_conv_bn_eval",
+            )
         # this node replaces the original conv + bn, and therefore
         # should replace the uses of bn_node
         bn_node.replace_all_uses_with(new_node)
