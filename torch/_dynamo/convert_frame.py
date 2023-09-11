@@ -478,6 +478,7 @@ def _compile(
     ) -> Optional[GuardedCode]:
         nonlocal output
         for attempt in itertools.count():
+            CompileContext.get().attempt = attempt
             try:
                 out_code = transform_code_object(code, transform)
                 orig_code_map[out_code] = code
