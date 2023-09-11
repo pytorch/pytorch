@@ -1146,6 +1146,163 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = np.random.randn(2, 2)
         return x - x
 
+    @make_test
+    def test_partials_torch_op_kwarg(x):
+        par_mul = functools.partial(torch.mul, other=torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_torch_op_arg(x):
+        par_mul = functools.partial(torch.mul, torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_arg(x):
+        par_mul = functools.partial(udf_mul, torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_kwarg(x):
+        par_mul = functools.partial(udf_mul, y=torch.ones(10, 10))
+        return par_mul(x)
+
+    @make_test
+    def test_partials_udf_kwarg_module(x, y):
+        par_mod = functools.partial(udf_module, mod=SmallNN())
+        return par_mod(x=x, y=y)
+
+    @make_test
+    def test_partials_udf_kwarg_method(x, y):
+        par_mod = functools.partial(udf_module, mod=SmallNN().forward)
+        return par_mod(x=x, y=y)
+
+    @make_test
+    def test_partials_lambda(x):
+        multiply = lambda x, y: x * y
+        triple = functools.partial(multiply, y=3)
+        return triple(x)
+
+    def test_partials_as_input_partials_lambda(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        multiply = lambda x, y: x * y
+        lambda0 = functools.partial(multiply, y=3)
+        lambda1 = functools.partial(multiply, y=2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, torch.randn(2, 2)
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_partials_as_input_partials_mod(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(SmallNN(), y=torch.randn(2, 2))
+        lambda1 = functools.partial(SmallNN(), y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, x
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+        eager_result = fn(lambda0, lambda1, x)
+        self.assertEqual(eager_result, dynamo_result)
+
+    def test_partials_as_input_UDF(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
+        lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        dynamo_result = torch._dynamo.optimize(cnts, nopython=True)(fn)(
+            lambda0, lambda1, x
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
+        eager_result = fn(lambda0, lambda1, x)
+        self.assertEqual(eager_result, dynamo_result)
+
+    def test_partials_recompilation(self):
+        def fn(f0, f1, x):
+            return f0(x) * f1(x)
+
+        lambda0 = functools.partial(udf_mul, y=torch.randn(2, 2))
+        lambda1 = functools.partial(udf_mul, y=torch.randn(2, 2))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        x = torch.randn(2, 2)
+        fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        dynamo_result = fn(lambda0, lambda1, x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        fn(lambda1, lambda0, x)
+        self.assertEqual(
+            cnts.frame_count, 1
+        )  # No recompile! Tensor and udf_mul guarded
+
+        lambda2 = functools.partial(udf_mul, y=torch.randn(3, 3))
+        x = torch.randn(3, 3)
+        fn(lambda2, lambda2, x)
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Tensor size changed
+
+        multiply = lambda x, y: x * y
+        lambda3 = functools.partial(multiply, y=torch.randn(3, 3))
+        x = torch.randn(3, 3)
+        fn(lambda3, lambda3, x)
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! func id changed
+
+        def fn2(f0, f1, args):
+            return f0(*args) * f1(*args)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        x = torch.randn(2, 2)
+        fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        dynamo_result = fn2(lambda0, lambda1, [x])
+        self.assertEqual(cnts.frame_count, 1)  # start over
+
+        lambda4 = functools.partial(multiply, y=3, x=torch.randn(3, 3))
+        fn2(lambda4, lambda4, [])
+
+        self.assertEqual(cnts.frame_count, 2)  # Recompile! Different kwarg keys
+
+        lambda5 = functools.partial(multiply, 1)
+        x = torch.randn(3, 3)
+        fn2(lambda5, lambda5, [x])
+
+        self.assertEqual(cnts.frame_count, 3)  # Recompile! Different arg keys
+
+        lambda6 = lambda x: x + x
+        fn2(lambda6, lambda6, [x])
+        self.assertEqual(
+            cnts.frame_count, 4
+        )  # Recompile! input is no longer a functools partial
+
+
+def udf_mul(x, y):
+    return x * y
+
+
+class SmallNN(torch.nn.Module):
+    def forward(self, x, y):
+        combined = torch.cat((x, y), dim=1)
+        out = torch.nn.ReLU()(combined)
+        out = torch.nn.ReLU()(out)
+        return out
+
+
+def udf_module(mod, x, y):
+    return mod(x, y)
+
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))
