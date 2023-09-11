@@ -1345,7 +1345,11 @@ Example::
       .def_property_readonly(
           "port",
           &::c10d::TCPStore::getPort,
-          R"(Gets the port number on which the store listens for requests.)");
+          R"(Gets the port number on which the store listens for requests.)")
+      .def_property_readonly(
+          "libuvBackend",
+          &::c10d::TCPStore::isLibUvBackend,
+          R"(Returns True if it's using the libuv backend.)");
 
   intrusive_ptr_class_<::c10d::PrefixStore>(
       module,

@@ -24,7 +24,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, mesh_resources
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
@@ -201,6 +201,12 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
+    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    if parent_mesh is not None:
+        raise RuntimeError(
+            f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
+            "Hybrid sharding + TP is not supported yet.",
+        )
     return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
