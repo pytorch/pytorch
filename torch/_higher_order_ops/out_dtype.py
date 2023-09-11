@@ -20,7 +20,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor, maybe_disable_functional_mode
+from torch._subclasses.functional_tensor import FunctionalTensorMode, FunctionalTensor, maybe_disable_functional_mode, unset_functional_temporarily
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
@@ -201,7 +201,7 @@ def out_dtype_func1(op, output_dtype, *args):
         for arg in args
     )
     # pyre-ignore
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
+    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)), unset_functional_temporarily():
         res = out_dtype(op, output_dtype, *unwrapped_args)
     return _wrap_all_tensors_to_functional(res, level=0)
 
