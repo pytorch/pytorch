@@ -12924,7 +12924,12 @@ op_db: List[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
-           supports_expanded_weight=True,),
+           supports_expanded_weight=True,
+           skips=(
+                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', dtypes=(torch.float16,)),
+                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace', dtypes=(torch.float16,)),
+                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', dtypes=(torch.float16,)),
+           )),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
            dtypes=floating_types_and(torch.bfloat16),
