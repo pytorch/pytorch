@@ -71,6 +71,9 @@ def argmax(
     *,
     keepdims: KeepDims = False,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"argmax with dtype={a.dtype}.")
+
     axis = _util.allow_only_single_axis(axis)
 
     if a.dtype == torch.bool:
@@ -88,6 +91,9 @@ def argmin(
     *,
     keepdims: KeepDims = False,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"argmin with dtype={a.dtype}.")
+
     axis = _util.allow_only_single_axis(axis)
 
     if a.dtype == torch.bool:
@@ -134,6 +140,9 @@ def amax(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"amax with dtype={a.dtype}")
+
     return a.amax(axis)
 
 
@@ -149,6 +158,9 @@ def amin(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"amin with dtype={a.dtype}")
+
     return a.amin(axis)
 
 
@@ -218,16 +230,8 @@ def mean(
 ):
     dtype = _atleast_float(dtype, a.dtype)
 
-    is_half = dtype == torch.float16
-    if is_half:
-        # XXX revisit when the pytorch version has pytorch/pytorch#95166
-        dtype = torch.float32
-
     axis_kw = {} if axis is None else {"dim": axis}
     result = a.mean(dtype=dtype, **axis_kw)
-
-    if is_half:
-        result = result.to(torch.float16)
 
     return result
 
@@ -329,7 +333,7 @@ def average(
         if a.shape != weights.shape:
             if axis is None:
                 raise TypeError(
-                    "Axis must be specified when shapes of a and weights " "differ."
+                    "Axis must be specified when shapes of a and weights differ."
                 )
             if weights.ndim != 1:
                 raise TypeError(

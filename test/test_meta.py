@@ -3,6 +3,7 @@
 import itertools
 import torch
 import os
+import numpy as np
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
@@ -1250,6 +1251,30 @@ class TestMeta(TestCase):
             self.assertEqual(res.device.type, 'meta')
             self.assertEqual(ref.shape, res.shape)
 
+    def test_quantized_embedding_bag(self):
+        tab_shape = [8, 128]
+        emb_size, ind_len, off_len = tab_shape[0], 32, 33
+        f_table = torch.from_numpy((np.random.random_sample(tab_shape) + 1).astype(np.float32))
+        q_table = torch.ops.quantized.embedding_bag_byte_prepack(f_table)
+        indices = torch.from_numpy(np.random.randint(low=0, high=emb_size, size=ind_len)).int()
+        max_length = len(indices) // (off_len - 1)
+        if max_length > 20:
+            max_length = 20
+        np_lengths = np.random.randint(0, max_length + 1, size=off_len - 1).astype(np.int32)
+        offsets = torch.cat([torch.zeros([1]), torch.cumsum(torch.from_numpy(np_lengths), 0)]).int()
+
+        eb = torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+            q_table.to(device="meta"),
+            indices.to(device="meta"),
+            offsets.to(device="meta"),
+            mode=0,  # sum
+            per_sample_weights=None,
+            include_last_offset=True,
+        )
+        self.assertEqual(eb.shape, [32, 128])
+        self.assertEqual(eb.dtype, torch.float32)
+        self.assertEqual(eb.untyped_storage().data_ptr(), 0)
+
     # opinfo test is using aten.fill_, it's not testing aten.fill
     @onlyCUDA
     def test_fill_stride(self):
@@ -1277,6 +1302,30 @@ class TestMeta(TestCase):
         self.assertEqual(r.shape, t.shape)
         self.assertEqual(r.dtype, t.dtype)
         self.assertEqual(r.storage().data_ptr(), 0)
+
+    def test_embedding_bag_byte_prepack(self):
+        batch_size = 10
+        num_embeddings = 80
+        embedding_dim = [128, 256, 512]
+        res_shape = [[batch_size, num_embeddings, ed + 8] for ed in embedding_dim]
+        for ed, rs in zip(embedding_dim, res_shape):
+            weight = torch.randn(batch_size, num_embeddings, ed, dtype=torch.float32)
+            res = torch.ops.quantized.embedding_bag_byte_prepack(weight.to(device="meta"))
+            self.assertEqual(res.shape, rs)
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res.untyped_storage().data_ptr(), 0)
+
+    def test_embedding_bag_byte_unpack(self):
+        batch_size = 10
+        num_embeddings = 80
+        embedding_dim = [128, 256, 512]
+        res_shape = [[batch_size, num_embeddings, ed] for ed in embedding_dim]
+        for ed, rs in zip(embedding_dim, res_shape):
+            packed_weight = torch.randn(batch_size, num_embeddings, ed + 8, dtype=torch.float32)
+            res = torch.ops.quantized.embedding_bag_byte_unpack(packed_weight.to(device="meta"))
+            self.assertEqual(res.shape, rs)
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res.untyped_storage().data_ptr(), 0)
 
 instantiate_device_type_tests(TestMeta, globals())
 
