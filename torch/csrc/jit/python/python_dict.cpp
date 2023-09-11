@@ -60,8 +60,9 @@ void initScriptDictBindings(PyObject* module) {
           })
       .def("__iter__", [](ScriptDictIterator& iter) { return iter; });
 
-  py::class_<ScriptDict, std::shared_ptr<ScriptDict>>(m, "ScriptDict")
-      .def(py::init([](py::dict dict) {
+  auto cls = py::class_<ScriptDict, std::shared_ptr<ScriptDict>>(m, "ScriptDict");
+  add_class_getitem(cls);
+  cls.def(py::init([](py::dict dict) {
         TypePtr type = nullptr;
 
         if (!dict.empty()) {

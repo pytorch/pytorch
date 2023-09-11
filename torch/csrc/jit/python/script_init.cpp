@@ -1430,8 +1430,9 @@ void initJitScriptBindings(PyObject* module) {
             self->drop_all_functions();
           });
 
-  py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
-      .def(
+  auto ScriptFunction = py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr());
+  add_function_class_getitem(ScriptFunction);
+  ScriptFunction.def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
             HANDLE_TH_ERRORS
@@ -1540,8 +1541,9 @@ void initJitScriptBindings(PyObject* module) {
         return self.function_->doc_string();
       });
 
-  py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
-      .def(
+  auto ScriptMethod = py::class_<Method>(m, "ScriptMethod", py::dynamic_attr());
+  add_function_class_getitem(ScriptMethod);
+  ScriptMethod.def(
           "__call__",
           [](py::args args, py::kwargs kwargs) {
             // see: [pybind11 varargs]
