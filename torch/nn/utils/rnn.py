@@ -338,7 +338,7 @@ def pad_packed_sequence(
         return padded_output.index_select(batch_dim, unsorted_indices), lengths[unsorted_indices.cpu()]
     return padded_output, lengths
 
-
+# NOTE: .pyi stub allows Iterable[Tensor], but for JIT-compatibility we need to be more restrictive here.
 def pad_sequence(
     sequences: Union[Tensor, List[Tensor]],
     batch_first: bool = False,
@@ -347,9 +347,9 @@ def pad_sequence(
     r"""Pad a list of variable length Tensors with ``padding_value``
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
-    and pads them to equal length. For example, if the input is list of
-    sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
-    otherwise.
+    and pads them to equal length. For example, if the input is a list of
+    sequences with size ``L x *`` and ``batch_first`` is False, the output is
+    of size ``T x B x *``.
 
     `B` is batch size. It is equal to the number of elements in ``sequences``.
     `T` is length of the longest sequence.

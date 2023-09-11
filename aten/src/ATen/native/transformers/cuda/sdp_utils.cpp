@@ -284,8 +284,8 @@ bool use_flash_attention(sdp_params params, bool debug) {
 }
 
 bool use_mem_efficient_attention(sdp_params params, bool debug) {
-#ifndef USE_FLASH_ATTENTION
-  TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
+#ifndef USE_MEM_EFF_ATTENTION
+  TORCH_CHECK(!debug, "Torch was not compiled with memory efficient attention.");
   return false;
 #endif
   // Constraints specific to mem efficient attention

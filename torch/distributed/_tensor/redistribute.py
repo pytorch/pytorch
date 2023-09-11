@@ -72,12 +72,17 @@ def _decompose_reshard(val: List[_PlacementItem]) -> List[_PlacementItem]:
     return output
 
 
-# Intentionally expose this API to trace ops on local tensors
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
     target_spec: DTensorSpec,
 ) -> torch.Tensor:
+    """
+    This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
+    the target DTensorSpec, which involves the necessary collective calls to transform
+    the local shard of the DTensor from its current spec to the target spec.
+    """
+
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
@@ -197,7 +202,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=input.shape,
             dtype=input.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=input.requires_grad,
             stride=input.stride(),
         )
 
@@ -234,7 +239,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=grad_output.shape,
             dtype=grad_output.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=grad_output.requires_grad,
             stride=grad_output.stride(),
         )
 

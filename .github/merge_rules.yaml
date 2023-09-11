@@ -7,6 +7,7 @@
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
+  - docs/source/_static/img/onnx/**
   - scripts/onnx/**
   - test/onnx/**
   - tools/onnx/**
@@ -92,8 +93,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull / linux-bionic-py3_8-clang9-xla / build
+  - pull / linux-bionic-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
