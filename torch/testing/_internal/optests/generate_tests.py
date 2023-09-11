@@ -37,7 +37,7 @@ def safe_autograd_registration_check(op, args, kwargs):
 
 def safe_fake_check(op, args, kwargs):
     args, kwargs = deepcopy_tensors((args, kwargs))
-    return fake_check(op, args, kwargs, dynamic_only=False)
+    return fake_check(op, args, kwargs)
 
 
 def safe_aot_autograd_check(op, args, kwargs, dynamic):

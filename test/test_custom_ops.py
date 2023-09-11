@@ -1459,10 +1459,9 @@ class TestCustomOp(CustomOpTestCaseBase):
             return torch.ops._torch_testing.numpy_nonzero(x)
 
         x = torch.randn(5, 5)
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.DynamicOutputShapeException
-        ):
-            make_fx(f, tracing_mode="fake")(x)
+        # We've updated to attempt to use unbacked symints even for fake
+        # tracing
+        make_fx(f, tracing_mode="fake")(x)
 
     def test_symints(self):
         def f(x):
