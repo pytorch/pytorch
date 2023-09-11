@@ -1317,17 +1317,6 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
-################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
-################################################################################
-
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
-
-################################################################################
-# Import miscelaneous torch functions
-################################################################################
-
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
@@ -1391,6 +1380,13 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python
