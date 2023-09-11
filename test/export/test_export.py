@@ -169,7 +169,7 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             torchdynamo.exc.UserError,
-            "trying to get a value out of symbolic int"
+            "Dynamic control flow is not supported at the moment"
         ):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
