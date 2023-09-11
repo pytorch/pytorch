@@ -8,13 +8,12 @@ namespace c10 {
 // singleton promotes the int into a constant symnode. If we'd like to
 // support more combinations in the future, we may need to implement some
 // kind of multiple dispatch.
-#define DEFINE_BINARY_OP(OP, ROP)                                      \
-  template <typename T>                                                \
-  c10::SymNode ConstantSymNodeImpl<T>::OP(const c10::SymNode& other) { \
-    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());         \
-    c10::raw::intrusive_ptr::incref(this);                             \
-    return other->ROP(                                                 \
-        c10::intrusive_ptr<ConstantSymNodeImpl<T>>::reclaim(this));    \
+#define DEFINE_BINARY_OP(OP, ROP)                                        \
+  template <typename T>                                                  \
+  c10::SymNode ConstantSymNodeImpl<T>::OP(const c10::SymNode& other) {   \
+    TORCH_INTERNAL_ASSERT(other->singleton_int().has_value());           \
+    return other->ROP(                                                   \
+        c10::intrusive_ptr<ConstantSymNodeImpl<T>>::reclaim_copy(this)); \
   }
 
 DEFINE_BINARY_OP(eq, eq)
