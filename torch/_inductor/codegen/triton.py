@@ -31,6 +31,7 @@ from ..utils import (
     green_text,
     is_welford_reduction,
     next_power_of_2,
+    Placeholder,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -1772,7 +1773,7 @@ class TritonKernel(Kernel):
                 result.writeline(f"{stream_name} = get_cuda_stream({index})")
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
-                    f"KERNEL_NAME.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                    f"{str(Placeholder.KERNEL_NAME)}.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
                 )
 
         # benchmark all configs
@@ -1784,7 +1785,7 @@ class TritonKernel(Kernel):
                     f"torch.cuda.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
-                    f"return KERNEL_NAME.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
+                    f"return {str(Placeholder.KERNEL_NAME)}.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"  # noqa: B950 line too long
                 )
 
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
@@ -1879,7 +1880,7 @@ class TritonKernel(Kernel):
             "constants": {},
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
-            "kernel_name": "DESCRIPTIVE_KRNL_NAME",
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
         }
 
         for tree in self.range_trees:
@@ -1930,7 +1931,9 @@ class TritonKernel(Kernel):
                 @triton.jit
             """
         code.splice(heuristics_line)
-        code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
+        code.writeline(
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
+        )
         self.codegen_body()
         with code.indent():
             self.codegen_static_numels(code)
@@ -2497,11 +2500,11 @@ class TritonScheduling(BaseScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
-            # DESCRIPTIVE_KRNL_NAME is used for profiling purposes; it shows the full kernel name
+            # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
             # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
-            src_code = src_code.replace("DESCRIPTIVE_KRNL_NAME", kernel_name)
-            src_code = src_code.replace("KERNEL_NAME", subs_name)
+            src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
+            src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

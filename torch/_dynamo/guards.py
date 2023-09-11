@@ -88,12 +88,6 @@ CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
-        ("___is_grad_enabled", torch.is_grad_enabled),
-        (
-            "___are_deterministic_algorithms_enabled",
-            torch.are_deterministic_algorithms_enabled,
-        ),
-        ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -537,34 +531,13 @@ class GuardBuilder(GuardBuilderBase):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
-        """Guard on the initial grad state"""
-        assert guard.name == ""
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_grad_state:
-            code = "___is_grad_enabled()"
-        else:
-            code = "not ___is_grad_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard):
-        """Guard on the initial determinism algorithms state"""
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_deterministic_algorithms_state:
-            code = "___are_deterministic_algorithms_enabled()"
-        else:
-            code = "not ___are_deterministic_algorithms_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def TORCH_FUNCTION_STATE(self, guard: Guard):
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_torch_function_state:
-            code = "___is_torch_function_enabled()"
-        else:
-            code = "not ___is_torch_function_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
@@ -977,13 +950,11 @@ class CheckFunctionManager:
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = local_builder.argnames
         largs += ["**___kwargs_ignored"]
-        args = ",".join(largs)
 
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
-        code_parts = ["___guarded_code.valid"]
-        base = os.path.dirname(__file__)
+        code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
             if guards_log.isEnabledFor(logging.DEBUG):
@@ -1045,8 +1016,6 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
-            dynamic_dims_sizes = None
-            dynamic_dims_strides = None
 
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
@@ -1132,12 +1101,16 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard)
 
         assert not global_builder.shape_env_code
-
+        global_state = convert_frame.initial_global_state
+        if global_state is None:
+            # we should only hit this case in NopTests()
+            global_state = convert_frame.GlobalStateGuard()
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("___check_global_state", global_state.check),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
