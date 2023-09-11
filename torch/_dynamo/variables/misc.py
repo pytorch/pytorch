@@ -770,12 +770,17 @@ class SkipFilesVariable(VariableTracker):
         elif self.value is functools.wraps and not kwargs and len(args) == 1:
 
             def wraps(fn):
+                # args[0] is the function to wrap.
+                # fn is the function being wrapped
+                # Eg.
+                #   wraps(foo)
+                #   def bar():
+                #      pass
+                # Here : args[0] -> foo, fn -> bar
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    # `wraps_source` should implement `reconstruct`
-                    # which NestedUserFunctionVariable does.
-                    # We prefer `args[0].source` if that is available.
-                    wraps_source = args[0].source if args[0].source else fn
-                    return fn.clone(wraps_source=wraps_source)
+                    # `wraps_source` should either have a source
+                    # or implement reconstruct.
+                    return fn.clone(wraps_source=args[0])
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps, **options)

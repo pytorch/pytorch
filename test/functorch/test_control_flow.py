@@ -8,7 +8,7 @@ from torch._functorch.aot_autograd import from_fun, to_fun
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import UnsupportedAliasMutationException, cond
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase, TEST_WITH_TORCHDYNAMO
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 
@@ -1422,21 +1422,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return wrapper
 
         gm = make_fx(f_wrapper(map_fn))(torch.tensor(True), torch.ones([2, 3], requires_grad=False))
-
-        # The expected graph differs slight when running under Dynamo
-        if TEST_WITH_TORCHDYNAMO:
-            fwd_string = "def forward(self, arg0_1, arg1_1):"
-            impl_string = ("map_impl = torch.ops.map_impl(body_graph_0, 1, arg1_1, arg0_1);"
-                           "body_graph_0 = arg1_1 = arg0_1 = None")
-        else:
-            fwd_string = "def forward(self, pred_1, x_1):"
-            impl_string = ("map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);"
-                           "body_graph_0 = x_1 = pred_1 = None")
-
-        exp_graph = f"""\
-    {fwd_string}
+        exp_graph = """\
+def forward(self, pred_1, x_1):
     body_graph_0 = self.body_graph_0
-    {impl_string}
+    map_impl = torch.ops.map_impl(body_graph_0, 1, x_1, pred_1);\
+  body_graph_0 = x_1 = pred_1 = None
     getitem = map_impl[0];  map_impl = None
     return getitem
 """
