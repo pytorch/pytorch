@@ -3739,8 +3739,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('as_strided_scatter', ''),
         xfail('equal', ''),
         xfail('linalg.lu', ''),
-        xfail('linspace', 'tensor_overload'),
-        xfail('logspace', 'tensor_overload'),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
         # https://github.com/pytorch/pytorch/issues/96560

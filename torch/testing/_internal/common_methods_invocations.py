@@ -987,16 +987,7 @@ def error_inputs_uniform(op, device, **kwargs):
 
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
-    yield ErrorInput(
-        SampleInput(0, args=(3, 1.)),
-        error_type=TypeError,
-        error_regex="received an invalid combination of arguments - got \\(int, int, float",
-    )
-    yield ErrorInput(
-        SampleInput(torch.tensor([1, 1], device=device), args=(torch.tensor([3, 3], device=device), 1)),
-        error_type=RuntimeError,
-        error_regex="only supports 0-dimensional start and end tensors"
-    )
+    yield ErrorInput(SampleInput(0, args=(3, 1.)), error_type=TypeError, error_regex='must be int, not float')
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
@@ -11361,8 +11352,6 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_linspace,
            skips=(
-               # FX failed to normalize op - add the op to the op_skip list.
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -11408,6 +11397,17 @@ op_db: List[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+
+               # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.bfloat16),
@@ -11418,8 +11418,6 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_logspace,
            skips=(
-               # FX failed to normalize op - add the op to the op_skip list.
-               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
@@ -11476,6 +11474,17 @@ op_db: List[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+
+               # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -19154,6 +19163,12 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+
+            # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.float64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
@@ -19196,6 +19211,12 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+
+            # https://github.com/pytorch/pytorch/pull/107958#pullrequestreview-1611367760
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
