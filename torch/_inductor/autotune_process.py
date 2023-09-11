@@ -389,7 +389,7 @@ class BenchmarkRequest:
             bench_elapse = time.time() - start_ts
             log.debug(
                 "InChildProcess %s: load %f, create tensor %f, bench %f",
-                self.module_cache_key,
+                str(self),
                 load_elapse,
                 create_tensor_elapse,
                 bench_elapse,
