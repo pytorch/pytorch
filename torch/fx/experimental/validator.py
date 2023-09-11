@@ -571,10 +571,10 @@ class ValidationException(TorchDynamoException):
         def joinlines(xs) -> str:
             return "\n".join(f"  ==> {x}" for x in xs)
 
-        model_str = joinlines(map(symbolstr, model))
-        assertions_str = joinlines(map(z3str, assertions))
-        target_exprs_str = joinlines(map(z3str, target_exprs))
-        failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
+        model_str = joinlines(sorted(map(symbolstr, model)))
+        assertions_str = joinlines(sorted(map(z3str, assertions)))
+        target_exprs_str = joinlines(sorted(map(z3str, target_exprs)))
+        failed_source_exprs_str = joinlines(sorted(map(z3str, failed_source_exprs)))
 
         self.msg = "translation validation failed."
         self.details = f"""\
