@@ -9,6 +9,7 @@ import torch._inductor
 
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
+from torch._inductor.utils import aot_inductor_launcher
 
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -35,21 +36,9 @@ class AOTInductorModelRunner:
             options=options,
         )
 
-        # Use a utility function for easier testing
-        source = """
-        #include <torch/csrc/inductor/aot_inductor_model_container.h>
-
-        torch::aot_inductor::AOTInductorModelContainer model(1);
-
-        void run(
-                const std::vector<at::Tensor>& input_tensors,
-                std::vector<at::Tensor>& output_tensors) {
-            model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
-        }
-        """
         optimized = torch.utils.cpp_extension.load_inline(
             name="aot_inductor",
-            cpp_sources=[source],
+            cpp_sources=[aot_inductor_launcher],
             functions=["run"],
             extra_ldflags=[so_path],
             with_cuda=True,
@@ -84,6 +73,24 @@ class AotInductorTests(TestCase):
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    def test_large(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(250112, 512, device="cuda")
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(1, 250112, device="cuda"),
+            torch.randn(1, 512, device="cuda"),
         )
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
@@ -199,6 +206,22 @@ class AotInductorTests(TestCase):
         example_inputs = (a,)
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    def test_duplicated_params(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(torch.rand(6))
+                self.q = self.p
+
+            def forward(self, x):
+                return self.p * x + self.q
+
+        model = Model()
+        example_inputs = (torch.rand(6),)
+        expected = model(*example_inputs)
+        actual = torch._export.export(model, example_inputs)(*example_inputs)
         self.assertTrue(same(actual, expected))
 
 
