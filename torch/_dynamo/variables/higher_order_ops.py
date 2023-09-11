@@ -118,6 +118,7 @@ def speculate_subgraph(
     graph_checkpoint,
     checkpoint,
     description,
+    source_target,
     *,
     always_restore=False,
     enable_grad=None,
@@ -141,7 +142,7 @@ def speculate_subgraph(
         )
 
     try:
-        with tx.output.new_subtracer() as tracer:
+        with tx.output.new_subtracer(source_target) as tracer:
             args = validate_args_and_maybe_create_graph_inputs(
                 sub_args, tracer, tx, manually_set_subgraph_inputs
             )
@@ -397,6 +398,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     graph_checkpoint,
                     checkpoint,
                     "cond",
+                    self.value,
                 )
             # Reraise because we want to suggest workarounds
             except Unsupported as e:
@@ -544,6 +546,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx.output.graph,
             checkpoint,
             "torch.ops.higher_order.map",
+            self.value,
         )
 
         body_nn_modules = tx.copy_graphstate().output.nn_modules
@@ -679,6 +682,7 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             "torch.func.grad",
+            self.value,
             # See NOTE [HACK: Enable autograd while tracing function]
             enable_grad=True,
         )
@@ -868,6 +872,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 graph_checkpoint,
                 checkpoint,
                 "torch.vmap",
+                self.value,
             )
 
         body_name = add_subgraph(
@@ -985,6 +990,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             graph_checkpoint,
             checkpoint,
             "the user-defined autograd.Function",
+            self.value,
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
@@ -1043,6 +1049,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             graph_checkpoint,
             checkpoint,
             description,
+            self.value,
             manually_set_subgraph_inputs=False,
         )
 

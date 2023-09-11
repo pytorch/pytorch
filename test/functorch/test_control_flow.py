@@ -1450,7 +1450,7 @@ def forward(self, arg0_1, arg1_1):
             return x * x.sin()
 
         def foo(x):
-            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
         inp = torch.randn([4, 3])
         gm, _ = torch._dynamo.export(foo)(inp)
 
@@ -1461,7 +1461,7 @@ def forward(self, arg0_1, arg1_1):
 
 
         checked_ops = {"add", "mul", "sin", "cos"}
-        checked_meta = ["source_fn", "stack_trace"]
+        checked_meta = ["source_fn_stack", "stack_trace"]
         all_source_fns = collect_meta_for_filtered_nodes(gm, checked_ops, checked_meta)
         new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
         self.assertEqual(all_source_fns, new_source_fns)

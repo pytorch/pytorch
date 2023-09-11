@@ -410,11 +410,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return self.current_tracer.remove_node(*args, **kwargs)
 
     @contextlib.contextmanager
-    def new_subtracer(self):
+    def new_subtracer(self, source_target):
         new_scope_ctx = enter_new_scope()
         try:
             new_scope_ctx.__enter__()
-            tracer = SubgraphTracer(self, parent=self.current_tracer)
+            tracer = SubgraphTracer(
+                self, parent=self.current_tracer, source_target=source_target
+            )
             self.tracers.append(tracer)
             yield tracer
         finally:
@@ -1176,7 +1178,9 @@ class SubgraphTracer(fx.Tracer):
     compiling and executing the graph.
     """
 
-    def __init__(self, output_graph, parent=None, export_root=False):
+    def __init__(
+        self, output_graph, parent=None, export_root=False, source_target=None
+    ):
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
         self.graph = torch.fx.Graph()
@@ -1215,6 +1219,17 @@ class SubgraphTracer(fx.Tracer):
         self._orig_gm_meta = None
         self._orig_gm_lineno_map = None
         self._orig_gm_firstlineno = None
+
+        # Each SubgraphTracer is associated with a source target, which indicates
+        # which operator this subgraph is attached to. We compute a source_fn_stack
+        # based on the source tareget. For the root tracer, it's set to [].
+        # This is useful for debugging and transforming the exported graph.
+        if self.parent is None:
+            self.source_fn_stack = []
+        else:
+            self.source_fn_stack = self.parent.source_fn_stack + [
+                (self.graph._target_to_str(source_target), source_target)
+            ]
 
     def create_proxy(
         self,
@@ -1325,7 +1340,7 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
-                for key in ("nn_module_stack", "source_fn", "stack_trace"):
+                for key in ("nn_module_stack", "source_fn_stack", "stack_trace"):
                     if key in meta:
                         rv.node.meta[key] = meta[key]
                 return rv
@@ -1335,15 +1350,19 @@ class SubgraphTracer(fx.Tracer):
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
         if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = (rv.node.name, target)
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                (rv.node.name, target)
+            ]
         elif kind == "call_module":
             if self.parent is not None:
                 unimplemented("Invoking an nn.Module inside HigherOrderOperator")
             # For modules we store the class
-            rv.node.meta["source_fn"] = (
-                rv.node.name,
-                rv.node.meta["nn_module_stack"][target][1],
-            )
+            rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
+                (
+                    rv.node.name,
+                    rv.node.meta["nn_module_stack"][target][1],
+                )
+            ]
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

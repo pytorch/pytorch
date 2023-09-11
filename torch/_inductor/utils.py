@@ -296,11 +296,12 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
-            if origin.op == "call_function" and "source_fn" in origin.meta:
-                if isinstance(origin.meta["source_fn"][1], str):
-                    sources.append(origin.meta["source_fn"][1])
+            if origin.op == "call_function" and "source_fn_stack" in origin.meta:
+                source_fn = origin.meta["source_fn_stack"][-1]
+                if isinstance(source_fn[1], str):
+                    sources.append(source_fn[1])
                 else:
-                    sources.append(origin.meta["source_fn"][1].__name__)
+                    sources.append(source_fn[1].__name__)
         sources = sorted(set(sources))
     elif descriptive_names == "inductor_node":
         sources = [

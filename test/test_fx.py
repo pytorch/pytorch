@@ -1778,13 +1778,13 @@ class TestFX(JitTestCase):
             if node.op == 'get_attr':
                 node.meta["nn_module_stack"] = "self"
                 node.meta["stack_trace"] = "stack_trace"
-                node.meta["source_fn"] = "source_fn"
+                node.meta["source_fn_stack"] = "source_fn_stack"
         new_gm = Transformer(gm).transform()
         for node in new_gm.graph.nodes:
             if node.op == 'get_attr':
                 self.assertEqual(node.meta["nn_module_stack"], "self")
                 self.assertEqual(node.meta["stack_trace"], "stack_trace")
-                self.assertEqual(node.meta["source_fn"], "source_fn")
+                self.assertEqual(node.meta["source_fn_stack"], "source_fn_stack")
 
 
     def test_interpreter(self):
