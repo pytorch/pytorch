@@ -544,27 +544,6 @@ c10::Device ConcretePyInterpreterVTable::device(
   return toDevice(out.ptr());
 }
 
-// Note [Tensor Subclass custom size/stride caching strategy]
-// Tensor subclasses can use __torch_dispatch__ to override size/stride calls.
-// However, this presents a problem:
-// (1) When you return a custom (maybe symbolic) size/stride
-//     from python, we need to stash this fresh vector of ints/symints
-//     somewhere so that it has the same lifetime as the tensor.
-// (2) If the subclass experiences a metadata mutation,
-//     this stashed vector is no longer valid, so we need to allocate a fresh
-//     buffer to store the new sizes the next time someone asks for them.
-//
-// We handle this in two parts:
-// (1) We expect the subclass to store an attribute, `metadata_mutation_ctr`,
-// indicating
-//     how many times the tensor went through a metadata mutation
-//     (if the subclass does not do this then they will not handle metadata
-//     mutations)
-// (2) Whenever a user asks for a size, we check to see if a value is cached on
-//     getattr(t, f'_sym_size_buffer{metadata_mutation_ctr}'),
-//     and if not, we set it directly.
-//     When we set it, we also store the current number of dimensions at
-//     getattr(t, f'_sym_size_buffer{metadata_mutation_ctr}_len')
 static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
@@ -576,35 +555,21 @@ static void set_tensor_attr_with_capsule(
   py::handle(mb_obj.value()).attr(attr_name) = capsule;
 }
 
-static c10::optional<c10::SymIntArrayRef> maybe_get_cached_sym_attr(
-    const c10::TensorImpl* tensor,
-    const char* sym_attr_name) {
-  c10::optional<PyObject*> mb_obj =
-      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  if (py::hasattr(mb_obj.value(), sym_attr_name)) {
-    auto out = py::handle(mb_obj.value()).attr(sym_attr_name);
-    void* out_pycapsule = PyCapsule_GetPointer(out.ptr(), nullptr);
-    auto out_symint = reinterpret_cast<c10::SymInt*>(out_pycapsule);
-    // See Note [Tensor Subclass custom size/stride caching strategy]
-    auto size_len_attr_name = std::string(sym_attr_name) + std::string("_len");
-    TORCH_INTERNAL_ASSERT(
-        py::hasattr(mb_obj.value(), size_len_attr_name.c_str()));
-    auto len = py::cast<int64_t>(
-        py::handle(mb_obj.value()).attr(size_len_attr_name.c_str()));
-    return c10::SymIntArrayRef(out_symint, len);
-  }
-  return c10::nullopt;
-}
-
-// See Note [Tensor Subclass custom size/stride caching strategy]
-// Given a base attribute name like _sym_size or _sym_stride,
-// This function reads off the tensor for an optional metadata_mutation_ctr
-// attr, Which indicates how many times the tensor's metadata has been mutated.
-// We return an actual attribute name, e.g. `_sym_size4`, indicating
-// the name of the attribute where the current set of sizes should be stored on
-// the tensor.
+// Note [Tensor Subclass custom size/stride caching strategy]
+// Tensor subclasses can use __torch_dispatch__ to override size/stride calls.
+// However, this presents a problem:
+// (1) When you return a custom (maybe symbolic) size/stride
+//     from python, we need to stash this fresh vector of ints/symints
+//     somewhere so that it has the same lifetime as the tensor.
+// (2) If the subclass experiences a metadata mutation,
+//     this stashed vector is no longer valid, so we need to allocate a fresh
+//     buffer to store the new sizes the next time someone asks for them.
+//
+// We handle this in the same way that `TensorImpl::sizes_default()`
+// handles its buffer: we simply reallocate the buffer whenever
+// the number of dimensions changes due to a resize.
+// Notable, we do *not* reallocate the buffer if the values changed,
+// but the number of dimensions stayed the same (e.g. `.transpose_()`).
 template <typename T>
 static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
@@ -637,12 +602,19 @@ static c10::ArrayRef<T> get_set_cached_attr(
 
   int64_t new_size = py::len(obj);
 
-  // We need to maintain full-fidelity compared to TensorImpl::sizes()
+  // It turns out that we need to maintain full-fidelity compared to TensorImpl::sizes()
   // around when our buffer gets reallocated.
   // In particular, SmallVector starts out by allocating a size-5 buffer.
   // Any resizes on the tensor that are <= 5 elements will not reallocate the
   // buffer. But once we hit a size that is > 5 elements, we will re-allocate on
   // every future resize.
+  // NOTE: Ideally, we shouldn't need to model the SmallVector optimization!
+  // But removing this optimization fails tests: there's some code in our codebase
+  // that relies on the fact that calling `.sizes()` and then resizing the tensor
+  // doesn't reallocate the underlying SmallVector.
+  // Ideally, we should kill this optimization and fix any places in our code
+  // that rely on this.
+  // Example failing test: test/functorch/test_aotdispatch.py TestPartitioning
   bool needs_resize = false;
   // We need to resize if:
   // (1) we haven't allocated our buffer at all yet
