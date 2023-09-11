@@ -6054,30 +6054,6 @@ class TestTorch(TestCase):
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
-    def test_linspace_logspace(self):
-        # Ensure the output does not require grad regardless of inputs requiring gard or not.
-        # The output of factory functions should not be part of any computational graph.
-        start = 0.0
-        end = 3.0
-
-        for step in [0, 1, 2]:
-            self.assertFalse(
-                torch.linspace(
-                    torch.tensor(start, requires_grad=True),
-                    torch.tensor(end, requires_grad=True), step
-                ).requires_grad
-            )
-            self.assertFalse(torch.linspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
-            self.assertFalse(torch.linspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
-            self.assertFalse(
-                torch.logspace(
-                    torch.tensor(start, requires_grad=True),
-                    torch.tensor(end, requires_grad=True), step
-                ).requires_grad
-            )
-            self.assertFalse(torch.logspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
-            self.assertFalse(torch.logspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
-
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
         # test args: tensor, int, sizes

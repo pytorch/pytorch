@@ -3294,41 +3294,11 @@
   dispatch:
     CompositeExplicitAutograd: linspace
 
-- func: linspace.Tensor_Tensor(Tensor start, Tensor end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: linspace
-
-- func: linspace.Tensor_Scalar(Tensor start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: linspace
-
-- func: linspace.Scalar_Tensor(Scalar start, Tensor end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: linspace
-
 - func: linspace.out(Scalar start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: linspace_out
     CUDA: linspace_cuda_out
     MPS: linspace_out_mps
-
-- func: linspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: linspace_out
-
-- func: linspace.Tensor_Scalar_out(Tensor start, Scalar end, int steps, *, Tensor(a!) out) -> Tensor(a!)
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: linspace_out
-
-- func: linspace.Scalar_Tensor_out(Scalar start, Tensor end, int steps, *, Tensor(a!) out) -> Tensor(a!)
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: linspace_out
 
 - func: log(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3510,40 +3480,10 @@
   dispatch:
     CompositeExplicitAutograd: logspace
 
-- func: logspace.Tensor_Tensor(Tensor start, Tensor end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: logspace
-
-- func: logspace.Tensor_Scalar(Tensor start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: logspace
-
-- func: logspace.Scalar_Tensor(Scalar start, Tensor end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: logspace
-
 - func: logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, Meta: logspace_out
     CUDA: logspace_cuda_out
-
-- func: logspace.Tensor_Tensor_out(Tensor start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: logspace_out
-
-- func: logspace.Tensor_Scalar_out(Tensor start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: logspace_out
-
-- func: logspace.Scalar_Tensor_out(Scalar start, Tensor end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
-  category_override: factory
-  dispatch:
-    CompositeExplicitAutograd: logspace_out
 
 # log_softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
