@@ -22,6 +22,7 @@ from torch._subclasses.functional_tensor import (
     dispatch_functionalize,
     FunctionalTensor,
     FunctionalTensorMode,
+    unset_functional_temporarily,
 )
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -320,9 +321,10 @@ def cond_functional_tensor_mode(pred, true_fn, false_fn, inputs):
     functional_true = dispatch_functionalize(true_fn)
     functional_false = dispatch_functionalize(false_fn)
 
-    cond_return = cond_op(
-        unwrapped_pred, functional_true, functional_false, unwrapped_inputs
-    )
+    with unset_functional_temporarily():
+        cond_return = cond_op(
+            unwrapped_pred, functional_true, functional_false, unwrapped_inputs
+        )
     return pytree.tree_map_only(torch.Tensor, to_fun, cond_return)
 
 

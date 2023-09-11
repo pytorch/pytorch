@@ -57,7 +57,6 @@ from .utils import (
     convert_shape_to_symint,
     developer_warning,
     get_kernel_metadata,
-    is_dynamic,
     pad_listlike,
     sympy_dot,
     sympy_product,
@@ -1711,9 +1710,7 @@ class View(GenericView):
 
             return cls(x, tuple(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x) and not isinstance(
-            x.data, ExternKernelAlloc
-        ):
+        elif is_contiguous_storage_and_layout(x):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -1874,13 +1871,12 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
-        return f"reinterpret_tensor({self.get_name()}, {size}, {stride}, {offset})"
+        return V.graph.wrapper_code.codegen_reinterpret_view(
+            self.get_name(), self.layout.size, self.layout.stride, self.layout.offset
+        )
 
 
 class SliceView(View):
@@ -2873,29 +2869,13 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
-        buffer_names = []
         for i in range(len(inputs)):
-            input_buffer = cls.realize_into(
-                inputs[i],
-                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+            kernel.data.inputs.append(
+                cls.realize_into(
+                    inputs[i],
+                    SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+                )
             )
-
-            kernel.data.inputs.append(input_buffer)
-            if isinstance(inputs[i].data, BaseView):
-                input_unwrapped = inputs[i].data.unwrap_view()
-            else:
-                input_unwrapped = inputs[i].data
-
-            if (
-                input_unwrapped.is_input_buffer()
-                and inputs[i].get_device().type == "cuda"
-                and not is_dynamic(input_buffer)
-            ):
-                buffer_names.append(input_buffer.get_name())
-
-        if len(buffer_names) > 1:
-            V.graph.register_list(buffer_names)
-
         kernel.data.name = V.graph.register_buffer(kernel.data)
         kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
 
@@ -4448,16 +4428,15 @@ class LinearUnary(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
-        x = cls.require_stride1(cls.realize_input(x))
-        w = cls.require_stride1(cls.realize_input(w))
+        x = cls.require_contiguous(cls.realize_input(x))
+        w = cls.require_contiguous(cls.realize_input(w))
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
-
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if b is not None:
-            b = cls.require_stride1(cls.realize_input(b))
+            b = cls.require_contiguous(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, None)
@@ -4516,9 +4495,9 @@ class LinearBinary(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, y, w, b, attr):
-        x = cls.require_stride1(cls.realize_input(x))
-        y = cls.require_stride1(cls.realize_input(y))
-        w = cls.require_stride1(cls.realize_input(w))
+        x = cls.require_contiguous(cls.realize_input(x))
+        y = cls.require_contiguous(cls.realize_input(y))
+        w = cls.require_contiguous(cls.realize_input(w))
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
@@ -4526,7 +4505,7 @@ class LinearBinary(ExternKernelAlloc):
         inputs = [x, y, w]
         constant_args = [attr]
         if b is not None:
-            b = cls.require_stride1(cls.realize_input(b))
+            b = cls.require_contiguous(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)
