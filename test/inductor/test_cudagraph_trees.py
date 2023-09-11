@@ -787,7 +787,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_empty_storage(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
-                return (x + x + x), torch.zeros([0], device="cuda")
+                return (x + x + x), torch.zeros([0], device="cuda"), torch.zeros([100], device="cuda")[0:0]
 
             inp = torch.rand([4], device="cuda")
             for _ in range(3):
