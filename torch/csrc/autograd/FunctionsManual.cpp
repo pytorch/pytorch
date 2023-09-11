@@ -165,7 +165,7 @@ Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   return gradient_result;
 }
 
-static Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
+static Tensor handle_r_to_c(const Tensor& self, Tensor gradient_result) {
   if (!self.is_complex() && gradient_result.is_complex()) {
     // R -> C
     return at::real(gradient_result);
@@ -189,7 +189,7 @@ Tensor restore_reduced_dims(
     target_shape[i] = 1;
   }
   int64_t j = 0;
-  for (c10::SymInt i : output.sym_sizes()) {
+  for (const c10::SymInt& i : output.sym_sizes()) {
     while (target_shape[j] > 0)
       j++;
     target_shape[j++] = i;
@@ -476,7 +476,7 @@ Tensor pow_backward(Tensor grad, const Tensor& self, const Scalar& exponent) {
 }
 
 Tensor pow_backward_self(
-    Tensor grad,
+    const Tensor& grad,
     const Tensor& self,
     const Tensor& exponent) {
   auto out = at::where(
@@ -495,10 +495,10 @@ Tensor pow_backward_self(
 // d(a^b)/db = 0 for a > 0 and b -> +0.
 // Currently, tensorflow agrees with us.
 Tensor pow_backward_exponent(
-    Tensor grad,
+    const Tensor& grad,
     const Tensor& self,
     const Tensor& exponent,
-    Tensor result) {
+    const Tensor& result) {
   Tensor cond;
   if (exponent.is_complex()) {
     auto is_real_exp =
@@ -519,11 +519,13 @@ Tensor pow_backward_exponent(
 }
 
 Tensor pow_backward_exponent(
-    Tensor grad,
+    const Tensor& grad,
     const Scalar& base,
     const Tensor& exponent,
     Tensor result) {
-  auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
+  auto grad_lambda = [](const Tensor& a, const Scalar& b) {
+    return (a * b.log()).conj();
+  };
   auto base_ = exponent.is_complex() && !base.isComplex()
       ? base.toComplexDouble()
       : base;
@@ -546,7 +548,7 @@ Tensor pow_backward_exponent(
   }
 }
 
-Tensor angle_backward(Tensor grad, const Tensor& self) {
+Tensor angle_backward(const Tensor& grad, const Tensor& self) {
   if (self.is_complex()) {
     return at::where(
         self == 0.0,
@@ -558,7 +560,7 @@ Tensor angle_backward(Tensor grad, const Tensor& self) {
   }
 }
 
-Tensor mvlgamma_backward(Tensor grad, const Tensor& self, int64_t p) {
+Tensor mvlgamma_backward(const Tensor& grad, const Tensor& self, int64_t p) {
   Tensor args = at::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
@@ -623,8 +625,8 @@ template Tensor div_tensor_self_backward(Tensor, Tensor, ScalarType);
 template Tensor div_tensor_self_backward(Tensor, Scalar, ScalarType);
 
 Tensor div_tensor_other_backward(
-    Tensor grad,
-    Tensor self,
+    const Tensor& grad,
+    const Tensor& self,
     Tensor other,
     const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
@@ -1716,7 +1718,10 @@ Tensor repeat_backward(
 }
 
 // p1m == 1 - p
-Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
+Tensor _fused_dropout_backward(
+    const Tensor& grad,
+    const Tensor& mask,
+    double p1m) {
   if (grad.requires_grad()) {
     // Use autograd-friendly backward if double backward is required
     return grad * (mask.type_as(grad) * (1. / p1m));
@@ -1742,7 +1747,7 @@ Tensor native_dropout_double_backward(
 }
 
 Tensor evenly_distribute_backward(
-    Tensor grad,
+    const Tensor& grad,
     const Tensor& input,
     const Tensor& value) {
   bool any_tensor_subclass_like =
@@ -1934,10 +1939,10 @@ Tensor cholesky_backward(const Tensor& gL, bool upper, const Tensor& L) {
 }
 
 Tensor cholesky_inverse_backward(
-    Tensor grad,
-    Tensor L,
+    const Tensor& grad,
+    const Tensor& L,
     bool upper,
-    Tensor inverse) {
+    const Tensor& inverse) {
   at::NoTF32Guard disable_tf32;
   Tensor grad_L;
   if (grad.defined()) {
@@ -2090,7 +2095,7 @@ Tensor _nested_split_with_sizes_backward(
 
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    c10::SymInt split_size,
+    const c10::SymInt& split_size,
     int64_t dim,
     c10::SymIntArrayRef sym_sizes,
     const at::TensorOptions& options) {
@@ -2111,7 +2116,7 @@ Tensor max_pool_double_backward(
   // handle non-empty inputs
   if (indices.sym_numel() != 0) {
     auto size = indices.sym_sizes().slice(0, indices.dim() - dim).vec();
-    size.push_back(-1);
+    size.emplace_back(-1);
     auto indices_view = indices.view_symint(size);
     const auto memory_format = indices.suggest_memory_format();
     return grad.contiguous(memory_format)
@@ -3029,7 +3034,7 @@ Tensor as_strided_backward(
     const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
-    optional<c10::SymInt> sym_storage_offset_) {
+    const optional<c10::SymInt>& sym_storage_offset_) {
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -3154,9 +3159,9 @@ Tensor as_strided_backward(
 }
 
 Tensor as_strided_scatter_backward(
-    Tensor grad,
+    const Tensor& grad,
     const TensorGeometry& input_geometry,
-    TensorGeometry src_geometry,
+    const TensorGeometry& src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     optional<c10::SymInt> storage_offset) {
@@ -3678,7 +3683,7 @@ Tensor linalg_eig_backward(
       return ret;
     }();
 
-    auto ret = std::move(VhgV).div_(std::move(Econj));
+    auto ret = VhgV.div_(Econj);
 
     if (gL.defined()) {
       // For CompositeCompliance, if `gL` is subclass but `ret`
@@ -4478,7 +4483,7 @@ Tensor fft_r2c_backward(
     at::IntArrayRef dim,
     int64_t normalization,
     bool onesided,
-    c10::SymInt last_dim_size) {
+    const c10::SymInt& last_dim_size) {
   if (!onesided) {
     return at::real(at::_fft_c2c(grad, dim, normalization, /*forward=*/false));
   }
@@ -4834,7 +4839,7 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
     c10::SymInt N,
-    c10::SymInt C,
+    const c10::SymInt& C,
     c10::SymInt HxW,
     int64_t group,
     double eps,
@@ -4989,7 +4994,7 @@ Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
 Tensor embedding_dense_double_backward_symint(
     const Tensor& grad,
     const Tensor& indices,
-    c10::SymInt padding_idx) {
+    const c10::SymInt& padding_idx) {
   // since first backward takes care of scaling by frequency,
   // we don't need to worry about it here.
   auto gg_weight = grad.index_select(0, indices.reshape(-1));
@@ -5093,8 +5098,8 @@ bool any_variable_defined(const variable_list& variables) {
 // Additionally, when the computation is done in-place, we exploit that the
 // first `k` coordinates of `u_full/v_full` are zeros.
 static Tensor apply_simple_transformation(
-    c10::SymInt m,
-    c10::SymInt k,
+    const c10::SymInt& m,
+    const c10::SymInt& k,
     const Tensor& u_full,
     const Tensor& v_full,
     const Tensor& t,
@@ -5829,8 +5834,8 @@ Tensor solve_jvp(
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
-    const c10::SymInt m,
-    const c10::SymInt n) {
+    const c10::SymInt& m,
+    const c10::SymInt& n) {
   if (!L_grad.defined() && !U_grad.defined()) {
     return {};
   }
@@ -5884,7 +5889,7 @@ Tensor lu_unpack_backward(
   }
 }
 
-Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
+Tensor cat_jvp(const at::ITensorListRef& tensors, int64_t dim) {
   Tensor out_fw_grad;
 
   auto materialized = tensors.materialize();
@@ -5958,7 +5963,11 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
   return out_fw_grad;
 }
 
-Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim) {
+Tensor cumprod_jvp(
+    const Tensor& self_t,
+    const Tensor& self_p,
+    const Tensor& result,
+    int dim) {
   // Generic formula when no 0. is involved
   Tensor gradient = (self_t / self_p).cumsum(dim) * result;
 
@@ -6377,7 +6386,7 @@ Tensor linalg_lu_backward(
         /*left=*/true,
         /*unitriangular=*/true);
 
-    return pivot ? P.matmul(std::move(A_grad)) : std::move(A_grad);
+    return pivot ? P.matmul(A_grad) : std::move(A_grad);
   } else if (m < n) {
     // Wide case
     // A1_grad = P L^{-H} [U1_grad + (L^H L_grad o 1_L - U_grad U^H o 1_U)
@@ -6955,7 +6964,7 @@ mkldnn_rnn_layer_differentiable_backward(
     bias_hh = at::zeros(
         {4 /* num_bias_gates of LSTM */ * hidden_size}, weight0.options());
   }
-  auto input_ = input;
+  const auto& input_ = input;
   auto hx_prev = hx_;
   auto cx_prev = cx_tmp;
 
