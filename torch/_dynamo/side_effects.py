@@ -423,6 +423,16 @@ class SideEffects:
             cg.extend_output([cg.create_load_attr("register_hook")])
             cg(hook)
             cg.extend_output(create_call_function(1, True))
+            # Let's go over how handles work.
+            # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
+            # time after that, or never. In dynamo, we track and associate a name with a handle (last_seen_name) to determine
+            # if a handle is accessed. If a handle has no last_seen_name, we just pop the produced value off the top of the
+            # stack, discarding the handle.
+            # If a handle is seen, we store it under that name. This is extremely important, because, the handle
+            # can be generated at any time after this point, and can be generated multiple times! If we were to defer
+            # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
+            # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
+            # esentially a lookup.
             if hasattr(handle, "last_seen_name") and handle.last_seen_name:
                 # register_hook stored with variable name assigned to the handle
                 cg.extend_output([cg.create_store(handle.last_seen_name)])

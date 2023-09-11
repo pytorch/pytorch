@@ -608,6 +608,10 @@ class RemovableHandleVariable(UserDefinedObjectVariable):
         self.mutable_local = mutable_local
         self.as_global = as_global
 
+    # This reconstruct is actually pretty unique - it does not construct the object from scratch.
+    # Handles always come from a register_hook call on a tensor, and so, rerunning that for the codegen of a
+    # hook would be incorrect.
+    # Instead, the invariant is that codegen has already produced the handle and stored it at a known name.
     def reconstruct(self, codegen):
         if self.as_global:
             return [codegen.create_load_global(self.as_global, False, add=True)]
