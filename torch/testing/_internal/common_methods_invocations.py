@@ -8850,6 +8850,12 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bool, torch.bfloat16, torch.half),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
     ),
+    ForeachFuncInfo(
+        'lgamma',
+        foreach_inputs_sample_func(1, False, False),
+        dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+    ),
 ]
 
 foreach_binary_op_db: List[OpInfo] = [
