@@ -125,7 +125,7 @@ file(GLOB native_ao_sparse_h
             "native/ao_sparse/quantized/cpu/*.h")
 file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
-file(GLOB native_utils_h "native/utils/*.h)
+file(GLOB native_utils_h "native/utils/*.h")
 
 file(GLOB native_cuda_cu "native/cuda/*.cu")
 file(GLOB native_cuda_cpp "native/cuda/*.cpp")
