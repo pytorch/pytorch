@@ -48,7 +48,11 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   TORCH_INTERNAL_ASSERT(tls_on_entry.has_value());
   // c10::impl::ForceDispatchKeyGuard dispatcher_guard(tls_on_entry.value());
   // StashTLSOnEntryGuard stash_guard;
-  c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset);
+  c10::impl::ExcludeDispatchKeyGuard guard(after_Python_keyset
+    .remove(c10::DispatchKey::ZeroTensor)
+    .remove(c10::DispatchKey::Conjugate)
+    .remove(c10::DispatchKey::Negative)
+  );
 
 
   // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch

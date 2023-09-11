@@ -7,14 +7,6 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
-      ios-platform:
-        required: true
-        type: string
-        description: Which iOS platform to build for.
-      ios-arch:
-        required: true
-        type: string
-        description: Which iOS arch to build for.
       sync-tag:
         required: false
         type: string
@@ -31,8 +23,6 @@ on:
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-  IOS_PLATFORM: ${{ inputs.ios-platform }}
-  IOS_ARCH: ${{ inputs.ios-arch }}
 
 jobs:
   filter:
@@ -63,6 +53,16 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    env:
+      IOS_PLATFORM: ${{ matrix.ios_platform }}
+      IOS_ARCH: ${{ matrix.ios_arch }}
+      BUILD_LITE_INTERPRETER: ${{ matrix.use_lite_interpreter }}
+      USE_PYTORCH_METAL: ${{ matrix.use_metal }}
+      USE_COREML_DELEGATE: ${{ matrix.use_coreml }}
+      CUSTOM_OP_LIST: ${{ matrix.use_custom_op_list }}
+      # TODO: Bump it to 2.2.0 after cherry pick this or figure out a better way
+      # to get this version instead of hard coding it here
+      PYTORCH_VERSION: 2.1.0
     timeout-minutes: 240
     steps:
       # [see note: pytorch repo ref]
@@ -70,26 +70,13 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
       - name: Populate CI build options
+        shell: bash
         run: |
-          # Most builds use the lite interpreter, if certain builds shouldn't
-          # build the lite interpreter this env variable should get over-written
-          # in the following case statement
-          echo "BUILD_LITE_INTERPRETER=1" >> "${GITHUB_ENV}"
+          set -ex
 
-          case ${BUILD_ENVIRONMENT} in
-            *metal*)
-              echo "USE_PYTORCH_METAL=1" >> "${GITHUB_ENV}"
-              ;;
-            *full_jit*)
-              echo "BUILD_LITE_INTERPRETER=0" >> "${GITHUB_ENV}"
-              ;;
-            *custom*)
-              echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/mobilenetv2.yaml" >> "${GITHUB_ENV}"
-              ;;
-            *coreml*)
-              echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
-              ;;
-          esac
+          if [ -n "${CUSTOM_OP_LIST:-}" ]; then
+            echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/${CUSTOM_OP_LIST}" >> "${GITHUB_ENV}"
+          fi
 
       - name: Install brew dependencies
         uses: nick-fields/retry@v2.8.2
@@ -116,54 +103,67 @@ jobs:
           retry_wait_seconds: 90
           command: |
             set -x
-            cd ios/TestApp
-            # install fastlane
+
+            pushd ios/TestApp
+            # Install fastlane
             sudo gem install bundler && bundle install
             bundle update fastlane
+            popd
 
-      - name: Build PyTorch Mobile Runtime
+      - name: Build PyTorch mobile runtime
+        shell: bash
         run: |
+          set -eux
           # shellcheck disable=SC1091
           export TCLLIBPATH="/usr/local/lib"
-          python -VV
           ${CONDA_RUN} scripts/build_ios.sh
 
       - name: Build TestApp
-        if: inputs.ios-platform == 'SIMULATOR'
+        if: matrix.ios_platform == 'SIMULATOR'
         timeout-minutes: 15
         run: |
-          # run the ruby build script
+          # Run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
             echo 'Error: xcodebuild is not installed.'
             exit 1
           fi
           ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
-      - name: Run Simulator Tests
-        if: inputs.ios-platform == 'SIMULATOR'
+      - name: Run simulator tests
+        if: matrix.ios_platform == 'SIMULATOR'
+        shell: bash
         run: |
+          set -eux
           # shellcheck disable=SC1091
-          # use the pytorch nightly build to generate models
-          ${CONDA_RUN} pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
-          # generate models for differnet backends
-          cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+          # Use the pytorch nightly build to generate models
+          ${CONDA_RUN} pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
+
+          # Generate models for differnet backends
+          pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
+          # NB: Both of the following scripts only export models with lite interpreter
           if [ "${USE_COREML_DELEGATE}" == 1 ]; then
             ${CONDA_RUN} python coreml_backend.py
           else
-            cd "${GITHUB_WORKSPACE}"
+            pushd "${GITHUB_WORKSPACE}"
             ${CONDA_RUN} python test/mobile/model_test/gen_test_model.py ios-test
+            popd
           fi
-          cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
+
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             echo "Setting up the TestApp for LiteInterpreter"
             ruby setup.rb --lite 1
           else
+            # Generate some models for JIT without lite interpreter
+            ${CONDA_RUN} python trace_model.py
+
             echo "Setting up the TestApp for Full JIT"
             ruby setup.rb
           fi
-          cd "${GITHUB_WORKSPACE}/ios/TestApp"
-          # instruments -s -devices
+          popd
+
+          pushd "${GITHUB_WORKSPACE}/ios/TestApp"
+          # Instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
               bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
@@ -173,9 +173,282 @@ jobs:
           else
             bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
+          popd
 
-      - name: Dump Simulator Tests On a Failure
-        if: failure() && inputs.ios-platform == 'SIMULATOR'
+      - name: Dump simulator tests on failure
+        if: failure() && matrix.ios_platform == 'SIMULATOR'
         run: |
           echo "Simulator Tests Logs:"
           cat /Users/runner/Library/Logs/scan/*.log
+
+      - name: Prepare the build artifacts for upload
+        shell: bash
+        run: |
+          set -eux
+
+          # The structure of the folder is as follows:
+          #
+          # RUNNER_TEMP/
+          # └── IOS_ARCH/
+          #     ├── LICENSE
+          #     ├── install
+          #     │   ├── include
+          #     │   │   └── headers
+          #     │   └── lib
+          #     │       ├── libXNNPACK.a
+          #     │       ├── libc10.a
+          #     │       ├── libclog.a
+          #     │       ├── libcpuinfo.a
+          #     │       ├── libeigen_blas.a
+          #     │       ├── libpthreadpool.a
+          #     │       ├── libpytorch_qnnpack.a
+          #     │       ├── libtorch.a
+          #     │       └── libtorch_cpu.a
+          #     ├── src
+          #     │   └── LibTorch-Lite.h
+          #     └── version.txt
+          SETUP_DIR="${RUNNER_TEMP}/${IOS_ARCH}"
+          mkdir -p "${SETUP_DIR}/src"
+
+          cp -R "${GITHUB_WORKSPACE}/build_ios/install" "${SETUP_DIR}"
+          # Copy the umbrella header and license
+          if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+            cp "${GITHUB_WORKSPACE}/ios/LibTorch-Lite.h" "${SETUP_DIR}/src"
+          else
+            cp "${GITHUB_WORKSPACE}/ios/LibTorch.h" "${SETUP_DIR}/src"
+          fi
+
+          # Copy license and version
+          cp "${GITHUB_WORKSPACE}/LICENSE" "${SETUP_DIR}"
+          echo "${PYTORCH_VERSION}" > "${SETUP_DIR}"/version.txt
+
+          # Save the podspec for the upload job later
+          if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
+            DATE=$(date -u +%Y%m%d)
+            cp "${GITHUB_WORKSPACE}"/ios/LibTorch-Lite-Nightly.podspec.template "${SETUP_DIR}"/LibTorch-Lite-Nightly.podspec
+            sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${PYTORCH_VERSION}.${DATE}/g" "${SETUP_DIR}"/LibTorch-Lite-Nightly.podspec
+
+            cp "${GITHUB_WORKSPACE}"/ios/LibTorch-Lite.podspec.template "${SETUP_DIR}"/LibTorch-Lite.podspec
+            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" "${SETUP_DIR}"/LibTorch-Lite.podspec
+          else
+            # NB: There is no nightly build without lite interpreter atm
+            cp "${GITHUB_WORKSPACE}"/ios/LibTorch.podspec.template "${SETUP_DIR}"/LibTorch.podspec
+            sed -i '' -e "s/IOS_BUILD_VERSION/${PYTORCH_VERSION}/g" "${SETUP_DIR}"/LibTorch.podspec
+          fi
+
+          pushd "${SETUP_DIR}"
+          # NB: It's important to zip all the files before uploading because the GHA will upload
+          # all files sequentially which is both slow and has too many requests. More info is at
+          # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
+          zip -r "${IOS_ARCH}.zip" install src version.txt LICENSE ./*.podspec
+          popd
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/${{ matrix.ios_arch }}/${{ matrix.ios_arch }}.zip
+
+  upload-ios-artifacts:
+    # NB: this job run on GitHub MacOS ephemeral runner so that it can use lipo
+    # to create the fat iOS binaries for both x86_64 and arm64
+    runs-on: macos-12
+    needs: build
+    # NB: Only upload release build, if we need it, we could also turn on nightly here
+    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    steps:
+      - uses: actions/checkout@v3
+
+      # For awscli S3 upload
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: pip
+
+      # For cocoapods pod upload
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: pytorch-ios-build-artifacts-arm64
+
+      - name: Download x86_64 artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: pytorch-ios-build-artifacts-x86_64
+
+      - name: Unzip arm64 and x86_64 artifacts
+        shell: bash
+        run: |
+          set -eux
+
+          for ARCH in "arm64" "x86_64"; do
+            TMP_DIR="${RUNNER_TEMP}/${ARCH}"
+            mkdir -p "${TMP_DIR}"
+
+            cp "${ARCH}.zip" "${TMP_DIR}"
+
+            pushd "${TMP_DIR}"
+            unzip -o "${ARCH}.zip"
+            popd
+          done
+
+      - name: Prepare the artifact
+        env:
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        working-directory: ${{ runner.temp }}/arm64
+        run: |
+          set -eux
+
+          DEST_DIR="${RUNNER_TEMP}"/ios
+          echo "DEST_DIR=${DEST_DIR}" >> "$GITHUB_ENV"
+
+          # Prepare all the sub directories
+          mkdir -p "${DEST_DIR}"/install/lib
+
+          # Copy header and share files, arm64 or x86_64 both work
+          cp -R install/include "${DEST_DIR}"/install
+          cp -R install/share "${DEST_DIR}"/install
+          # The last dash is important to copy only files under src
+          cp -R src "${DEST_DIR}"
+          cp LICENSE "${DEST_DIR}"
+
+          if [ "${IS_NIGHTLY}" == true ]; then
+            PYTORCH_VERSION=$(cat version.txt)
+            DATE=$(date -u +%Y%m%d)
+            echo "${PYTORCH_VERSION}.${DATE}" > "${DEST_DIR}"/version.txt
+          else
+            cp version.txt "${DEST_DIR}"
+          fi
+          PYTORCH_VERSION=$(cat "${DEST_DIR}"/version.txt)
+          echo "PYTORCH_VERSION=${PYTORCH_VERSION}" >> "$GITHUB_ENV"
+
+          pushd install/lib
+          # shellcheck disable=SC2207
+          LIBRARIES=($(ls ./*.a))
+          popd
+
+          for LIB in "${LIBRARIES[@]}"; do
+            FROM_LIBS=("${RUNNER_TEMP}"/arm64/install/lib/"${LIB}" "${RUNNER_TEMP}"/x86_64/install/lib/"${LIB}")
+            # Create a fat binary for both arm64 and x86_64
+            lipo -create "${FROM_LIBS[@]}" -o "${DEST_DIR}"/install/lib/"${LIB}"
+            # Print the info
+            lipo -i "${DEST_DIR}"/install/lib/"${LIB}"
+          done
+
+          BUILD_LITE_INTERPRETER=1
+          if [ -f "${RUNNER_TEMP}"/arm64/LibTorch.podspec ]; then
+            # If LibTorch.podspec is used instead of LibTorch-Lite.podspec, the artifact is built
+            # without lite interpreter
+            BUILD_LITE_INTERPRETER=0
+          fi
+          echo "BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}" >> "$GITHUB_ENV"
+
+      - name: Prepare the podspec
+        env:
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        working-directory: ${{ env.DEST_DIR }}
+        run: |
+          set -eux
+
+          ARTIFACT_NAME=libtorch
+          SPEC_NAME=LibTorch
+
+          if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME}_lite_ios"
+            SPEC_NAME="${SPEC_NAME}-Lite"
+          else
+            ARTIFACT_NAME="${ARTIFACT_NAME}_ios"
+          fi
+
+          if [ "${IS_NIGHTLY}" == true ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME}_nightly_${PYTORCH_VERSION}.zip"
+            SPEC_NAME="${SPEC_NAME}-Nightly"
+          else
+            ARTIFACT_NAME="${ARTIFACT_NAME}_${PYTORCH_VERSION}.zip"
+          fi
+
+          SPEC_NAME_WITH_VERSION="${SPEC_NAME}-${PYTORCH_VERSION}.podspec"
+          SPEC_NAME="${SPEC_NAME}.podspec"
+
+          # Also copy the spec file
+          cp "${RUNNER_TEMP}"/arm64/"${SPEC_NAME}" "${SPEC_NAME_WITH_VERSION}"
+
+          # NB: It's important to zip all the files before uploading because the GHA will upload
+          # all files sequentially which is both slow and has too many requests. More info is at
+          # https://github.com/actions/upload-artifact#too-many-uploads-resulting-in-429-responses
+          zip -r "${ARTIFACT_NAME}" install src version.txt LICENSE
+
+          {
+            echo "ARTIFACT_NAME=${ARTIFACT_NAME}"
+            echo "SPEC_NAME_WITH_VERSION=${SPEC_NAME_WITH_VERSION}"
+            echo "SPEC_NAME=${SPEC_NAME}"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios-artifacts
+          if-no-files-found: error
+          path: ${{ env.DEST_DIR }}/${{ env.ARTIFACT_NAME }}
+
+      - uses: actions/upload-artifact@v3
+        with:
+          name: pytorch-ios-podspec
+          if-no-files-found: error
+          path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
+
+      - name: Set DRY_RUN
+        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Upload the artifact to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
+        shell: bash
+        working-directory: ${{ env.DEST_DIR }}
+        run: |
+          set -eux
+
+          pip install -q awscli==1.29.40
+
+          DRY_RUN=${DRY_RUN:-enabled}
+          AWS_S3_CP="aws s3 cp --dryrun"
+          if [ "${DRY_RUN}" == "disabled" ]; then
+            AWS_S3_CP="aws s3 cp"
+          fi
+
+          if [ "${IS_NIGHTLY}" == true ]; then
+            BUCKET_NAME="ossci-ios-build"
+          else
+            BUCKET_NAME="ossci-ios"
+          fi
+
+          ${AWS_S3_CP} "${ARTIFACT_NAME}" "s3://${BUCKET_NAME}/" --acl public-read
+          ${AWS_S3_CP} "${SPEC_NAME_WITH_VERSION}" "s3://${BUCKET_NAME}/" --acl public-read
+
+      - name: Upload the artifact to cocoapods (nightly only)
+        env:
+          # We need to set this secret to upload to cocoapods. However, we might want
+          # to NOT set this for PROD release so that we can upload the artifacts manually
+          COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN || '' }}
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
+        shell: bash
+        working-directory: ${{ runner.temp }}/arm64
+        run: |
+          set -eux
+
+          gem install cocoapods
+
+          pod trunk me
+          # Upload the spec to cocoapods
+          pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation "${SPEC_NAME}"

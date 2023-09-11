@@ -665,7 +665,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
       new_buffer_size = 5;
       set_to_smallvector = true;
     }
-    T* ptr = new T[new_size];
+    T* ptr = new T[new_buffer_size];
     auto capsule =
         py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<T*>(p); });
     int64_t idx = 0;
