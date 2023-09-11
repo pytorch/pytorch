@@ -947,7 +947,14 @@ class LiteScriptModule:
     def forward(self, *input) -> List[str]: ...
     def run_method(self, method_name: str, *input): ...
 
-class ScriptFunction(Generic[P,ReturnVal]):
+# NOTE: switch to collections.abc.Callable in python 3.9
+import sys
+if sys.version_info >= (3, 9):
+    from collections.abc import Callable as CallableGeneric
+else:
+    from typing import Callable as CallableGeneric
+
+class ScriptFunction(CallableGeneric[P, ReturnVal]):
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnVal: ...
     def save(self, filename: str, _extra_files: Dict[str, bytes]) -> None: ...
     def save_to_buffer(self, _extra_files: Dict[str, bytes]) -> bytes: ...
@@ -960,8 +967,9 @@ class ScriptFunction(Generic[P,ReturnVal]):
     @property
     def qualified_name(self) -> str: ...
 
-class ScriptMethod:
+class ScriptMethod(CallableGeneric[P, ReturnVal]):
     graph: Graph
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnVal: ...
     @property
     def owner(self) -> ScriptModule: ...
     @property

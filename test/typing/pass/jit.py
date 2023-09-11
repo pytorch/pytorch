@@ -25,11 +25,17 @@ assert_type(jit.script({1: 1}), ScriptDict)
 assert_type(jit.script([0]), ScriptList)
 
 # ScriptModule
-assert_type(jit.script(nn.Linear(2, 2)), jit.RecursiveScriptModule)
+scripted_module = jit.script(nn.Linear(2, 2))
+assert_type(scripted_module, jit.RecursiveScriptModule)
+
+# ScriptMethod
+# NOTE: Generic usage only possible with Python 3.9
+forward: ScriptMethod = scripted_module.forward
 
 # ScripFunction
 # NOTE: can't use assert_type because of parameter names
-relu: ScriptFunction[[Tensor, bool], Tensor] = jit.script(nn.functional.relu)
+# NOTE: Generic usage only possible with Python 3.9
+relu: ScriptFunction = jit.script(nn.functional.relu)
 
 # can't script nn.Module class
 assert_never(jit.script(nn.Linear))
