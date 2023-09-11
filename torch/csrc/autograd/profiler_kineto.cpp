@@ -64,7 +64,6 @@ inline int64_t getTimeUs() {
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
-using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
@@ -666,7 +665,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 KinetoEvent::KinetoEvent(
-    std::shared_ptr<const torch::profiler::impl::Result> result,
+    const std::shared_ptr<const torch::profiler::impl::Result>& result,
     const bool verbose)
     : result_{result} {
   TORCH_INTERNAL_ASSERT(result != nullptr);

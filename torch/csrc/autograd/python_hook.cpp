@@ -171,7 +171,7 @@ auto PyFunctionPostHook::operator()(
 }
 
 void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -182,7 +182,7 @@ void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
 }
 
 void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -191,7 +191,7 @@ void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
 }
 
 void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);

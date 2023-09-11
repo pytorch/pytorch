@@ -127,20 +127,20 @@ at::Tensor pow_backward(
     const at::Tensor& self,
     const at::Scalar& exponent_);
 at::Tensor pow_backward_self(
-    at::Tensor grad,
+    const at::Tensor& grad,
     const at::Tensor& self,
     const at::Tensor& exponent);
 at::Tensor pow_backward_exponent(
-    at::Tensor grad,
+    const at::Tensor& grad,
     const at::Tensor& self,
     const at::Tensor& exponent,
-    at::Tensor result);
+    const at::Tensor& result);
 at::Tensor pow_backward_exponent(
-    at::Tensor grad,
+    const at::Tensor& grad,
     const at::Scalar& base,
     const at::Tensor& exponent,
     at::Tensor result);
-at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
+at::Tensor angle_backward(const at::Tensor& grad, const at::Tensor& self);
 template <typename T>
 at::Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st);
 template <typename T>
@@ -153,12 +153,12 @@ at::Tensor div_tensor_self_backward(
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(
-    Tensor grad,
-    Tensor self,
+    const Tensor& grad,
+    const Tensor& self,
     Tensor other,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor mvlgamma_backward(
-    at::Tensor grad,
+    const at::Tensor& grad,
     const at::Tensor& self,
     int64_t p);
 at::Tensor permute_backwards(const at::Tensor& grad, at::IntArrayRef fwd_dims);
@@ -337,8 +337,8 @@ at::Tensor repeat_backward(
     at::SymIntArrayRef repeats,
     at::SymIntArrayRef input_shape);
 at::Tensor _fused_dropout_backward(
-    at::Tensor grad,
-    at::Tensor mask,
+    const at::Tensor& grad,
+    const at::Tensor& mask,
     double p1m);
 at::Tensor infinitely_differentiable_native_dropout_backward(
     const at::Tensor& grad,
@@ -350,7 +350,7 @@ at::Tensor native_dropout_double_backward(
     const at::Tensor& mask,
     double scale);
 at::Tensor evenly_distribute_backward(
-    at::Tensor grad,
+    const at::Tensor& grad,
     const at::Tensor& input,
     const at::Tensor& value);
 Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
@@ -409,10 +409,10 @@ at::Tensor cholesky_jvp(
     const at::Tensor& L,
     bool upper);
 at::Tensor cholesky_inverse_backward(
-    at::Tensor grad,
-    at::Tensor L,
+    const at::Tensor& grad,
+    const at::Tensor& L,
     bool upper,
-    at::Tensor inverse);
+    const at::Tensor& inverse);
 at::Tensor cholesky_inverse_jvp(
     const at::Tensor& F,
     const at::Tensor& dF,
@@ -433,7 +433,7 @@ at::Tensor _nested_split_with_sizes_backward(
     const Tensor& self);
 at::Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    c10::SymInt split_size,
+    const c10::SymInt& split_size,
     int64_t dim,
     c10::SymIntArrayRef sizes,
     const at::TensorOptions& options);
@@ -569,7 +569,7 @@ at::Tensor sparse_constructor_values_backward(
 at::Tensor embedding_dense_double_backward_symint(
     const at::Tensor& grad,
     const at::Tensor& indices,
-    c10::SymInt padding_idx);
+    const c10::SymInt& padding_idx);
 at::Tensor index_backward(
     at::Tensor zeros_like_self,
     const torch::List<c10::optional<Tensor>>& indices,
@@ -720,7 +720,7 @@ Tensor fft_r2c_backward(
     at::IntArrayRef dim,
     int64_t normalization,
     bool onesided,
-    c10::SymInt last_dim_size);
+    const c10::SymInt& last_dim_size);
 Tensor fft_c2r_backward(
     const Tensor& grad,
     IntArrayRef dim,
@@ -748,7 +748,7 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
     c10::SymInt N,
-    c10::SymInt C,
+    const c10::SymInt& C,
     c10::SymInt HxW,
     int64_t group,
     double eps,
@@ -763,11 +763,11 @@ Tensor as_strided_backward(
     const TensorGeometry& input_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset_);
+    const optional<c10::SymInt>& storage_offset_);
 Tensor as_strided_scatter_backward(
-    Tensor grad,
+    const Tensor& grad,
     const TensorGeometry& input_geometry,
-    TensorGeometry src_geometry,
+    const TensorGeometry& src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     optional<c10::SymInt> storage_offset);
@@ -860,8 +860,8 @@ Tensor linalg_solve_jvp(
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
-    const c10::SymInt m,
-    const c10::SymInt n);
+    const c10::SymInt& m,
+    const c10::SymInt& n);
 
 Tensor linalg_det_backward(
     const Tensor& grad,
@@ -988,10 +988,14 @@ Tensor convolution_backward_jvp_grad_bias(
     const Tensor& grad_out_t,
     const Tensor& grad_bias);
 
-Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim);
+Tensor cat_jvp(const at::ITensorListRef& tensors, int64_t dim);
 Tensor block_diag_jvp(at::TensorList tensors);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
-Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
+Tensor cumprod_jvp(
+    const Tensor& self_t,
+    const Tensor& self_p,
+    const Tensor& result,
+    int dim);
 Tensor gather_with_keepdimed_indices(
     const Tensor& input,
     int64_t dim,

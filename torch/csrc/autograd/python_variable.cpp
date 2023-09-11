@@ -627,7 +627,7 @@ static PyObject* THPVariable_make_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(data),
+      data,
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -722,7 +722,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
         0,
         at::DataPtr{nullptr, r.device(7)},
         /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizeable=*/true};
+        /*resizable=*/true};
 
     auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
     if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
@@ -758,7 +758,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(tensor),
+      tensor,
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }

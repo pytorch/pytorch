@@ -222,8 +222,8 @@ int NodeTask::getReentrantDepth() const {
 }
 
 CheckpointValidGuard::CheckpointValidGuard(
-    const std::shared_ptr<const GraphTask>& graph_task) {
-  prev_checkpoint_valid_state = checkpoint_valid;
+    const std::shared_ptr<const GraphTask>& graph_task)
+    : prev_checkpoint_valid_state(checkpoint_valid) {
   checkpoint_valid =
       graph_task->can_checkpoint() && prev_checkpoint_valid_state;
 }
@@ -383,8 +383,8 @@ void Engine::thread_init(
   }
 }
 
-GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
-  last_graph_task_ = std::move(current_graph_task);
+GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task)
+    : last_graph_task_(std::move(current_graph_task)) {
   current_graph_task = std::move(graph_task);
 }
 GraphTaskGuard::~GraphTaskGuard() {
@@ -671,7 +671,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
-    future_result_->markCompleted(std::move(vars));
+    future_result_->markCompleted(vars);
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
   }
