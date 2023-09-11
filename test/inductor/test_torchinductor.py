@@ -610,7 +610,7 @@ class CommonTemplate:
             return (x + x).to(torch.int16)
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([128], dtype=torch.uint8)
-        x = torch.tensor(([64]*20, dtype=torch.uint8)
+        x = torch.tensor(([64]*20), dtype=torch.uint8)
 
 
 
