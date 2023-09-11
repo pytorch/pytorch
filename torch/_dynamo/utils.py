@@ -27,7 +27,10 @@ from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, Optional, Tuple, Union
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 import torch._logging
 import torch._numpy as tnp
@@ -37,14 +40,19 @@ from . import config
 
 
 # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
-NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
+if np:
+    NP_SUPPORTED_MODULES = (np, np.fft, np.linalg, np.random)
 
-NP_TO_TNP_MODULE = {
-    np: tnp,
-    np.fft: tnp.fft,
-    np.linalg: tnp.linalg,
-    np.random: tnp.random,
-}
+    NP_TO_TNP_MODULE = {
+        np: tnp,
+        np.fft: tnp.fft,
+        np.linalg: tnp.linalg,
+        np.random: tnp.random,
+    }
+else:
+    NP_SUPPORTED_MODULES = {}
+
+    NP_TO_TNP_MODULE = {}
 
 import importlib
 
@@ -53,6 +61,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo_utils import DYNAMO_FORCE_INLINE
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
@@ -82,6 +91,13 @@ def tabulate(rows, headers):
         return "\n".join(
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
+
+
+def should_force_inline(func):
+    from .variables.functions import NestedUserFunctionVariable, UserFunctionVariable
+
+    assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
+    return func.get_code() in DYNAMO_FORCE_INLINE
 
 
 def dynamo_profiled(func):
@@ -401,11 +417,20 @@ def is_typing(value):
         return isinstance(value, typing._GenericAlias)
     else:
         return isinstance(
-            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+            # `_SpecialForm`` is the parent class of `Optional`
+            value,
+            (
+                typing._SpecialGenericAlias,
+                typing._UnionGenericAlias,
+                typing._SpecialForm,
+            ),
         )
 
 
 def is_numpy_int_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -422,6 +447,9 @@ def is_numpy_int_type(value):
 
 
 def is_numpy_float_type(value):
+    if not np:
+        return False
+
     return istype(
         value,
         (
@@ -433,6 +461,9 @@ def is_numpy_float_type(value):
 
 
 def is_numpy_ndarray(value):
+    if not np:
+        return False
+
     return istype(value, np.ndarray)
 
 
@@ -488,6 +519,7 @@ class CompilationMetrics:
     co_filename: str
     co_firstlineno: int
     cache_size: int
+    accumulated_cache_size: int
     guard_count: Optional[int]
     graph_op_count: Optional[int]
     graph_node_count: Optional[int]
@@ -539,7 +571,7 @@ def clone_tensor(x):
 def clone_input(x, *, dtype=None):
     """copy while preserving strides"""
     # TODO: this is questionable
-    if isinstance(x, torch._subclasses.FakeTensor):
+    if is_fake(x):
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
@@ -975,9 +1007,14 @@ def same(
                 log_error("Accuracy failed for key name %s", k)
                 return False
         return True
-    elif isinstance(ref, torch.Tensor):
+    elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
+
+        def to_tensor(t):
+            return t if isinstance(t, torch.Tensor) else torch.tensor(t)
+
+        ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
 
         if ref.is_sparse:
             assert res.is_sparse
@@ -1025,6 +1062,12 @@ def same(
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
+                # ref unable to produce this with stable numerics in this precision, ignore
+                if math.isnan(ref_error):
+                    log.warning(
+                        "Found nan in reference. Consider running in higher precision."
+                    )
+
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
@@ -1061,13 +1104,6 @@ def same(
         r = ref == res
         if not r:
             log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
-        return r
-    elif isinstance(ref, float):
-        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
-        if not r:
-            log_error(
-                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
-            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality and not (
@@ -1346,7 +1382,14 @@ def get_fake_value(node, tx):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            unimplemented("guard on data-dependent symbolic int/float")
+            raise UserError(
+                UserErrorType.CONSTRAIN_VIOLATION,
+                "Tried to use data-dependent value in the subsequent computation. "
+                "This can happen when we encounter unbounded dynamic value that is unknown during tracing time."
+                "You will need to explicitly give hint to the compiler. Please take a look at "
+                "constrain_as_value OR constrain_as_size APIs",
+                case_name="constrain_as_size_example",
+            )
         elif isinstance(cause, torch.utils._sympy.value_ranges.ValueRangeError):
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, e.args[0]) from e
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
@@ -1368,6 +1411,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise an AssertionError.
     """
     op = node.op
+
     try:
         if op == "call_function":
             return node.target(*args, **kwargs)
@@ -1381,6 +1425,12 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
+    except NotImplementedError as e:
+        # NB: mimic how wrap_fake_exception does it
+        from .exc import unimplemented
+
+        raise unimplemented(f"running {op} {node.target}(*{args}, **{kwargs})") from e
+
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
         raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
@@ -1700,6 +1750,26 @@ class numpy_method_wrapper:
             obj = tnp.ndarray(obj)
         method_callable = getattr(obj, self.method)
         out = method_callable(*args[1:], **kwargs)
+        return numpy_to_tensor(out)
+
+
+class numpy_operator_wrapper:
+    """Implements dunder methods for tnp.ndarray via functions from the operator library"""
+
+    def __init__(self, op: str):
+        self.op = op
+        self.__name__ = f"wrapped_{op.__name__}"
+
+    def __repr__(self):
+        return f"<Wrapped operator <original {self.__name__}>>"
+
+    def __call__(self, *args, **kwargs):
+        assert not kwargs
+
+        args = (
+            tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
+        )
+        out = self.op(*args)
         return numpy_to_tensor(out)
 
 

@@ -5,7 +5,6 @@ import re
 import sys
 import warnings
 
-# from numpy.core._multiarray_tests import array_indexing  # numpy implements this in C
 from itertools import product
 
 import pytest
@@ -18,11 +17,6 @@ from torch._numpy.testing import (
     assert_equal,
     assert_warns,
     HAS_REFCOUNT,
-)
-
-
-xfail_neg_step = pytest.mark.xfail(
-    reason="torch does not support indexing with negative slice steps"
 )
 
 
@@ -261,7 +255,6 @@ class TestIndexing:
         assert_equal(a[b], [1, 3])
         assert_equal(a[None, b], [[1, 3]])
 
-    @xfail_neg_step
     def test_reverse_strides_and_subspace_bufferinit(self):
         # This tests that the strides are not reversed for simple and
         # subspace fancy indexing.
@@ -279,7 +272,6 @@ class TestIndexing:
         a[b, :] = c
         assert_equal(a[0], [0, 1])
 
-    @xfail_neg_step
     def test_reversed_strides_result_allocation(self):
         # Test a bug when calculating the output strides for a result array
         # when the subspace size was 1 (and test other cases as well)
@@ -436,7 +428,6 @@ class TestIndexing:
         zind = np.zeros(4, dtype=np.intp)
         assert_array_equal(x2[ind, zind], x2[ind.copy(), zind])
 
-    @xfail_neg_step
     def test_indexing_array_negative_strides(self):
         # From gh-8264,
         # core dumps if negative strides are used in iteration
@@ -544,7 +535,6 @@ class TestBroadcastedAssignments:
 
         assert_((a[:3, :3] == [2, 3, 4]).all())
 
-    @xfail_neg_step
     def test_broadcast_subspace(self):
         a = np.zeros((100, 100))
         v = np.arange(100)[:, None]
@@ -709,7 +699,7 @@ class TestMultiIndexingAutomated:
                 in_indices[i] = indx
             elif indx.dtype.kind != "b" and indx.dtype.kind != "i":
                 raise IndexError(
-                    "arrays used as indices must be of " "integer (or boolean) type"
+                    "arrays used as indices must be of integer (or boolean) type"
                 )
             if indx.ndim != 0:
                 no_copy = False
