@@ -27,7 +27,7 @@ runs:
 
         if [[ -f "${file_name}" ]]; then
           while true; do
-            aws s3 cp "${file_name}" "s3://ossci-raw-job-status/log/${JOB_ID}" --content-type "text/plain"
+            aws s3 cp "${file_name}" "s3://ossci-raw-job-status/log/catexperiment/${JOB_ID}" --content-type "text/plain"
             sleep 60
           done &
         fi
