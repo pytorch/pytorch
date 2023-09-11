@@ -33,10 +33,6 @@
 #define AOTI_TORCH_NOINLINE
 #endif
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 struct AOTITensorOpaque {};
 using AOTITensorHandle = AOTITensorOpaque*;
 
@@ -50,6 +46,10 @@ enum AOTITorchError : int32_t {
   Success = 0,
   Failure = 1,
 };
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // WARNING: Change the following signatures will break ABI compatibility
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_device_type_cpu();
