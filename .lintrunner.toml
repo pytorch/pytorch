@@ -1281,7 +1281,6 @@ exclude_patterns = [
     'test/jit/test_ignorable_args.py',
     'test/jit/test_ignore_context_manager.py',
     'test/jit/test_isinstance.py',
-    'test/jit/test_ivalue.py',
     'test/jit/test_jit_utils.py',
     'test/jit/test_list_dict.py',
     'test/jit/test_logging.py',
