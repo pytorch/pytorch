@@ -73,6 +73,7 @@ def define_c10_ovrsource(name, is_mobile):
         }),
         exported_deps = [
             ":ovrsource_c10_cmake_macros.h",
+            "//third-party/cpuinfo:cpuinfo",
             "//arvr/third-party/gflags:gflags",
             "//third-party/glog:glog",
             "//third-party/fmt:fmt",
