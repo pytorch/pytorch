@@ -1,6 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <c10/util/flat_hash_map.h>
+#include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
 #include <sstream>
@@ -422,6 +424,69 @@ static PyMethodDef TensorGuards_methods[] = {
 
 static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
+struct GlobalStateGuard {
+  PyObject_HEAD;
+
+  inline void init() {
+    auto& ctx = at::globalContext();
+    _grad_mode = at::GradMode::is_enabled();
+    _torch_function = torch::torch_function_enabled();
+    _deterministic_algorithms = ctx.deterministicAlgorithms();
+    _allow_tf32 = ctx.allowTF32CuBLAS();
+    _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
+    _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
+    _num_threads = at::get_num_threads();
+  }
+
+  inline bool check() {
+    auto& ctx = at::globalContext();
+    return (
+        _grad_mode == at::GradMode::is_enabled() &&
+        _torch_function == torch::torch_function_enabled() &&
+        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+        _allow_tf32 == ctx.allowTF32CuBLAS() &&
+        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+        _num_threads == at::get_num_threads());
+  }
+
+  bool _grad_mode;
+  bool _torch_function;
+  bool _deterministic_algorithms;
+  bool _allow_tf32;
+  bool _allow_fp16_reduce;
+  bool _allow_bf16_reduce;
+  int _num_threads;
+  // TODO(jansel): we should guard on more state as inductor starts using it
+};
+
+int GlobalStateGuard_init(
+    GlobalStateGuard* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  self->init();
+  return 0;
+}
+
+PyObject* GlobalStateGuard_check(
+    GlobalStateGuard* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  if (self->check()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+static PyMethodDef GlobalStateGuard_methods[] = {
+    {"check",
+     (PyCFunction)(void*)GlobalStateGuard_check,
+     METH_NOARGS,
+     "Return true if global state was the same as at creation time"},
+    {nullptr}};
+static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
   PyObject* obj = nullptr;
@@ -526,6 +591,18 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&TensorGuardsType) < 0)
     return nullptr;
 
+  GlobalStateGuardType.tp_name = "torch._C._dynamo.guards.GlobalStateGuard";
+  GlobalStateGuardType.tp_basicsize = sizeof(GlobalStateGuard);
+  GlobalStateGuardType.tp_itemsize = 0;
+  GlobalStateGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
+  GlobalStateGuardType.tp_doc = "Guard on PyTorch global flags such as no_grad";
+  GlobalStateGuardType.tp_methods = GlobalStateGuard_methods;
+  GlobalStateGuardType.tp_init = (initproc)GlobalStateGuard_init;
+  GlobalStateGuardType.tp_new = PyType_GenericNew;
+
+  if (PyType_Ready(&GlobalStateGuardType) < 0)
+    return nullptr;
+
   auto m = PyModule_Create(&_module);
   if (m == nullptr)
     return nullptr;
@@ -533,6 +610,14 @@ PyObject* torch_c_dynamo_guards_init() {
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);
+    Py_DECREF(m);
+    return nullptr;
+  }
+
+  Py_INCREF(&GlobalStateGuardType);
+  if (PyModule_AddObject(
+          m, "GlobalStateGuard", (PyObject*)&GlobalStateGuardType) < 0) {
+    Py_DECREF(&GlobalStateGuardType);
     Py_DECREF(m);
     return nullptr;
   }
