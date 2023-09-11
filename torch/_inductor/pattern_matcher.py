@@ -587,9 +587,9 @@ class PatternPrettyPrinter:
     """
 
     def __init__(self):
+        self.namespace = torch.fx.graph._Namespace()
         self.memoized_objs_names: Dict[PatternExpr, str] = {}
         self.memoized_objs_pp: Dict[PatternExpr, str] = {}
-        self.tmp_counter = itertools.count(0)
 
     @staticmethod
     def run(obj: PatternExpr, output_name="output"):
@@ -612,7 +612,7 @@ class PatternPrettyPrinter:
         if isinstance(obj, _TargetArgsExpr):
             if memoized_name := self.memoized_objs_names.get(obj):
                 return memoized_name
-            elif obj.users > 1:
+            else:
                 return self.memoize(obj)
         if hasattr(obj, "pretty_print"):
             return obj.pretty_print(self, level + 1)
@@ -622,7 +622,11 @@ class PatternPrettyPrinter:
     def memoize(self, obj):
         # will be printed as a top level variable, so indent level goes to 0
         obj_str = obj.pretty_print(self, level=0)
-        tmp_name = f"tmp_{next(self.tmp_counter)}"
+        obj_name = obj.fns_repr()
+        for prefix in ("aten.", "torch.", "prims."):
+            obj_name = obj_name.replace(prefix, "")
+
+        tmp_name = self.namespace.create_name(obj_name, None)
         self.memoized_objs_names[obj] = tmp_name
         self.memoized_objs_pp[obj] = obj_str
         return tmp_name
