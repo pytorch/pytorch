@@ -107,8 +107,8 @@ from .variables.tensor import (
 )
 from .variables.torch import TorchVariable
 from .variables.user_defined import (
-    UserDefinedClassVariable,
     RemovableHandleVariable,
+    UserDefinedClassVariable,
     UserDefinedObjectVariable,
     UserDefinedVariable,
 )
