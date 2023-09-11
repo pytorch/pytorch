@@ -333,6 +333,7 @@ class XNNPACKQuantizer(Quantizer):
         self._annotate_add_patterns(model, config, filter_fn)
         OP_TO_ANNOTATOR["mul_relu"](model, config, filter_fn)
         OP_TO_ANNOTATOR["mul"](model, config, filter_fn)
+        OP_TO_ANNOTATOR["cat"](model, config, filter_fn)
         self._annotate_adaptive_avg_pool2d(model, config, filter_fn)
         self._annotate_gru_io_only(model, config, filter_fn)
         return model
