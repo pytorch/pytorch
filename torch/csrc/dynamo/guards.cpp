@@ -574,11 +574,26 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+typedef std::pair<int, std::string> DebugInfo;
 class LeafGuard {
  public:
-  virtual bool check(py::object value) = 0;
+  std::pair<bool, DebugInfo> check_with_debug_info(py::object value) {
+    bool result = run_guards(value);
+    if (result == false) {
+      std::string reason = get_failure_reason(value);
+      return std::make_pair(result, std::make_pair(0, reason));
+    }
+    return std::make_pair(result, std::make_pair(0, ""));
+  }
+
+  bool check(py::object value) {
+    return run_guards(value);
+  }
+
+  virtual bool run_guards(py::object value) = 0;
   virtual ~LeafGuard() = default;
   virtual std::string repr() const = 0;
+  virtual std::string get_failure_reason(py::object value) = 0;
 };
 
 class PythonLambdaGuard : public LeafGuard {
@@ -589,9 +604,11 @@ class PythonLambdaGuard : public LeafGuard {
  public:
   // Saves the lambda function provided by the user. The lambda function
   // represents the check_fn that will be triggered during cache lookup.
-  PythonLambdaGuard(py::object lambda) {
-    if (py::isinstance<py::function>(lambda)) {
-      _lambda = py::cast<py::function>(lambda);
+  PythonLambdaGuard(py::object guard_check_fn, py::object print_failure_fn) {
+    if (py::isinstance<py::function>(guard_check_fn) &&
+        py::isinstance<py::function>(print_failure_fn)) {
+      _guard_check_fn = py::cast<py::function>(guard_check_fn);
+      _print_failure_fn = py::cast<py::function>(print_failure_fn);
     } else {
       throw py::type_error(
           "PythonLambdaGuard expects a callable as its check_fn");
@@ -599,21 +616,21 @@ class PythonLambdaGuard : public LeafGuard {
   }
 
   // Runs the lambda function with the current f_locals value.
-  // TODO - move this to leaf guard class
-  bool check(py::object value) {
-    return run_guards(value);
-  }
-
-  bool run_guards(py::object value) {
-    return py::cast<bool>(_lambda(value));
+  bool run_guards(py::object value) override {
+    return py::cast<bool>(_guard_check_fn(value));
   }
 
   std::string repr() const override {
     return "PythonLambdaGuard";
   }
 
+  std::string get_failure_reason(py::object value) override {
+    return py::cast<std::string>(_print_failure_fn(value));
+  }
+
  private:
-  py::function _lambda;
+  py::function _guard_check_fn;
+  py::function _print_failure_fn;
 };
 
 class GuardAccessor {
@@ -702,28 +719,43 @@ class GuardManager {
   }
 
   bool check(py::object value) {
-    bool result = run_guards(value);
-    if (result == false) {
-      _fail_count += 1;
-    }
-    return result;
+    return check_with_debug_info(value).first;
   }
 
-  bool run_guards(py::object value) {
+  std::pair<bool, DebugInfo> check_with_debug_info(py::object value) {
+    const std::pair<bool, DebugInfo> result_pair = run_guards(value);
+    if (result_pair.first == false) {
+      _fail_count += 1;
+    }
+    return result_pair;
+  }
+
+  std::pair<bool, DebugInfo> run_guards(py::object value) {
+    int debug_guards_run_count = 0;
     bool result = true;
     for (const auto& guard : _leaf_guards) {
-      result &= guard->check(value);
-    }
-    if (result == false) {
-      // TODO(janimesh) - Does this optimization matter? We are trying to avoid
-      // traversal of the priority queue.
-      return result;
+      const std::pair<bool, DebugInfo>& tmp =
+          guard->check_with_debug_info(value);
+      result &= tmp.first;
+      debug_guards_run_count++;
+      // TODO (janimesh): Does this check adds overhead?
+      if (result == false) {
+        auto& debug_info = tmp.second;
+        return std::make_pair(
+            result, std::make_pair(debug_guards_run_count, debug_info.second));
+      }
     }
 
+    std::string reason = "";
     for (const auto& child_guard : _child_guards) {
       auto& accessor = child_guard.first;
       auto& manager = child_guard.second;
-      result &= manager->check(accessor->access(value));
+      const std::pair<bool, DebugInfo>& tmp =
+          manager->check_with_debug_info(accessor->access(value));
+      result &= tmp.first;
+      auto& debug_info = tmp.second;
+      debug_guards_run_count += debug_info.first;
+      reason = debug_info.second;
       if (result == false) {
         break;
       }
@@ -732,21 +764,22 @@ class GuardManager {
     if (result == false) {
       // Inplace sort the child guards by fail count. This moves the guard with
       // higher fail count earlier in the queue, and enables fail fast for the
-      // next check.
+      // next check_with_debug_info.
 
       // An alternate implementation was to use priority queue directly on
       // _child_guards, but it was rejected because of the complexity of popping
       // and creating a new pq on each run_guards. Moreover, this sort is
-      // happening on the unhappy path when check guard fails. So, its probably
-      // ok.
+      // happening on the unhappy path when check_with_debug_info guard fails.
+      // So, its probably ok.
       std::sort(
           _child_guards.begin(),
           _child_guards.end(),
           [](const ChildGuardType& a, const ChildGuardType& b) {
-            return a.second->fail_count() < b.second->fail_count();
+            return a.second->fail_count() >= b.second->fail_count();
           });
     }
-    return result;
+    return std::make_pair(
+        result, std::make_pair(debug_guards_run_count, reason));
   }
 
   int fail_count() const {
@@ -814,17 +847,21 @@ PyObject* torch_c_dynamo_guards_init() {
 
   py::class_<PythonLambdaGuard, LeafGuard, std::unique_ptr<PythonLambdaGuard>>(
       py_m, "PythonLambdaGuard")
-      .def(py::init<py::object>())
+      .def(py::init<py::function, py::function>())
       .def("__call__", &PythonLambdaGuard::check)
       .def("__repr__", &PythonLambdaGuard::repr);
 
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       .def(py::init<>())
       .def("check", &GuardManager::check)
+      .def("check_with_debug_info", &GuardManager::check_with_debug_info)
       .def(
           "add_lambda_guard",
-          [](GuardManager& self, py::object lambda) -> void {
-            self.add_leaf_guard(std::make_unique<PythonLambdaGuard>(lambda));
+          [](GuardManager& self,
+             py::object lambda1,
+             py::object lambda2) -> void {
+            self.add_leaf_guard(
+                std::make_unique<PythonLambdaGuard>(lambda1, lambda2));
           })
       // the pointer is returned as a reference to avoid multiple deallocation
       // of GuardManager
