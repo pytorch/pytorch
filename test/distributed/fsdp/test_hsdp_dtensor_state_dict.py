@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed._tensor import DTensor, mesh_resources, Replicate, Shard
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
@@ -52,6 +52,24 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @property
     def world_size(self):
         return 4
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_raises_tp_hsdp_not_supported_error(self):
+        mesh_2d = init_device_mesh(self.device_type, (2, 2))
+        # manually set a fake parent mesh to mesh_2d
+        fake_parent_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        mesh_resources.child_to_parent_mapping[mesh_2d] = fake_parent_mesh
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Hybrid sharding \+ TP is not supported yet.",
+        ):
+            model = FSDP(
+                TestDummyModel().cuda(),
+                device_mesh=mesh_2d,
+                sharding_strategy=ShardingStrategy.HYBRID_SHARD,
+            )
 
     def _create_model(self, use_device_mesh=True):
         device_mesh = init_device_mesh(self.device_type, (2, 2))
