@@ -102,3 +102,9 @@ class TestIsScalar:
     @pytest.mark.parametrize("value", not_scalars)
     def test_is_not_scalar(self, value):
         assert not np.isscalar(value)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
