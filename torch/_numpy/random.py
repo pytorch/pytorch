@@ -42,11 +42,10 @@ def deco_stream(func):
         if USE_NUMPY_RANDOM is False:
             return func(*args, **kwds)
         elif USE_NUMPY_RANDOM is True:
-            import numpy as _np
-
+            import numpy
             from ._ndarray import ndarray
 
-            f = getattr(_np.random, func.__name__)
+            f = getattr(numpy.random, func.__name__)
 
             # numpy funcs accept numpy ndarrays, unwrap
             args = tuple(
@@ -59,8 +58,8 @@ def deco_stream(func):
 
             value = f(*args, **kwds)
 
-            # `value` can be either _np.ndarray or python scalar (or None)
-            if value is not None and isinstance(value, _np.ndarray):
+            # `value` can be either numpy.ndarray or python scalar (or None)
+            if isinstance(value, numpy.ndarray):
                 value = ndarray(torch.as_tensor(value))
 
             return value
