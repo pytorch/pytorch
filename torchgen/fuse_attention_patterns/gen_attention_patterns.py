@@ -5,7 +5,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import torch._inductor
-from torch._inductor import config
 
 from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
 from torch._inductor.pattern_matcher import (
@@ -71,21 +70,15 @@ def clean_directory(dir: Path) -> None:
 
 
 def serialize_functions() -> None:
-    file_path = (
-        Path.cwd()
-        / "torch"
-        / "_inductor"
-        / "fx_passes"
-        / "serialized_attention_patterns"
-    )
+    file_path = Path.cwd() / "torch" / "_inductor" / "fx_passes" / "serialized_patterns"
     if not file_path.exists():
         raise Exception(
-            "Could not find attention patterns directory. Make sure you are at Pytorch root directory"
+            "Could not find serialized patterns directory. Make sure you are at Pytorch root directory"
         )
 
     clean_directory(file_path)
 
-    with open(file_path / "__init__.py", 'w'):
+    with open(file_path / "__init__.py", "w"):
         pass
 
     central_index = {}
@@ -93,17 +86,19 @@ def serialize_functions() -> None:
     seen_patterns = set()
 
     file_template = get_file_template()
-    for (
+    for i, (
         key,
         kwargs,
-    ) in (
-        _get_sfdp_patterns()
-    ):
+    ) in enumerate(_get_sfdp_patterns()):
         pattern_name = kwargs["search_fn"].__name__
         gen_kwargs = {
             key: kwargs[key]
             for key in ("search_fn", "example_inputs", "trace_fn", "scalar_workaround")
         }
+
+        # temporary to batch adding new patterns
+        if i >= 2:
+            continue
 
         from torch._functorch import config as functorch_config
 
