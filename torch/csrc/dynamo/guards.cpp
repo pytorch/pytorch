@@ -601,17 +601,12 @@ class PythonLambdaGuard : public LeafGuard {
   // Runs the lambda function with the current f_locals value.
   // TODO - move this to leaf guard class
   bool check(py::object value) {
-    bool result = run_guards(value);
-    if (result == false) {
-      _fail_count += 1;
-    }
-    return result;
+    return run_guards(value);
   }
 
   bool run_guards(py::object value) {
     return py::cast<bool>(_lambda(value));
   }
-
 
   std::string repr() const override {
     return "PythonLambdaGuard";
@@ -619,7 +614,6 @@ class PythonLambdaGuard : public LeafGuard {
 
  private:
   py::function _lambda;
-  int _fail_count{0};  // TODO - move this to LeafGuard class
 };
 
 class GuardAccessor {
@@ -671,6 +665,7 @@ class ItemGuardAccessor : public GuardAccessor {
 class GuardManager;
 typedef std::pair<std::unique_ptr<GuardAccessor>, std::unique_ptr<GuardManager>>
     ChildGuardType;
+
 class GuardManager {
  public:
   GuardManager() = default;
@@ -719,15 +714,48 @@ class GuardManager {
     for (const auto& guard : _leaf_guards) {
       result &= guard->check(value);
     }
+    if (result == false) {
+      // TODO(janimesh) - Does this optimization matter? We are trying to avoid
+      // traversal of the priority queue.
+      return result;
+    }
+
     for (const auto& child_guard : _child_guards) {
       auto& accessor = child_guard.first;
       auto& manager = child_guard.second;
       result &= manager->check(accessor->access(value));
+      if (result == false) {
+        break;
+      }
+    }
+
+    if (result == false) {
+      // Inplace sort the child guards by fail count. This moves the guard with
+      // higher fail count earlier in the queue, and enables fail fast for the
+      // next check.
+
+      // An alternate implementation was to use priority queue directly on
+      // _child_guards, but it was rejected because of the complexity of popping
+      // and creating a new pq on each run_guards. Moreover, this sort is
+      // happening on the unhappy path when check guard fails. So, its probably
+      // ok.
+      std::sort(
+          _child_guards.begin(),
+          _child_guards.end(),
+          [](const ChildGuardType& a, const ChildGuardType& b) {
+            return a.second->fail_count() < b.second->fail_count();
+          });
     }
     return result;
   }
 
+  int fail_count() const {
+    return _fail_count;
+  }
+
  private:
+  // Leaf guards are the terminal guards on this object, e.g, type check on a
+  // list. These guards have to be run before any children are run
   std::vector<std::unique_ptr<LeafGuard>> _leaf_guards;
   std::vector<ChildGuardType> _child_guards;
   int _fail_count{0};

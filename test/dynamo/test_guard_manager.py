@@ -28,8 +28,8 @@ guard_manager["foo"].add_lambda_guard(lambda x: x >= 5)
 print(guard_manager["foo"].check(9), guard_manager["foo"].check(11))
 
 
+# Put everything together - f_locals is a dictionary (__getitem__). f_locals["bar"] is a pair of x, y
 
-# Put everything together - f_locals is a dictionary (__getitem__). f_locals["bar"] is a pair of x, y (__getattr__)
 
 class Pair:
     def __init__(self, x, y):
