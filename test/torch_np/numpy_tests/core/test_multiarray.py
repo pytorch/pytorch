@@ -23,6 +23,8 @@ import pytest
 import torch._numpy as np
 from pytest import raises as assert_raises
 
+# from numpy.core._rational_tests import rational
+
 from torch._numpy.testing import (
     assert_,
     assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
@@ -43,6 +45,9 @@ HAS_REFCOUNT = True
 
 from numpy.core.tests._locales import CommaDecimalPointLocale
 from numpy.testing._private.utils import _no_tracing, requires_memory
+
+# Need to test an object that does not fully implement math interface
+# from datetime import timedelta, datetime
 
 
 # #### stubs to make pytest pass the collections stage ####
@@ -6892,9 +6897,3 @@ def test_sort_int():
     arr[np.random.choice(arr.shape[0], 10)] = minv
     arr[np.random.choice(arr.shape[0], 10)] = maxv
     assert_equal(np.sort(arr, kind="quick"), np.sort(arr, kind="heap"))
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

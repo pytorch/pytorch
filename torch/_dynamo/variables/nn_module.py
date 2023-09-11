@@ -256,13 +256,7 @@ class NNModuleVariable(VariableTracker):
                 isinstance(mod, torch.nn.Sequential)
                 and mod.__class__.forward is torch.nn.Sequential.forward
             ):
-                if nnmodule_has_hooks(mod):
-                    # We do not want to unroll sequential if it has hooks, since evaporating it
-                    # will cause hooks to not fire!
-                    # This terminates and restart the tracing process
-                    self.convert_to_unspecialized(tx)
-
-                # Unroll sequential
+                # unroll Sequential()
                 assert (
                     not is_lazy
                 ), "Expected lazy sequential isn't a valid combination?"

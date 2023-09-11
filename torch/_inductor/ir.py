@@ -1710,7 +1710,9 @@ class View(GenericView):
 
             return cls(x, tuple(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x):
+        elif is_contiguous_storage_and_layout(x) and not isinstance(
+            x.data, ExternKernelAlloc
+        ):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -4426,15 +4428,16 @@ class LinearUnary(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
-        x = cls.require_contiguous(cls.realize_input(x))
-        w = cls.require_contiguous(cls.realize_input(w))
+        x = cls.require_stride1(cls.realize_input(x))
+        w = cls.require_stride1(cls.realize_input(w))
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
+
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
+            b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, None)
@@ -4493,9 +4496,9 @@ class LinearBinary(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, y, w, b, attr):
-        x = cls.require_contiguous(cls.realize_input(x))
-        y = cls.require_contiguous(cls.realize_input(y))
-        w = cls.require_contiguous(cls.realize_input(w))
+        x = cls.require_stride1(cls.realize_input(x))
+        y = cls.require_stride1(cls.realize_input(y))
+        w = cls.require_stride1(cls.realize_input(w))
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
@@ -4503,7 +4506,7 @@ class LinearBinary(ExternKernelAlloc):
         inputs = [x, y, w]
         constant_args = [attr]
         if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
+            b = cls.require_stride1(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)

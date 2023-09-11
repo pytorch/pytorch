@@ -41,7 +41,7 @@ except unittest.SkipTest:
 
 
 RUN_CPU = HAS_CPU and not torch.backends.mps.is_available() and not IS_MACOS
-RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN
+RUN_CUDA = HAS_CUDA and not TEST_WITH_ASAN and not TEST_WITH_ROCM
 
 
 class CppWrapperTemplate:
@@ -90,37 +90,6 @@ test_failures_cuda_wrapper = {
         ("cuda_wrapper",), is_skip=True
     ),
 }
-
-if TEST_WITH_ROCM:
-    # Current skips for ROCm
-    rocm_exclude_list = [
-        "test_addmm",
-        "test_batch_norm_2d_2_cuda",
-        "test_bmm1_cuda",
-        "test_cat_cuda",
-        "test_convolution1_cuda",
-        "test_custom_op_cuda",
-        "test_foreach_cpp_wrapper",
-        "test_linear_relu",
-        "test_index_put_deterministic_fallback_cuda",
-        "test_index_tensor_cuda",
-        "test_multi_device_cuda",
-        "test_mm_plus_mm2",
-        "test_scaled_dot_product_efficient_attention_cuda",
-        "test_sum_dtype_cuda",
-        "test_transpose_cuda",
-        "test_index_tensor_cuda",
-    ]
-
-    # Create skip entries for both the cuda and cuda_dynamic_shapes variants
-    for test_name in rocm_exclude_list:
-        dynamic_shapes_test_name = f"{test_name}_dynamic_shapes"
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=True
-        )
-        test_failures_cuda_wrapper[
-            dynamic_shapes_test_name
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
 
 def make_test_case(name, device, tests, condition=True, slow=False, func_inputs=None):
@@ -342,9 +311,7 @@ if RUN_CUDA:
     ]:
         make_test_case(item.name, item.device, item.tests)
 
-    test_torchinductor.copy_tests(
-        CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper
-    )
+    test_torchinductor.copy_tests(CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper")
 
     DynamicShapesCudaWrapperTemplate = (
         test_torchinductor_dynamic_shapes.make_dynamic_cls(CudaWrapperTemplate)
