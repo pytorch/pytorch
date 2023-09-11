@@ -180,7 +180,7 @@ def get_decompositions(
 
 
 def remove_decompositions(
-    decompositions: Dict[OpOverload, Callable],
+    decompositions: Dict[torch._ops.OperatorBase, Callable],
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
 ) -> None:
     """
@@ -237,6 +237,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.diag_embed,
             aten.diagonal_backward,
             aten.dot,
+            aten.vdot,
             aten.elu,
             aten.elu_,
             aten.elu_backward,
@@ -372,6 +373,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._unsafe_index,
             aten.upsample_bilinear2d,
             aten.upsample_nearest2d_backward,
+            aten.view_as_complex,
             aten.xlogy,
             aten.xlogy_,
             aten.zero,

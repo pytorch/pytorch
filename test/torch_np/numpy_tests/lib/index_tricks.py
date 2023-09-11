@@ -390,7 +390,7 @@ class AxisConcatenator:
                         newobj = newobj.swapaxes(-1, trans1d)
             elif isinstance(item, str):
                 if k != 0:
-                    raise ValueError("special directives must be the " "first entry.")
+                    raise ValueError("special directives must be the first entry.")
                 if item in ("r", "c"):
                     matrix = True
                     col = item == "c"

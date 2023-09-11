@@ -10,7 +10,17 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Union,
+)
 
 import sympy
 
@@ -102,6 +112,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
@@ -292,6 +303,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # and restore_graphstate
         self.timestamp = 0
 
+        # A list of register_finalizer_fns to apply to the output graph module
+        self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
+
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
         self.global_scope = global_scope
@@ -476,6 +490,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             list(self.tracked_fakes),
             guards_graph_state,
             module_state,
+            list(self.register_finalizer_fns),
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
@@ -492,6 +507,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             module_state,
+            self.register_finalizer_fns,
             global_state,
             self.param_name_to_source,
             self.side_effects,
@@ -590,18 +606,29 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
 
+    @staticmethod
+    def module_key_name(*names):
+        # create a new unique name
+        name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
+        if not name or not name[0].isalpha():
+            name = "sub" + name
+
+        return name
+
     def register_attr_or_module(
         self,
         target: Union[torch.nn.Module, torch.Tensor, Any],
         *names,
         **options,
     ):
-        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
-        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
-        # but route here fore registration of children.
-        if is_dynamic_nn_module(target) and not getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
+        if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -609,25 +636,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
-
-        if is_dynamic_nn_module(target) and getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
-            name = "_".join(map(str, names))
-            base = name
-            for i in itertools.count():
-                if name not in self.nn_modules:
-                    self.nn_modules[name] = target
-                    break
-                name = f"{base}_{i}"
-            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
-            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
-            vt = variables.nn_module.FSDPManagedNNModuleVariable(
-                target,
-                name,
-                **options,
-            )
-            return self.side_effects.track_object_existing(source, target, vt)
 
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer
@@ -717,17 +725,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-        # create a new unique name
-        name = "_".join(map(str, names))
-        # Strip the guard lookup L/G access
-        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
-        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
 
-        if not name or not name[0].isalpha():
-            name = "sub" + name
+        name = OutputGraph.module_key_name(*names)
+
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
@@ -808,6 +808,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
+        # NB: Typically (i.e., for graph compile from RETURN_VALUE),
+        # symbolic_locals will be empty at this point, as prune_dead_locals
+        # will clear out all of symbolic_locals because RETURN_VALUE is the
+        # last instruction and no more locals are used.  The fanciness here
+        # is only needed for partial graphs.
         for k, v in tx.symbolic_locals.items():
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
@@ -969,6 +974,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
+        for register_finalizer in self.register_finalizer_fns:
+            register_finalizer(gm)
+
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
@@ -1148,9 +1156,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+        self.register_finalizer_fns.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
+
+    def add_graph_finalizer(
+        self, register_finalizer: Callable[[fx.GraphModule], None]
+    ) -> None:
+        self.register_finalizer_fns.append(register_finalizer)
 
 
 class SubgraphTracer(fx.Tracer):
@@ -1345,6 +1359,11 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        log.debug(
+            "create_graph_input %s %s",
+            name,
+            source.name() if source is not None else "(none)",
+        )
         if source is None:
             assert (
                 self.parent is not None
