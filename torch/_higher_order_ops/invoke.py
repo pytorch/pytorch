@@ -12,34 +12,46 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
 def invoke(fn, grad):
+    breakpoint()
     return invoke_op(fn, grad)
 
 
 invoke_op = HigherOrderOperator("invoke")
 
 
+def dynamo_interceding_fn_wrapper(grad, *, fn):
+    breakpoint()
+    # torch._dynamo.optimize("eager")(fn)(grad)
+    return invoke_op(fn, grad)
+
 @invoke_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(fn, grad):
+    breakpoint()
     mode = _get_current_dispatch_mode()
     if isinstance(fn, functools.partial):
         fn.__name__ = fn.func.__name__  # type: ignore[attr-defined]
+    original_fn = fn
+    fn = functools.partial(dynamo_interceding_fn_wrapper, fn=fn)
+    fn.__name__ = fn.func.__name__
     grad = torch._functorch.aot_autograd.from_fun(grad)
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (grad,))
     out_proxy = mode.tracer.create_proxy(
         "call_function", fn, proxy_args, {}, name="invocation"
     )
-    grad = fn(grad)
+    grad = original_fn(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
     return torch._functorch.aot_autograd.to_fun(grad)
 
 
 @invoke_op.py_impl(FakeTensorMode)
 def inner_fake(fn, grad):
+    breakpoint()
     return fn(grad)
 
 
 @invoke_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def invoke_op_dense(fn, grad):
+    breakpoint()
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return fn(grad)

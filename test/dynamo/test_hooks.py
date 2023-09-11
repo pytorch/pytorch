@@ -13,12 +13,7 @@ from torch._functorch.aot_autograd import aot_module_simplified
 
 
 def compiler_fn(gm):
-    """Same as torch.compile() but counts number of compiles"""
-
-    def inner_compiler(gm_, example_inputs_):
-        return inductor.compile(gm_, example_inputs_)
-
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+    return torch._dynamo.optimize("inductor", nopython=True, dynamic=True)(gm)
 
 
 def global_hook_0(grad):
@@ -361,8 +356,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         aot_out[0].backward(torch.ones(4))
 
         x2 = torch.ones(4, requires_grad=True)
-        dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2)
         with compiled_autograd.enable(compiler_fn):
+            dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2)
             dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(dynamo_out, aot_out)
@@ -405,8 +400,8 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         eager_out[0].backward(torch.ones(4))
 
         x2 = torch.ones(4, requires_grad=True)
-        dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2, obj)
         with compiled_autograd.enable(compiler_fn):
+            dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2, obj)
             dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(dynamo_out, eager_out)

@@ -54,6 +54,7 @@ class AutogradCompilerInstance:
         return GetItemSource(LocalSource(name), idx)
 
     def begin_capture(self, inputs: List[torch.Tensor], sizes: List[int]):
+        breakpoint()
         counters["compiled_autograd"]["captures"] += 1
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
@@ -91,6 +92,7 @@ class AutogradCompilerInstance:
         return inputs, sizes
 
     def proxy_call_hook(self, hook, *args):
+        breakpoint()
         return self.fx_tracer.create_proxy(
             "call_function",
             call_hook,
@@ -102,6 +104,7 @@ class AutogradCompilerInstance:
         )
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
+        breakpoint()
         hook = self.hooks_proxy[hook_id]
         proxy = self.proxy_call_hook(
             hook,
@@ -113,6 +116,7 @@ class AutogradCompilerInstance:
         return inputs
 
     def pre_hook(self, inputs, hook_id):
+        breakpoint()
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
@@ -124,6 +128,7 @@ class AutogradCompilerInstance:
         return inputs
 
     def post_hook(self, outputs, inputs, hook_id):
+        breakpoint()
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
@@ -149,6 +154,7 @@ class AutogradCompilerInstance:
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
+        breakpoint()
         return self.compiler_fn(graph)
 
     def to_proxy(self, t):
@@ -159,7 +165,11 @@ class AutogradCompilerInstance:
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
         assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_tensor_proxy(self.fx_tracer)(t).proxy
+        fetched_tensor = fetch_tensor_proxy(self.fx_tracer)(t)
+        if hasattr(fetched_tensor, "proxy"):
+            return fetched_tensor.proxy
+        else:
+            return self.fx_tracer.unwrap_proxy(torch._functorch.aot_autograd.from_fun(fetched_tensor))
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):
