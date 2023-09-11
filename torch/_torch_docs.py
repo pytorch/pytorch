@@ -5950,8 +5950,8 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
-    start (float): the starting value for the set of points
-    end (float): the ending value for the set of points
+    start (float or Tensor): the starting value for the set of points. If `Tensor`, it must be 0-dimensional
+    end (float or Tensor): the ending value for the set of points. If `Tensor`, it must be 0-dimensional
     steps (int): size of the constructed tensor
 
 Keyword arguments:
@@ -6334,8 +6334,8 @@ with base :attr:`base`. That is, the values are:
 From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
-    start (float): the starting value for the set of points
-    end (float): the ending value for the set of points
+    start (float or Tensor): the starting value for the set of points. If `Tensor`, it must be 0-dimensional
+    end (float or Tensor): the ending value for the set of points. If `Tensor`, it must be 0-dimensional
     steps (int): size of the constructed tensor
     base (float, optional): base of the logarithm function. Default: ``10.0``.
 
