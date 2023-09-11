@@ -1,6 +1,9 @@
 TorchScript-based ONNX Exporter
 ===============================
 
+.. note::
+    To export an ONNX model using TorchDynamo instead of TorchScript, see :func:`torch.onnx.dynamo_export`.
+
 .. contents:: :local:
 
 Example: AlexNet from PyTorch to ONNX
