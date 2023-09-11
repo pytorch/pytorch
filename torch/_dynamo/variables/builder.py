@@ -168,6 +168,7 @@ class GraphArg:
     # Then we cannot only keep a weak reference to it.  This lets you
     # stash a strong reference too.
     example_strong_ref: Optional[torch.Tensor] = None
+    has_symbols = True
 
     @property
     def example(self):
@@ -498,7 +499,9 @@ class VariableBuilder:
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             }
 
-            return FunctoolsPartialVariable(func_obj, args, keywords, guards=guards)
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original=value, guards=guards
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(

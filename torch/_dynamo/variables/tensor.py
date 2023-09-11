@@ -1,3 +1,4 @@
+import functools
 import inspect
 import operator
 import types
@@ -14,6 +15,7 @@ import torch._numpy as tnp
 
 import torch.fx
 import torch.random
+from torch._higher_order_ops.invoke import invoke
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
@@ -51,6 +53,13 @@ supported_const_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+
+hook_registry = []
+
+
+def record_hook(*args, real_hook, pos):
+    grad = args[0]
+    return invoke(real_hook, grad)
 
 
 class TensorVariable(VariableTracker):
@@ -644,6 +653,68 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "register_hook":
+            # see [On tensor.register_hook]
+            assert len(args) == 1
+            fn_var = args[0]
+
+            if isinstance(fn_var, variables.NestedUserFunctionVariable):
+                # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
+                # This should not be onerous to support when needed.
+                unimplemented("NYI - lambda variables as hooks")
+            elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+                # The real fn got desugared, we need to put it back together
+                fn = fn_var.as_python_constant()
+                name = fn_var.func.fn.__name__
+            else:
+                fn = fn_var.fn
+                name = fn_var.fn.__name__
+
+            handle = self.as_proxy().node.meta["example_value"].register_hook(fn)
+
+            handle_variable = variables.user_defined.RemovableHandleVariable(
+                handle,
+                last_seen_name=None,
+                mutable_local=variables.base.MutableLocal(),
+                **options,
+            )
+            src = tx.store_hook(name, fn)
+            if not self.source:
+                # Intermediary
+                from .builder import GraphArg
+
+                original_fn = fn
+                fn = functools.partial(
+                    record_hook, real_hook=fn, pos=len(hook_registry)
+                )
+
+                new_name = tx.store_handle("intermed_handle", handle)
+                handle_variable.as_global = new_name
+
+                hook_proxy = tx.output.root_tracer.create_graph_input(
+                    name, type(fn), source=src
+                )
+                grapharg = GraphArg(src, fn, False, None)
+                grapharg.has_symbols = False
+                hook_proxy.node.meta["grapharg"] = grapharg
+                # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
+                # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
+                # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
+
+                # hook_registry.append(original_fn)
+                hook_registry.append(original_fn)
+
+                self.as_proxy().register_hook(hook_proxy)
+
+                if fn_var.source:
+                    tx.output.guards.add(
+                        fn_var.source.make_guard(GuardBuilder.ID_MATCH)
+                    )
+            else:
+                fn_var.source = src
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            return handle_variable
+
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
