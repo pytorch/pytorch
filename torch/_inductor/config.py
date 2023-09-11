@@ -45,6 +45,22 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# register custom graph optimizatin pass hook. so far, pre/post passes are
+# only applied before/after pattern_matcher in post_grad_passes.
+#
+# def my_custom_pre_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# def my_custom_post_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
+# torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+post_grad_custom_pre_pass = None
+post_grad_custom_post_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
@@ -95,6 +111,9 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# If autotuning in subprocess, whether to use multiple devices
+autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"

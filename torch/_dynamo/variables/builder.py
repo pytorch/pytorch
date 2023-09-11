@@ -5,7 +5,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import itertools
 import logging
 import operator
 import re
@@ -92,6 +91,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    FunctoolsPartialVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -474,6 +474,31 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, functools.partial):
+            func_src = AttrSource(self.get_source(), "func")
+            func_obj = VariableBuilder(self.tx, func_src)(value.func)
+
+            args = []
+            args_source = AttrSource(self.get_source(), "args")
+            for i, arg in enumerate(value.args):
+                args.append(
+                    VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
+                )
+
+            keywords = {}
+            keywords_source = AttrSource(self.get_source(), "keywords")
+            for k, v in value.keywords.items():
+                keywords[k] = VariableBuilder(
+                    self.tx, GetItemSource(keywords_source, k)
+                )(v)
+
+            guards = {
+                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                args_source.make_guard(GuardBuilder.LIST_LENGTH),
+            }
+
+            return FunctoolsPartialVariable(func_obj, args, keywords, guards=guards)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
@@ -834,16 +859,8 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            base = self.name
-            name = self.name
-            for i in itertools.count():
-                if name not in self.tx.output.nn_modules:
-                    self.tx.output.nn_modules[name] = value
-                    break
-                name = f"{base}_{i}"
             return FSDPManagedNNModuleVariable(
                 value,
-                name,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
                 source=self.get_source(),
             )
