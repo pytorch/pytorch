@@ -84,7 +84,7 @@ def check_codegen(
         has_dynamic = False
         lines = code.split("\n")
         # there are cases where the cpp processing validly does not return code with a for loop. Issue 109016 has been raised for this.
-        if lines and lines.len() >0:
+        if lines and len(lines) >0:
             for line in lines:
                 if "for(" in line:
                     for_loop_found = True
