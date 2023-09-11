@@ -5,7 +5,7 @@ LearningToPaint,pass,8
 Super_SloMo,pass,8
 alexnet,pass,8
 attention_is_all_you_need_pytorch,pass,8
-basic_gnn_edgecnn,pass,23
+basic_gnn_edgecnn,pass,25
 basic_gnn_gcn,pass,14
 basic_gnn_gin,pass,8
 basic_gnn_sage,pass,8
@@ -20,7 +20,7 @@ hf_Albert,pass,7
 hf_Bart,pass,7
 hf_DistilBert,pass,7
 hf_GPT2,pass,7
-hf_Reformer,pass,27
+hf_Reformer,pass,30
 hf_T5_large,pass_due_to_skip,0
 hf_Whisper,pass,7
 lennard_jones,pass,8
