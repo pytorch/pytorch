@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import builtins
 import collections
@@ -47,7 +49,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import TypeSource
+from .source import LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -172,14 +174,16 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
+        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
-        check_fn_manager: "CheckFunctionManager",
+        check_fn_manager: CheckFunctionManager,
         *,
         local: bool,
     ):
         self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
+        self.lookup_weakrefs = lookup_weakrefs
         if user_scope:
             scope = {"L" if local else "G": user_scope}
         else:
@@ -223,6 +227,10 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_guards: List[Guard] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
+        # Keep track of weak references of objects with ID_MATCH guard. This
+        # info is stored alongside optimized_code and check_fn and is used to
+        # limit the number of cache entries with same ID_MATCH'd object.
+        self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -286,8 +294,22 @@ class GuardBuilder(GuardBuilderBase):
                 )
             )
 
-        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        code = f"___check_obj_id({ref}, {self.id_ref(val)})"
         self._produce_guard_code(guard, [code])
+
+        # Keep track of ID_MATCH'd objects. This will be used to modify the
+        # cache size logic
+        if self.local and isinstance(guard.originating_source, LocalSource):
+            # TODO(janimesh) - This is currently restricted to nn.Module objects
+            # because many other ID_MATCH'd objects fail - like DeviceMesh.
+            # Increase the scope of ID_MATCH'd objects.
+            if isinstance(val, torch.nn.Module):
+                local_name = guard.originating_source.local_name
+                weak_id = self.lookup_weakrefs(val)
+                if weak_id is not None:
+                    self.id_matched_objs[local_name] = weak_id
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -408,22 +430,40 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        # TODO(janimesh) - This id_match can be removed because nn_module_guard
+        # checks this in C. However, we need this redundant check to allow
+        # flexible cache size policy when we guard on self of nn module
+        # instances. See Note in torch/_dynamo/cache_size.py
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        def setup_guard():
-            assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
-
-        if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
-        else:
+        # The module guard checks for modifications to the Module's type, __dict__,
+        # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
+        # This subsumes the check for Module.training.
+        if not hasattr(val, "training"):
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
+        if config.allow_rnn and isinstance(
+            val, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
+        ):
+            # TorchDynamo graph breaks on LSTMs, but this is a way if user wants
+            # to override it. LSTMs change the module state in every invocation,
+            # leading to recompilations.
+            log.warning("Skipping nn module guard on LSTMs")
+            return
+        try:
+            g = torch._C._dynamo.guards.nn_module_guard(val)
+        except AttributeError:
+            # We get an attribute error if the module is partially initialized. For example,
+            # we might be trying to install a guard before a super().__init__() call when
+            # the module is missing _parameters, _modules, and other attributes.
+            # For now, we skip installing the guard.
+            log.warning(
+                "Skipping nn module guard because the module could be partially initialized"
+            )
+            return
+        name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
+        self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -790,7 +830,7 @@ class PyExprCSEPass:
         expr_to_name: Dict[str, str]
 
     class ExprCounter(ast.NodeVisitor):
-        def __init__(self, config: "PyExprCSEPass.Config") -> None:
+        def __init__(self, config: PyExprCSEPass.Config) -> None:
             self._config = config
 
         def visit(self, node: ast.AST) -> Any:
@@ -801,7 +841,7 @@ class PyExprCSEPass:
     class Replacer(ast.NodeTransformer):
         def __init__(
             self,
-            config: "PyExprCSEPass.Config",
+            config: PyExprCSEPass.Config,
             gen_name: Callable[[], str],
         ) -> None:
             super().__init__()
@@ -876,7 +916,9 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
+        self._extra_closure_vars: Dict[str, object] = {}
         self.output_graph = output_graph
+        self.extra_closure_vars_count = 0
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -900,13 +942,20 @@ class CheckFunctionManager:
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
+            self.lookup_weakrefs,
             combine_scopes(output_graph.global_scope, output_graph.local_scope),
             self,
             local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, output_graph.global_scope, self, local=False
+            self.id_ref,
+            source_ref,
+            self.lookup_weakrefs,
+            output_graph.global_scope,
+            self,
+            local=False,
         )
+
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
         # the inverse is illegal.
@@ -923,7 +972,8 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
+                # Force-enable NN_MODULE checks
+                and guard.create_fn is not GuardBuilder.NN_MODULE
             ):
                 continue
             guard.create(local_builder, global_builder)
@@ -931,6 +981,15 @@ class CheckFunctionManager:
             local_builder, global_builder, guards, guard_fail_fn
         )
         self._weakrefs.clear()
+        # Keep track of weak references of objects with ID_MATCH guard. This
+        # info is stored alongside optimized_code and check_fn and is used to
+        # limit the number of cache entries with same ID_MATCH'd object.
+        # TODO(janimesh) - Currently this information is stored as an attr on
+        # the check_fn itself to avoid changing CacehEntry datastrucutre in
+        # eval_frame.c. In future, we should probably replace check_fn with a
+        # queryable data structure such that this information is already present
+        # in some form.
+        self.check_fn.id_matched_objs = local_builder.id_matched_objs
 
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
@@ -967,7 +1026,8 @@ class CheckFunctionManager:
                 maybe_stack = ""
                 maybe_user_stack = ""
                 if guard is not None:
-                    maybe_stack = f"\nStack:\n{''.join(guard.stack.format())}"
+                    if guard.stack:
+                        maybe_stack = f"\nStack:\n{''.join(guard.stack.format())}"
                     if guard.user_stack:
                         maybe_user_stack = (
                             f"\nUser stack:\n{''.join(guard.user_stack.format())}"
@@ -1104,6 +1164,7 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
+        closure_vars.update(self._extra_closure_vars)
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1135,6 +1196,9 @@ class CheckFunctionManager:
 
     def invalidate(self):
         # A weakref is no longer valid, self.check_fn should return false
+        # TODO(janimesh) - Free up cache entry after the cache entry formation
+        # is in python, and the underlying data structure is a doubly linked
+        # list.
         self.valid = False
 
     def id_ref(self, obj):
@@ -1149,6 +1213,18 @@ class CheckFunctionManager:
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+    def lookup_weakrefs(self, obj):
+        """Lookup the _weakrefs created in id_ref function for ID_MATCH'd objects"""
+        if id(obj) in self._weakrefs:
+            return self._weakrefs[id(obj)]
+        return None
+
+    def add_extra_closure_var(self, name_hint, obj):
+        name = f"{name_hint}_{self.extra_closure_vars_count}"
+        self.extra_closure_vars_count += 1
+        self._extra_closure_vars[name] = obj
+        return name
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:

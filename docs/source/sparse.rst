@@ -1332,6 +1332,15 @@ To manage checking sparse tensor invariants, see:
 
     sparse.check_sparse_tensor_invariants
 
+To use sparse tensors with :func:`~torch.autograd.gradcheck` function,
+see:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.as_sparse_gradcheck
+
 Unary functions
 ---------------
 

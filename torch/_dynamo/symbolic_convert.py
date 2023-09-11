@@ -409,6 +409,9 @@ def break_graph_if_unsupported(*, push):
                     assert isinstance(ctx, GenericContextWrappingVariable)
                     unimplemented(f"Graph break under {ctx}")
 
+                if isinstance(excp, exc.UncapturedHigherOrderOpError):
+                    raise
+
                 if not self.should_compile_partial_graph():
                     raise
 
@@ -692,6 +695,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise
+
             log.debug("step triggered compile", exc_info=True)
 
         # generate code from checkpoint
@@ -1850,7 +1854,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             lookup_line=False,
         )
 
-    def store_dict_key(self, name, value):
+    def store_global_weakref(self, name, value):
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
@@ -2028,6 +2032,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
             self.init_local_index_guards_hack()
+
+            # Additionally, we need to add guards for self, if it is a NNModule. The
+            # outer invocation of Module.__call__ is a use of "self" that's not seen
+            # by the tracer. Practically, this is useful for catching modifications
+            # to the module's hooks that would otherwise be missed.
+            if "self" in self.symbolic_locals:
+                val = self.symbolic_locals["self"]
+                if isinstance(val, NNModuleVariable):
+                    local_guards = VariableTracker.propagate(val)["guards"]
+                    self.output.guards.update(local_guards)
 
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
