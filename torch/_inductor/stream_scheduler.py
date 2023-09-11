@@ -42,6 +42,7 @@ class SSNode:
         is_fused: mark if this node is a fused node.
         is_nop_node: mark if this node is a nop node.
         node_type: the type of the node. It can be "template", "extern", "foreach", "fused_or_schedule", "nop"
+        kernel_volumn: the product of the node's arguments' size. It usually represents the number of kernel threads.
     """
 
     def __init__(self, original_node) -> None:
@@ -61,6 +62,12 @@ class SSNode:
         self.cuda_event = False
         self.is_nop_node = isinstance(original_node, NopKernelSchedulerNode)
         self.node_type = None
+        self.kernel_volumn = 0
+        if self.name and original_node.read_writes.var_ranges:
+            results = 1
+            for key, value in original_node.read_writes.var_ranges.items():
+                results *= value
+            self.kernel_volumn = results
         if hasattr(original_node, "snodes"):
             self.is_fused = True
             for snode in original_node.snodes:
@@ -637,7 +644,7 @@ class SSGraph:
                 event_str = "cuda_event True"
             else:
                 event_str = ""
-            log.info(f"{node.get_name()} {node.stream_id} {event_str}")
+            log.info(f"{node.get_name()} {node.stream_id} {node.kernel_volumn} {event_str}")
         log.info("=====TorchInductor Stream Scheduler Tree stream allocation end=====")
 
         reset_log_path()
