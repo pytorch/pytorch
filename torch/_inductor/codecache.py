@@ -327,10 +327,10 @@ def get_path(basename: str, extension: str, specified_dir: str = ""):
 
 
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
-    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    assert hash_type in ["code", "cubin", "hsaco"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type == "cubin":
+    if hash_type == "cubin" or "hsaco":
         return code_hash(repr(content))
 
 
@@ -809,10 +809,13 @@ def get_include_and_linking_paths(
             else:
                 macros = f"-D{macros}"
         if cuda:
-            if config.is_fbcode():
-                libs += ["cuda"]
+            if torch.version.hip is not None:
+                libs += ["c10_hip", "torch_hip"]
             else:
-                libs += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libs += ["cuda"]
+                else:
+                    libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -943,13 +946,19 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            "cubin",
-            hash_type="cubin",
+            bin_type,
+            hash_type=bin_type,
             specified_dir=config.aot_inductor.output_path,
         )
-        params["cubin_path"] = path
+
+        if torch.version.hip is None:
+            params["cubin_path"] = path
+        else:
+            params["hsaco_path"] = path
+
         cls.cache[key] = params
 
     @classmethod
