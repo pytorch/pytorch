@@ -11,6 +11,7 @@ import contextlib
 import re
 import os
 
+from unittest.mock import patch
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
@@ -111,6 +112,16 @@ def reduction_dtype_filter(op):
     if 'dtype' not in argspec.kwonlyargs:
         return False
     return True
+
+def deterministic_torch_manual_seed(*args, **kwargs):
+    from torch._C import default_generator
+
+    seed = 1337
+    import torch.cuda
+
+    if not torch.cuda._is_in_bad_fork():
+        torch.cuda.manual_seed_all(seed)
+    return default_generator.manual_seed(seed)
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
@@ -776,6 +787,7 @@ class TestCommon(TestCase):
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
     @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
+    @patch.object(torch, "manual_seed", deterministic_torch_manual_seed)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
