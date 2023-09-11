@@ -678,7 +678,15 @@ class TensorVariable(VariableTracker):
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
-            src = tx.store_hook(name, fn)
+
+            # Note - if the hook has no source, we are forced to lift it up into a global
+            # An example of where this might happen will be if the user creates a custom hook
+            # within a compile region, or wraps an func with a source (like a global)
+            # with a functools partial.  In that case, we can end up in a situation where we
+            # have a source for the internal func, but not the partial. The real fix here is to
+            # not always lift up to globals, but to use the lowest level scope possible to match the
+            # func lifecycle.
+            src = fn_var.source if fn_var.source else tx.store_hook(name, fn)
             if not self.source:
                 # Intermediary
                 from .builder import GraphArg

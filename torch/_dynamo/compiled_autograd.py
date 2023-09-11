@@ -91,7 +91,6 @@ class AutogradCompilerInstance:
         return inputs, sizes
 
     def proxy_call_hook(self, hook, *args):
-        breakpoint()
         return self.fx_tracer.create_proxy(
             "call_function",
             call_hook,
@@ -103,7 +102,6 @@ class AutogradCompilerInstance:
         )
 
     def tensor_pre_hook(self, inputs, hook_id, i: int):
-        breakpoint()
         hook = self.hooks_proxy[hook_id]
         proxy = self.proxy_call_hook(
             hook,
@@ -115,7 +113,6 @@ class AutogradCompilerInstance:
         return inputs
 
     def pre_hook(self, inputs, hook_id):
-        breakpoint()
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
@@ -127,7 +124,6 @@ class AutogradCompilerInstance:
         return inputs
 
     def post_hook(self, outputs, inputs, hook_id):
-        breakpoint()
         hook = self.hooks_proxy[hook_id]
         proxies = self.proxy_call_hook(
             hook,
