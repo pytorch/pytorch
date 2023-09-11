@@ -1010,3 +1010,9 @@ def test_pyscalar_subclasses(subtype, __op__, __rop__, op, cmp):
     expected = op(np.float32(2), subtype(1))
     assert res == expected
     assert type(res) == type(expected)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
