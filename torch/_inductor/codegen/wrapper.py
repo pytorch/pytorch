@@ -961,10 +961,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
-
+                '''
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
-                '''
                 """
             )
 
@@ -1465,7 +1464,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             return f"aoti_torch__reinterpret_tensor({', '.join(args)})"
         else:
             args = [name, size, stride, offset]
-            return f"_reinterpret_tensor({', '.join(args)})"
+            return f"reinterpret_tensor({', '.join(args)})"
 
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
