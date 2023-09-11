@@ -69,9 +69,9 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 int
 THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     /* Merge fast locals into f->f_locals */
-    PyObject *locals;
-    PyObject **fast;
-    PyCodeObject *co;
+    PyObject *locals = NULL;
+    PyObject **fast = NULL;
+    PyCodeObject *co = NULL;
     locals = frame->f_locals;
     if (locals == NULL) {
         locals = frame->f_locals = PyDict_New();
@@ -232,7 +232,7 @@ PyFrameObject *
 THP_PyFrame_MakeAndSetFrameObject(_PyInterpreterFrame *frame)
 {
     CHECK(frame->frame_obj == NULL);
-    PyObject *error_type, *error_value, *error_traceback;
+    PyObject *error_type = NULL, *error_value = NULL, *error_traceback = NULL;
     PyErr_Fetch(&error_type, &error_value, &error_traceback);
 
     PyFrameObject *f = THP_PyFrame_New_NoTrack(frame->f_code);

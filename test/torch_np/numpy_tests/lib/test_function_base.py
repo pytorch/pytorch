@@ -2920,7 +2920,7 @@ class TestPercentile:
         assert_equal(c1.shape, r1.shape)
 
     @pytest.mark.xfail(
-        reason="numpy: x.dtype is int, out is int; " "torch: result is float"
+        reason="numpy: x.dtype is int, out is int; torch: result is float"
     )
     def test_scalar_q_2(self):
         x = np.arange(12).reshape(3, 4)

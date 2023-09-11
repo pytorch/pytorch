@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+import weakref
 
 from copy import deepcopy
 
@@ -9,8 +10,8 @@ import torch
 
 import torch._inductor
 
-# The rest of the optimizers not yet imported: Adamax, ASGD, LBFGS, NAdam, RAdam, SGD, SparseAdam
-from torch.optim import Adadelta, Adagrad, Adam, AdamW, RMSprop, Rprop
+# The rest of the optimizers not yet imported: Adamax, LBFGS, NAdam, RAdam, SGD, SparseAdam
+from torch.optim import Adadelta, Adagrad, Adam, AdamW, ASGD, RMSprop, Rprop
 
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
 
@@ -75,6 +76,8 @@ def make_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
         with torch.set_grad_enabled(False):
             compiled_step()
+            compiled_step()
+            opt_eager.step()
             opt_eager.step()
 
         self.assertEqual(
@@ -165,6 +168,9 @@ class CompiledOptimizerTests(TestCase):
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad = make_test(Adagrad, kernel_count=5, lr=0.01)
+    test_asgd_default = make_test(ASGD, kernel_count=2, lr=0.1)
+    test_asgd_single = make_test(ASGD, kernel_count=12, lr=0.1, foreach=False)
+    test_asgd_foreach = make_test(ASGD, kernel_count=2, lr=0.1, foreach=True)
     # test_sgd = make_test(SGD, kernel_count=1, lr=0.01)
 
     test_adam_recompile = make_recompile_test(Adam, lr=0.01)
@@ -176,7 +182,39 @@ class CompiledOptimizerTests(TestCase):
     test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, kernel_count=1, lr=0.01)
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
+    test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
+    test_asgd_recompile_single = make_recompile_test(
+        ASGD, kernel_count=12, lr=0.01, foreach=False
+    )
+    test_asgd_recompile_foreach = make_recompile_test(
+        ASGD, kernel_count=2, lr=0.01, foreach=True
+    )
     # test_sgd_recompile = make_recompile_test(SGD, kernel_count=1, lr=0.01)
+
+    @requires_cuda()
+    def test_static_address_finalizer(self):
+        p_ref = None
+
+        def fn():
+            nonlocal p_ref
+            mod = torch.nn.Linear(10, 10, device="cuda:0", bias=False)
+            for p in mod.parameters():
+                p.grad = torch.rand_like(p)
+
+            opt = torch.optim.Adam(mod.parameters(), lr=0.1)
+
+            def fn():
+                opt.step()
+
+            with torch.set_grad_enabled(False):
+                step_fn_compiled = torch.compile(fn)
+                step_fn_compiled()
+            p_ref = weakref.ref(p)
+            self.assertTrue(p_ref() is not None)
+
+        fn()
+
+        self.assertTrue(p_ref() is None)
 
 
 if __name__ == "__main__":

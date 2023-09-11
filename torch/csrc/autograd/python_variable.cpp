@@ -26,6 +26,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -268,7 +269,8 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   }
 
   c10::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   c10::impl::PyInterpreterStatus status;
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
@@ -345,7 +347,8 @@ bool isResurrectable(THPVariable* self) {
   }
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
+      c10::make_optional((PyObject*)self)) {
     return false;
   }
   return true;
@@ -369,7 +372,16 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   TORCH_INTERNAL_ASSERT(
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
-  tensor.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(true);
+  c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
+      getPyInterpreter(),
+      /*ignore_hermetic_tls=*/false);
+
+  TORCH_INTERNAL_ASSERT(
+      maybe_pyobj.has_value(),
+      "Trying to preserve a Python tensor whose PyObjectSlot does not have a PyObject");
+
+  tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
 // Resurrect the Python object.  This is something CPython does
 // internally occasionally, see
@@ -443,7 +455,8 @@ static int THPVariable_clear(THPVariable* self) {
 
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-            getPyInterpreter()) == c10::make_optional((PyObject*)self)) {
+            getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
+            c10::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -697,8 +710,14 @@ static PyObject* THPVariable_make_wrapper_subclass(
     AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
     tracer::impl::NoTracerDispatchMode tracer_guard{};
 
-    // We shouldn't need storage
-    Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
+    // We use storages **only** to track aliasing of subclasses during tracing.
+    // The actual data pointers are not valid.
+    Storage storage{
+        Storage::use_byte_size_t{},
+        0,
+        at::DataPtr{nullptr, r.device(7)},
+        /*allocator=*/c10::GetAllocator(c10::kMeta),
+        /*resizeable=*/true};
 
     tensor = at::detail::make_tensor<TensorImpl>(
         std::move(storage), options.computeDispatchKey(), options.dtype());
@@ -714,9 +733,8 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      TORCH_CHECK(
-          false,
-          "Setting sizes_strides_policy isn't supported for this overload")
+      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
+          parseSizesStridesPolicyArgument(*sizes_strides_policy));
     }
   }
 
@@ -1248,6 +1266,16 @@ PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_mtia");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_mtia());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1528,6 +1556,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
     {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+    {"is_mtia", (getter)THPVariable_is_mtia, nullptr, nullptr, nullptr},
     {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
     {"is_xla", (getter)THPVariable_is_xla, nullptr, nullptr, nullptr},
     {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},
@@ -1722,26 +1751,6 @@ PyObject* THPVariable_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-static void clear_slots(PyTypeObject* type, PyObject* self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
-    if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
-      char* addr = (char*)self + mp->offset;
-      PyObject* obj = *(PyObject**)addr;
-      if (obj != nullptr) {
-        *(PyObject**)addr = nullptr;
-        Py_DECREF(obj);
-      }
-    }
-  }
-}
-
 // NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
 // on subclasses.  It's never valid to construct a THPVariable so it's not
 // necessary to implement the dealloc for that case
@@ -1861,8 +1870,8 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj =
-      _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common
