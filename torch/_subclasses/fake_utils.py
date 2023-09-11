@@ -4,7 +4,6 @@ from typing import Callable, Union
 
 import torch
 import torch.utils._pytree as pytree
-from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensorMode,
@@ -82,9 +81,8 @@ class CrossRefFakeMode(TorchDispatchMode):
             and torch.Tag.data_dependent_output not in func.tags
         ):
             try:
-                with FakeTensorMode(
-                    shape_env=ShapeEnv()
-                ) as fake_mode, enable_python_dispatcher():
+                # enable_python_dispatcher() here
+                with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
                         functools.partial(fake_mode.from_tensor, static_shapes=True),
