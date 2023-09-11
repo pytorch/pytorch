@@ -573,7 +573,7 @@ def _get_sfdp_patterns():
 
 @functools.lru_cache(None)
 def _sfdp_init():
-    from .serialized_attention_patterns.central_index import get_serialized_pattern
+    from .serialized_patterns.central_index import get_serialized_pattern
 
     for key, register_replacement_kwargs in _get_sfdp_patterns():
         search_fn_pattern = get_serialized_pattern(key)
