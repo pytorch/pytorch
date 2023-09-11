@@ -1982,8 +1982,7 @@ class TestCorrCoef:
 
     def test_extreme(self):
         x = [[1e-100, 1e100], [1e100, 1e-100]]
-        with np.errstate(all="raise"):
-            c = corrcoef(x)
+        c = corrcoef(x)
         assert_array_almost_equal(c, np.array([[1.0, -1.0], [-1.0, 1.0]]))
         assert_(np.all(np.abs(c) <= 1.0))
 
@@ -2921,7 +2920,7 @@ class TestPercentile:
         assert_equal(c1.shape, r1.shape)
 
     @pytest.mark.xfail(
-        reason="numpy: x.dtype is int, out is int; " "torch: result is float"
+        reason="numpy: x.dtype is int, out is int; torch: result is float"
     )
     def test_scalar_q_2(self):
         x = np.arange(12).reshape(3, 4)

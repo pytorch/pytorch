@@ -216,13 +216,14 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return self._local_tensor, self._spec
+        return ["_local_tensor"], self._spec
 
     @staticmethod
-    def __tensor_unflatten__(local_tensor, spec):
+    def __tensor_unflatten__(inner_tensors, spec):
         assert (
             spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        local_tensor = inner_tensors["_local_tensor"]
         return DTensor(
             local_tensor,
             spec.mesh,
@@ -457,12 +458,7 @@ def distribute_tensor(
     for idx, placement in enumerate(placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
-            output = placement._shard_tensor(local_tensor, device_mesh, idx)
-            # scatter call could not return a tensor with correct requires_grad
-            # field, as ProcessGroupNCCL refuse to take a tensor with requires_grad
-            # to do inplace update! So we manually set it here
-            output.requires_grad_(tensor.requires_grad)
-            local_tensor = output
+            local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
@@ -475,7 +471,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach(),
+        local_tensor.detach().requires_grad_(tensor.requires_grad),
         device_mesh,
         tuple(placements),
         shape=tensor.size(),

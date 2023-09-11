@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/onnx.h>
+#include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
 #include <atomic>
@@ -61,7 +62,7 @@ namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
 const static int kInvalidOpsetVersion = -1;
-const static int kMainOpsetVersion = 18;
+const static int kMainOpsetVersion = 19;
 // Based on OP_SET_ID_VERSION_MAP in
 // https://github.com/onnx/onnx/blob/master/onnx/helper.py.
 constexpr static std::array<int64_t, kMainOpsetVersion + 1>
@@ -85,6 +86,7 @@ constexpr static std::array<int64_t, kMainOpsetVersion + 1>
         8, // opset 16
         8, // opset 17
         8, // opset 18
+        9, // opset 19
 };
 
 std::string getNodeStackTraceString(const Node* n) {
@@ -430,6 +432,10 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
       return onnx::TensorProto_DataType_INT32;
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
+    case at::kFloat8_e4m3fn:
+      return onnx_torch::TensorProto_DataType_FLOAT8E4M3FN;
+    case at::kFloat8_e5m2:
+      return onnx_torch::TensorProto_DataType_FLOAT8E5M2;
     default:
       TORCH_CHECK(
           false,
@@ -736,12 +742,18 @@ void GraphEncoder::EncodeBlock(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   TORCH_INTERNAL_ASSERT(graph_proto != nullptr);
-  std::string block_name = "torch_jit";
-  if (num_blocks_) {
-    block_name += std::to_string(num_blocks_);
+  if (nullptr == block->owningNode()) {
+    // Top level main graph.
+    graph_proto->set_name("main_graph");
+  } else {
+    // TODO: Set more meaningful name for sub-graphs.
+    std::string block_name = "sub_graph";
+    if (num_blocks_) {
+      block_name += std::to_string(num_blocks_);
+    }
+    num_blocks_++;
+    graph_proto->set_name(block_name);
   }
-  num_blocks_++;
-  graph_proto->set_name(block_name);
 
   // Since ONNX IR VERSION 4, initializers do not have to
   // be a subset of graph inputs. We use keep_initializers_as_inputs

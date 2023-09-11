@@ -45,6 +45,22 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# register custom graph optimizatin pass hook. so far, pre/post passes are
+# only applied before/after pattern_matcher in post_grad_passes.
+#
+# def my_custom_pre_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# def my_custom_post_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
+# torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+post_grad_custom_pre_pass = None
+post_grad_custom_post_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
@@ -68,11 +84,8 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# AOTInductor output path
-# If an absolute path is specified, the generated lib files will be stored under the directory;
-# If a relative path is specified, it will be used as a subdirectory under the default caching path;
-# If not specified, a temp directory will be created under the default caching path
-aot_inductor_output_path = ""
+# TODO: capture whether the graph is from export
+from_export = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -98,6 +111,9 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# If autotuning in subprocess, whether to use multiple devices
+autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
@@ -138,6 +154,10 @@ implicit_fallbacks = True
 # fuse even in cases without common reads
 aggressive_fusion = False
 
+# For each fused kernel in the wrapper, comment with the nodes that get fused.
+# Useful for debugging fusion.
+debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -159,16 +179,17 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 
-# constant folding on the joint graph
-joint_graph_constant_folding = True
-
-# Enable indirect_indexing asserts for decompositions and lowerings
-debug_index_asserts = False
-
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
+
+# constant folding on the joint graph
+# Turn off constant folding due to issue #108388
+joint_graph_constant_folding = not is_fbcode()
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -188,19 +209,20 @@ def decide_compile_threads():
     elif sys.platform == "win32" or is_fbcode():
         return 1
     else:
-        return min(
-            32,
+        cpu_count = (
             len(os.sched_getaffinity(0))
             if hasattr(os, "sched_getaffinity")
-            else os.cpu_count(),
+            else os.cpu_count()
         )
+        assert cpu_count
+        return min(32, cpu_count)
 
 
 compile_threads = decide_compile_threads()
 
 # gemm autotuning global cache dir
 if is_fbcode():
-    from libfb.py import parutil
+    from libfb.py import parutil  # type: ignore[import]
 
     try:
         if __package__:
@@ -305,6 +327,10 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # Make scatter_reduce fallback when reduce is sum to avoid performance regression
+    # using atomic_add.
+    fallback_scatter_reduce_sum = True
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -312,7 +338,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = True
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
@@ -397,6 +423,14 @@ class triton:
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
+
+
+class aot_inductor:
+    # AOTInductor output path
+    # If an absolute path is specified, the generated lib files will be stored under the directory;
+    # If a relative path is specified, it will be used as a subdirectory under the default caching path;
+    # If not specified, a temp directory will be created under the default caching path
+    output_path = ""
 
 
 # create a directory containing lots of debug information
