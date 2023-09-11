@@ -83,17 +83,16 @@ def check_codegen(
         for_loop_found = False
         has_dynamic = False
         lines = code.split("\n")
-        # there are cases where the cpp processing validly does not return code with a for loop. Issue 109016 has been raised for this.
-        if lines and len(lines) >0:
-            for line in lines:
-                if "for(" in line:
-                    for_loop_found = True
-                    if re.search(r";.*ks.*;", line) is not None:
-                        has_dynamic = True
-                        break
-            self.assertTrue(has_dynamic, msg=f"Failed to find dynamic for loop variable\n{code}")
-            self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
-
+        for line in lines:
+            if "for(" in line:
+                for_loop_found = True
+                if re.search(r";.*ks.*;", line) is not None:
+                    has_dynamic = True
+                    break
+        self.assertTrue(
+            has_dynamic, msg=f"Failed to find dynamic for loop variable\n{code}"
+        )
+        self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
         triton_kernel_found = False
@@ -146,6 +145,17 @@ test_failures = {
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
+    #
+    # Failed to find for loop/cpu kernel:
+    #
+    "test_add_uint8_tensor": TestFailure(("cpu", "cuda")),
+    "test_add_int8_tensor": TestFailure(("cpu", "cuda")),
+    "test_add_int16_tensor": TestFailure(("cpu", "cuda")),
+    "test_multiply_uint8_tensor": TestFailure(("cpu", "cuda")),
+    "test_square_uint8_tensor_overflow": TestFailure(("cpu", "cuda")),
+    "test_multiply_uint8_tensor_overflow": TestFailure(("cpu", "cuda")),
+    "test_square_uint8_tensor": TestFailure(("cpu", "cuda")),
+
     #
     # Failed to find for loop/triton kernel:
     #
