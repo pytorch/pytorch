@@ -203,7 +203,7 @@ class Ignored(PatternExpr):
     def __repr__(self):
         return "*"
 
-    def pretty_print(self, pp: "PatternPrettyPrinter", level=0):
+    def pretty_print(self, pp: "PatternPrettyPrinter"):
         return "Ignored()"
 
 
@@ -344,18 +344,17 @@ class _TargetArgsExpr(_TargetExpr):
         ]
         return f"{self.__class__.__name__}({', '.join(args)})"
 
-    def pretty_print(self, pp: "PatternPrettyPrinter", level=0):
-        indent = "  " * level
+    def pretty_print(self, pp: "PatternPrettyPrinter"):
         args = [
             self.fns_repr(),
-            *(pp.pretty_print(x, level=level) for x in self.args),
-            *[f"{k}={pp.pretty_print(v, level=level)}" for k, v in self.kwargs.items()],
+            *(pp.pretty_print(x) for x in self.args),
+            *[f"{k}={pp.pretty_print(v)}" for k, v in self.kwargs.items()],
         ]
-        if self.users != 1:
+        if self.users > 1:
             args.append(f"_users={self.users}")
 
-        joiner_str = f",\n{'  ' * (level + 1)}"
-        return f"{self.__class__.__name__}({joiner_str.join(args)}\n{indent})"
+        joiner_str = ", "
+        return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
         if (
@@ -508,7 +507,7 @@ class MultiOutputPattern(PatternExpr):
         return f"{self.__class__.__name__}({self.outputs})"
 
     def pretty_print(self, pp: "PatternPrettyPrinter"):
-        args = [pp.pretty_print(x, level=0) for x in self.outputs]
+        args = [pp.pretty_print(x) for x in self.outputs]
         joiner_str = f",\n{'  '}"
         str_out = f"{self.__class__.__name__}([{joiner_str.join(args)}"
         str_out = f"{str_out}\n])"
@@ -608,20 +607,19 @@ class PatternPrettyPrinter:
 
         return "\n".join(output)
 
-    def pretty_print(self, obj, level):
+    def pretty_print(self, obj):
         if isinstance(obj, _TargetArgsExpr):
             if memoized_name := self.memoized_objs_names.get(obj):
                 return memoized_name
             else:
                 return self.memoize(obj)
         if hasattr(obj, "pretty_print"):
-            return obj.pretty_print(self, level + 1)
+            return obj.pretty_print(self)
 
         return repr(obj)
 
     def memoize(self, obj):
-        # will be printed as a top level variable, so indent level goes to 0
-        obj_str = obj.pretty_print(self, level=0)
+        obj_str = obj.pretty_print(self)
         obj_name = obj.fns_repr()
         for prefix in ("aten.", "torch.", "prims."):
             obj_name = obj_name.replace(prefix, "")
