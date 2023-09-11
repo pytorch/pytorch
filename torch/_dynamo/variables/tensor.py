@@ -59,7 +59,7 @@ hook_registry = []
 
 def record_hook(*args, real_hook, pos):
     grad = args[0]
-    return invoke(real_hook, grad)
+    return invoke(real_hook, grad, reenter=True)
 
 
 class TensorVariable(VariableTracker):
