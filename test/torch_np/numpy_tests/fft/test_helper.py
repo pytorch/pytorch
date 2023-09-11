@@ -153,9 +153,3 @@ class TestIRFFTN:
 
         # Should not raise error
         fft.irfftn(a, axes=axes)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

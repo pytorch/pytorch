@@ -1,12 +1,10 @@
-from typing import Dict, List, Union
-
 from .. import config
 from ..utils import instance_descriptor
 from ..virtualized import V
 from .common import SizeArg, TensorArg
 
 
-def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
+def signature_of(arg, *, size_dtype: str):
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
@@ -30,18 +28,14 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
-def signature_to_meta(
-    signature: List[Union[TensorArg, SizeArg]], *, size_dtype: str
-) -> Dict[int, str]:
+def signature_to_meta(signature, *, size_dtype: str):
     return {
         i: signature_of(arg, size_dtype=size_dtype) for i, arg in enumerate(signature)
     }
 
 
-def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
-    def is_aligned(
-        x: Union[TensorArg, SizeArg], alignment: int, include_tensor: bool
-    ) -> bool:
+def config_of(args):
+    def is_aligned(x, alignment, include_tensor):
         """
         Roughly follow triton code here:
         https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222

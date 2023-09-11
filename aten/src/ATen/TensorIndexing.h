@@ -372,7 +372,7 @@ static inline Tensor scalarToTensor(
     const Scalar& v,
     const TensorOptions& options,
     const at::Device& self_device) {
-  if (self_device == at::kCPU && !v.isSymbolic()) {
+  if (self_device == at::kCPU) {
     return at::detail::scalar_tensor_static(
         v, options.dtype_opt()->toScalarType(), self_device);
   } else {

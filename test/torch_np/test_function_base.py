@@ -91,9 +91,3 @@ class TestAppend:
 
         with pytest.raises((RuntimeError, ValueError)):
             np.append([[1, 2, 3], [4, 5, 6]], [7, 8, 9], axis=0)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
