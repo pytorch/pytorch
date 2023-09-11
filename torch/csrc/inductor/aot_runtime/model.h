@@ -57,7 +57,7 @@ class AOTInductorModelBase {
   // Passes such as constant-folding may affect how we handle constants.
   // We will revisit it once all the relevant pieces are ready.
   void run(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
       ProxyExecutor* proxy_executor = nullptr) {
@@ -225,7 +225,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   AOTInductorModel(std::shared_ptr<ConstantMap>);
 
   void run_impl(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
       ProxyExecutor* proxy_executor = nullptr);

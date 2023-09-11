@@ -810,6 +810,12 @@ def get_include_and_linking_paths(
                 )
             else:
                 macros = f"-D{macros}"
+
+        if aot_mode and cuda:
+            if macros is None:
+                macros = ""
+            macros += " -D USE_CUDA"
+
         if cuda:
             if torch.version.hip is not None:
                 libs += ["c10_hip", "torch_hip"]

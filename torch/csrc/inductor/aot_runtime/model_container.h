@@ -125,7 +125,7 @@ class AOTInductorModelContainer {
   }
 
   void run(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
       ProxyExecutor* proxy_executor) {

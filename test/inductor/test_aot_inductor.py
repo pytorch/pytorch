@@ -208,6 +208,26 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    def test_convolution(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn((32, 16, 8), device="cuda")
+                self.bias = torch.randn((16), device="cuda")
+
+            def forward(self, x):
+                return (
+                    aten.convolution(
+                        x, self.weight, self.bias, [4], [0], [1], True, [0], 1
+                    ),
+                )
+
+        model = Model()
+        example_inputs = (torch.randn((2, 32, 90), device="cuda"),)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
     def test_duplicated_params(self):
         class Model(torch.nn.Module):
             def __init__(self):
