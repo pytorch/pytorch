@@ -53,9 +53,9 @@ set(CMAKE_RANLIB ranlib CACHE FILEPATH "" FORCE)
 set(PKG_CONFIG_EXECUTABLE pkg-config CACHE FILEPATH "" FORCE)
 
 # Setup iOS platform unless specified manually with IOS_PLATFORM
-if(NOT DEFINED IOS_PLATFORM)
+if(NOT IOS_PLATFORM)
     set(IOS_PLATFORM "OS")
-endif(NOT DEFINED IOS_PLATFORM)
+endif(NOT IOS_PLATFORM)
 set(IOS_PLATFORM ${IOS_PLATFORM} CACHE STRING "Type of iOS Platform")
 
 # Check the platform selection and setup for developer root
@@ -118,9 +118,9 @@ set(CMAKE_FIND_LIBRARY_SUFFIXES ".dylib" ".so" ".a")
 # (where install_name_tool was hardcoded) and where CMAKE_INSTALL_NAME_TOOL isn't in the cache
 # and still cmake didn't fail in CMakeFindBinUtils.cmake (because it isn't rerun)
 # hardcode CMAKE_INSTALL_NAME_TOOL here to install_name_tool, so it behaves as it did before, Alex
-if(NOT DEFINED CMAKE_INSTALL_NAME_TOOL)
+if(NOT CMAKE_INSTALL_NAME_TOOL)
     find_program(CMAKE_INSTALL_NAME_TOOL install_name_tool)
-endif(NOT DEFINED CMAKE_INSTALL_NAME_TOOL)
+endif(NOT CMAKE_INSTALL_NAME_TOOL)
 
 # Setup iOS deployment target
 set(IOS_DEPLOYMENT_TARGET ${IOS_DEPLOYMENT_TARGET} CACHE STRING "Minimum iOS version")
@@ -130,17 +130,17 @@ set(IOS_DEPLOYMENT_TARGET ${IOS_DEPLOYMENT_TARGET} CACHE STRING "Minimum iOS ver
 exec_program(/usr/bin/xcode-select ARGS -print-path OUTPUT_VARIABLE CMAKE_XCODE_DEVELOPER_DIR)
 set(XCODE_POST_43_ROOT "${CMAKE_XCODE_DEVELOPER_DIR}/Platforms/${IOS_PLATFORM_LOCATION}/Developer")
 set(XCODE_PRE_43_ROOT "/Developer/Platforms/${IOS_PLATFORM_LOCATION}/Developer")
-if(NOT DEFINED CMAKE_IOS_DEVELOPER_ROOT)
+if(NOT CMAKE_IOS_DEVELOPER_ROOT)
     if(EXISTS ${XCODE_POST_43_ROOT})
         set(CMAKE_IOS_DEVELOPER_ROOT ${XCODE_POST_43_ROOT})
     elseif(EXISTS ${XCODE_PRE_43_ROOT})
         set(CMAKE_IOS_DEVELOPER_ROOT ${XCODE_PRE_43_ROOT})
     endif(EXISTS ${XCODE_POST_43_ROOT})
-endif(NOT DEFINED CMAKE_IOS_DEVELOPER_ROOT)
+endif(NOT CMAKE_IOS_DEVELOPER_ROOT)
 set(CMAKE_IOS_DEVELOPER_ROOT ${CMAKE_IOS_DEVELOPER_ROOT} CACHE PATH "Location of iOS Platform")
 
 # Find and use the most recent iOS sdk unless specified manually with CMAKE_IOS_SDK_ROOT
-if(NOT DEFINED CMAKE_IOS_SDK_ROOT)
+if(NOT CMAKE_IOS_SDK_ROOT)
     file(GLOB _CMAKE_IOS_SDKS "${CMAKE_IOS_DEVELOPER_ROOT}/SDKs/*")
     if(_CMAKE_IOS_SDKS)
         list(SORT _CMAKE_IOS_SDKS)
@@ -150,7 +150,7 @@ if(NOT DEFINED CMAKE_IOS_SDK_ROOT)
         message(FATAL_ERROR "No iOS SDK's found in default search path ${CMAKE_IOS_DEVELOPER_ROOT}. Manually set CMAKE_IOS_SDK_ROOT or install the iOS SDK.")
     endif(_CMAKE_IOS_SDKS)
     message(STATUS "Toolchain using default iOS SDK: ${CMAKE_IOS_SDK_ROOT}")
-endif(NOT DEFINED CMAKE_IOS_SDK_ROOT)
+endif(NOT CMAKE_IOS_SDK_ROOT)
 set(CMAKE_IOS_SDK_ROOT ${CMAKE_IOS_SDK_ROOT} CACHE PATH "Location of the selected iOS SDK")
 
 # Set the sysroot default to the most recent SDK
