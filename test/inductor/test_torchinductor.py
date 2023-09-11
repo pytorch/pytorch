@@ -608,8 +608,11 @@ class CommonTemplate:
     def test_add_uint8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([128], dtype=torch.uint8)
+        x = torch.tensor([64]*2, dtype=torch.uint8)
 
-        x = torch.tensor([128], dtype=torch.uint8)
+
 
         self.common(fn, x)
 
@@ -617,23 +620,27 @@ class CommonTemplate:
         def fn(x):
             return (x + x).to(torch.int16)
 
-        x = torch.tensor([120], dtype=torch.int8)
-
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([120], dtype=torch.int8)
+        x = torch.tensor([60]*2, dtype=torch.int8)
         self.common(fn, x)
 
     def test_add_int16_tensor(self):
         def fn(x):
             return (x + x).to(torch.int32)
 
-        x = torch.tensor([32000], dtype=torch.int16)
-
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([32000], dtype=torch.int16)
+        x = torch.tensor([16000]*2, dtype=torch.int16)
         self.common(fn, x)
 
     def test_multiply_uint8_tensor(self):
         def fn(x):
             return (x * x).to(torch.int16)
 
-        x = torch.tensor([16], dtype=torch.uint8)
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([16], dtype=torch.uint8)
+        x = torch.tensor([8]*2, dtype=torch.uint8)
 
         self.common(fn, x)
 
@@ -641,15 +648,18 @@ class CommonTemplate:
         def fn(x):
             return (x**2).to(torch.int16)
 
-        x = torch.tensor([18], dtype=torch.uint8)
-
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([18], dtype=torch.uint8)
+        x = torch.tensor([9]*2, dtype=torch.uint8)
         self.common(fn, x)
 
     def test_multiply_uint8_tensor_overflow(self):
         def fn(x):
             return (x * x).to(torch.int16)
 
-        x = torch.tensor([18], dtype=torch.uint8)
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([18], dtype=torch.uint8)
+        x = torch.tensor([9]*2, dtype=torch.uint8)
 
         self.common(fn, x)
 
@@ -657,11 +667,13 @@ class CommonTemplate:
         def fn(x):
             return (x**2).to(torch.int16)
 
-        x = torch.tensor([16], dtype=torch.uint8)
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([16], dtype=torch.uint8)
+        x = torch.tensor([8]*2, dtype=torch.uint8)
 
         self.common(fn, x)
 
-    #  issue https://github.com/pytorch/pytorch/issues/108520 raised for this
+    #  issue 108520 raised for this
     # def test_int32_tensor(self):
     #     def fn(x):
     #         return (x + x).to(torch.int64)
