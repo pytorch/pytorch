@@ -12912,7 +12912,8 @@ op_db: List[OpInfo] = [
            aten_name='group_norm',
            aliases=('group_norm',),
            ref=reference_group_norm,
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12924,12 +12925,7 @@ op_db: List[OpInfo] = [
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
-           supports_expanded_weight=True,
-           skips=(
-                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace', dtypes=(torch.float16,)),
-                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace', dtypes=(torch.float16,)),
-                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_meta_outplace', dtypes=(torch.float16,)),
-           )),
+           supports_expanded_weight=True),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
            dtypes=floating_types_and(torch.bfloat16),
