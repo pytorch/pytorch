@@ -528,7 +528,8 @@ TEST(OptimTest, CheckLRChange_StepLR_Adam) {
 TEST(OptimTest, CheckStateInit_Adagrad) {
   auto x = torch::tensor({0.5, 2.0, 4.0}, torch::requires_grad());
   auto y = torch::tensor({1.0, 2.0, 3.0});
-  auto o = torch::optim::Adagrad(std::vector<torch::Tensor>{}, torch::optim::AdagradOptions(0.1));
+  auto o = torch::optim::Adagrad(
+      std::vector<torch::Tensor>{}, torch::optim::AdagradOptions(0.1));
   auto& p = o.param_groups();
   p[0].params().push_back(x);
   auto l = torch::nn::functional::mse_loss(x, y);

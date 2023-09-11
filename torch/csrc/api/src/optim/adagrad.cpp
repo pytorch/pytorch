@@ -86,7 +86,8 @@ Tensor Adagrad::step(LossClosure closure) {
       if (param_state == state_.end()) {
         auto state = std::make_unique<AdagradParamState>();
         state->step(0);
-        state->sum(torch::full_like(p, initial_accumulator_value, MemoryFormat::Preserve));
+        state->sum(torch::full_like(
+            p, initial_accumulator_value, MemoryFormat::Preserve));
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
             std::move(state);
       }
