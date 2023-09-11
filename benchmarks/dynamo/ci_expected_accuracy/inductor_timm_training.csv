@@ -1,5 +1,5 @@
 name,accuracy,graph_breaks
-SelecSls42b,pass,8
+selecsls42b,pass,8
 adv_inception_v3,pass,8
 beit_base_patch16_224,pass,8
 botnet26t_256,pass,8
