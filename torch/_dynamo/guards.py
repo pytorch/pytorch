@@ -570,7 +570,9 @@ class GuardBuilder(GuardBuilderBase):
             source_pairs: List[Tuple[Source, Source]] = []
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
-                    source, *other_sources = get_sources(constraint.t_id, constraint.dim)
+                    source, *other_sources = get_sources(
+                        constraint.t_id, constraint.dim
+                    )
                     # When t.size()[dim] maps to src0, src1, ..., srcN, we add
                     # constraints that make src0 "equal" to src1, ..., srcN.
                     source_pairs.extend(
