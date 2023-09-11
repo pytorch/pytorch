@@ -59,9 +59,8 @@ void initScriptListBindings(PyObject* module) {
           })
       .def("__iter__", [](ScriptListIterator& iter) { return iter; });
 
-  auto cls = py::class_<ScriptList, std::shared_ptr<ScriptList>>(m, "ScriptList");
-  add_class_getitem(cls);
-  cls.def(py::init([](py::list list) {
+  py::class_<ScriptList, std::shared_ptr<ScriptList>>(m, "ScriptList")
+      .def(py::init([](py::list list) {
         TypePtr type = nullptr;
 
         if (!list.empty()) {
@@ -311,22 +310,6 @@ void initScriptListBindings(PyObject* module) {
             auto data = toIValue(std::move(list), type);
             return std::make_shared<ScriptList>(data);
           }));
-//  // Add __class_getitem__ to ScriptList for type-hinting
-//  // pybind11 version of __class_getitem__ = classmethod(types.GenericAlias)
-//  // NOTE: https://github.com/pybind/pybind11/issues/1693
-//  static const py::type GenericAlias  = py::module_::import("types").attr("GenericAlias");
-//  cls.attr("__class_getitem__") = PyClassMethod_New(
-//      py::cpp_function(
-//          [](
-//              const py::type &cls,
-//              const py::args &args
-//          ){
-//              // NOTE: https://pybind11.readthedocs.io/en/stable/advanced/pycpp/object.html#unpacking-arguments
-//              return GenericAlias(cls, *args);
-//          },
-//        GenericAlias.attr("__doc__").cast<std::string>().c_str()
-//      ).ptr()
-//  );
 }
 
 } // namespace torch::jit

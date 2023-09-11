@@ -1,9 +1,10 @@
 from enum import Enum
 from typing import Type, TypeVar
 
+import pytest
 from typing_extensions import ParamSpec, assert_never, assert_type
 
-from torch import ScriptDict, ScriptFunction, ScriptList, Tensor, jit, nn
+from torch import ScriptDict, ScriptFunction, ScriptList, jit, nn
 
 P = ParamSpec("P")
 R = TypeVar("R", covariant=True)
@@ -28,14 +29,11 @@ assert_type(jit.script([0]), ScriptList)
 scripted_module = jit.script(nn.Linear(2, 2))
 assert_type(scripted_module, jit.RecursiveScriptModule)
 
-# ScriptMethod
-# NOTE: Generic usage only possible with Python 3.9
-forward: ScriptMethod = scripted_module.forward
-
 # ScripFunction
 # NOTE: can't use assert_type because of parameter names
 # NOTE: Generic usage only possible with Python 3.9
 relu: ScriptFunction = jit.script(nn.functional.relu)
 
 # can't script nn.Module class
-assert_never(jit.script(nn.Linear))
+with pytest.raises(RuntimeError):
+    assert_never(jit.script(nn.Linear))

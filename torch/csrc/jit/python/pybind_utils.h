@@ -1111,57 +1111,5 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     bool is_overload,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-
-template <typename... T>
-void add_class_getitem(py::class_<T...> &cls) {
-  // Add __class_getitem__ to ScriptList for type-hinting
-  // pybind11 version of __class_getitem__ = classmethod(types.GenericAlias)
-  // NOTE: https://github.com/pybind/pybind11/issues/1693
-  static const py::type GenericAlias  = py::module_::import("types").attr("GenericAlias");
-  cls.attr("__class_getitem__") = PyClassMethod_New(
-      py::cpp_function(
-          [](
-              const py::type &cls,
-              const py::args &args
-          ){
-              // NOTE: https://pybind11.readthedocs.io/en/stable/advanced/pycpp/object.html#unpacking-arguments
-              return GenericAlias(cls, *args);
-          },
-        GenericAlias.attr("__doc__").cast<std::string>().c_str()
-      ).ptr()
-  );
-}
-
-template <typename... T>
-void add_function_class_getitem(py::class_<T...> &cls) {
-  // Add __class_getitem__ to Function-like objects.
-  // pybind11 version of __class_getitem__ = classmethod(collections.abc.Callable.__class_getitem__)
-  // NOTE: https://github.com/pybind/pybind11/issues/1693
-  // TODO: switch to collections.abc.Callable in python 3.9
-//  static const py::type Callable = py::module_::import("collections.abc").attr("Callable");
-//  static const py::function class_getitem = Callable.attr("__class_getitem__");
-  static const py::type Callable = py::module_::import("collections.abc").attr("Callable");
-  // NOTE: static may cause issues: https://github.com/pybind/pybind11/issues/1598
-//  static const py::function class_getitem = Callable.attr("__class_getitem__");
-//  const py::function class_getitem = (
-//      py::module_::import("collections.abc").attr("Callable").attr("__class_getitem__")
-//  );
-
-  cls.attr("__class_getitem__") = PyClassMethod_New(
-      py::cpp_function(
-          [](
-              const py::type &cls,
-              const py::args &args
-          ){
-              // NOTE: https://pybind11.readthedocs.io/en/stable/advanced/pycpp/object.html#unpacking-arguments
-              py::function class_getitem = Callable.attr("__class_getitem__");
-              return class_getitem(*args);
-          },
-          Callable.attr("__class_getitem__").attr("__doc__").cast<std::string>().c_str()
-//          class_getitem.attr("__doc__").cast<std::string>().c_str()
-      ).ptr()
-  );
-}
-
 } // namespace jit
 } // namespace torch

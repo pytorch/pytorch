@@ -1,4 +1,3 @@
-from types import MethodType
 from typing import (
     Any,
     Callable,
@@ -6,82 +5,68 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    overload,
     Tuple,
     Type,
     TypeVar,
     Union,
-    overload,
 )
 
 from _typeshed import Incomplete
-from typing_extensions import Never, ParamSpec
+from typing_extensions import Never
 
 import torch
-from torch._C import (
-    ScriptClass,
-    ScriptClassFunction,
-    ScriptDict,
-    ScriptFunction,
-    ScriptList,
-    ScriptMethod,
-    ScriptModule,
-    ScriptObject,
-)
 from torch._classes import classes as classes
 from torch._jit_internal import _qualified_name as _qualified_name
 from torch.jit._builtins import _register_builtin as _register_builtin
-from torch.jit._fuser import _graph_for as _graph_for
 from torch.jit._fuser import (
+    _graph_for as _graph_for,
     _script_method_graph_for as _script_method_graph_for,
 )
 from torch.jit._monkeytype_config import (
     JitTypeTraceConfig as JitTypeTraceConfig,
+    JitTypeTraceStore as JitTypeTraceStore,
+    monkeytype_trace as monkeytype_trace,
 )
-from torch.jit._monkeytype_config import JitTypeTraceStore as JitTypeTraceStore
-from torch.jit._monkeytype_config import monkeytype_trace as monkeytype_trace
-from torch.jit._recursive import ScriptMethodStub as ScriptMethodStub
 from torch.jit._recursive import (
     _compile_and_register_class as _compile_and_register_class,
-)
-from torch.jit._recursive import (
     infer_methods_to_compile as infer_methods_to_compile,
+    ScriptMethodStub as ScriptMethodStub,
+    wrap_cpp_module as wrap_cpp_module,
 )
-from torch.jit._recursive import wrap_cpp_module as wrap_cpp_module
-from torch.jit._state import _enabled as _enabled
-from torch.jit._state import _set_jit_function_cache as _set_jit_function_cache
-from torch.jit._state import _set_jit_overload_cache as _set_jit_overload_cache
 from torch.jit._state import (
+    _enabled as _enabled,
+    _set_jit_function_cache as _set_jit_function_cache,
+    _set_jit_overload_cache as _set_jit_overload_cache,
     _try_get_jit_cached_function as _try_get_jit_cached_function,
-)
-from torch.jit._state import (
     _try_get_jit_cached_overloads as _try_get_jit_cached_overloads,
 )
-from torch.jit.frontend import get_default_args as get_default_args
-from torch.jit.frontend import get_jit_class_def as get_jit_class_def
-from torch.jit.frontend import get_jit_def as get_jit_def
-from torch.nn import Module as Module
-from torch.overrides import has_torch_function as has_torch_function
-from torch.overrides import (
-    has_torch_function_unary as has_torch_function_unary,
+from torch.jit.frontend import (
+    get_default_args as get_default_args,
+    get_jit_class_def as get_jit_class_def,
+    get_jit_def as get_jit_def,
 )
+from torch.nn import Module as Module
 from torch.overrides import (
+    has_torch_function as has_torch_function,
+    has_torch_function_unary as has_torch_function_unary,
     has_torch_function_variadic as has_torch_function_variadic,
 )
-from torch.package import PackageExporter as PackageExporter
-from torch.package import PackageImporter as PackageImporter
+from torch.package import (
+    PackageExporter as PackageExporter,
+    PackageImporter as PackageImporter,
+)
 from torch.utils import set_module as set_module
 
 from ._serialization import validate_map_location as validate_map_location
+
+ScriptFunction = torch._C.ScriptFunction
 
 type_trace_db: JitTypeTraceStore
 
 # Defined in torch/csrc/jit/python/script_init.cpp
 ResolutionCallback = Callable[[str], Callable[..., Any]]
 ClassVar = TypeVar("ClassVar", bound=type)
-P = ParamSpec("P")
-R = TypeVar("R", covariant=True)  # return value
-K = TypeVar("K")  # key TypeVar
-V = TypeVar("V")  # value TypeVar
 
 def _reduce(cls) -> None: ...
 
@@ -220,20 +205,20 @@ def script(
 ) -> Never: ...
 @overload
 def script(
-    obj: Dict[K,V],
+    obj: Dict,
     optimize: Optional[bool] = None,
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> ScriptDict[K,V]: ...
+) -> torch.ScriptDict: ...
 @overload
 def script(
-    obj: List[V],
+    obj: List,
     optimize: Optional[bool] = None,
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> ScriptList[V]: ...
+) -> torch.ScriptList: ...
 @overload
 def script(  # type: ignore[misc]
     obj: Module,
@@ -252,20 +237,12 @@ def script(  # type: ignore[misc]
 ) -> ClassVar: ...
 @overload
 def script(  # type: ignore[misc]
-    obj: MethodType,
+    obj: Callable,
     optimize: Optional[bool] = None,
     _frames_up: int = 0,
     _rcb: Optional[ResolutionCallback] = None,
     example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> ScriptMethod: ...
-@overload
-def script(  # type: ignore[misc]
-    obj: Callable[P, R],
-    optimize: Optional[bool] = None,
-    _frames_up: int = 0,
-    _rcb: Optional[ResolutionCallback] = None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
-) -> ScriptFunction[P, R]: ...
+) -> ScriptFunction: ...
 @overload
 def script(
     obj: Any,
