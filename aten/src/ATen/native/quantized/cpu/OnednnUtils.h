@@ -114,6 +114,13 @@ enum PostOps {
   Tanh,
 };
 
+static std::unordered_map<std::string, PostOps> POST_OP_TABLE = {
+  {"none", NoPostOp},
+  {"relu", Relu},
+  {"leaky_relu", LeakyRelu},
+  {"tanh", Tanh}
+};
+
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
       std::unique_ptr<ideep::tensor> weight,
@@ -306,6 +313,21 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 };
 
 namespace onednn_utils {
+
+static ideep::attr_t create_attr_by_post_op(
+    const std::string& post_op_name,
+    const torch::List<double>& post_op_args) {
+  using ideep::tensor;
+  PostOps post_op = POST_OP_TABLE[post_op_name];
+  if (post_op == Relu) {
+    return ideep::attr_t::fuse_relu();
+  } else if (post_op == LeakyRelu) {
+    return ideep::attr_t::fuse_relu_v2(/*alpha=*/post_op_args[0]);
+  } else if (post_op == Tanh) {
+    return ideep::attr_t::fuse_tanh();
+  }
+  return ideep::attr_t();
+}
 
 // Try to reorder tensor to expected desc at runtime
 // Do it in a `try...catch...` manner to avoid oneDNN's errors
