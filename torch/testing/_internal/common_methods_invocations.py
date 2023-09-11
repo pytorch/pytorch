@@ -13804,8 +13804,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
                          device_type='cuda', dtypes=[torch.bfloat16]),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
-                         device_type='cuda', dtypes=[torch.bfloat16]),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
                          device_type='cuda', dtypes=[torch.bfloat16]),),
     ),
     UnaryUfuncInfo(
