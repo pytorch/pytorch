@@ -48,10 +48,7 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
-from torch.fx.experimental.recording import (
-    NotEqualError
-    replay_shape_env_events,
-)
+from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     expect_true,
