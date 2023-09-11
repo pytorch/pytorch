@@ -488,11 +488,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
-        Bias = (
-            None
-            if len(self.input_nodes) == 2 or self.input_nodes[2] is None
-            else self.input_nodes[2]
-        )
+        Bias = None if len(self.input_nodes) == 2 else self.input_nodes[2]
 
         epilogue_template: Optional[str] = None
         argument_template: Optional[str] = None
