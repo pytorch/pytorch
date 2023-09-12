@@ -2842,8 +2842,6 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
     # without `dim` arg
     yield SampleInput(
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
-    yield SampleInput(
-        make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
 
 
 def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
