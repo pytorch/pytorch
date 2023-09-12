@@ -422,29 +422,51 @@ class SideEffects:
             #    - We don't generate any instructions for registering a hook.
             #    - We lift the fn up as an input.
             #    - We then manually insert a register_hook call into the graph.
-            # - The handle's exact user-specified name, "last_seen_name", is discerned and associated during STORE_FAST.
+            # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             if tensor.source:
                 cg(tensor)
                 cg.extend_output([cg.create_load_attr("register_hook")])
                 cg(hook)
                 cg.extend_output(create_call_function(1, True))
-                if hasattr(handle, "last_seen_name") and handle.last_seen_name:
+                # Let's go over how handles work.
+                #
+                # A handle is created from invoking `register_hook` on a tensor. A handle can be referenced at any
+                # time after that, or never. In dynamo, we track and associate a name with a handle (user_code_variable_name) to
+                # determine if a handle is accessed. If a handle has no user_code_variable_name, we just pop the produced value
+                # off the top of the stack, discarding the handle.
+                #
+                # If a handle is seen, we store it under that name. This is extremely important, because, the handle
+                # can be generated at any time after this point, and can be generated multiple times! If we were to defer
+                # actual codegen of the handle object until we saw a codegen call to it - then we would end up generating multiple
+                # register_hook calls, which is incorrect. This turns the codegen reconstruct(handle) call for the handle into
+                # esentially a lookup.
+                if (
+                    hasattr(handle, "user_code_variable_name")
+                    and handle.user_code_variable_name
+                ):
                     # register_hook stored with variable name assigned to the handle
                     cg.extend_output(
-                        [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=handle.user_code_variable_name
+                            )
+                        ]
                     )
                 else:
                     # register_hook stored w/o a variable name assigned to the handle
                     cg.extend_output([create_instruction("POP_TOP")])
             else:
                 if (
-                    handle.as_global
-                    and hasattr(handle, "last_seen_name")
-                    and handle.last_seen_name
+                    hasattr(handle, "user_code_variable_name")
+                    and handle.user_code_variable_name
                 ):
                     cg(handle)
                     cg.extend_output(
-                        [create_instruction("STORE_FAST", argval=handle.last_seen_name)]
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=handle.user_code_variable_name
+                            )
+                        ]
                     )
 
     def codegen_update_mutated(self, cg: PyCodegen):

@@ -5,7 +5,8 @@ from typing import List
 import torch
 from torch._dynamo.external_utils import call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, lazy_format_graph_code
+from torch._logging import getArtifactLogger
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
 from torch.fx import GraphModule
@@ -19,6 +20,8 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 
 
 def maybe_clone(x):
@@ -140,9 +143,13 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
-        return self.compiler_fn(
-            GraphModule(self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd")
+        graph = GraphModule(
+            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
+        compiled_autograd_log.info(
+            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+        )
+        return self.compiler_fn(graph)
 
     def to_proxy(self, t):
         if t is None:
@@ -152,7 +159,13 @@ class AutogradCompilerInstance:
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
         assert isinstance(t, (torch.Tensor, torch.SymInt))
-        return fetch_tensor_proxy(self.fx_tracer)(t).proxy
+        fetched_tensor = fetch_tensor_proxy(self.fx_tracer)(t)
+        if hasattr(fetched_tensor, "proxy"):
+            return fetched_tensor.proxy
+        else:
+            return self.fx_tracer.unwrap_proxy(
+                torch._functorch.aot_autograd.from_fun(fetched_tensor)
+            )
 
     def bind_tensors_to_proxies(self, tensors, proxies):
         if isinstance(proxies, torch.fx.Proxy):

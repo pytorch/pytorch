@@ -5,7 +5,6 @@ import re
 import sys
 import warnings
 
-# from numpy.core._multiarray_tests import array_indexing  # numpy implements this in C
 from itertools import product
 
 import pytest

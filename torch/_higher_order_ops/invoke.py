@@ -11,35 +11,43 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
-def invoke(fn, grad):
-    return invoke_op(fn, grad)
+def invoke(fn, grad, reenter):
+    return invoke_op(fn, grad, reenter)
 
 
 invoke_op = HigherOrderOperator("invoke")
 
 
+def dynamo_interceding_fn_wrapper(grad, *, fn):
+    return invoke_op(fn, grad, reenter=False)
+
+
 @invoke_op.py_impl(ProxyTorchDispatchMode)
-def inner_trace(fn, grad):
+def inner_trace(fn, grad, reenter):
     mode = _get_current_dispatch_mode()
     if isinstance(fn, functools.partial):
         fn.__name__ = fn.func.__name__  # type: ignore[attr-defined]
+    original_fn = fn
+    if reenter:
+        fn = functools.partial(dynamo_interceding_fn_wrapper, fn=fn)
+        fn.__name__ = fn.func.__name__
     grad = torch._functorch.aot_autograd.from_fun(grad)
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (grad,))
     out_proxy = mode.tracer.create_proxy(
         "call_function", fn, proxy_args, {}, name="invocation"
     )
-    grad = fn(grad)
+    grad = original_fn(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
     return torch._functorch.aot_autograd.to_fun(grad)
 
 
 @invoke_op.py_impl(FakeTensorMode)
-def inner_fake(fn, grad):
+def inner_fake(fn, grad, reenter):
     return fn(grad)
 
 
 @invoke_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def invoke_op_dense(fn, grad):
+def invoke_op_dense(fn, grad, reenter):
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return fn(grad)
@@ -51,10 +59,10 @@ invoke_op.py_impl(DispatchKey.Autograd)(
 
 
 @invoke_op.py_impl(DispatchKey.Functionalize)
-def invoke_functionalized(fn, grad):
+def invoke_functionalized(fn, grad, reenter):
     mode = _get_current_dispatch_mode()
     with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        return invoke_op(fn, grad)
+        return invoke_op(fn, grad, reenter)
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm

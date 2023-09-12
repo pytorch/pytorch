@@ -54,12 +54,10 @@ supported_const_comparison_ops = {
     "!=": operator.ne,
 }
 
-hook_registry = []
 
-
-def record_hook(*args, real_hook, pos):
+def record_hook(*args, real_hook):
     grad = args[0]
-    return invoke(real_hook, grad)
+    return invoke(real_hook, grad, reenter=True)
 
 
 class TensorVariable(VariableTracker):
@@ -674,36 +672,47 @@ class TensorVariable(VariableTracker):
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 handle,
-                last_seen_name=None,
+                user_code_variable_name=None,
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
-            src = tx.store_hook(name, fn)
+            # Note - if the hook has no source, we are forced to lift it up into a global
+            # An example of where this might happen will be if the user creates a custom hook
+            # within a compile region, or wraps an func with a source (like a global)
+            # with a functools partial.  In that case, we can end up in a situation where we
+            # have a source for the internal func, but not the partial. The real fix here is to
+            # not always lift up to globals, but to use the lowest level scope possible to match the
+            # func lifecycle.
+            src = fn_var.source if fn_var.source else tx.store_hook(name, fn)
             if not self.source:
                 # Intermediary
                 from .builder import GraphArg
 
                 original_fn = fn
-                fn = functools.partial(
-                    record_hook, real_hook=fn, pos=len(hook_registry)
-                )
+                fn = functools.partial(record_hook, real_hook=fn)
+
+                hook_proxy = None
+                for node in tx.output.root_tracer.graph.nodes:
+                    if node.op == "placeholder":
+                        if "source" in node.meta:
+                            if node.meta["source"] == src:
+                                hook_proxy = node.meta["proxy"]
+                                break
 
                 new_name = tx.store_handle("intermed_handle", handle)
-                handle_variable.as_global = new_name
 
-                hook_proxy = tx.output.root_tracer.create_graph_input(
-                    name, type(fn), source=src
-                )
-                grapharg = GraphArg(src, fn, False, None)
-                grapharg.has_symbols = False
-                hook_proxy.node.meta["grapharg"] = grapharg
+                if hook_proxy is None:
+                    hook_proxy = tx.output.root_tracer.create_graph_input(
+                        name, type(fn), source=src
+                    )
+                    hook_proxy.node.meta["source"] = src
+                    grapharg = GraphArg(src, fn, False, None)
+                    grapharg.has_symbols = False
+                    hook_proxy.node.meta["grapharg"] = grapharg
+                    hook_proxy.node.meta["proxy"] = hook_proxy
                 # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
                 # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
                 # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
-
-                # hook_registry.append(original_fn)
-                hook_registry.append(original_fn)
-
                 self.as_proxy().register_hook(hook_proxy)
 
                 if fn_var.source:
@@ -729,6 +738,12 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        self.proxy.node.name = new_name
+        self.user_code_variable_name = new_name
+        return self
 
 
 class SymNodeVariable(VariableTracker):
