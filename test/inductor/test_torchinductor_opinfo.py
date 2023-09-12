@@ -356,7 +356,9 @@ inductor_override_kwargs = {
     ("log_normal", "cuda"): {"reference_in_float": True},
     ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.batch_norm", "cuda", f16): {"reference_in_float": True},
-    ("nn.functional.batch_norm.without_cudnn", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.batch_norm.without_cudnn", "cuda", f16): {
+        "reference_in_float": True
+    },
     ("nn.functional.cosine_similarity", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.local_response_norm", "cuda", f16): {"reference_in_float": True},
