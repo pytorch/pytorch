@@ -157,7 +157,9 @@ def _fft_r2c(
     input = _maybe_promote_tensor_fft(input)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     dim_size = n if n is not None else input.shape[dim]
-    torch._check(dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified")
+    torch._check(
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
@@ -182,7 +184,9 @@ def _fft_c2c(
     )
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     dim_size = n if n is not None else input.shape[dim]
-    torch._check(dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified")
+    torch._check(
+        dim_size >= 1, lambda: f"Invalid number of data points ({dim_size}) specified"
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
