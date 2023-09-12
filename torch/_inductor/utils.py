@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -32,7 +33,7 @@ from unittest import mock
 import sympy
 
 import torch
-from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
@@ -225,10 +226,6 @@ def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
-
-
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 
 def precompute_method(obj: Any, method: str):
@@ -789,7 +786,7 @@ def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama
+        import colorama  # type: ignore[import]
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
@@ -906,11 +903,18 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
-PYTHON_TYPE_TO_SCHEMA_TYPE = {
-    torch.dtype: "int",
-    torch.device: "Device",
-    bool: "bool",
-}
+@functools.lru_cache(None)
+def python_type_to_schema_type():
+    from . import ir
+
+    PYTHON_TYPE_TO_SCHEMA_TYPE = {
+        torch.dtype: "int",
+        torch.device: "Device",
+        bool: "bool",
+        float: "float",
+        ir.TensorBox: "Tensor",
+    }
+    return PYTHON_TYPE_TO_SCHEMA_TYPE
 
 
 def may_get_optional_schema_type(schema_type, is_optional_arg):
@@ -931,8 +935,8 @@ def type_match(arg, arg_type, is_optional_arg):
             # TODO: add support here
             return False
 
-    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
-        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+    if arg.__class__ in python_type_to_schema_type():
+        schema_type = python_type_to_schema_type()[arg.__class__]
         may_optional_schema_type = may_get_optional_schema_type(
             schema_type, is_optional_arg
         )
@@ -965,6 +969,9 @@ def schema_match(schema, args, kwargs):
     def is_optional(arg):
         return "Optional" in str(arg.type)
 
+    def allow_none(arg):
+        return is_optional(arg) or arg.has_default_value()
+
     assert len(args) <= max_pos_args, args_error_message(
         len(args), max_pos_args, min_args
     )
@@ -981,7 +988,7 @@ def schema_match(schema, args, kwargs):
                 obj = kwargs[argument.name]
                 is_kwd = True
 
-        if obj is None and not is_optional(argument):
+        if obj is None and not allow_none(argument):
             return False
 
         if obj is not None:
@@ -1033,3 +1040,49 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+# Placeholder strings used in triton codegen.
+class Placeholder(enum.Enum):
+    # The placeholder for the actual name of a triton kernel.
+    # e.g. for "def triton_" it would be "triton_"
+    KERNEL_NAME = "KERNEL_NAME"
+
+    # The descriptive name of the triton kernel; when unique_kernel_names = False, this
+    # placeholder will be replaced with a string with more information.
+    DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+# A utility function for easier AOTInductor testing
+aot_inductor_launcher = """
+    #include <c10/cuda/CUDAStream.h>
+    #include <torch/csrc/inductor/aot_runtime/interface.h>
+
+    void run(
+            std::vector<at::Tensor>& input_tensors,
+            std::vector<at::Tensor>& output_tensors) {
+        AOTInductorModelContainerHandle container_handle;
+        AOT_INDUCTOR_ERROR_CHECK(
+            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
+        const auto stream_id = cuda_stream.stream();
+        AOTInductorStreamHandle stream_handle =
+            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+        AOTInductorTensorHandle inputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
+        AOTInductorTensorHandle outputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
+        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+            container_handle,
+            inputs_handle,
+            input_tensors.size(),
+            outputs_handle,
+            output_tensors.size(),
+            stream_handle,
+            proxy_executor_handle));
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+    }
+"""

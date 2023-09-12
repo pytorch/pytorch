@@ -38,13 +38,19 @@ aten = torch.ops.aten
 
 
 # TODO: this isn't going to work with non-aten namespaces
-def overload_to_aten_name(overload):
-    return overload._schema.name.split("::")[1]
+def overload_to_aten_name(op):
+    return op._schema.name.split("::")[1]
 
 
 # All operators that can have decomp tests
-decomposition_names = {overload_to_aten_name(k) for k in decomposition_table}
-core_decomposition_names = {overload_to_aten_name(k) for k in core_aten_decompositions()}
+decomposition_names = {
+    overload_to_aten_name(k) for k in decomposition_table
+    if isinstance(k, torch._ops.OpOverload)
+}
+core_decomposition_names = {
+    overload_to_aten_name(k) for k in core_aten_decompositions()
+    if isinstance(k, torch._ops.OpOverload)
+}
 _decomp_test_ops = [
     op
     for op in op_db
@@ -233,6 +239,21 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.int16, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int32, torch.ops.aten.linspace.default) : (0, 1),
         (torch.int64, torch.ops.aten.linspace.default) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Tensor_Tensor) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Tensor_Scalar) : (0, 1),
+        (torch.int8, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.uint8, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int16, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int32, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
+        (torch.int64, torch.ops.aten.linspace.Scalar_Tensor) : (0, 1),
     }
     if (decomp.dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -908,7 +929,8 @@ class HasDecompTest(TestCase):
         # Some decompositions are registered for CompositeImplicitAutograd
         # operators, which never appear in AOTAutograd's graph so are never used.
         useful_decomps = {op for op in decomposition_table.keys()
-                          if self._can_appear_in_trace(op)}
+                          if isinstance(op, torch._ops.OpOverload) and
+                          self._can_appear_in_trace(op)}
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
