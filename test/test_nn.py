@@ -12744,7 +12744,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
             # remove weight norm
-            m = torch.nn.utils.parametrizations.remove_weight_norm(m)
+            m = torch.nn.utils.remove_weight_norm(m)
             self.assertFalse(hasattr(m, 'weight_g'))
             self.assertFalse(hasattr(m, 'weight_v'))
             self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
