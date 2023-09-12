@@ -16,6 +16,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
 from typing import Any, cast, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+try:
+    from typing import NotImplementedType
+except ImportError:
+    import typing
+    NotImplementedType = typing.TypeVar("NotImplementedType")
 
 import torch
 import torch.fx
@@ -1498,7 +1503,9 @@ def _make_user_magic(method, user_type):
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")
 
-    def is_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+    def is_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool, NotImplementedType]):
+        if x is NotImplemented:
+            return False
         if isinstance(x, (int, float, bool)):
             return True
         return not is_symbolic(x) and not x.node.is_singleton_int()
