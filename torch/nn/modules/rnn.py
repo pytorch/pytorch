@@ -88,6 +88,8 @@ class RNNBase(Module):
             raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
         if hidden_size <= 0:
             raise ValueError("hidden_size must be greater than zero")
+        if num_layers <= 0:
+            raise ValueError("num_layers must be greater than zero")
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
         if proj_size >= hidden_size:
