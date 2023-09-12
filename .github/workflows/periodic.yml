@@ -112,30 +112,38 @@ jobs:
       cuda-version: "11.8"
       test-matrix: ${{ needs.win-vs2019-cuda11_8-py3-build.outputs.test-matrix }}
 
-  ios-12-5-1-x86-64-coreml:
-    name: ios-12-5-1-x86-64-coreml
+  # TODO: Figure out how to migrate this job to M1 runner
+  ios-build-test:
+    name: ios-build-test
     if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * 1-5' || github.event.schedule == '45 4 * * 0,6'
     uses: ./.github/workflows/_ios-build-test.yml
     with:
-      build-environment: ios-12-5-1-x86-64-coreml
-      ios-platform: SIMULATOR
-      ios-arch: x86_64
+      build-environment: ios-build-test
+      sync-tag: ios-build-test
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
-        ]}
-
-  ios-12-5-1-arm64-custom-ops:
-    name: ios-12-5-1-arm64-custom-ops
-    if: github.event_name != 'schedule' || github.event.schedule == '45 0,8,16 * * 1-5' || github.event.schedule == '45 4 * * 0,6'
-    uses: ./.github/workflows/_ios-build-test.yml
-    with:
-      build-environment: ios-12-5-1-arm64-custom-ops
-      ios-platform: OS
-      ios-arch: arm64
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+          { config: "default",
+            shard: 1,
+            num_shards: 1,
+            runner: "macos-12",
+            ios_platform: "SIMULATOR",
+            ios_arch: "x86_64",
+            use_lite_interpreter: 1,
+            use_metal: 0,
+            use_coreml: 1,
+            use_custom_op_list: ""
+          },
+          { config: "default",
+            shard: 1,
+            num_shards: 1,
+            runner: "macos-12",
+            ios_platform: "OS",
+            ios_arch: "arm64",
+            use_lite_interpreter: 1,
+            use_metal: 1,
+            use_coreml: 1,
+            use_custom_op_list: "mobilenetv2.yaml"
+          }
         ]}
 
   buck-build-test:

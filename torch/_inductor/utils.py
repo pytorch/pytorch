@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -1041,29 +1042,15 @@ def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
-def has_free_symbols(itr):
-    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+# Placeholder strings used in triton codegen.
+class Placeholder(enum.Enum):
+    # The placeholder for the actual name of a triton kernel.
+    # e.g. for "def triton_" it would be "triton_"
+    KERNEL_NAME = "KERNEL_NAME"
 
-
-def is_dynamic(*args):
-    from . import ir
-
-    for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
-            ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
-                return True
-        elif not isinstance(t, ir.IRNode):
-            continue
-        else:
-            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
-
-    return False
+    # The descriptive name of the triton kernel; when unique_kernel_names = False, this
+    # placeholder will be replaced with a string with more information.
+    DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
 
 # A utility function for easier AOTInductor testing
