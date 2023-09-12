@@ -239,7 +239,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
-    "cumprod": {f16},
     "exponential": {f16},
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
@@ -271,7 +270,6 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
-    "cumprod": {f16},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
@@ -349,6 +347,7 @@ inductor_override_kwargs = {
     ("atanh", "cuda", f16): {"reference_in_float": True},
     ("cauchy", "cuda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     ("exponential", "cuda"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
