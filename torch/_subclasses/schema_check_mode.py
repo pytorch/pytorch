@@ -48,7 +48,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 # this is actually true
                 return torch.equal(lhs, rhs)
             else:
-                return torch.allclose(before, after, equal_nan=True)
+                return torch.allclose(lhs, rhs, equal_nan=True)
 
         def has_mutated(before, after, md):
             are_tensors = type(before) == torch.Tensor and type(after) == torch.Tensor
