@@ -291,7 +291,13 @@ def _unflatten_communicated_optim_state(
                 views = flat_param_views[state_name]
             optim_state: Union[torch.Tensor, ShardedTensor, DTensor] = next(views)
             if shard_state:
-                if not fsdp_state._optim_state_dict_config.use_dtensor:
+                osd_config = fsdp_state._optim_state_dict_config
+                if getattr(osd_config, "_use_dtensor", False):
+                    assert fsdp_state._device_mesh is not None
+                    optim_state = _ext_chunk_dtensor(
+                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                    )
+                else:
                     assert fsdp_state.process_group is not None
                     optim_state = _ext_chunk_tensor(
                         optim_state,
@@ -300,12 +306,6 @@ def _unflatten_communicated_optim_state(
                         fsdp_state._device_handle.device_count(),
                         fsdp_state.process_group,
                     )
-                else:
-                    assert fsdp_state._device_mesh is not None
-                    optim_state = _ext_chunk_dtensor(
-                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
-                    )
-
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
@@ -1326,18 +1326,23 @@ def _convert_all_state_info(
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
 ) -> Tuple[torch.dtype, Dict[str, List[Optional[torch.Tensor]]]]:
+    """
+    Given the ``gathered_state_info`` and ``input_states``, the API converted
+    the StateInfos into the original state if the state is not a non-scalar
+    tensor For a multi-dimensional tensor, the local state will be stored in
+    ``state_buffer`` in a correct ordert for later allgather purpose.
+    """
+
     state_buffers: Dict[str, List[Optional[torch.Tensor]]] = {}
 
-    # Loop through the all the StateInfos to get the information of GPU
-    # tensors and store the local GPU states to ``state_buffers``.
-    # Inside the loop, the non-GPU tensors states will be decoded and
-    # stored in the ``output_states``, the result state_dict.
     for fqn, gathered_state in output_states.items():
         state_info = [s[fqn] for s in gathered_state_info]
         all_tensor_states = sorted(
             {n for state in state_info for n in state.tensors.keys()}
         )
         empty_ranks: Set[int] = set()
+        # First check all the non-scalar states and get the exist status of the
+        # the states on each rank.
         for state_name in all_tensor_states:
             numels = []
             dtype: Optional[torch.dtype] = None
@@ -1361,6 +1366,9 @@ def _convert_all_state_info(
             local_state = input_states[fqn].get(state_name, None)
             state_buffers[state_name][fsdp_param_info.param_indices[fqn]] = local_state
 
+        # Restoring the scalar and non-tensor states. If the corresponding non-scalar
+        # states do not exist on the rank, we also skip the scalar and non-tensor
+        # states on that rank
         for rank, object_state in enumerate(state_info):
             if rank in empty_ranks:
                 continue
@@ -1379,6 +1387,7 @@ def _convert_all_state_info(
                 ), f"Different ranks have different values for {name}."
                 gathered_state[name] = scalar_tensor_value
 
+    assert dtype is not None  # typing purpose
     return dtype, state_buffers
 
 
@@ -1398,10 +1407,6 @@ def _unflatten_orig_param_states(
     """
     if not to_save:
         return
-    logger.warning(
-        "CUDA Memory Summary before calling to _unflatten_orig_param_states %s",
-        torch.cuda.memory_summary(),
-    )
     flat_param = fsdp_param_info.handle.flat_param
     fsdp_state = fsdp_param_info.state
     numel = 0
@@ -1412,7 +1417,13 @@ def _unflatten_orig_param_states(
         value = value.reshape(flat_param._shapes[param_idx])
         numel += value.numel()
         if shard_state:
-            if not fsdp_state._optim_state_dict_config.use_dtensor:
+            osd_config = fsdp_state._optim_state_dict_config
+            if getattr(osd_config, "_use_dtensor", False):
+                assert fsdp_state._device_mesh is not None
+                value = _ext_chunk_dtensor(
+                    value, fsdp_state.rank, fsdp_state._device_mesh
+                )
+            else:
                 assert fsdp_state.process_group is not None
                 value = _ext_chunk_tensor(
                     value,
@@ -1420,11 +1431,6 @@ def _unflatten_orig_param_states(
                     fsdp_state.world_size,
                     fsdp_state._device_handle.device_count(),
                     fsdp_state.process_group,
-                )
-            else:
-                assert fsdp_state._device_mesh is not None
-                value = _ext_chunk_dtensor(
-                    value, fsdp_state.rank, fsdp_state._device_mesh
                 )
         with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
             value = value.cpu()
@@ -1443,9 +1449,13 @@ def _allgather_orig_param_states(
     to_save: bool,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Given the ``gathered_state_info`` and ``input_states``, the API allgather
+    Given the ``gathered_state_info`` and ``input_states``, the API allgathers
     all tensor states and restore non-tensor states from ``gathered_state_info``.
     """
+    logger.warning(
+        "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
+        torch.cuda.memory_summary(),
+    )
 
     output_states: Dict[str, Dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
 
@@ -1456,10 +1466,11 @@ def _allgather_orig_param_states(
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
     # sharded states. The size of the constructed state will be the same size as
     # flat_param (also sharded).
-    # Then perform an allgather_into_tensor to get the full flat_param state. The
-    # full flat_param state is the result of concatenation of multiple states in
+    # Then we perform an allgather_into_tensor to get the full flat_param state.
+    # The full flat_param state is the result of concatenation of multiple states
     # the order of of flat_param._fqns.
-    # We then split the flat_param state into multiple ones and return the result.
+    # The final step is to split the flat_param state into original param states
+    # and return the result.
     fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.handle.flat_param
     empty_func = functools.partial(
@@ -1506,6 +1517,7 @@ def _allgather_orig_param_states(
                     local_buffers.append(empty_func(padding_len))
             else:
                 if buffers[buffer_idx] is not None:
+                    assert buffers[buffer_idx] is not None  # typing purpose
                     local_buffers.append(buffers[buffer_idx])
                 buffer_idx += 1
             pos += numel
