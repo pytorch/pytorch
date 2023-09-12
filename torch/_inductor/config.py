@@ -466,6 +466,11 @@ class cuda:
         ),
     )
 
+    # Configures the maximum number of CUTLASS configs to profile in max_autotune.
+    # By default it's None, so that all CUTLASS configs are tuned.
+    # This is mainly used to reduce test time in CI.
+    cutlass_max_profiling_configs = None
+
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config

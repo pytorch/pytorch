@@ -3,13 +3,19 @@ import logging
 import torch
 
 from .. import config as inductor_config
+from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_max_autotune, use_triton_template
+from ..utils import (
+    use_aten_gemm_kernels,
+    use_cutlass_template,
+    use_max_autotune,
+    use_triton_template,
+)
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
@@ -126,6 +132,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, k, layout),
             )
 
+    if m * n != 0 and use_cutlass_template(layout):
+        cutlass_template = CUTLASSGemmTemplate([mat1, mat2], layout, alpha=1, beta=0)
+        ops = cutlass_template.gen_ops()
+        for op in ops:
+            cutlass_template.maybe_append_choice(
+                choices,
+                op=op,
+            )
+        log.debug("Added %d cutlass gemm configs.", len(ops))
+
     return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
 
 
@@ -209,6 +225,22 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 prefix_args=1,
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
+
+    if use_cutlass_template(layout):
+        cutlass_template = CUTLASSGemmTemplate(
+            [mat1, mat2, inp_expanded],
+            layout,
+            alpha=alpha,
+            beta=beta,
+            input_reorder=[2, 0, 1],
+        )
+        ops = cutlass_template.gen_ops()
+        for op in ops:
+            cutlass_template.maybe_append_choice(
+                choices,
+                op=op,
+            )
+        log.debug("Added %d cutlass gemm configs.", len(ops))
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
