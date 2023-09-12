@@ -17,6 +17,7 @@ from torch._inductor import ir
 from torch._inductor.codecache import CUDACodeCache, DLLWrapper, PyCodeCache
 
 if TYPE_CHECKING:
+    from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from .utils import do_bench_using_profiling
@@ -379,7 +380,7 @@ class CUDABenchmarkRequest(BenchmarkRequest):
 
 
 def benchmark_in_sub_process(
-    choice: "TritonTemplateCaller",
+    choice: "Union[TritonTemplateCaller, CUDATemplateCaller]",
 ) -> float:
     """
     Do benchmarking in subprocess and return the perf number (latency).
