@@ -155,6 +155,9 @@ void ProcessGroup::init() {
 }
 
 const std::string& ProcessGroup::getGroupName() const {
+  if (deviceTypeToBackend_.size() == 0) {
+    return "";
+  }
   return deviceTypeToBackend_.begin()->second->getGroupName();
 }
 
