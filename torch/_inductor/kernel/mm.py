@@ -9,7 +9,7 @@ from ..select_algorithm import (
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_triton_template
+from ..utils import use_aten_gemm_kernels, use_max_autotune, use_triton_template
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
@@ -116,12 +116,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+
     if m * n != 0 and use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
+                input_nodes=(mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
             )
 
@@ -142,8 +143,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
         for config in int8_mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
-                (mat1, mat2),
-                layout,
+                input_nodes=(mat1, mat2),
+                layout=layout,
                 **mm_options(config, k, layout),
             )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -154,7 +155,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
 
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    if m * n == 0 or not use_triton_template(layout):
+    if m * n == 0 or not use_max_autotune():
         choices = (
             [
                 aten_addmm.bind(
@@ -183,8 +184,10 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         if use_aten_gemm_kernels()
         else []
     )
+
     if (
-        inp_expanded.get_stride()[0] == 0
+        use_aten_gemm_kernels()
+        and inp_expanded.get_stride()[0] == 0
         and inp_expanded.get_device().type == "cuda"
         and inductor_config.triton.autotune_cublasLt
     ):
@@ -196,15 +199,16 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             ),
         )
 
-    for config in mm_configs(m, n, k):
-        mm_template.maybe_append_choice(
-            choices,
-            (inp_expanded, mat1, mat2),
-            layout,
-            **mm_options(config, k, layout),
-            prefix_args=1,
-            epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
-        )
+    if use_triton_template(layout):
+        for config in mm_configs(m, n, k):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(inp_expanded, mat1, mat2),
+                layout=layout,
+                **mm_options(config, k, layout),
+                prefix_args=1,
+                epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
+            )
 
     return autotune_select_algorithm(
         "addmm", choices, [inp_expanded, mat1, mat2], layout
@@ -231,8 +235,8 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
         mm_template.maybe_append_choice(
             choices,
-            (mat1, mat2),
-            layout,
+            input_nodes=(mat1, mat2),
+            layout=layout,
             **mm_options(config, k, layout, b_prologue_cast_type),
         )
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
