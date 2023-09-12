@@ -33,7 +33,7 @@ namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 
-DEFINE_DISPATCH(transform_bias_rescale_qkv_kernel);
+DEFINE_DISPATCH(transform_bias_rescale_qkv_stub);
 DEFINE_DISPATCH(flash_attention_kernel);
 DEFINE_DISPATCH(flash_attention_backward_kernel);
 
@@ -206,7 +206,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
 
   const auto qkv_contig = qkv_->expect_contiguous();
   const auto qkv_bias_contig = qkv_bias.expect_contiguous();
-  transform_bias_rescale_qkv_kernel(
+  transform_bias_rescale_qkv_stub(
       kCPU,
       qkv_->scalar_type(),
       q_k_v.data_ptr(),

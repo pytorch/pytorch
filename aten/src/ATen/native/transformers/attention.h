@@ -30,7 +30,7 @@ using transform_bias_rescale_qkv_fn = void(*)(
     int64_t D,
     int64_t num_head);
 
-DECLARE_DISPATCH(transform_bias_rescale_qkv_fn, transform_bias_rescale_qkv_kernel);
+DECLARE_DISPATCH(transform_bias_rescale_qkv_fn, transform_bias_rescale_qkv_stub);
 
 TORCH_API Tensor transform0213_gemm_nt_bias(
     const Tensor& a,
