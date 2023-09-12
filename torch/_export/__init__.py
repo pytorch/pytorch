@@ -93,18 +93,13 @@ _ = NewType("_", int)
 
 TensorType = types.new_class("TensorType", (Tuple,))
 
-# Different ways of specifying dynamic shapes.
-# 1. TensorType[dim0, _, dim2]
-# 2. {0: dim0, 2: dim2}
-_DynamicShape = Union[TensorType[Dim, ...], Dict[int, Dim]]
-
 
 def export_(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Dict[str, _DynamicShape]] = None,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
 ) -> ExportedProgram:
     """
     API for different ways of exporting with dynamic shape specifications.
@@ -115,35 +110,36 @@ def export_(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    import typing_inspect
+    from typing import _GenericAlias
 
-    def typing_zip(args, types):
-        if isinstance(args, tuple):
-            if isinstance(types, Sequence):
-                for arg, type_ in zip(args, types):
-                    yield from typing_zip(arg, type_)
+    def typing_zip(combined_args, dynamic_shapes):
+        if isinstance(combined_args, tuple):
+            if isinstance(dynamic_shapes, Sequence):
+                for arg, shape in zip(combined_args, dynamic_shapes):
+                    yield from typing_zip(arg, shape)
             else:
-                assert typing_inspect.is_generic_type(types) and typing_inspect.get_origin(types) is list, f"Unexpected {types} matching tuple"
-                type_ = typing_inspect.get_args(types)[0]
-                for arg in args:
-                    yield from typing_zip(arg, type_)
-        if isinstance(args, dict):
-            if isinstance(types, Mapping):
-                for arg, type_ in zip(args.values(), types.values()):
-                    yield from typing_zip(arg, type_)
+                assert isinstance(dynamic_shapes, (_GenericAlias, types.GenericAlias)) and dynamic_shapes.__origin__ is list, f"Unexpected {dynamic_shapes} matching tuple"
+                shape = dynamic_shapes.__args__[0]
+                for arg in combined_args:
+                    yield from typing_zip(arg, shape)
+        if isinstance(combined_args, dict):
+            if isinstance(dynamic_shapes, Mapping):
+                for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
+                    yield from typing_zip(arg, shape)
             else:
-                assert typing_inspect.is_generic_type(types) and typing_inspect.get_origin(types) is dict, f"Unexpected {types} matching dict"
-                type_ = typing_inspect.get_args(types)[1]
-                for arg in args.values():
-                    yield from typing_zip(arg, type_)
+                assert isinstance(dynamic_shapes, (_GenericAlias, types.GenericAlias)) and dynamic_shapes.__origin__ is dict, f"Unexpected {dynamic_shapes} matching dict"
+                shape = dynamic_shapes.__args__[1]
+                for arg in combined_args.values():
+                    yield from typing_zip(arg, shape)
         else:
-            yield (args, types)
+            yield (combined_args, dynamic_shapes)
+
 
     from collections import defaultdict
     symbols = defaultdict(list)
 
-    def update_symbols(tensor, shape: _DynamicShape):
-        if typing_inspect.is_tuple_type(shape):
+    def update_symbols(tensor, shape):
+        if isinstance(shape, (_GenericAlias, types.GenericAlias)) and shape.__origin__ is TensorType:
             for i, dim in enumerate(shape.__args__):
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i))
