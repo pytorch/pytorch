@@ -15,8 +15,7 @@ class _LazyProtocol(Protocol):
     def _register_load_state_dict_pre_hook(self, hook):
         ...
 
-    def register_forward_pre_hook(self, hook, *, prepend=False,
-                                  with_kwargs=False):
+    def register_forward_pre_hook(self, hook, *, prepend=False, with_kwargs=False):
         ...
 
     def _lazy_load_hook(
