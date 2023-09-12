@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import cast, Dict, List, Sequence, Tuple
+from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -125,7 +125,7 @@ def _operator_dispatch(
     flat_local_args: List[object] = []
     flat_kwargs_schema: List[object] = []
     flat_local_kwargs: List[object] = []
-    mesh = None
+    mesh: Optional[DeviceMesh] = None
 
     for arg in flat_args_list:
         if isinstance(arg, dtensor.DTensor):
@@ -167,7 +167,10 @@ def _operator_dispatch(
             flat_kwargs_schema.append(kwarg)
             flat_local_kwargs.append(kwarg)
 
+    assert mesh is not None, "found no DeviceMesh from dtensor args!"
+
     op_info = OpInfo(
+        mesh,
         OpSchema(
             op_call,
             tree_unflatten(flat_args_schema, args_spec),
@@ -185,7 +188,7 @@ def _operator_dispatch(
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
 
-    if mesh is not None and mesh.get_coordinate() is None:
+    if mesh.get_coordinate() is None:
         # For a non-participating device, we do:
         #   1. if the return type is scalar, set the local result to None.
         #   The local results from all devices will then be all-gathered
@@ -248,7 +251,6 @@ def _operator_dispatch(
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        assert isinstance(mesh, DeviceMesh)
         if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
             if not random._rng_tracker:
                 raise RuntimeError(
