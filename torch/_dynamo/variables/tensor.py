@@ -659,6 +659,12 @@ class TensorVariable(VariableTracker):
                 **options,
             )
 
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        self.proxy.node.name = new_name
+        self.user_code_variable_name = new_name
+        return self
+
 
 class SymNodeVariable(VariableTracker):
     """
