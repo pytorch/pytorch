@@ -8298,7 +8298,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     # FIXME: Port to a more appropriate test suite
     # Fails with inductor (and aot_eager) because functionalization replaces copy_ with copy,
     # which doesn't properly error on bad inputs.
-    @skipIfTorchInductor("FIXME")
     def test_copy_many_to_one(self):
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
