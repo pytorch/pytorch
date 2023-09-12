@@ -1296,10 +1296,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         i = 1
         for sample in samples:
             args = sample_to_args(sample)
-            if len(args) < 3:
-                continue
             # swap args order
-            args = (args[0], args[2], args[1])
+            if len(args) < 3:
+                args = (args[0], 1, args[1])  # use ndim=1
+            else:
+                args = (args[0], args[2], args[1])
             self.assertEqual(fn(*args), opt_fn(*args))
             self.assertEqual(cnts.frame_count, i)
             i += 1
