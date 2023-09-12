@@ -1,7 +1,8 @@
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 
-__all__ = ['Chi2']
+__all__ = ["Chi2"]
+
 
 class Chi2(Gamma):
     r"""
@@ -10,7 +11,7 @@ class Chi2(Gamma):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = Chi2(torch.tensor([1.0]))
         >>> m.sample()  # Chi2 distributed with shape df=1
         tensor([ 0.1046])
@@ -18,7 +19,7 @@ class Chi2(Gamma):
     Args:
         df (float or Tensor): shape parameter of the distribution
     """
-    arg_constraints = {'df': constraints.positive}
+    arg_constraints = {"df": constraints.positive}
 
     def __init__(self, df, validate_args=None):
         super().__init__(0.5 * df, 0.5, validate_args=validate_args)

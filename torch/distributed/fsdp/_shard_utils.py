@@ -1,3 +1,4 @@
+import copy
 import itertools
 import math
 from typing import Any, Dict, Optional
@@ -14,6 +15,7 @@ from torch.distributed._shard.sharded_tensor import (
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 
 
 def _all_gather_sharded_tensor(
@@ -29,8 +31,9 @@ def _all_gather_sharded_tensor(
     pg_device = distributed_c10d._get_pg_default_device(pg)
     if shards:
         local_tensor = shards[0].tensor.flatten()
-        if local_tensor.device.type != pg_device.type:
-            local_tensor = local_tensor.to(pg_device)
+        with SimpleProfiler.profile(SimpleProfiler.Type.D2H):
+            if local_tensor.device.type != pg_device.type:
+                local_tensor = local_tensor.to(pg_device)
         num_padding = chunk_size - local_tensor.numel()
         if num_padding > 0:
             local_tensor = F.pad(local_tensor, [0, num_padding])
@@ -50,6 +53,8 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
+# TODO: Make this API work for both FSDP, and 2D. Move it outside of FSDP.
+# External users are interesting in using this API.
 def _gather_state_dict(
     state_dict: Dict[str, Any],
     pg: Optional[dist.ProcessGroup] = None,
@@ -66,13 +71,21 @@ def _gather_state_dict(
                 if tensor.local_shards()
                 else torch.device("cpu")
             )
-            if output_tensor.device != local_shard_device:
-                tensor = output_tensor.to(local_shard_device)
-            else:
-                tensor = output_tensor
+            with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+                if output_tensor.device != local_shard_device:
+                    tensor = output_tensor.to(local_shard_device)
+                else:
+                    tensor = output_tensor
         elif isinstance(tensor, DTensor):
+            if tensor.device != tensor.device_mesh.device_type:
+                tensor = tensor.to(tensor.device_mesh.device_type)
+            # FSDP all_gather: [Shard(0)] -> [Replicate()]
+            # HSDP all_gather: [Replicate(), Shard(0)] -> [Replicate(), Replicate()]
+            placements = list(copy.deepcopy(tensor.placements))
+            placements[-1] = Replicate()
             tensor = tensor.redistribute(
-                device_mesh=tensor.device_mesh, placements=[Replicate()]
+                device_mesh=tensor.device_mesh,
+                placements=placements,
             )
             tensor = tensor.to_local()
         new_state_dict[key] = tensor
@@ -148,10 +161,11 @@ def _create_chunk_dtensor(
     Shard a tensor to chunks along the first dimension. The local rank will gets its
     corresponding chunk as the local tensor to create a DTensor.
     """
+    inner_dim = device_mesh.ndim - 1
     shard_placement = DShard(0)
     tensor_list, _ = shard_placement._split_tensor(
         tensor,
-        device_mesh.size(dim=0),
+        device_mesh.size(dim=inner_dim),
         with_padding=False,
         contiguous=True,
     )
@@ -159,4 +173,9 @@ def _create_chunk_dtensor(
     # Each chunk is a view of the input tensor. If the original tensor change, the view will also be changed.
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
     local_tensor = tensor_list[rank].clone().detach()
-    return DTensor.from_local(local_tensor, device_mesh, [shard_placement])
+
+    # FSDP placements: [Shard(0)]
+    # HSDP placements: [Replicate(), Shard(0)]
+    placements = [Replicate() for _ in range(device_mesh.ndim)]
+    placements[-1] = shard_placement  # type: ignore[call-overload]
+    return DTensor.from_local(local_tensor, device_mesh, placements)

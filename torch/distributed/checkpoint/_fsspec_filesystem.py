@@ -1,4 +1,4 @@
-# pyre-ignore-all-errors
+# Mypy will not try inferring the types of any 3rd party libraries installed.
 # mypy: ignore-errors
 
 import collections
@@ -18,9 +18,9 @@ import fsspec
 import torch
 from fsspec.core import url_to_fs
 from torch import Tensor
+from torch._utils import _get_device_module
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
-
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
 
 from torch.distributed.checkpoint.planner import (
@@ -38,6 +38,7 @@ from torch.distributed.checkpoint.storage import (
     StorageWriter,
     WriteResult,
 )
+from torch.distributed.checkpoint.utils import _create_file_view
 from torch.futures import Future
 
 __all__ = [
@@ -114,7 +115,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def __init__(
         self,
         resolve_fun: Callable,
-        stream: Union[None, io.RawIOBase, torch._C._CudaStreamBase] = None,
+        stream: Union[None, io.RawIOBase, torch.Stream] = None,
         inflight_threshhold: int = 1_000_000,
     ):
         self.resolve_fun = resolve_fun
@@ -124,9 +125,11 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.stream = stream or torch.cuda.current_stream()
-        if self.stream != torch.cuda.current_stream():
-            self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_module = _get_device_module(self.device_type)
+        self.stream = stream or self.device_module.current_stream()
+        if self.stream != self.device_module.current_stream():
+            self.stream.wait_stream(self.device_module.current_stream())
 
     @property
     def _done(self):
@@ -143,7 +146,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         return drained
 
     def _refill(self):
-        with torch.cuda.stream(self.stream):
+        with self.device_module.stream(self.stream):
             while (
                 not self._done
                 and self.in_flight_data < self.inflight_threshhold
@@ -151,7 +154,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
-                if tensor.is_cuda:
+                if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
                     if tensor.storage().size() != tensor.numel():
@@ -232,7 +235,7 @@ def _split_by_size_and_type(
 
 
 def _write_item(
-    stream: Optional[Union[io.RawIOBase, torch._C._CudaStreamBase]],
+    stream: Optional[Union[io.RawIOBase, torch.Stream]],
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
     storage_key: str,
@@ -294,7 +297,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert not tensor.is_cuda
+                    assert tensor.is_cpu
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )
@@ -320,6 +323,7 @@ class FsspecWriter(StorageWriter):
     def __init__(
         self,
         path: Union[str, os.PathLike],
+        single_file_per_rank: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
     ) -> None:
@@ -328,15 +332,15 @@ class FsspecWriter(StorageWriter):
 
         Args:
             path: diretory where the checkpoint will be writen to.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
 
-        N. B. There's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
-
         super().__init__()
         self.path = path
         self.fs, _ = url_to_fs(path)
+        self.single_file_per_rank = single_file_per_rank
         self.thread_count = thread_count
         self.per_thread_copy_ahead = per_thread_copy_ahead
 
@@ -371,10 +375,18 @@ class FsspecWriter(StorageWriter):
             return file_name
 
         file_queue: queue.Queue = queue.Queue()
-        for item in plan.items:
-            file_name = gen_file()
-            file_path = os.path.join(self.path, file_name)
-            file_queue.put((file_path, file_name, [item]))
+        if self.single_file_per_rank:
+            for bucket in _split_by_size_and_type(
+                self.thread_count, plan.items
+            ):
+                file_name = gen_file()
+                file_path = os.path.join(self.path, file_name)
+                file_queue.put((file_path, file_name, bucket))
+        else:
+            for item in plan.items:
+                file_name = gen_file()
+                file_path = os.path.join(self.path, file_name)
+                file_queue.put((file_path, file_name, [item]))
 
         result_queue: queue.Queue = queue.Queue()
 
@@ -421,6 +433,7 @@ class FsspecWriter(StorageWriter):
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
         metadata_path = os.path.join(self.path, ".metadata")
+
         with self.fs.transaction:
             with fsspec.open(metadata_path, "wb") as metadata_file:
                 pickle.dump(metadata, metadata_file)
@@ -432,6 +445,9 @@ class FsspecReader(StorageReader):
         self.path = path
         self.fs, _ = url_to_fs(path)
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
+
+    def _slice_file(self, file, sinfo: _StorageInfo):
+        return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -447,13 +463,14 @@ class FsspecReader(StorageReader):
                 # TODO sort by offset and cache the reading
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
+                    file_slice = self._slice_file(file, item_md)
                     if req.type == LoadItemType.BYTE_IO:
-                        bytes = io.BytesIO(file.read(item_md.length))
+                        bytes = io.BytesIO(file_slice.read(item_md.length))
                         bytes.seek(0)
                         planner.load_bytes(req, bytes)
                     else:
                         tensor = cast(
-                            Tensor, torch.load(file, map_location="cpu")
+                            Tensor, torch.load(file_slice, map_location="cpu")
                         )
                         tensor = narrow_tensor_by_index(
                             tensor, req.storage_offsets, req.lengths

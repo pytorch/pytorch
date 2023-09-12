@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import functools
 import sys
 import warnings
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -196,11 +198,19 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = opset9.get_pool_ceil_padding(
+                input, kernel_size, stride, padding
+            )
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
+        else:
+            padding = padding * 2
         kwargs = {
             "kernel_shape_i": tuple_fn(kernel_size),
-            "pads_i": tuple_fn(padding) * 2,
+            "pads_i": padding,
             "strides_i": tuple_fn(stride),
-            "ceil_mode_i": ceil_mode,
+            "ceil_mode_i": 0,
         }
         if set(tuple_fn(dilation)) != {1}:
             kwargs["dilations_i"] = tuple_fn(dilation)
@@ -243,26 +253,83 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     return symbolic_fn
 
 
+# For AvgPool
+def _adjust_attributes_of_avg_pool(
+    expand_size: int,
+    kernel_size: Union[Sequence[int], int],
+    stride: Union[Sequence[int], int],
+    padding: Union[Sequence[int], int],
+) -> Tuple[Sequence[int], Sequence[int], Sequence[int]]:
+    """Adjust attributes of avg_pool to match ONNX specification."""
+
+    if isinstance(kernel_size, int):
+        kernel_shape = [kernel_size] * expand_size
+    else:
+        kernel_shape = kernel_size  # type: ignore[assignment]
+
+    if isinstance(padding, int):
+        pads = [padding] * expand_size * 2
+    elif len(padding) == 1:
+        pads = padding * expand_size * 2  # type: ignore[operator, assignment]
+    elif len(padding) == 2:
+        pads = padding * expand_size  # type: ignore[operator, assignment]
+    else:
+        pads = padding * 2  # type: ignore[operator, assignment]
+
+    if isinstance(stride, int):
+        strides = [stride] * expand_size
+    elif not stride:
+        strides = kernel_shape
+    else:
+        strides = stride  # type: ignore[assignment]
+
+    return (kernel_shape, strides, pads)
+
+
 @_onnx_symbolic(
     "aten::avg_pool1d",
-    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
+    decorate=[_apply_params("avg_pool1d", 1)],
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
-    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
+    decorate=[_apply_params("avg_pool2d", 2)],
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
-    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
+    decorate=[_apply_params("avg_pool3d", 3)],
 )
 @_beartype.beartype
-def _avg_pool(name, tuple_fn):
-    # Although onnx::AvgPool provides count_include_pad and ceil_mode,
-    # The corner case of Average Pooling with ceil_mode on
-    # PyTorch allows sliding window go off bound, which leads to
-    # this accommodation.
-    # More detail on https://github.com/pytorch/pytorch/issues/57178
-    return opset9._avg_pool(name, tuple_fn)
+def _avg_pool(name, expand_size):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
+    @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
+    @_beartype.beartype
+    def symbolic_fn(
+        g,
+        input: _C.Value,
+        kernel_size: Sequence[int],
+        stride: Sequence[int],
+        padding: Union[int, Sequence[int]],
+        ceil_mode: int,
+        count_include_pad: int,
+        divisor_override=None,
+    ):
+        kernel_shape, strides, pads = _adjust_attributes_of_avg_pool(
+            expand_size, kernel_size, stride, padding
+        )
+
+        result = g.op(
+            "AveragePool",
+            input,
+            ceil_mode_i=ceil_mode,
+            count_include_pad_i=count_include_pad,
+            kernel_shape_i=kernel_shape,
+            pads_i=pads,
+            strides_i=strides,
+        )
+
+        return result
+
+    return symbolic_fn
 
 
 @_onnx_symbolic(
