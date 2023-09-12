@@ -1358,9 +1358,3 @@ def test_overlap():
     # gh-10080, out overlaps one of the operands
     c = np.einsum("ij,jk->ik", a, b, out=b)
     assert_equal(c, d)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

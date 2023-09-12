@@ -270,13 +270,11 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
-                    assert all(choice in timings for choice in choices)
-
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
-                    for choice, timing in timings.items():
-                        local_cache[name][inputs][choice.hash_key()] = timing
+                    for choice in choices:
+                        timings[choice] = benchmark(choice)
+                        local_cache.setdefault(name, {})
+                        local_cache[name].setdefault(inputs, {})
+                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -329,10 +327,10 @@ def get_path(basename: str, extension: str, specified_dir: str = ""):
 
 
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
-    assert hash_type in ["code", "cubin", "hsaco"], "Hash type not supported"
+    assert hash_type in ["code", "cubin"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type == "cubin" or "hsaco":
+    if hash_type == "cubin":
         return code_hash(repr(content))
 
 
@@ -796,6 +794,17 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
+                # This is a special treatment for Meta internal cuda-12 where all libs
+                # are in lib/cuda-12 and lib/cuda-12/stubs
+                for i, path in enumerate(lpaths):
+                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
+                        f"{path}/libcudart_static.a"
+                    ):
+                        for root, dirs, files in os.walk(path):
+                            if "libcudart_static.a" in files:
+                                lpaths[i] = os.path.join(path, root)
+                                lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -811,13 +820,10 @@ def get_include_and_linking_paths(
             else:
                 macros = f"-D{macros}"
         if cuda:
-            if torch.version.hip is not None:
-                libs += ["c10_hip", "torch_hip"]
+            if config.is_fbcode():
+                libs += ["cuda"]
             else:
-                if config.is_fbcode():
-                    libs += ["cuda"]
-                else:
-                    libs += ["c10_cuda", "cuda", "torch_cuda"]
+                libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -882,9 +888,14 @@ def get_include_and_linking_paths(
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
+    static_link_libs = []
+    if aot_mode and config.is_fbcode():
+        # For Meta internal cuda-12, it is recommended to static link cudart
+        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
-    libs = " ".join(["-l" + p for p in libs])
+    libs = " ".join(static_link_libs + ["-l" + p for p in libs])
     return ipaths, lpaths, libs, macros
 
 
@@ -948,19 +959,13 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
-        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            bin_type,
-            hash_type=bin_type,
+            "cubin",
+            hash_type="cubin",
             specified_dir=config.aot_inductor.output_path,
         )
-
-        if torch.version.hip is None:
-            params["cubin_path"] = path
-        else:
-            params["hsaco_path"] = path
-
+        params["cubin_path"] = path
         cls.cache[key] = params
 
     @classmethod
