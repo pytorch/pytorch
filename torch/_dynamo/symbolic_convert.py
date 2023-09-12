@@ -873,7 +873,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
-        value = value.rename(self, name)
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):

@@ -162,22 +162,22 @@ class Repro(torch.nn.Module):
         l_x1_ = L_x1_
         l_y1_ = L_y1_
         randn = torch.randn(20, 20)
-        cuda = randn.cuda();  randn = None
-        randn_1 = torch.randn(20, 20)
-        add = l_x1_ + cuda;  l_x1_ = cuda = None
-        add_1 = l_y1_ + randn_1;  l_y1_ = randn_1 = None
+        x2_0 = randn.cuda();  randn = None
+        y2_0 = torch.randn(20, 20)
+        add = l_x1_ + x2_0;  l_x1_ = x2_0 = None
+        add_1 = l_y1_ + y2_0;  l_y1_ = y2_0 = None
         g__mod___m_x = self.G__mod___m_x(add);  add = None
         g__mod___p_x = self.G__mod___p_x
         add_2 = g__mod___m_x + g__mod___p_x;  g__mod___m_x = g__mod___p_x = None
         g__mod___b_x = self.G__mod___b_x
-        add_3 = add_2 + g__mod___b_x;  add_2 = g__mod___b_x = None
+        x3_0 = add_2 + g__mod___b_x;  add_2 = g__mod___b_x = None
         g__mod___m_y = self.G__mod___m_y(add_1);  add_1 = None
         g__mod___p_y = self.G__mod___p_y
         add_4 = g__mod___m_y + g__mod___p_y;  g__mod___m_y = g__mod___p_y = None
         g__mod___b_y = self.G__mod___b_y
-        add_5 = add_4 + g__mod___b_y;  add_4 = g__mod___b_y = None
-        cpu = add_3.cpu();  add_3 = None
-        add_6 = cpu + add_5;  cpu = add_5 = None
+        y3_0 = add_4 + g__mod___b_y;  add_4 = g__mod___b_y = None
+        cpu = x3_0.cpu();  x3_0 = None
+        add_6 = cpu + y3_0;  cpu = y3_0 = None
         relu = torch.relu(add_6);  add_6 = None
         return (relu,)""",
         )
@@ -207,9 +207,9 @@ class Repro(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, sin_19):
-        relu = torch.relu(sin_19);  sin_19 = None
-        return (relu,)""",
+    def forward(self, x_19_0):
+        x_20_0 = torch.relu(x_19_0);  x_19_0 = None
+        return (x_20_0,)""",
         )
 
 
