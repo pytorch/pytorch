@@ -10,6 +10,8 @@ import torch.distributed._tensor.api as dtensor
 import torch.distributed._tensor.random as random
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
     OpInfo,
     OpSchema,
     OutputSharding,
@@ -166,9 +168,8 @@ def _operator_dispatch(
             flat_local_kwargs.append(kwarg)
 
     op_info = OpInfo(
-        op_call,
         OpSchema(
-            op_call._schema,
+            op_call,
             tree_unflatten(flat_args_schema, args_spec),
             tree_unflatten(flat_kwargs_schema, kwargs_spec),
         ),
@@ -195,7 +196,7 @@ def _operator_dispatch(
         #   2. if the return type is Tensor or List[Tensor], return empty
         #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
-        ret_list = op_info.schema.func_schema.returns
+        ret_list = op_info.schema.op._schema.returns
 
         if spec is None:
             # For a scalar return type, the non-participating device has None
@@ -273,12 +274,12 @@ def _operator_dispatch(
             # perform reduce on the collection with AND op
             local_results = functools.reduce(operator.and_, obj_list, True)
 
-    if op_info.schema.is_inplace:
+    if _is_inplace_op(op_call):
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
         self._spec = cast(DTensorSpec, output_sharding.output_spec)
         return self, op_info.schema, output_sharding
-    elif op_info.schema.is_out_variant:
+    elif _is_out_variant_op(op_call):
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
             (output_sharding.output_spec,)
@@ -287,7 +288,7 @@ def _operator_dispatch(
         )
         out_dts = []
         spec_idx = 0
-        for arg in op_info.schema.func_schema.arguments:
+        for arg in op_call._schema.arguments:
             if arg.is_out:
                 out_dt = cast(dtensor.DTensor, kwargs[arg.name])
                 out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])

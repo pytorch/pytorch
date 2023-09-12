@@ -61,11 +61,9 @@ def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(self, self, scalar) if scalar else (self, self),
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -108,13 +106,11 @@ def _prop__foreach_addcop_scalar(op_schema: OpSchema):
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(self, self, self, scalar)
                     if scalar
                     else (self, self, self),
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -158,11 +154,9 @@ def _prop__fused_adam(op_schema: OpSchema):
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=new_schemas + op_schema.args_schema[NT:],
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -190,11 +184,9 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(new_self, target) + op_schema.args_schema[2:],
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -382,11 +374,9 @@ def _refine_sharding(
         )
 
     op_schema = OpSchema(
-        func_schema=op_schema.func_schema,
+        op=op_schema.op,
         args_schema=args_schema,  # type: ignore[arg-type]
         kwargs_schema={},
-        is_inplace=op_schema.is_inplace,
-        is_out_variant=op_schema.is_out_variant,
     )
     output_sharding = pointwise_rule(op_schema, linearity=False)
     if output_sharding.output_spec:
@@ -452,7 +442,7 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(
                         DTensorSpec(
                             mesh=input.mesh,
