@@ -327,8 +327,8 @@ def _unshard(
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
         unshard_stream.wait_stream(pre_unshard_stream)
+    handle.unshard(unshard_stream)
     with state._device_handle.stream(unshard_stream):
-        handle.unshard()
         handle.post_unshard()
 
 

@@ -1244,7 +1244,10 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self):
+    def unshard(
+        self,
+        unshard_stream: torch.Stream,
+    ):
         """
         Runs the unshard logic. This includes all-gathering the flat parameter
         and switching to using the unsharded flat parameter. If the handle does
@@ -1265,11 +1268,22 @@ class FlatParamHandle:
             self._use_unsharded_flat_param(unsharded_flat_param)
             return
 
+        in_forward = self._training_state == HandleTrainingState.FORWARD
+        in_backward = self._training_state == HandleTrainingState.BACKWARD_PRE or self._training_state == HandleTrainingState.BACKWARD_POST
+
+        if in_forward:
+            self._unshard_in_forward(unshard_stream)
+        elif in_backward:
+            self._unshard_in_backward(unshard_stream)
+
+    def _unshard_in_forward(
+        self,
+        unshard_stream: torch.Stream,
+    ):
         if self._limit_all_gathers:
             # All-gather rate limiting coming into effect via stream wait
             # Current stream is unshard stream as we call `handle.unshard` in
             # its with-stream context
-            unshard_stream = self._device_handle.current_stream()
             event_with_tensor = self._free_event_queue.dequeue_if_needed()
             if event_with_tensor:
                 # Wait for a resharding event (compute done)
@@ -1280,9 +1294,30 @@ class FlatParamHandle:
                 # storage into the unshard stream's pool, and potentially reuse
                 # it for the current unshard
 
-        unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-        padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
-        self._use_unsharded_flat_param(padded_unsharded_flat_param)
+        with self._device_handle.stream(unshard_stream):
+            unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
+            padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
+            self._use_unsharded_flat_param(padded_unsharded_flat_param)
+
+    def _unshard_in_backward(
+        self,
+        unshard_stream: torch.Stream,
+    ):
+        if self._limit_all_gathers:
+            # Allocate buffer on default stream
+            unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
+            # Unshard stream wait for default stream
+            unshard_stream.wait_stream(
+                self._device_handle.current_stream()
+            )
+        else:
+            # Allocate buffer on unshard stream
+            with self._device_handle.stream(unshard_stream):
+                unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
+
+        with self._device_handle.stream(unshard_stream):
+            padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
+            self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def needs_unshard(self) -> bool:
         """Returns if the handle's flat parameter needs to be unsharded."""
@@ -1679,7 +1714,8 @@ class FlatParamHandle:
         self._use_sharded_flat_param()
 
         if free_unsharded_flat_param:
-            if self._limit_all_gathers:
+            in_forward = self._training_state == HandleTrainingState.FORWARD
+            if self._limit_all_gathers and in_forward:
                 # In the new rate limiter, we stash an all-gather buffer to keep
                 # it from being freed by the caching allocator until two
                 # all-gathers later. So that the caching allocator would try to
@@ -1695,6 +1731,7 @@ class FlatParamHandle:
                     unsharded_flat_param,
                 )
             else:
+                # Direct free if in backward or if there is no rate limiting
                 self._free_unsharded_flat_param()
 
     def post_reshard(self):
