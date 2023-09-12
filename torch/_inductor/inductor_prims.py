@@ -71,3 +71,10 @@ force_stride_order = make_prim(
     lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
     doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
 )
+masked_scatter_with_index = make_prim(
+    "inductor_masked_scatter_with_index(Tensor input, Tensor mask, Tensor source_idx, Tensor source) -> Tensor",
+    lambda input_tensor, mask, index, source: torch.masked_scatter(
+        input_tensor, mask, source
+    ),
+    doc="masked_scatter with precomputed indices",
+)
