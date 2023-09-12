@@ -34,10 +34,10 @@ config.benchmark_kernel = True
 config.triton.unique_kernel_names = True
 from torch._inductor.scheduler import log
 
-log.setLevel(logging.DEBUG)
+# log.setLevel(logging.DEBUG)
 from torch._inductor.codegen.triton import log
 
-log.setLevel(logging.DEBUG)
+# log.setLevel(logging.DEBUG)
 
 # END CHANGES ONLY FOR PERF TEST PURPOSE #####
 
