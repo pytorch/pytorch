@@ -774,14 +774,30 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        def autotune(choices):
-            return make_benchmark_fn()(choices)
+        def autotune(choice):
+            benchmark_fn = make_benchmark_fn()
+            try:
+                timing = benchmark_fn(
+                    choice,
+                )
+            except RuntimeError as e:
+                msg = str(e)
+                if "invalid argument" in msg:
+                    msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
+                    log.warning(msg)
+                    return float("inf")
+                elif "illegal memory access" in msg:
+                    msg += "\n\nEither error in template or triton bug.\n"
+                raise ErrorFromChoice(msg, choice, benchmark_fn.debug_str())
+            except AssertionError as e:
+                raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
+            return timing
 
         if config.autotune_in_subproc:
-            from .autotune_process import tuning_pool
+            from .autotune_process import tuning_process
 
             # do the optional warmup
-            tuning_pool.initialize()
+            tuning_process.initialize()
 
         autotune_start_ts = time.time()
         timings = self.lookup(
@@ -837,6 +853,46 @@ class AlgorithmSelectorCache(PersistentCache):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
+        def benchmark_in_current_process(choice):
+            if DEBUG:
+                start_ts = time.time()
+            out.zero_()
+            if isinstance(choice, ExternKernelCaller):
+                # aten kernels want the offset baked in for sliced tensors
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)
+            else:
+                # triton templates want the base pointer for sliced tensors
+                result = choice.benchmark(*example_inputs, out=out)
+            if VERIFY:
+                torch.testing.assert_close(out_extern, expected, **VERIFY)
+            torch.cuda.synchronize()  # shake out any CUDA errors
+            return result
+
+        def benchmark_in_sub_process(choice):
+            # only benchmark triton kernel in sub process for now.
+            # ATen/Extern kernel are still benchmarked in the current process.
+            if isinstance(choice, ExternKernelCaller):
+                return benchmark_in_current_process(choice)
+
+            from . import autotune_process
+
+            if DEBUG:
+                start_ts = time.time()
+
+            out = autotune_process.benchmark_in_sub_process(
+                choice,
+            )
+            if DEBUG:
+                elapse = time.time() - start_ts
+                print(f"MultiProcessTuning {choice}: {elapse}")
+            return out
+
+        benchmark = (
+            benchmark_in_sub_process
+            if config.autotune_in_subproc
+            else benchmark_in_current_process
+        )
+
         def debug_str():
             def tensor_repr(x):
                 return (
@@ -852,61 +908,7 @@ class AlgorithmSelectorCache(PersistentCache):
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
-        def benchmark_choice_in_current_process(choice):
-            out.zero_()
-            if isinstance(choice, ExternKernelCaller):
-                # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
-            else:
-                # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY:
-                torch.testing.assert_close(out_extern, expected, **VERIFY)
-            torch.cuda.synchronize()  # shake out any CUDA errors
-            return result
-
-        def benchmark_in_current_process(choices):
-            timings = {}
-            for choice in choices:
-                try:
-                    timing = benchmark_choice_in_current_process(choice)
-                except RuntimeError as e:
-                    msg = str(e)
-                    if "invalid argument" in msg:
-                        msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                        log.warning(msg)
-                        timing = float("inf")
-                    else:
-                        if "illegal memory access" in msg:
-                            msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(msg, choice, debug_str())
-                except AssertionError as e:
-                    raise AssertionError(
-                        f"Incorrect result from choice {choice}\n\n{e}"
-                    )
-
-                timings[choice] = timing
-
-            return timings
-
-        def benchmark_in_sub_process(choices):
-            from . import autotune_process
-
-            # only benchmark triton kernel in sub process for now.
-            # ATen/Extern kernel are still benchmarked in the current process.
-            extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-            triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
-
-            timings = benchmark_in_current_process(extern)
-            timings.update(autotune_process.benchmark_in_sub_process(triton))
-            return timings
-
-        benchmark = (
-            benchmark_in_sub_process
-            if config.autotune_in_subproc
-            else benchmark_in_current_process
-        )
-
+        benchmark.debug_str = debug_str  # type: ignore[attr-defined]
         return benchmark
 
     @staticmethod
