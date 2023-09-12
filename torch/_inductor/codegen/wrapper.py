@@ -633,6 +633,9 @@ class WrapperCodeGen(CodeGen):
         offset = self.codegen_sizevar(offset)
         return f"reinterpret_tensor({name}, {size}, {stride}, {offset})"
 
+    def codegen_multi_output(self, name, value):
+        self.writeline(f"{self.declare}{name} = {value}{self.ending}")
+
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
@@ -1337,6 +1340,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{size}, {stride}, at::TensorOptions({device}).dtype({dtype}));"
         )
+
+    def codegen_multi_output(self, name, value):
+        # MultiOutput is allocated by a fallback op and needs to be copied into the final output in the AOT mode
+        if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+            self.outputs_need_copy.add(name)
+        super().codegen_multi_output(name, value)
 
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args

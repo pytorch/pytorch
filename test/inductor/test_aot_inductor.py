@@ -10,6 +10,7 @@ import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor.utils import aot_inductor_launcher
+from torch.testing._internal.common_cuda import SM80OrLater
 
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -204,6 +205,25 @@ class AotInductorTests(TestCase):
         batch = 2
         a = torch.randn(batch, M, K, device="cuda")
         example_inputs = (a,)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
+    def test_scaled_dot_product_flash_attention(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, q, k, v):
+                return torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
+
+        model = Repro()
+        example_inputs = (
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+        )
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
