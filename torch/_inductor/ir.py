@@ -5675,6 +5675,12 @@ class OutOfPlaceCollectiveKernel(CollectiveKernel):
         super().__init__(layout, inputs + outputs, constant_args)
         self.outputs = outputs
         self.original_inputs = inputs
+        # NOTE: As seen in issue #108780, output buffers of out-of-place collectives
+        # could be incorrectly reused. As a safety measure, here we just ban the reuse of them.
+        # TODO: A better fix is to figure out how to propagate the aliases properly,
+        # so that the buffer is only reused after all its users have consumed it.
+        for x in self.outputs:
+            V.graph.never_reuse_buffers.add(x.name)
 
     def should_allocate(self):
         return False

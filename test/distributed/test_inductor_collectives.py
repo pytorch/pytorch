@@ -22,6 +22,8 @@ from torch.testing._internal.common_distributed import (
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
+import torch.nn.functional as F
+
 
 @requires_nccl()
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -155,12 +157,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allreduce_input_buffer_reuse(self):
         def func(a, *, tag, ranks, group_size):
-            ar = torch.ops.c10d_functional.all_reduce(a, "sum", tag, ranks, group_size)
-            ar = torch.ops.c10d_functional.wait_tensor(ar)
+            ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
             c = torch.relu(a)
             d = torch.matmul(c, c)
             e = d + ar
@@ -171,6 +173,32 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled = torch.compile(func)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allgather_output_buffer_reuse(self):
+        class Model(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.emb = torch.nn.Embedding(4, 4)
+
+            def forward(self, x, world_size, tag, ranks, group_size):
+                y = self.emb(x)
+                last_dim = y.dim() - 1
+                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
+                return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model = Model().cuda()
+            model_compiled = torch.compile(model)
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            out = model_compiled(inp, self.world_size, **self.get_world_trs())
+            correct = model(inp, self.world_size, **self.get_world_trs())
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
