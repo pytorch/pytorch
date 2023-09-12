@@ -1366,6 +1366,7 @@ class Graph:
             seen_values.add(node)
 
             if node.name in seen_names:
+                breakpoint()
                 raise RuntimeError(f'Node redefined name {node.name}!')
             seen_names.add(node.name)
 
