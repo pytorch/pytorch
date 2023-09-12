@@ -13,7 +13,7 @@ from torch._C._functorch import (
 )
 from torch._guards import Source
 
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic, is_symbolic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -445,7 +445,7 @@ class MetaConverter:
                         )
                         if r.is_nested:
                             # This is how we check that this is a non-symbolic SymNode
-                            assert isinstance(r._size[1].node, torch._C._SymNode)
+                            assert not is_symbolic(r._size[1])
                             # Avoid circular import
                             from torch._dynamo.source import TensorProperty, TensorPropertySource
 

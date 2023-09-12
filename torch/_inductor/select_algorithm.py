@@ -8,7 +8,7 @@ import textwrap
 import time
 from io import StringIO
 
-from typing import Any, Dict, List, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 from unittest.mock import patch
 
 import sympy
@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 
 from .codegen.triton_utils import config_of, signature_to_meta
 
-from .utils import do_bench, sympy_dot, sympy_product, unique
+from .utils import do_bench, Placeholder, sympy_dot, sympy_product, unique
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,7 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
+        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
         return (
             f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
@@ -517,7 +518,7 @@ class TritonTemplate:
 
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
-                kernel_name="KERNEL_NAME",
+                kernel_name=str(Placeholder.KERNEL_NAME),
                 output_node=out_node,
                 use_jit=False,
                 **kernel_options,
@@ -745,7 +746,19 @@ class ErrorFromChoice(RuntimeError):
 
 
 class AlgorithmSelectorCache(PersistentCache):
-    def __call__(self, name, choices: List[ChoiceCaller], input_nodes, layout):
+    def __call__(
+        self,
+        name,
+        choices: List[ChoiceCaller],
+        input_nodes,
+        layout,
+        # optional dict mapping arg indices to the functions
+        # generating a torch.Tensor for that input from the
+        # corresponding ir.Buffer. if passed for a given
+        # arg, the function will be called instead of
+        # generating a random torch.Tensor for benchmarking.
+        input_gen_fns: Optional[Dict[int, Callable[[ir.Buffer], torch.Tensor]]] = None,
+    ):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
         if len(choices) == 0:
@@ -759,7 +772,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         @functools.lru_cache(None)
         def make_benchmark_fn():
-            return self.make_benchmark_fn(choices, input_nodes, layout)
+            return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
         def autotune(choice):
             benchmark_fn = make_benchmark_fn()
@@ -809,10 +822,15 @@ class AlgorithmSelectorCache(PersistentCache):
         choices,
         input_nodes,
         layout,
+        input_gen_fns=None,
     ):
+        if input_gen_fns is None:
+            input_gen_fns = {}
+
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): cls.benchmark_example_value(x) for x in input_nodes
+            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+            for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = [

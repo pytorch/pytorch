@@ -5,7 +5,6 @@ import re
 import sys
 import warnings
 
-# from numpy.core._multiarray_tests import array_indexing  # numpy implements this in C
 from itertools import product
 
 import pytest
@@ -700,7 +699,7 @@ class TestMultiIndexingAutomated:
                 in_indices[i] = indx
             elif indx.dtype.kind != "b" and indx.dtype.kind != "i":
                 raise IndexError(
-                    "arrays used as indices must be of " "integer (or boolean) type"
+                    "arrays used as indices must be of integer (or boolean) type"
                 )
             if indx.ndim != 0:
                 no_copy = False

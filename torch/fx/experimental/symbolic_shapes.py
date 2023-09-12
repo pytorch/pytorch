@@ -324,6 +324,36 @@ def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compi
     else:
         shape_env.runtime_var_to_range[s] = ValueRanges(runtime_min, runtime_max)
 
+def _advise_is_size(a):
+    """
+    Don't use this directly; use torch._check_is_size instead.
+
+    This is a softer version of _constrain_range_for_size (with min=0,
+    max=Inf).  Instead of forcibly constraining a variable (and erroring if we
+    failed to constrain it), it will simply advise us that a size is
+    constrained in some way.  We will always defer a runtime assert for this
+    constraint if we cannot prove it at compile-time, but we we only
+    *sometimes* learn useful extra information at compile-time with this
+    information.  This is in contrast to constrain_range_for_size, where if
+    you don't call that on a fresh unbacked symint, chances are we will choke.
+
+    TODO: Make Dynamo handle this appropriately if this is seen in Dynamo-ed
+    code.  Right now this is only really used in code with AOTAutograd trace
+    through, so it is not a big problem that this isn't supported, but in
+    principle all of this code should be Dynamo'able too.
+
+    TODO: I didn't support min/max because I didn't have a use case where this
+    actually helped.  In principle we can support it, it just makes the
+    implementation below more complicated.
+    """
+
+    # This must always succeed, because the sole allowed caller _check_is_size
+    # was responsible for expect_true'ing this
+    assert a >= 0
+
+    if isinstance(a, SymInt) and isinstance(a.node.expr, sympy.Symbol):
+        _constrain_range_for_size(a)
+
 def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] = None):
     """
     This function is NOT INTENDED to be used by itself.
@@ -977,6 +1007,13 @@ class SymNode:
     def bool_(self):
         return self.guard_bool("", 0)
 
+    def is_symbolic(self):
+        return True
+
+def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
+    if isinstance(val, (int, float, bool)):
+        return False
+    return val.node.is_symbolic()
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -1451,30 +1488,46 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
+    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+        if isinstance(x, (int, float, bool)):
+            return x
+        # Only expect to be called on SymBool or singleton int
+        if isinstance(x, SymBool):
+            return x.node.guard_bool("", 0)
+        assert False
+
+    def is_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+        if isinstance(x, (int, float, bool)):
+            return True
+        return not is_symbolic(x) and not x.node.is_singleton_int()
+
+    # Before performing the operation, check if any operands are constant.
+    # If so, extract out the constant values first. If `self` itself is a
+    # constant, then "redispatch" by calling back into the operator. Sometimes
+    # this means that operations involving SymBool return plain bools.
+    # Alternatively, we could also rewrap into constant Symbool (i.e. by
+    # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
+    # today for no particular reason.
     def unary_magic_impl(self):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
-        # Decay constant SymBool into plain bools
-        if isinstance(self.node, torch._C._SymNode):
-            if isinstance(self, SymBool):
-                return (method_to_operator(method))(self.node.guard_bool("", 0), other)
-        if isinstance(other, SymBool):
-            if isinstance(other.node, torch._C._SymNode):
-                other = other.node.guard_bool("", 0)
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method_attr)(other_node))
 
     def rbinary_magic_impl(self, other):
-        # Decay constant SymBool into plain bools
-        if isinstance(self.node, torch._C._SymNode):
-            if isinstance(self, SymBool):
-                return (method_to_operator(method))(self.node.guard_bool("", 0), other)
-        if isinstance(other, SymBool):
-            if isinstance(other.node, torch._C._SymNode):
-                other = other.node.guard_bool("", 0)
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
@@ -2321,7 +2374,7 @@ class ShapeEnv:
         # we may have an unnessary shape speciliazation for y.
         def maybe_specialize_sym_int_with_hint(maybe_sym) -> int:
             assert isinstance(maybe_sym, (int, torch.SymInt))
-            if isinstance(maybe_sym, SymInt) and not isinstance(maybe_sym.node, torch._C._SymNode):
+            if is_symbolic(maybe_sym):
                 assert maybe_sym.node.shape_env is not self, \
                     "expect the symbol is created from an shape env other than current one."
                 return maybe_sym.node.require_hint()
@@ -2740,6 +2793,27 @@ class ShapeEnv:
         def is_dim(src):
             return isinstance(src, TensorPropertySource) and src.prop is TensorProperty.SIZE
 
+        if equalities_inputs:
+            source_index = {}
+            for i, src in enumerate(sources):
+                source_index[src.name()] = i
+
+            def get_symbol(tensor_dim_src):
+                fake = placeholders[source_index[tensor_dim_src.base.name()]]
+                symint = fake.shape[tensor_dim_src.idx]
+                assert isinstance(symint, torch.SymInt)
+                return symint.node.expr
+
+            for src1, src2 in equalities_inputs.source_pairs:
+                s1, s2 = get_symbol(src1), get_symbol(src2)
+                concrete_val = self.evaluate_expr(sympy.Eq(s1, s2))
+                if not concrete_val:
+                    raise ConstraintViolationError(
+                        f"{src1.name()} = {self.var_to_val[s1]}"
+                        " is not equal to "
+                        f"{src2.name()} = {self.var_to_val[s2]}"
+                    )
+
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
         # variable.  If there is no such input, this is an error in our
@@ -2752,8 +2826,8 @@ class ShapeEnv:
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
         def track_symint(source, val, constraint=None):
-            if isinstance(val, SymInt) and isinstance(val.node, torch._C._SymNode):
-                return
+            assert not isinstance(val, SymInt) or is_symbolic(val)
+
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
                 val = val.node.maybe_as_int()
 

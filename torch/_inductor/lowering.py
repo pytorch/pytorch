@@ -23,7 +23,6 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
-    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from torch.utils._pytree import tree_flatten
@@ -354,7 +353,12 @@ def promote_constants(inputs, override_return_dtype=None):
                 )
             )
         elif isinstance(x, sympy.Expr):
-            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+            out.append(
+                ExpandView.create(
+                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    list(ex.get_size()),
+                )
+            )
         else:
             out.append(x)
 
@@ -1482,12 +1486,23 @@ def _warn_complex_not_supported():
     )
 
 
+@functools.lru_cache(None)
+def _warn_float8_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
+    )
+
+
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
+        return True
+    # FP8 Tensors are currently not supported
+    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
+        _warn_float8_not_supported()
         return True
     return False
 
@@ -1856,8 +1871,6 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
-make_fallback(aten.cumsum, require_dense, warn=False)
-make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1868,7 +1881,7 @@ make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
 make_fallback(aten._scaled_dot_product_efficient_attention)
 make_fallback(aten._scaled_dot_product_efficient_attention_backward)
-make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention, warn=False)
 make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
@@ -1876,7 +1889,9 @@ make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
+make_fallback(aten._scaled_mm.default)
 
+# TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
@@ -1896,7 +1911,6 @@ make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
-make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1976,7 +1990,6 @@ make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
-make_fallback(aten.vdot)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -2447,8 +2460,7 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
-    dtype = kwargs.get("dtype")
-    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
+    assert kwargs.get("dtype") is not None, "dtype should be handled by decomposition"
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
@@ -2764,6 +2776,13 @@ def scatter_fallback(
     reduce_ty = "add" if fn == "aten.scatter_" else "sum"
     if (
         reduce not in {None, reduce_ty}
+        or (
+            fn == "aten.scatter_reduce_"
+            and reduce == "sum"
+            and isinstance(src, TensorBox)
+            and src.get_device() == torch.device("cpu")
+            and config.cpp.fallback_scatter_reduce_sum
+        )
         or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
         or torch.are_deterministic_algorithms_enabled()
     ):
@@ -2801,7 +2820,7 @@ def scatter_add(x, dim: int, index, src):
 
 @register_lowering(aten.scatter_add_, type_promotion_kind=None)
 def scatter_add_(x, dim: int, index, src):
-    return scatter_reduce_(clone(x), dim, index, src, "sum")
+    return scatter_reduce_(x, dim, index, src, "sum")
 
 
 @register_lowering(aten.scatter_reduce, type_promotion_kind=None)
@@ -4130,6 +4149,21 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
     return inner
 
 
+def _make_scan_inner(x, *, axis, dtype):
+    if dtype is not None:
+        x = to_dtype(x, dtype)
+    size = x.get_size()
+    axis = _validate_reduction_axis(x, axis)[0]
+
+    return dict(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=x.make_loader(),
+        size=x.get_size(),
+        axis=axis,
+    )
+
+
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
@@ -4460,6 +4494,38 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
 
     fn = make_reduction("sum", override_return_dtype=dtype)
     return fn(x, axis, keepdims, dtype=dtype)
+
+
+fallback_cumsum = fallback_handler(aten.cumsum)
+fallback_cumprod = fallback_handler(aten.cumprod)
+
+
+@register_lowering(aten.cumsum)
+def cumsum(x, axis=None, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    result = ir.Scan.create(**kwargs, scan_op="sum")
+    if result is None:
+        return fallback_cumsum(x, dim=axis, dtype=dtype)
+    return result
+
+
+@register_lowering(aten.cumprod)
+def cumprod(x, axis=None, dtype=None):
+    if (
+        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    ) and dtype is None:
+        dtype = torch.int64
+
+    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
+    result = ir.Scan.create(**kwargs, scan_op="prod")
+    if result is None:
+        return fallback_cumprod(x, dim=axis, dtype=dtype)
+    return result
 
 
 @register_lowering(aten.prod)

@@ -1258,11 +1258,20 @@ void initJITBindings(PyObject* module) {
           [](c10::SymNode a) { return a->str(); })
       .def(
           "__hash__",
-          [](c10::SymNode node){
+          [](const c10::SymNode& node){
             // TODO: We should do this properly by adding a method to SymNodeImpl
             auto ms = node->singleton_int();
-            TORCH_CHECK(ms.has_value());
             return *ms;
+          })
+      .def(
+          "is_symbolic",
+          [](const c10::SymNode& node){
+            return false;
+          })
+      .def(
+          "is_singleton_int",
+          [](const c10::SymNode& node){
+            return node->singleton_int().has_value();
           });
 
   // clang-format on
