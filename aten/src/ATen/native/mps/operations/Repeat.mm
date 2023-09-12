@@ -201,7 +201,7 @@ void computeRepeatIndices(index_t* repeat_ptr,
   });
 }
 
-Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<SymInt> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat_, c10::optional<int64_t> output_size) {
   Tensor output;
   Tensor repeat = repeat_;
   if (repeat.scalar_type() == kLong && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {
