@@ -268,6 +268,10 @@ ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
   return value;
 }
+ListTypePtr ListType::ofNumbers() {
+  static auto value = ListType::create(NumberType::get());
+  return value;
+}
 
 TypePtr OptionalType::get(TypePtr inner) {
   static ska::flat_hash_map<TypePtr, TypePtr> containerTypePtrs;
