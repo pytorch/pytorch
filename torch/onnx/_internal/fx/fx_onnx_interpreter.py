@@ -235,10 +235,11 @@ def _fill_tensor_shape_type(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
         if expected_value is None:
+            # There is no shape/type from None.
             continue
-        # aten::sym_size output is a int, not a tensor, which stands
-        # for the size of one dim. We treat it as 0-D tensor.
         elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # aten::sym_size output is a int, not a tensor, which stands
+            # for the size of one dim. We treat it as 0-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
