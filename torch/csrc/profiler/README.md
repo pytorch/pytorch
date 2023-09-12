@@ -11,7 +11,7 @@ The profiler instruments PyTorch to collect information about the model's execut
 ## Table of Contents
 
 - [Codebase Structure](#codebase-structure)
-- [RecordFunction](#recordfunction)
+- [`RecordFunction`](#recordfunction)
 - [Autograd Integration](#autograd-integration)
 - [Collection and Post-Processing](#collection-and-post-processing)
 - [Kineto Integration](#kineto-integration)
@@ -21,7 +21,7 @@ The profiler instruments PyTorch to collect information about the model's execut
 
 TODO
 
-## RecordFunction ##
+## `RecordFunction` ##
 
 [/aten/src/ATen/record_function.h](/aten/src/ATen/record_function.h)
 
