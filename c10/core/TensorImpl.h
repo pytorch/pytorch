@@ -75,7 +75,7 @@ inline int64_t size_from_dim_(int k, IntArrayRef dims) {
 
 // Product of all dims up to k (not including dims[k])
 inline int64_t size_to_dim_(int k, IntArrayRef dims) {
-  TORCH_CHECK((unsigned)k <= dims.size());
+  TORCH_CHECK(k >= 0 && static_cast<size_t>(k) <= dims.size());
   int64_t r = 1;
   for (const auto i : c10::irange(k)) {
     r *= dims[i];

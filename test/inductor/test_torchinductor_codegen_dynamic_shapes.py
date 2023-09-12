@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -111,6 +112,14 @@ def check_codegen(
 # xfail by default, set is_skip=True to skip
 test_failures = {
     #
+    # Failed to find dynamic for loop variable (no kernels generated)
+    #
+    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(
+        ("cpu", "cuda"), is_skip=True
+    ),
+    "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
+    #
     # Failed to find dynamic for loop variable:
     #
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
@@ -154,6 +163,7 @@ test_failures = {
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_embedding_bag_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -175,6 +185,7 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
+    "test_multilayer_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -186,7 +197,6 @@ test_failures = {
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_to_device_dynamic_shapes": TestFailure(("cpu",)),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -264,12 +274,17 @@ test_failures = {
     #
     "test_cudnn_rnn_dynamic_shapes": TestFailure(("cuda",)),
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
-    "test_fft_real_input_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_fft_real_input_real_output_dynamic_shapes": TestFailure(("cpu", "cuda")),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_aliased_buffer_reuse_dynamic_shapes": TestFailure(("cpu",)),
 }
+
+if TEST_WITH_ROCM:
+    test_failures.update(
+        {
+            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+        }
+    )
 
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
