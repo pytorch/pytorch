@@ -1010,8 +1010,8 @@ class SymNode:
     def is_symbolic(self):
         return True
 
-    def __hash__(self):
-        raise AssertionError("non-singleton-int SymNode cannot be hashed")
+    def is_singleton_int(self):
+        return False
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):
@@ -1494,10 +1494,9 @@ def _make_user_magic(method, user_type):
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
-        # Only expect to be called on SymBool or singleton int
         if isinstance(x, SymBool):
             return x.node.guard_bool("", 0)
-        assert False
+        raise AssertionError("expect to be called with constant SymBools")
 
     def is_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):

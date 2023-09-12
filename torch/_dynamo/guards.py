@@ -1257,9 +1257,7 @@ def guard_fail_hook(
         if isinstance(fail_reason, str):
             reason = fail_reason
             break
-        elif (
-            isinstance(fail_reason, bool) or isinstance(fail_reason, torch.SymBool)
-        ) and not fail_reason:
+        elif isinstance(fail_reason, (bool, torch.SymBool)) and not fail_reason:
             reason = part
             break
 

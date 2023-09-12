@@ -123,7 +123,6 @@ class NestedTensor(torch.Tensor):
             requires_grad,
         ) = meta
 
-        # This pair of methods gets called during the initial creation and then
         B = offsets.shape[0] - 1
         D = values.shape[1]
         sym_size = (B, symint, D)

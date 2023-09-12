@@ -290,8 +290,10 @@ class SymInt:
         return str(self.node)
 
     def __hash__(self) -> builtins.int:
-        # Note that only singleton ints can be hashed today
-        return hash(self.node)
+        if self.node.is_singleton_int():
+            return hash(self.node)
+        else:
+            raise TypeError("unhashable type: non-singleton SymInt")
 
 class SymFloat:
     """

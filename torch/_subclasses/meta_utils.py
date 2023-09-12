@@ -446,7 +446,6 @@ class MetaConverter:
                             ),
                         )
                         if r.is_nested:
-                            # This is how we check that this is a non-symbolic SymNode
                             assert not is_symbolic(r._size[1])
                             # Avoid circular import
                             from torch._dynamo.source import (
