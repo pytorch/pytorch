@@ -17,7 +17,7 @@ template <
     void compute(index_t*, int64_t*, index_t*, int64_t, int64_t)>
 static inline Tensor repeat_interleave_common(
     const Tensor& repeats,
-    c10::optional<int64_t> output_size) {
+    c10::optional<SymInt> output_size) {
   TORCH_CHECK(
       repeats.dim() == 1, "repeat_interleave only accept 1D vector as repeat");
   TORCH_CHECK(

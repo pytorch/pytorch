@@ -42,7 +42,7 @@ namespace native {
 
 Tensor repeat_interleave_cpu(
     const Tensor& repeat,
-    c10::optional<int64_t> output_size) {
+    c10::optional<SymInt> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
     output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
@@ -56,7 +56,7 @@ Tensor repeat_interleave(
     const Tensor& self,
     const Tensor& repeats,
     c10::optional<int64_t> dim,
-    c10::optional<int64_t> output_size) {
+    c10::optional<SymInt> output_size) {
   Tensor input = self;
 
   // Store conj and neg bits
