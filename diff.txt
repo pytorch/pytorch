@@ -1,0 +1,405 @@
+diff --git a/test/distributed/test_inductor_collectives.py b/test/distributed/test_inductor_collectives.py
+index 33e30bbb19..6b777b9150 100644
+--- a/test/distributed/test_inductor_collectives.py
++++ b/test/distributed/test_inductor_collectives.py
+@@ -22,6 +22,7 @@ from torch.testing._internal.common_distributed import (
+ from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
+ from torch._inductor.utils import has_triton, run_and_get_triton_code
+ import torch._dynamo.logging
++from torch._custom_ops import get_ctx
+ 
+ @requires_nccl()
+ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+@@ -219,11 +220,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+     @patch.object(torch._inductor.config, "compile_threads", 1)
+     def test_all_to_all_single_inductor(self):
+-        def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
++        def example(inp, input_split_sizes, output_split_sizes, *, tag, ranks, group_size):
+             a2a = torch.ops.c10d_functional.all_to_all_single(
+                 inp,
+-                output_split_sizes=input_split_sizes_tensor,
+-                input_split_sizes=output_split_sizes_tensor,
++                output_split_sizes=output_split_sizes,
++                input_split_sizes=input_split_sizes,
+                 tag=tag,
+                 ranks=ranks,
+                 group_size=group_size,
+@@ -241,32 +242,35 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+             )
+         ):
+             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
+-            input_split_sizes_tensor = torch.tensor(
+-                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+-                dtype=torch.int64,
+-                device="cuda",
+-            )
+-            output_split_sizes_tensor = torch.tensor(
+-                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+-                dtype=torch.int64,
+-                device="cuda",
+-            )
++            input_split_sizes = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
++            output_split_sizes = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
+             inputs = (
+                 torch.ones(int(row), 5, device="cuda") * (self.rank + 1),
+-                input_split_sizes_tensor,
+-                output_split_sizes_tensor,
++                input_split_sizes,
++                output_split_sizes,
+             )
+             trs = self.get_world_trs()
+ 
+             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+-            FileCheck() \
+-                .check("buf0_inputs = [arg2_1,arg4_1,arg5_1]") \
+-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=buf0_inputs[1], input_split_sizes=buf0_inputs[2], tag='', ranks=[0, 1], group_size=2)") \
+-                .check("buf1 = buf0") \
+-                .check("i3 = buf1.size(0)") \
+-                .check("buf1 = _wait_tensor(buf1)") \
+-                .run(code)
++            if self.rank == 0:
++                FileCheck() \
++                    .check("buf0_inputs = [arg2_1]") \
++                    .check("i4 = 1") \
++                    .check("i5 = 1") \
++                    .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=[i4, s3], input_split_sizes=[i5, s2], tag='', ranks=[0, 1], group_size=2)") \
++                    .check("buf1 = buf0") \
++                    .check("i3 = buf1.size(0)") \
++                    .check("buf1 = _wait_tensor(buf1)") \
++                    .run(code)
++            else:
++                FileCheck() \
++                    .check("buf0_inputs = [arg2_1]") \
++                    .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=[s4, s5], input_split_sizes=[s2, s3], tag='', ranks=[0, 1], group_size=2)") \
++                    .check("buf1 = buf0") \
++                    .check("i3 = buf1.size(0)") \
++                    .check("buf1 = _wait_tensor(buf1)") \
++                    .run(code)
+ 
+             eager_out = example(*inputs, **trs)
+             inductor_out = compiled_fn(*inputs, **trs)
+@@ -277,11 +281,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+     @patch.object(torch._inductor.config, "compile_threads", 1)
+     def test_all_to_all_single_inductor_output_split_sizes_none(self):
+-        def example(inp, input_split_sizes_tensor, *, tag, ranks, group_size):
++        def example(inp, input_split_sizes, *, tag, ranks, group_size):
+             a2a = torch.ops.c10d_functional.all_to_all_single(
+                 inp,
+                 output_split_sizes=None,
+-                input_split_sizes=input_split_sizes_tensor,
++                input_split_sizes=input_split_sizes,
+                 tag=tag,
+                 ranks=ranks,
+                 group_size=group_size,
+@@ -291,19 +295,20 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+             return out
+ 
+         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+-            input_split_sizes_tensor = torch.tensor(
+-                [1] * self.world_size,
+-                dtype=torch.int64,
+-                device="cuda",
++            input_split_sizes = [1] * self.world_size
++            inputs = (
++                torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),
++                input_split_sizes,
+             )
+-            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), input_split_sizes_tensor)
+             trs = self.get_world_trs()
+ 
+             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+             FileCheck() \
+-                .check("buf0_inputs = [arg1_1,arg2_1]") \
+-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=None, input_split_sizes=buf0_inputs[1], tag='', ranks=[0, 1], group_size=2)") \
++                .check("buf0_inputs = [arg1_1]") \
++                .check("i0 = 1") \
++                .check("i1 = 1") \
++                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=None, input_split_sizes=[i0, i1], tag='', ranks=[0, 1], group_size=2)") \
+                 .check("buf1 = buf0") \
+                 .check("buf1 = _wait_tensor(buf1)") \
+                 .run(code)
+@@ -317,10 +322,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+     @patch.object(torch._inductor.config, "compile_threads", 1)
+     def test_all_to_all_single_inductor_input_split_sizes_none(self):
+-        def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
++        def example(inp, output_split_sizes, *, tag, ranks, group_size):
+             a2a = torch.ops.c10d_functional.all_to_all_single(
+                 inp,
+-                output_split_sizes=output_split_sizes_tensor,
++                output_split_sizes=output_split_sizes,
+                 input_split_sizes=None,
+                 tag=tag,
+                 ranks=ranks,
+@@ -338,19 +343,20 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
+                 capture_scalar_outputs=True,
+             )
+         ):
+-            output_split_sizes_tensor = torch.tensor(
+-                [1] * self.world_size,
+-                dtype=torch.int64,
+-                device="cuda",
++            output_split_sizes = [1] * self.world_size
++            inputs = (
++                torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),
++                output_split_sizes,
+             )
+-            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), output_split_sizes_tensor)
+             trs = self.get_world_trs()
+ 
+             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
+             FileCheck() \
+-                .check("buf0_inputs = [arg1_1,arg2_1]") \
+-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=buf0_inputs[1], input_split_sizes=None, tag='', ranks=[0, 1], group_size=2)") \
++                .check("buf0_inputs = [arg1_1]") \
++                .check("i0 = 1") \
++                .check("i1 = 1") \
++                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=[i0, i1], input_split_sizes=None, tag='', ranks=[0, 1], group_size=2)") \
+                 .check("buf1 = buf0") \
+                 .check("i3 = buf1.size(0)") \
+                 .check("buf1 = _wait_tensor(buf1)") \
+diff --git a/torch/_inductor/ir.py b/torch/_inductor/ir.py
+index 166dd6023b..243d79800b 100644
+--- a/torch/_inductor/ir.py
++++ b/torch/_inductor/ir.py
+@@ -5991,10 +5991,12 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
+         layout,
+         inputs,
+         constant_args,
+-        arg_index_to_input_index,
++        output_split_sizes,
++        input_split_sizes,
+     ):
+         super().__init__(layout, inputs, [], constant_args)
+-        self.arg_index_to_input_index = arg_index_to_input_index
++        self.output_split_sizes = output_split_sizes
++        self.input_split_sizes = input_split_sizes
+ 
+     def should_emit_register_tensor_work(self):
+         return False
+@@ -6010,32 +6012,13 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
+     def create(
+         cls,
+         x: "TensorBox",
+-        output_split_sizes: Optional["TensorBox"],
+-        input_split_sizes: Optional["TensorBox"],
++        output_split_sizes: Optional[List[Expr]],
++        input_split_sizes: Optional[List[Expr]],
+         tag: str,
+         ranks: List[int],
+         group_size: int,
+     ):
+         x_realized = cls.realize_input(x)
+-        inputs_allow_none = []
+-        output_split_sizes_realized = None
+-        if output_split_sizes is not None:
+-            output_split_sizes_realized = cls.realize_input(output_split_sizes)
+-        input_split_sizes_realized = None
+-        if input_split_sizes is not None:
+-            input_split_sizes_realized = cls.realize_input(input_split_sizes)
+-        inputs_allow_none = [
+-            x_realized,
+-            output_split_sizes_realized,
+-            input_split_sizes_realized,
+-        ]
+-        inputs = [inp for inp in inputs_allow_none if inp is not None]
+-        arg_index_to_input_index = {}
+-        for i in range(len(inputs_allow_none)):
+-            if inputs_allow_none[i] is not None:
+-                arg_index_to_input_index[i] = inputs.index(inputs_allow_none[i])
+-            else:
+-                arg_index_to_input_index[i] = None
+ 
+         new_size = x_realized.get_size()
+         output_shape_first_dim_s = None
+@@ -6053,9 +6036,10 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
+ 
+         coll = AllToAllSingle(
+             layout=layout,
+-            inputs=inputs,
++            inputs=[x_realized],
+             constant_args=[tag, ranks, group_size],
+-            arg_index_to_input_index=arg_index_to_input_index,
++            output_split_sizes=output_split_sizes,
++            input_split_sizes=input_split_sizes,
+         )
+ 
+         return MultiOutputNoSizeAssert(
+@@ -6067,22 +6051,28 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
+     def codegen_input(self, wrapper, output_name, input_names):
+         wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
+ 
+-    def codegen_collective(self, wrapper, output_name, input_names):
+-        input_strs = [f"{output_name}_inputs[0]"]
+-        for i in range(1, len(self.arg_index_to_input_index)):
+-            input_index = self.arg_index_to_input_index[i]
+-            if input_index is None:
+-                input_strs.append("None")
+-            else:
+-                input_strs.append(f"{output_name}_inputs[{input_index}]")
++    def codegen_unbacked_symint_to_value(self, wrapper, s):
++        if V.graph.sizevars.shape_env.is_unbacked_symint(s):
++            var_range = V.graph.sizevars.shape_env.var_to_range[s.node.expr]
++            assert var_range.lower == var_range.upper
++            wrapper.writeline(f"{s.node.expr} = {var_range.lower}")
+ 
++    def codegen_collective(self, wrapper, output_name, input_names):
+         tag, ranks, group_size = self.constant_args
+ 
++        if self.output_split_sizes is not None:
++            for s in self.output_split_sizes:
++                self.codegen_unbacked_symint_to_value(wrapper, s)
++
++        if self.input_split_sizes is not None:
++            for s in self.input_split_sizes:
++                self.codegen_unbacked_symint_to_value(wrapper, s)
++
+         wrapper.writeline(
+             f"{output_name} = fun_col_impl._all_to_all_single("
+-            f"input={input_strs[0]}, "
+-            f"output_split_sizes={input_strs[1]}, "
+-            f"input_split_sizes={input_strs[2]}, "
++            f"input={output_name}_inputs[0], "
++            f"output_split_sizes={self.output_split_sizes}, "
++            f"input_split_sizes={self.input_split_sizes}, "
+             f"tag='{tag}', "
+             f"ranks={ranks}, "
+             f"group_size={group_size})",
+diff --git a/torch/_inductor/lowering.py b/torch/_inductor/lowering.py
+index 291a923e43..18ef4f39b8 100644
+--- a/torch/_inductor/lowering.py
++++ b/torch/_inductor/lowering.py
+@@ -46,6 +46,7 @@ from .ir import (
+ )
+ from .utils import ceildiv, decode_device, pad_listlike, sympy_product
+ from .virtualized import ops, V
++from torch.fx.experimental.symbolic_shapes import constrain_range
+ 
+ log = logging.getLogger(__name__)
+ lowerings = {}
+@@ -4773,17 +4774,31 @@ try:
+         )
+         return list(map(TensorBox.create, result))
+ 
+-    # NOTE: Under torch.compile, the default `type_promotion_kind` will allocate float32 buffers
+-    # for `output_split_sizes` and `input_split_sizes` and then copy the inputs (int64 tensors)
+-    # into the float32 buffers, which is incorrect. Here we set `type_promotion_kind=None` to
+-    # disable that behavior.
+-    @register_lowering(c10d_functional.all_to_all_single, type_promotion_kind=None)
++    def replace_specialized_zero_or_one_with_unbacked_symint(sizes_list):
++        ret = []
++        for elem in sizes_list:
++            if elem in [0, 1]:
++                elem_symint = V.graph.sizevars.shape_env.create_unbacked_symint()
++                constrain_range(elem_symint, min=elem, max=elem)
++                ret.append(elem_symint)
++            else:
++                ret.append(elem)
++        return ret
++
++    @register_lowering(c10d_functional.all_to_all_single)
+     def all_to_all_single(
+         self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+     ):
++        if output_split_sizes is not None:
++            output_split_sizes = replace_specialized_zero_or_one_with_unbacked_symint(output_split_sizes)
++        if input_split_sizes is not None:
++            input_split_sizes = replace_specialized_zero_or_one_with_unbacked_symint(input_split_sizes)
+         return TensorBox.create(
+             ir.AllToAllSingle.create(
+-                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
++                self,
++                output_split_sizes,
++                input_split_sizes,
++                tag, ranks, group_size
+             )
+         )
+ 
+diff --git a/torch/distributed/_functional_collectives.py b/torch/distributed/_functional_collectives.py
+index 475188cece..08e571f18e 100644
+--- a/torch/distributed/_functional_collectives.py
++++ b/torch/distributed/_functional_collectives.py
+@@ -305,8 +305,10 @@ def _is_view_op(tgt):
+ 
+ def all_to_all_single(
+     self: torch.Tensor,
+-    output_split_sizes: Optional[torch.Tensor],
+-    input_split_sizes: Optional[torch.Tensor],
++    # output_split_sizes: Optional[torch.Tensor],
++    # input_split_sizes: Optional[torch.Tensor],
++    output_split_sizes: Optional[List[int]],
++    input_split_sizes: Optional[List[int]],
+     group: RANK_TYPES,
+     tag: str = "",
+ ) -> torch.Tensor:
+@@ -325,11 +327,10 @@ def all_to_all_single(
+     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+     that information and perform collective algebraic optimization. Use other forms of input for that.
+     """
+-    int_dtypes = {torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64}
+     if output_split_sizes is not None:
+-        assert output_split_sizes.dtype in int_dtypes
++        assert all([isinstance(size, int) for size in output_split_sizes])
+     if input_split_sizes is not None:
+-        assert input_split_sizes.dtype in int_dtypes
++        assert all([isinstance(size, int) for size in input_split_sizes])
+     tag, rankset, group_size = _expand_group(group, tag)
+     tensor = torch.ops.c10d_functional.all_to_all_single(self, output_split_sizes, input_split_sizes, tag, rankset, group_size)  # type: ignore[attr-defined]
+     return _maybe_wrap_tensor(tensor)
+@@ -542,12 +543,10 @@ def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, r
+     if output_split_sizes is None:
+         return input.new_empty(input.size())
+     else:
+-        ctx = get_ctx()
++        out_size = list(input.size())
+         # `output.shape[0]` is `sum(output_split_sizes)`
+         # which is data-dependent, so we use symint to represent it here.
+-        output_shape_first_dim = ctx.create_unbacked_symint()
+-        out_size = list(input.size())
+-        out_size[0] = output_shape_first_dim
++        out_size[0] = get_ctx().create_unbacked_symint()
+         return input.new_empty(out_size)
+ 
+ 
+@@ -560,7 +559,7 @@ def _register_ops():
+         "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
+         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+         "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+-        "all_to_all_single(Tensor input, Tensor? output_split_sizes, Tensor? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
++        "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
+     ]
+ 
+     my_module = sys.modules[__name__]
+diff --git a/torch/distributed/_functional_collectives_impl.py b/torch/distributed/_functional_collectives_impl.py
+index d1b452f1e2..2d4f9de2f4 100644
+--- a/torch/distributed/_functional_collectives_impl.py
++++ b/torch/distributed/_functional_collectives_impl.py
+@@ -308,18 +308,17 @@ def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op,
+ 
+ def _all_to_all_single(
+     input: torch.Tensor,
+-    output_split_sizes: Optional[torch.Tensor],
+-    input_split_sizes: Optional[torch.Tensor],
++    # output_split_sizes: Optional[torch.Tensor],
++    # input_split_sizes: Optional[torch.Tensor],
++    output_split_sizes: Optional[List[int]],
++    input_split_sizes: Optional[List[int]],
+     tag: str,
+     ranks: List[int],
+     group_size: int,
+ ):
+     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+ 
+-    if isinstance(input_split_sizes, torch.Tensor):
+-        input_split_sizes = input_split_sizes.tolist()  # type: ignore[assignment]
+-    if isinstance(output_split_sizes, torch.Tensor):
+-        output_split_sizes = output_split_sizes.tolist()  # type: ignore[assignment]
++    if output_split_sizes is not None:
+         assert input.dim() >= 1, f"Expected input to have at least 1 dim but got {input.dim()} dim"
+         out_size = list(input.size())
+         out_size[0] = sum(output_split_sizes)

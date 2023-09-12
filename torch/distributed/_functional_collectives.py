@@ -543,10 +543,12 @@ def _all_to_all_single_meta(input, output_split_sizes, input_split_sizes, tag, r
     if output_split_sizes is None:
         return input.new_empty(input.size())
     else:
-        out_size = list(input.size())
+        ctx = get_ctx()
         # `output.shape[0]` is `sum(output_split_sizes)`
         # which is data-dependent, so we use symint to represent it here.
-        out_size[0] = get_ctx().create_unbacked_symint()
+        output_shape_first_dim = ctx.create_unbacked_symint()
+        out_size = list(input.size())
+        out_size[0] = output_shape_first_dim
         return input.new_empty(out_size)
 
 
