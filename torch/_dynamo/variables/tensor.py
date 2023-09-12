@@ -664,7 +664,7 @@ class TensorVariable(VariableTracker):
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 handle,
-                last_seen_name=None,
+                user_code_variable_name=None,
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
@@ -698,6 +698,12 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        self.proxy.node.name = new_name
+        self.user_code_variable_name = new_name
+        return self
 
 
 class SymNodeVariable(VariableTracker):
