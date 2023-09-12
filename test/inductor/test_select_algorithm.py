@@ -20,7 +20,7 @@ aten = torch.ops.aten
 
 def patches(fn):
     def skip_cache(self, choices, name, key, generate):
-        return generate(choices)
+        return {choice: generate(choice) for choice in choices}
 
     for patcher in [
         dynamo_config.patch(verbose=True),
