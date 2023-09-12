@@ -980,6 +980,17 @@ class ModuleComparison(torch.nn.Module):
         return output
 
 
+class ModuleWithTrainingState(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.drop1 = torch.nn.Dropout(0.5)
+        self.bn1 = torch.nn.BatchNorm2d(6)
+
+    def forward(self, x):
+        x = self.bn1(self.drop1(x))
+        return x
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -987,6 +998,25 @@ class ModulePatch1(torch.nn.Module):
 class ModulePatch2(torch.nn.Module):
     def forward(self, x):
         return x - 1
+
+
+class UnspecNonInlinableModule(torch.nn.Module):
+    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+    def forward(self, x):
+        if x.sum() > 0:
+            return x + 1
+        else:
+            return x - 1
+
+
+class UnspecNonInlinableToplevelModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.m = UnspecNonInlinableModule()
+
+    def forward(self, x):
+        return self.m(x)
 
 
 def make_test(fn, expected_ops=None):
@@ -2199,6 +2229,30 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
+
+    def test_module_with_training_state(self):
+        mod = ModuleWithTrainingState()
+        opt_mod = torch.compile(mod)
+        input = torch.randn(64, 6, 32, 32)
+        # trigger the compilation
+        opt_mod(input)
+
+        # calling .eval in sub model
+        # now the model should be deterministic
+        opt_mod.drop1.eval()
+        opt_mod.bn1.eval()
+
+        output2 = opt_mod(input)
+        output3 = opt_mod(input)
+        self.assertEqual(output2, output3)
+
+    def test_unspec_non_inlinable_module(self):
+        mod = UnspecNonInlinableModule()
+        opt_fn = torch._dynamo.optimize("eager")(mod)
+        x = torch.randn(100)
+        actual = opt_fn(x)
+        expected = mod(x)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":
