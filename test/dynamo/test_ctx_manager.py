@@ -747,11 +747,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        ones = torch.ones(1)
+        x_0 = torch.ones(1)
 
-        zeros = torch.zeros(1)
+        y_0 = torch.zeros(1)
 
-        add = ones + zeros;  ones = zeros = None
+        add = x_0 + y_0;  x_0 = y_0 = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
         return (add,)
@@ -785,11 +785,11 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        ones = torch.ones(1)
+        x_0 = torch.ones(1)
 
-        zeros = torch.zeros(1)
+        y_0 = torch.zeros(1)
 
-        add = ones + zeros;  ones = zeros = None
+        add = x_0 + y_0;  x_0 = y_0 = None
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
         return (add,)
@@ -829,17 +829,17 @@ class GraphModule(torch.nn.Module):
     def forward(self):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        ones = torch.ones(1)
+        x_0 = torch.ones(1)
 
-        zeros = torch.zeros(1)
+        y_0 = torch.zeros(1)
 
         _saved_tensors_hooks_disable_1 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported inner')
 
-        add = ones + zeros;  zeros = None
+        add = x_0 + y_0;  y_0 = None
 
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        add_1 = add + ones;  add = ones = None
+        add_1 = add + x_0;  add = x_0 = None
 
         _saved_tensors_hooks_disable_3 = torch._C._autograd._saved_tensors_hooks_disable('Previously disabled message')
         return (add_1,)
@@ -868,10 +868,10 @@ class GraphModule(torch.nn.Module):
 
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable('This is not supported')
 
-        add = l_x_ + 1;  l_x_ = None
+        y_0 = l_x_ + 1;  l_x_ = None
 
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
-        return (add,)
+        return (y_0,)
 """
         graph = eager.graphs[0]
         actual = normalize_gm(graph.print_readable(False))
