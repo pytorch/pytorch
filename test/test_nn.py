@@ -7135,6 +7135,67 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @parametrize_test("count", [[0, 5, 8, 0], [0, 0, 0]])
+    def test_sync_batchnorm_zero_count(self, count):
+        # Test for issue #78656
+        device = 'cuda'
+        count = torch.tensor(count, dtype=torch.int32, device=device)
+        n = count.sum()
+        eps = 1e-6
+        momentum = 0.1
+        input = [torch.randn(c, 96, 112, 112, device=device) for c in count]
+        running_mean = torch.rand(96, device=device)
+        running_var = torch.rand(96, device=device)
+
+        # Per-batch statistics computed on ddp workers and all-gathered
+        mean_all = []
+        invstd_all = []
+        for i in input:
+            if i.numel() > 0:
+                m, iv = torch.batch_norm_stats(i, eps)
+                mean_all.append(m)
+                invstd_all.append(iv)
+            else:
+                mean_all.append(torch.zeros([96], device=device))
+                invstd_all.append(torch.ones([96], device=device))
+
+        mean_all = torch.stack(mean_all)
+        invstd_all = torch.stack(invstd_all)
+
+        # Expected statistics
+        if n > 0:
+            mean_expected, inv_std_expected = torch.batch_norm_stats(torch.cat(input, dim=0), eps=eps)
+            running_mean_expected = (1 - momentum) * running_mean + momentum * mean_expected
+            running_var_expected = (1 - momentum) * running_var + momentum * n / (n - 1) / inv_std_expected ** 2
+        else:
+            mean_expected, inv_std_expected = None, None
+            running_mean_expected = running_mean
+            running_var_expected = running_var
+
+        # Compute statistics as a DDP worker would and check correctness
+        for i in input:
+            running_mean_pred = running_mean.clone()
+            running_var_pred = running_var.clone()
+
+            mean_pred, inv_std_pred = torch.batch_norm_gather_stats_with_counts(
+                i,
+                mean_all,
+                invstd_all,
+                running_mean_pred,
+                running_var_pred,
+                momentum,
+                eps,
+                count.to(torch.get_default_dtype())
+            )
+
+            if n > 0:
+                self.assertEqual(mean_pred, mean_expected)
+                self.assertEqual(inv_std_pred, inv_std_expected)
+
+            self.assertEqual(running_mean_pred, running_mean_expected)
+            self.assertEqual(running_var_pred, running_var_expected, atol=1.3e-6, rtol=1e-5)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sync_batchnorm_backward_elemt(self):
         device = 'cuda'
         saved_input = torch.rand(2, 3, 2, 1, device=device)
