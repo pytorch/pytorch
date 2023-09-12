@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -7,6 +8,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -40,12 +42,12 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
 
 
 @contextlib.contextmanager
-def dynamo_enable_grad(tx):
+def dynamo_enable_grad(tx, enable=True):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, True)
+        GradModeVariable.create(tx, enable)
         yield
     finally:
         GradModeVariable.create(tx, org_value)
@@ -118,7 +120,7 @@ def speculate_subgraph(
     description,
     *,
     always_restore=False,
-    enable_grad=False,
+    enable_grad=None,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
     # If manually_set_subgraph_inputs=True, then we manually add
     # the `sub_args` to `subgraph`, if False then we rely
@@ -149,7 +151,9 @@ def speculate_subgraph(
             )
 
             autograd_ctx = (
-                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
+                dynamo_enable_grad(tx, enable_grad)
+                if enable_grad is not None
+                else contextlib.nullcontext()
             )
 
             if restore_side_effects:
@@ -290,10 +294,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
     def check_kwargs(self, kwargs, supported_types):
-        assert (
-            all(isinstance(value, supported_types) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        if not all(isinstance(value, supported_types) for value in kwargs.values()):
+            raise unimplemented(
+                f"Only kwargs of the following types are supported: {supported_types}"
+            )
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -313,8 +317,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -509,8 +511,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        self.check_kwargs(kwargs, ConstantVariable)
-
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
@@ -631,8 +631,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO: Support `fn` with kwargs.
         if not torch._dynamo.config.capture_func_transforms:
@@ -912,9 +910,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # We compute the example_value by actually calling
         # `vmap` with FakeTensors.
-        fake_batched_fn_args = tuple(
-            arg.as_proxy().node.meta["example_value"] for arg in batch_input_args
-        ) + tuple(arg.node.meta["example_value"] for arg in body_lifted_freevars)
+        fake_batched_fn_args = itertools.chain(
+            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
+            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
+        )
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
@@ -922,7 +921,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # NOTE: `body_graph` might have operators which
         # will create new tensors. So it is required
         # that we run `vmap` under FakeMode.
-        with tx.fake_mode:
+        with tx.fake_mode, enable_python_dispatcher():
             example_value = torch._functorch.vmap.vmap_impl(
                 torch.fx.GraphModule(tx.output.nn_modules, body_graph),
                 actual_in_dims,
@@ -963,6 +962,13 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         checkpoint = tx.copy_graphstate()
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
+        # In eager-mode PyTorch, if we only compute first-order gradients,
+        # then the grad_mode is False during the backward pass.
+        # torch.compile assumes that we only compute first-order gradients,
+        # so we want to speculate the backward pass with the grad mode disabled.
+        enable_grad = (
+            False if self.value.__name__ == "trampoline_autograd_bwd" else None
+        )
 
         # TODO: Support kwargs
         (
@@ -982,6 +988,7 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
+            enable_grad=enable_grad,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
@@ -1096,7 +1103,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         op = p_args[0]
         output_dtype = p_args[1]
         fake_sub_args = pytree.tree_map_only(
-            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args[2:]
+            torch.fx.Proxy, lambda a: a.node.meta["example_value"], p_args[2:]
         )
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
