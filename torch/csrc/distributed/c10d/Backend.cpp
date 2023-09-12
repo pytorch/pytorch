@@ -24,8 +24,7 @@ void Backend::emitCollectiveStart(const Work& work) {
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   evt.pg_name = getGroupName();
   evt.backend = getBackendName();
-  evt.sequence_number =
-      sequenceNum_.has_value() ? (int64_t)sequenceNum_.value().get() : -1;
+  evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
 
   details::enqueue_c10d_event(std::move(evt));
@@ -38,8 +37,7 @@ void Backend::emitCollectiveEnd(const Work& work) {
       std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   evt.pg_name = getGroupName();
   evt.backend = getBackendName();
-  evt.sequence_number =
-      sequenceNum_.has_value() ? (int64_t)sequenceNum_.value().get() : -1;
+  evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
   // FIXME change getDuration to return Optional<float>
   try {

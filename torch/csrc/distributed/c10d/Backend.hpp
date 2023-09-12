@@ -15,7 +15,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
@@ -369,8 +368,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   void init();
   void emitCollectiveStart(const Work& work);
   void emitCollectiveEnd(const Work& work);
-  // Optional sequence number structure for matching collectives.
-  c10::optional<c10d::SequenceNum> sequenceNum_ = c10::nullopt;
+
   const int rank_;
   const int size_;
   // Debug level setting. It is parsed once when ProcessGroup is constructed and

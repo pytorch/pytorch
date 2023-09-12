@@ -1,9 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-from functools import wraps, partial
 import sys
 import threading
+from functools import partial, wraps
+
 import torch
 import torch.distributed as dist
 import torch.distributed.hooks as dhooks
@@ -15,7 +16,7 @@ if not dist.is_available():
 
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    skip_if_lt_x_gpu
+    skip_if_lt_x_gpu,
 )
 
 from torch.testing._internal.common_utils import run_tests
@@ -60,6 +61,7 @@ class PgHooks(MultiProcessTestCase):
         self.assertEqual(len(pgs), 2)
         self.assertEqual(pgs[1][0], pg0 if self.rank < 2 else pg1)
 
+
 def with_comms(func=None):
     if func is None:
         return partial(
@@ -71,6 +73,7 @@ def with_comms(func=None):
         self.init_comms()
         func(self, *args, **kwargs)
         self.destroy_comms()
+
     return wrapper
 
 
@@ -89,14 +92,12 @@ class CollectiveHooks:
             starts.append(status)
             print(f"col_start {len(starts)} rank{self.rank}")
 
-
         def coll_end(status):
             ends.append(status)
             print(f"col_end {len(ends)} rank{self.rank}")
             if len(ends) == 2:
                 with cv:
                     cv.notify()
-
 
         dhooks.register_collective_start_hook(coll_start)
         dhooks.register_collective_end_hook(coll_end)
@@ -122,12 +123,10 @@ class CollectiveHooks:
         self.assertGreaterEqual(starts[0].timestamp, 0)
         self.assertEqual("ALLGATHER", starts[0].operation)
 
-
         self.assertEqual(default_pg_name, ends[0].pg_name)
         self.assertEqual(self.backend_name, ends[0].backend)
 
-
-        self.assertEquals(starts[0].sequence_number, ends[0].sequence_number)
+        self.assertEqual(starts[0].sequence_number, ends[0].sequence_number)
         self.assertLessEqual(starts[0].timestamp, ends[0].timestamp)
         self.assertEqual("ALLGATHER", ends[0].operation)
 
@@ -162,6 +161,7 @@ class GlooHooks(MultiProcessTestCase, CollectiveHooks):
     @with_comms
     def test_collective_hooks(self):
         self._collective_hooks()
+
 
 class NcclHooks(MultiProcessTestCase, CollectiveHooks):
     def setUp(self) -> None:
