@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import cast, Dict, List, Optional, Sequence, Tuple
+from typing import cast, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -28,7 +28,6 @@ from torch.distributed._tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch.fx import Node
 
 
 aten = torch.ops.aten
@@ -45,11 +44,9 @@ aten = torch.ops.aten
         aten.is_same_size.default,
     ]
 )
-def default_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def default_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # Default strategy by default just propagate the first input strategy
-    select_strategy = node_to_strategy[node.all_input_nodes[0]]
+    select_strategy = op_schema.args_schema[0]
     assert isinstance(select_strategy, OpStrategy)
     return OpStrategy(
         [
@@ -69,14 +66,12 @@ def default_strategy(
         aten.zeros_like.default,
     ]
 )
-def create_like_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # create_like_strategy deals with ops that creating tensors with same
     # shape as input, but with specific content that does not depend on
     # the input, we can propagate sharding, but we have to make sure we
     # move from partial to replicated.
-    select_strategy = node_to_strategy[node.all_input_nodes[0]]
+    select_strategy = op_schema.args_schema[0]
     create_like_strategy = OpStrategy([])
     assert isinstance(select_strategy, OpStrategy)
     for arg_strategy in select_strategy.strategies:
@@ -111,9 +106,7 @@ def create_like_strategy(
         aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
     ]
 )
-def new_factory_strategy(
-    _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
     # replicated for new factory methods
     replica_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
@@ -121,13 +114,11 @@ def new_factory_strategy(
 
 
 @register_op_strategy(aten.bucketize.Tensor)
-def gen_bucketize_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """
     Just propagate input sharding, but expect replicated for boundaries input.
     """
-    input_strategy = node_to_strategy[node.all_input_nodes[0]]
+    input_strategy = op_schema.args_schema[0]
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:
@@ -143,36 +134,33 @@ def gen_bucketize_strategy(
 
 
 @register_op_strategy(aten.slice.Tensor)
-def gen_slice_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """
     forwards all shardings except the slice dimension.
     """
     defaults = (None, 0, None, None, 1)
-    input_node, dim, start, end, step = node.args + defaults[len(node.args) :]
-    assert isinstance(input_node, Node)
-    input_val = input_node.meta["val"]
+    input_strategy, dim, start, end, step = (
+        op_schema.args_schema + defaults[len(op_schema.args_schema) :]
+    )
+    assert isinstance(input_strategy, OpStrategy)
+    input_shape = input_strategy.output_shape
+    input_ndim = input_strategy.output_ndim
     assert isinstance(dim, int)
     if start is None:
         start = 0
-    if end is None or end > input_val.shape[dim]:
-        end = input_val.shape[dim]
+    if end is None or end > input_shape[dim]:
+        end = input_shape[dim]
     assert isinstance(start, int)
     assert isinstance(end, int)
     assert isinstance(step, int)
 
     # normalize args
-    slice_dim = normalize_dim(dim, input_val.ndim)
-    if start < 0:
-        start += input_val.shape[dim]
-    if end < 0:
-        end += input_val.shape[dim]
+    slice_dim = normalize_dim(dim, input_ndim)
+    start = normalize_dim(start, input_shape[dim])
+    end = normalize_dim(end, input_shape[dim])
 
-    redundant_slice = start == 0 and end == input_val.shape[dim] and step == 1
+    redundant_slice = start == 0 and end == input_shape[dim] and step == 1
 
-    input_strategy = node_to_strategy[input_node]
-    assert isinstance(input_strategy, OpStrategy)
     slice_strategy = OpStrategy([])
 
     for arg_strategy in input_strategy.strategies:
@@ -218,9 +206,7 @@ def replicate_tensor_dim(
 
 
 @register_op_strategy(aten.slice_scatter.default)
-def gen_slice_scatter_strategy(
-    node: Node, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
     # 3. numer of elements in src in dim need to match the slice size.
@@ -229,12 +215,13 @@ def gen_slice_scatter_strategy(
     #   where our best bet for now is to make them replicated as a fall-back.
     #   TODO: Ideally we'd like to make sure the output is re-sharded afterwards to keep input sharding.
 
-    input_node = cast(Node, node.args[0])
-    input_ndim = input_node.meta["val"].ndim
-    slice_dim = cast(int, node.args[2]) if len(node.args) > 2 else 0
-    slice_dim = normalize_dim(slice_dim, input_ndim)
-    input_strategy = node_to_strategy[input_node]
+    input_strategy = op_schema.args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
+    input_ndim = input_strategy.output_ndim
+    slice_dim = (
+        cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
+    )
+    slice_dim = normalize_dim(slice_dim, input_ndim)
 
     slice_scatter_strategy = OpStrategy([])
     # by default follow the input strategy for both input and src
@@ -264,9 +251,7 @@ def gen_slice_scatter_strategy(
 
 
 @register_op_strategy(aten._local_scalar_dense.default)
-def replica_only_strategy(
-    _, mesh: DeviceMesh, node_to_strategy: Dict[Node, StrategyType]
-) -> StrategyType:
+def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """Only allow replication on the input/ouput"""
     replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replicate_spec)])
