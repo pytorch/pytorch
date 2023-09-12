@@ -547,7 +547,7 @@ def _sfdp_init():
             _sfdp_scale_factor_check(aten.div.Tensor),
         ),
     ]:
-        args = [*args, *workaround.values()]
+        args = [*args, *workaround.values()]  # type: ignore[attr-defined]
         register_replacement(
             pattern,
             replacement,
