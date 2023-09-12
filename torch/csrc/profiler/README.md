@@ -5,7 +5,7 @@ This README describes the details of how the profiler is implemented.
 The profiler instruments PyTorch to collect information about the model's execution. Its main features are:
 * Instrumenting op calls on the CPU side
 * Interfacing with [Kineto](https://github.com/pytorch/kineto/) to collect information from the GPU (or other accelerators)
-* Collecting python stacktraces
+* Collecting python stack traces
 * Exporting this information, e.g. in a chrome trace, or to be processed by downstream tools like [HTA](https://github.com/facebookresearch/HolisticTraceAnalysis)
 
 ## Table of Contents
@@ -25,13 +25,13 @@ TODO
 
 [/aten/src/ATen/record_function.h](/aten/src/ATen/record_function.h)
 
-RecordFunction is used by the profiler to instrument CPU-side events.
+`RecordFunction` is used by the profiler to instrument CPU-side events.
 
-RecordFunction is a general method of instrumenting function calls in pytorch. It can be used for other general applications, e.g. see [Features for Large-Scale Deployments](https://pytorch.org/docs/stable/notes/large_scale_deployments.html). In PyTorch, it is already included at some important locations; notably, in the [dispatcher](https://github.com/pytorch/pytorch/blob/247c603da9b780534e25fb1d90b6e5a528b625b1/aten/src/ATen/core/dispatch/Dispatcher.h#L650), surrounding every op.
+`RecordFunction` is a general method of instrumenting function calls in PyTorch. It can be used for other general applications, e.g. see [Features for Large-Scale Deployments](https://pytorch.org/docs/stable/notes/large_scale_deployments.html). In PyTorch, it is already included at some important locations; notably, in the [dispatcher](https://github.com/pytorch/pytorch/blob/247c603da9b780534e25fb1d90b6e5a528b625b1/aten/src/ATen/core/dispatch/Dispatcher.h#L650), surrounding every op.
 
-Users (or PyTorch itself) can register callbacks that will be executed whenever a RecordFunction guard is encountered. The profiler uses this mechanism to record the start and end times for each op call, as well as user-provided RecordFunction anntations. The RecordFunction machinery is designed to have relatively low overhead, especially when there are no callbacks registered. Nevertheless, there can still be some overhead.
+Users (or PyTorch itself) can register callbacks that will be executed whenever a `RecordFunction` guard is encountered. The profiler uses this mechanism to record the start and end times for each op call, as well as user-provided `RecordFunction` annotations. The `RecordFunction` machinery is designed to have relatively low overhead, especially when there are no callbacks registered. Nevertheless, there can still be some overhead.
 
-There is also a python binding for RecordFunction in python (`with torch.profiler.record_function`); this is often used by users to annotate events corresponding to module-level events.
+There is also a python binding for `RecordFunction` in python (`with torch.profiler.record_function`); this is often used by users to annotate events corresponding to module-level events.
 
 ## Autograd Integration ##
 
