@@ -4494,7 +4494,7 @@ def take_along_dim(
         return torch.gather(self_broadcast, dim, indices_broadcast)
 
 
-@out_wrapper()
+@register_decomposition(aten.empty.memory_format)
 def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
