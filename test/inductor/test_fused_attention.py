@@ -42,13 +42,14 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         has_dropout=False,
         check_train=True,
         override_check_equal=False,
+        dtype=torch.float,
     ):
         if args1 is None:
             tensor_shape = (4, 2, 16, 32)
             args1 = [
-                torch.randn(tensor_shape, device=self.device),
-                torch.randn(tensor_shape, device=self.device),
-                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
             ]
         else:
             args1 = list(args1)
@@ -106,8 +107,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(value)
             )
 
-        self._check_common(dot_prod_attention)
-        self._check_common(checkpoint_wrapper(dot_prod_attention))
+        for dtype in [torch.float, torch.half]:
+            self._check_common(dot_prod_attention, dtype=dtype)
+            self._check_common(checkpoint_wrapper(dot_prod_attention), dtype=dtype)
 
     def _test_pattern_fails_with_reuse(self):
         """
