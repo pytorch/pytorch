@@ -531,3 +531,9 @@ class TestCumProdGeneric(_GenericCumSumProdTestMixin):
 class TestCumSumGeneric(_GenericCumSumProdTestMixin):
     def setup_method(self):
         self.func = np.cumsum
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
