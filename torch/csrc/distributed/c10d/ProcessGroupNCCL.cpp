@@ -1586,6 +1586,9 @@ float ProcessGroupNCCL::WorkNCCL::getDuration() const {
       "getDuration can only be called after work is succeeded.")
   return (*ncclStartEvents_)[0].elapsed_time((*ncclEndEvents_)[0]);
 }
+uint64_t ProcessGroupNCCL::WorkNCCL::getSequencenumber() const {
+  return seq_;
+}
 
 void ProcessGroupNCCL::workEnqueue(
     c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> work) {
