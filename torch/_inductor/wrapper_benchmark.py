@@ -10,6 +10,8 @@ _kernel_category_choices = [
     "pointwise",
     "reduction",
     "persistent_reduction",
+    "template",
+    "foreach",
 ]
 
 

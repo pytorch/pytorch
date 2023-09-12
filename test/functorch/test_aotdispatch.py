@@ -2779,6 +2779,27 @@ class TestAOTModuleSimplified(AOTTestCase):
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
+    # https://github.com/pytorch/pytorch/issues/105327
+    def test_lift_fresh_copy_in_graph(self):
+        class MyMod(torch.nn.Module):
+            def forward(self, x):
+                _tensor_constant0 = torch.tensor([1])
+                lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0)
+                y = x.mul(lift_fresh_copy)
+                return (y,)
+
+        mod = MyMod()
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        x = torch.ones(4, requires_grad=True)
+        inputs = [x]
+        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        compiled_f = aot_module_simplified(mod, fake_inputs, nop)
+
+        out_ref = mod(x)
+        out_test = compiled_f(x)
+        self.assertEqual(out_ref[0].detach(), out_test[0].detach())
+
     def test_inference_python_dispatcher(self):
         # Extracted from unet
         class MockModule(torch.nn.Module):

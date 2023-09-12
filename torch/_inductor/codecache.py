@@ -668,6 +668,10 @@ def get_warning_all_flag(warning_all=True):
     return "-Wall" if warning_all else ""
 
 
+def get_glibcxx_abi_build_flags():
+    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
+
+
 def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
 
@@ -790,6 +794,17 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
+                # This is a special treatment for Meta internal cuda-12 where all libs
+                # are in lib/cuda-12 and lib/cuda-12/stubs
+                for i, path in enumerate(lpaths):
+                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
+                        f"{path}/libcudart_static.a"
+                    ):
+                        for root, dirs, files in os.walk(path):
+                            if "libcudart_static.a" in files:
+                                lpaths[i] = os.path.join(path, root)
+                                lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -873,9 +888,14 @@ def get_include_and_linking_paths(
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
+    static_link_libs = []
+    if aot_mode and config.is_fbcode():
+        # For Meta internal cuda-12, it is recommended to static link cudart
+        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
-    libs = " ".join(["-l" + p for p in libs])
+    libs = " ".join(static_link_libs + ["-l" + p for p in libs])
     return ipaths, lpaths, libs, macros
 
 
@@ -913,6 +933,7 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {get_glibcxx_abi_build_flags()}
             {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
@@ -942,7 +963,7 @@ class CudaKernelParamCache:
             cubin,
             "cubin",
             hash_type="cubin",
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
         params["cubin_path"] = path
         cls.cache[key] = params
@@ -957,7 +978,7 @@ class AotCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def compile(cls, graph, source_code, cuda):
+    def compile(cls, graph, source_code, serialized_extern_kernel_nodes, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         cpp_command = repr(
@@ -975,17 +996,29 @@ class AotCodeCache:
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
+
+        def _to_bytes(t: torch.Tensor) -> bytes:
+            # This serializes the tensor's untyped_storage to bytes by accessing
+            # the raw data of the underlying structure.
+            import ctypes
+
+            t_cpu = t.untyped_storage().cpu()
+            raw_array = ctypes.cast(
+                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
+            )
+
+            return bytes(raw_array.contents)
 
         aot_constants = b""
         for tensor in graph.constants.values():
-            aot_constants += bytes(tensor.untyped_storage().cpu())
+            aot_constants += _to_bytes(tensor)
 
         consts_key, consts_path = write(
             aot_constants,
             "bin",
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
 
         if key not in cls.cache:
@@ -994,6 +1027,13 @@ class AotCodeCache:
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
+                # Currently, this only support serializing extern nodes in fbcode
+                # Eventually, we should also have a serializer for OSS.
+                if config.is_fbcode() and serialized_extern_kernel_nodes:
+                    output_json = os.path.splitext(input_path)[0] + ".json"
+                    with open(output_json, "w") as f:
+                        f.write(serialized_extern_kernel_nodes)
+
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
