@@ -6215,10 +6215,14 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         layout,
         inputs,
         constant_args,
-        arg_index_to_input_index,
+        # arg_index_to_input_index,
+        output_split_sizes,
+        input_split_sizes,
     ):
         super().__init__(layout, inputs, [], constant_args)
-        self.arg_index_to_input_index = arg_index_to_input_index
+        # self.arg_index_to_input_index = arg_index_to_input_index
+        self.output_split_sizes = output_split_sizes
+        self.input_split_sizes = input_split_sizes
 
     def should_emit_register_tensor_work(self):
         return False
@@ -6234,32 +6238,13 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
     def create(
         cls,
         x: "TensorBox",
-        output_split_sizes: Optional["TensorBox"],
-        input_split_sizes: Optional["TensorBox"],
+        output_split_sizes: Optional[List[Expr]],
+        input_split_sizes: Optional[List[Expr]],
         tag: str,
         ranks: List[int],
         group_size: int,
     ):
         x_realized = cls.realize_input(x)
-        inputs_allow_none = []
-        output_split_sizes_realized = None
-        if output_split_sizes is not None:
-            output_split_sizes_realized = cls.realize_input(output_split_sizes)
-        input_split_sizes_realized = None
-        if input_split_sizes is not None:
-            input_split_sizes_realized = cls.realize_input(input_split_sizes)
-        inputs_allow_none = [
-            x_realized,
-            output_split_sizes_realized,
-            input_split_sizes_realized,
-        ]
-        inputs = [inp for inp in inputs_allow_none if inp is not None]
-        arg_index_to_input_index = {}
-        for i in range(len(inputs_allow_none)):
-            if inputs_allow_none[i] is not None:
-                arg_index_to_input_index[i] = inputs.index(inputs_allow_none[i])
-            else:
-                arg_index_to_input_index[i] = None
 
         new_size = x_realized.get_size()
         output_shape_first_dim_s = None
@@ -6277,9 +6262,10 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
 
         coll = AllToAllSingle(
             layout=layout,
-            inputs=inputs,
+            inputs=[x_realized],
             constant_args=[tag, ranks, group_size],
-            arg_index_to_input_index=arg_index_to_input_index,
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
         )
 
         return MultiOutputNoSizeAssert(
@@ -6292,21 +6278,13 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
 
     def codegen_collective(self, wrapper, output_name, input_names):
-        input_strs = [f"{output_name}_inputs[0]"]
-        for i in range(1, len(self.arg_index_to_input_index)):
-            input_index = self.arg_index_to_input_index[i]
-            if input_index is None:
-                input_strs.append("None")
-            else:
-                input_strs.append(f"{output_name}_inputs[{input_index}]")
-
         tag, ranks, group_size = self.constant_args
 
         wrapper.writeline(
             f"{output_name} = fun_col_impl._all_to_all_single("
-            f"input={input_strs[0]}, "
-            f"output_split_sizes={input_strs[1]}, "
-            f"input_split_sizes={input_strs[2]}, "
+            f"input={output_name}_inputs[0], "
+            f"output_split_sizes={self.output_split_sizes}, "
+            f"input_split_sizes={self.input_split_sizes}, "
             f"tag='{tag}', "
             f"ranks={ranks}, "
             f"group_size={group_size})",
