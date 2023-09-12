@@ -10,8 +10,7 @@ from torch.distributed._tensor.ops.common_rules import (
     pointwise_rule,
     reduction_rule,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.fx.passes.shape_prop import _extract_tensor_metadata
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -30,7 +29,11 @@ class CommonRulesTest(DTensorTestBase):
 
     def _gen_tensor_meta(self, shape):
         empty_tensor = torch.empty(shape)
-        return _extract_tensor_metadata(empty_tensor)
+        return TensorMeta(
+            empty_tensor.shape,
+            empty_tensor.stride(),
+            empty_tensor.dtype,
+        )
 
     @with_comms
     def test_einop_basic_propagation(self):
