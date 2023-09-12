@@ -239,7 +239,13 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
 
 template <typename scalar_t>
 inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50400)
+  auto trans = HIPBLAS_OP_N;
+#elif defined(USE_ROCM) && (ROCM_VERSION < 50400)
+  auto trans = rocblas_operation_none;
+#else
   auto trans = CUBLAS_OP_N;
+#endif
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
 
