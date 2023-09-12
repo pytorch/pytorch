@@ -338,17 +338,35 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({', '.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if (
-            not self._match_fns(node)
-            or len(node.args) != len(self.args)
-            or len(node.kwargs) != len(self.kwargs)
-        ):
+        if not self._match_fns(node) or len(node.args) != len(self.args):
             return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
             return FailedMatch(f"multiple_users {node}")
 
-        node_items, node_spec = self.flatten(node.args, node.kwargs)
+        _args = node.args
+        _kwargs = node.kwargs
+        if len(_kwargs) < len(self.kwargs):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized_args_and_kwargs = normalize_function(
+                node.target, node.args, node.kwargs
+            )
+
+            if normalized_args_and_kwargs is None:
+                return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            else:
+                _args, _kwargs = normalized_args_and_kwargs
+                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
+                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+                else:
+                    return FailedMatch(
+                        f"function_mismatch: node={node}, pattern={self}"
+                    )
+        else:
+            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+
+        node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
             return FailedMatch(f"args_structure {node_spec} {self_spec}")
@@ -1137,33 +1155,3 @@ def filter_nodes(nodes, fn):
         fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
     return [node for node in nodes if node.target in fns]
-
-
-def same_layout(node1: torch.fx.Node, node2: torch.fx.Node):
-    """True if two nodes have the same size/strides"""
-    val1 = node1.meta.get("val")
-    val2 = node2.meta.get("val")
-    return (
-        val1 is not None
-        and val2 is not None
-        and val1.size() == val2.size()
-        and val1.stride() == val2.stride()
-    )
-
-
-def remove_extra_clones(graph: torch.fx.Graph):
-    seen = set()
-    for node in reversed(graph.nodes):
-        if node.target is aten.clone.default:
-            src = node.args[0]
-            if (
-                isinstance(src, torch.fx.Node)
-                and src.op == "call_function"
-                and isinstance(src.target, torch._ops.OpOverload)
-                and not src.target.is_view
-                and not any(u in seen for u in src.users)
-                and same_layout(src, node)
-            ):
-                node.replace_all_uses_with(src)
-                graph.erase_node(node)
-        seen.add(node)
