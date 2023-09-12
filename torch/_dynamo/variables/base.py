@@ -334,7 +334,7 @@ class VariableTracker(metaclass=HasPostInit):
             # This is fine for objects that are not mutable locals
             self.user_code_variable_name = new_name
             return self
-        new_vt = self.clone(name=new_name)
+        new_vt = self.clone(user_code_variable_name=new_name)
         return tx.replace_all(self, new_vt)
 
     def __init__(

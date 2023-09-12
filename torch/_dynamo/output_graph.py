@@ -595,7 +595,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         return obj
 
     def new_var(self, name="tmp"):
+        graph_names = {node.name for node in self.graph.nodes}
         existing = set(self.code_options["co_varnames"])
+        existing.update(graph_names)
         for i in itertools.count():
             var = f"{name}_{i}"
             if var not in existing:
