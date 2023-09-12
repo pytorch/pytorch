@@ -119,7 +119,9 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
         blurb = file.read()
 
     # Generate contents of the .rst file
-    doc_contents = f"""ExportDB
+    doc_contents = f""".. _torch.export_db:
+
+ExportDB
 ========
 
 {blurb}

@@ -1370,6 +1370,16 @@ class BuiltinVariable(VariableTracker):
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
+            if (
+                isinstance(right, TensorVariable)
+                and (left.size and right.size) is not None
+                and left.size != right.size
+            ):
+                try:
+                    torch.broadcast_shapes(left.size, right.size)
+                except RuntimeError:
+                    # not broadcastable, can't be compared
+                    _unimplemented()
             return wrap_fx_proxy_cls(
                 type(left),  # handle Ndarrays and Tensors
                 tx,

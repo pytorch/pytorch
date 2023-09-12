@@ -6,6 +6,7 @@ from tools.testing.target_determination.heuristics.correlated_with_historical_fa
 from tools.testing.target_determination.heuristics.edited_by_pr import EditedByPR
 
 from tools.testing.target_determination.heuristics.interface import (
+    AggregatedHeuristics as AggregatedHeuristics,
     HeuristicInterface as HeuristicInterface,
     TestPrioritizations as TestPrioritizations,
 )
