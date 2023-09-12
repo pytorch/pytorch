@@ -53,6 +53,19 @@ class CompileId(NamedTuple):
         return f"{self.frame_id}/{self.frame_compile_id}"
 
 
+class TraceId(NamedTuple):
+    compile_id: CompileId
+    # This starts off as 0, and every time we restart analysis it goes
+    # up by one
+    attempt: int
+
+    def __str__(self):
+        if self.attempt == 0:
+            return str(self.compile_id)
+        else:
+            return f"{self.compile_id}_{self.attempt}"
+
+
 class GuardSource(enum.Enum):
     LOCAL = 0
     GLOBAL = 1
@@ -534,7 +547,8 @@ class CompileContext:
 
     def __init__(self, compile_id):
         assert compile_id is None or isinstance(compile_id, CompileId)
-        self.compile_id = compile_id
+        self.compile_id: Optional[CompileId] = compile_id
+        self.attempt = 0
 
     @staticmethod
     def current_compile_id():
@@ -542,6 +556,15 @@ class CompileContext:
         if self is None:
             return None
         return self.compile_id
+
+    @staticmethod
+    def current_trace_id():
+        self = CompileContext.get()
+        if self is None:
+            return None
+        if self.compile_id is None:
+            return None
+        return TraceId(self.compile_id, self.attempt)
 
 
 class TracingContext:
@@ -582,6 +605,30 @@ class TracingContext:
         # you ever do change this in aot_autograd.py; you should check
         # on permutations preferentially.)
         self.output_strides: Optional[List[Optional[List[int]]]] = None
+        # When this is True, whenever we encounter an int in Dynamo tracing,
+        # we will (1) force unspec it and (2) force it as a size-like unbacked
+        # integer.  This is currently used when processing certain lists of
+        # ints that are known to be size-like and may have 0/1 entries that we
+        # must not specialize on.
+        self.force_unspec_int_unbacked_size_like = False
+
+    @staticmethod
+    @contextmanager
+    def patch(**kwargs):
+        prior = {}
+        ctx = TracingContext.get()
+        assert ctx is not None
+
+        for key in kwargs.keys():
+            # KeyError on invalid entry
+            prior[key] = getattr(ctx, key)
+        for key, val in kwargs.items():
+            setattr(ctx, key, val)
+        try:
+            yield
+        finally:
+            for key, val in prior.items():
+                setattr(ctx, key, val)
 
     @staticmethod
     def extract_stack():
