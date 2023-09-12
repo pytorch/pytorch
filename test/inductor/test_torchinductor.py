@@ -608,6 +608,7 @@ class CommonTemplate:
     def test_add_uint8_tensor(self):
         def fn(x):
             return (x + x).to(torch.int16)
+
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([128], dtype=torch.uint8)
         # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
