@@ -223,6 +223,9 @@ class PythonCode:
     src: str
     # Values in global scope during execution of `src_def`.
     globals: Dict[str, Any]
+    # Optional mapping from the forward function's line number to
+    # node index.
+    _lineno_map: Optional[Dict[int, Optional[int]]]
 
 
 def _format_target(base: str, target: str) -> str:
@@ -323,7 +326,9 @@ class CodeGen:
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+    def _gen_python_code(
+        self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
+    ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -558,11 +563,15 @@ class CodeGen:
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        for node in nodes:
+        for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
             if verbose:
                 append_stacktrace_summary(node)
+            # emit a counter comment to keep track of
+            # node index, which will be deleted later
+            # after going through _body_transformer
+            body.append(f"# COUNTER: {i}\n")
             emit_node(node)
             delete_unused_values(node)
 
@@ -588,14 +597,28 @@ class CodeGen:
 
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
-        code = ''.join(body).lstrip('\n')
+        # remove counter and generate lineno to node index mapping
+        lineno_map: Dict[int, Optional[int]] = {}
+        prologue_len = prologue.count('\n') + 1
+        new_lines: List[str] = []
+        cur_idx = None
+        for line in ''.join(body).split('\n'):
+            counter = re.search(r"# COUNTER: (\d+)", line)
+            if counter and counter.group(1) is not None:
+                cur_idx = int(counter.group(1))
+            else:
+                lineno_map[len(new_lines) + prologue_len] = cur_idx
+                new_lines.append(line)
+
+        code = "\n".join(new_lines).lstrip('\n')
         code = '\n'.join('    ' + line for line in code.split('\n'))
+
         fn_code = f"""
 {wrap_stmts}
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_)
+        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen
