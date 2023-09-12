@@ -308,8 +308,6 @@ def _reduce_scatter_tensor_coalesced_fallback(output_tensors, input_tensors, op,
 
 def _all_to_all_single(
     input: torch.Tensor,
-    # output_split_sizes: Optional[torch.Tensor],
-    # input_split_sizes: Optional[torch.Tensor],
     output_split_sizes: Optional[List[int]],
     input_split_sizes: Optional[List[int]],
     tag: str,
