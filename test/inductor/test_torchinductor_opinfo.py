@@ -373,7 +373,7 @@ inductor_override_kwargs = {
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
-    ("std_mean.unbiased", "cuda", f16): {"atol": 4e-5, "rtol": 0.002},
+    ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
     "linalg.solve_triangular": {"check_gradient": False},
