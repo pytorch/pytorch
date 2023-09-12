@@ -21,10 +21,6 @@ from torch._dynamo.testing import expectedFailureDynamic, same
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
-if torch.distributed.is_available():
-    from torch.distributed._tensor import DeviceMesh
-    from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-
 try:
     from . import test_functions
 except ImportError:
@@ -993,6 +989,25 @@ class ModulePatch2(torch.nn.Module):
         return x - 1
 
 
+class UnspecNonInlinableModule(torch.nn.Module):
+    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+    def forward(self, x):
+        if x.sum() > 0:
+            return x + 1
+        else:
+            return x - 1
+
+
+class UnspecNonInlinableToplevelModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.m = UnspecNonInlinableModule()
+
+    def forward(self, x):
+        return self.m(x)
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1552,6 +1567,87 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check all attributes, parameters and buffers
         self.assertTrue(len(set(mod_keys).difference(opt_mod_keys)) == 0)
 
+    def test_no_recompile_on_nn_guarded_modules(self):
+        size = (10, 10)
+        cache_size_limit = 1
+        num_submodules = 4
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(*size)
+
+            def forward(self, x):
+                a = torch.sin(torch.cos(x))
+                return self.linear(a)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule() for _ in range(num_submodules)]
+                self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        # Each submod is compiled separately and has a different nn module
+        # guard. Ensure that recompilation logic is handle correctly.
+        with unittest.mock.patch(
+            "torch._dynamo.config.error_on_recompile", True
+        ), unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit",
+            cache_size_limit,
+        ):
+            x = torch.randn(*size)
+            mod(x)
+            self.assertEqual(cnts.frame_count, num_submodules)
+
+    def test_cache_size_limit_on_guarded_nn_modules(self):
+        cache_size_limit = 2
+        num_submodules = 4
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                a = torch.sin(torch.cos(x))
+                return self.relu(a)
+
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods = [SubModule() for _ in range(num_submodules)]
+                self.mods = [torch.compile(mod, backend=cnts) for mod in self.mods]
+
+            def forward(self, x):
+                for mod in self.mods:
+                    x = mod(x)
+                return x
+
+        mod = MockModule()
+        # For the third iteration, we would reach the cache size limit, and
+        # therefore the total number of expected frame count is 2 *
+        # num_submodules.
+        with unittest.mock.patch(
+            "torch._dynamo.config.cache_size_limit",
+            cache_size_limit,
+        ):
+            for size in [
+                (4,),
+                (4, 4),
+                (4, 4, 4),
+            ]:
+                x = torch.randn(size)
+                mod(x)
+        self.assertEqual(cnts.frame_count, 2 * num_submodules)
+
     def test_recursion(self):
         mod = MockModule()
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1798,7 +1894,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        activations = dict()
+        compiled_activations = dict()
+        eager_activations = dict()
+        activations = None
 
         def save_activations(name, mod, inp, out):
             activations[name] = inp
@@ -1808,19 +1906,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 partial(save_activations, name)
             )
 
-        model = torch.compile(model, backend="aot_eager")
+        compiled_model = torch.compile(model, backend="aot_eager")
 
+        activations = compiled_activations
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
-            activations.clear()
+            compiled_activations.clear()
+            x = torch.randn((20, 10))
+            pred = compiled_model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        activations = eager_activations
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            eager_activations.clear()
             x = torch.randn((20, 10))
             pred = model(x)
             loss = pred.sum()
             loss.backward()
 
-        print(f"Recorded Layers: {activations.keys()}\n\n")
-        print(f"Expected Layers: {forward_handles.keys()}")
+        print(f"Recorded Layers: {compiled_activations.keys()}\n\n")
+        print(f"Expected Layers: {eager_activations.keys()}")
+
+        self.assertTrue(compiled_activations.keys() == eager_activations.keys())
         self.assertTrue(activations.keys() == forward_handles.keys())
 
     def test_hooks_allowed_modules(self):
@@ -1870,7 +1981,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             pred = model(x)
             loss = pred.sum()
             loss.backward()
-        self.assertEqual(len(activations), 5)
+        self.assertEqual(len(activations), 6)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_hooks_allowed_modules_compiles_self_contained(self):
@@ -2040,6 +2151,16 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_assign_does_not_exist(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                self.text_encoding = x + 1
+                return self.text_encoding
+
+        mod = MyModule()
+        out = torch.compile(mod, fullgraph=True)(torch.randn(10))
+        assert mod.text_encoding is out
+
     def test_module_dict_iter_values(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -2113,42 +2234,13 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
 
-
-if torch.distributed.is_available():
-    from torch.testing._internal.distributed._tensor.common_dtensor import (
-        DTensorTestBase,
-        with_comms,
-    )
-
-    class TestDTensorCompile(DTensorTestBase):
-        def setUp(self):
-            super().setUp()
-
-        @property
-        def world_size(self) -> int:
-            return 2
-
-        @with_comms
-        def test_dtensor_fullgraph(self):
-            class SimpleMLP(torch.nn.Module):
-                def __init__(self, device):
-                    super().__init__()
-                    self.net1 = torch.nn.Linear(5, 1024, device=device)
-                    self.relu = torch.nn.ReLU()
-                    self.net2 = torch.nn.Linear(1024, 4, device=device)
-
-                def forward(self, x):
-                    return self.net2(F.relu(self.net1(x)))
-
-            mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-            model = SimpleMLP(self.device_type)
-            model = parallelize_module(model, mesh, PairwiseParallel())
-            inp = torch.rand(20, 5, device=self.device_type)
-            out = model(inp)
-            compiled_mod = torch.compile(model, backend="eager", fullgraph=True)
-            compiled_out = compiled_mod(inp)
-            self.assertEqual(compiled_out, out)
+    def test_unspec_non_inlinable_module(self):
+        mod = UnspecNonInlinableModule()
+        opt_fn = torch._dynamo.optimize("eager")(mod)
+        x = torch.randn(100)
+        actual = opt_fn(x)
+        expected = mod(x)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

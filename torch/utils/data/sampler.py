@@ -83,8 +83,8 @@ class Sampler(Generic[T_co]):
     #     This prevents triggering some fallback behavior. E.g., the built-in
     #     `list(X)` tries to call `len(X)` first, and executes a different code
     #     path if the method is not found or `NotImplemented` is returned, while
-    #     raising an `NotImplementedError` will propagate and and make the call
-    #     fail where it could have use `__iter__` to complete the call.
+    #     raising a `NotImplementedError` will propagate and make the call fail
+    #     where it could have used `__iter__` to complete the call.
     #
     # Thus, the only two sensible things to do are
     #

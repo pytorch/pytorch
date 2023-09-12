@@ -20,6 +20,7 @@ import sysconfig
 import tempfile
 import threading
 import types
+import warnings
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
@@ -46,11 +47,15 @@ if config.is_fbcode():
     from triton.fb.build import _run_build_command
 
     from torch._inductor.fb.utils import (
+        log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
 else:
+
+    def log_global_cache_errors(*args, **kwargs):
+        pass
 
     def log_global_cache_stats(*args, **kwargs):
         pass
@@ -237,6 +242,7 @@ class PersistentCache(CacheBase):
 
         log_stats = partial(log_global_cache_stats, self.system, name, inputs)
         log_vals = partial(log_global_cache_vals, self.system, name, inputs)
+        log_errors = partial(log_global_cache_errors, self.system, name, inputs)
         timings = {}
 
         def check_cache(cache, callback=None):
@@ -262,12 +268,19 @@ class PersistentCache(CacheBase):
                 use_global_cache()
                 and check_cache(self.get_global_cache(), callback=log_stats)
             ):
-                # re-benchmark everything to try to get consistent numbers from the same machine
-                for choice in choices:
-                    timings[choice] = benchmark(choice)
+                try:
+                    # re-benchmark everything to try to get consistent numbers from the same machine
+                    timings = benchmark(choices)
+                    assert all(choice in timings for choice in choices)
+
                     local_cache.setdefault(name, {})
                     local_cache[name].setdefault(inputs, {})
-                    local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                    for choice, timing in timings.items():
+                        local_cache[name][inputs][choice.hash_key()] = timing
+                except RuntimeError as e:
+                    # catch and log autotuning failures
+                    log_errors(e)
+                    raise e
 
                 self.update_local_cache(local_cache)
 
@@ -291,13 +304,13 @@ def get_lock_dir():
     return lock_dir
 
 
-def code_hash(code, extra: str = ""):
-    hashing_str = code
+def code_hash(code: Union[str, bytes], extra: str = ""):
+    hashing_str = code if isinstance(code, bytes) else code.encode("utf-8")
     if extra != "":
-        hashing_str = hashing_str + "||" + extra
+        hashing_str = hashing_str + b"||" + extra.encode("utf-8")
     return (
         "c"
-        + base64.b32encode(hashlib.sha256(hashing_str.encode("utf-8")).digest())[:51]
+        + base64.b32encode(hashlib.sha256(hashing_str).digest())[:51]
         .decode("utf-8")
         .lower()
     )
@@ -316,10 +329,10 @@ def get_path(basename: str, extension: str, specified_dir: str = ""):
 
 
 def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
-    assert hash_type in ["code", "cubin"], "Hash type not supported"
+    assert hash_type in ["code", "cubin", "hsaco"], "Hash type not supported"
     if hash_type == "code":
         return code_hash(content, extra)
-    if hash_type == "cubin":
+    if hash_type == "cubin" or "hsaco":
         return code_hash(repr(content))
 
 
@@ -465,6 +478,13 @@ def install_gcc_via_conda():
 
 def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
+
+
+@functools.lru_cache(None)
+def is_apple_clang():
+    cxx = cpp_compiler()
+    version_string = subprocess.check_output([cxx, "--version"]).decode("utf8")
+    return "Apple" in version_string.splitlines()[0]
 
 
 class VecISA:
@@ -638,6 +658,10 @@ def pick_vec_isa():
     return invalid_vec_isa
 
 
+def get_compile_only(compile_only=True):
+    return "-c" if compile_only else ""
+
+
 def get_shared(shared=True):
     return "-shared -fPIC" if shared else ""
 
@@ -646,8 +670,16 @@ def get_warning_all_flag(warning_all=True):
     return "-Wall" if warning_all else ""
 
 
+def get_glibcxx_abi_build_flags():
+    return "-D_GLIBCXX_USE_CXX11_ABI=" + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))
+
+
 def cpp_flags():
     return "-std=c++17 -Wno-unused-variable"
+
+
+def cpp_wrapper_flags():
+    return "-DTORCH_INDUCTOR_CPP_WRAPPER"
 
 
 def optimization_flags():
@@ -691,6 +723,36 @@ def use_standard_sys_dir_headers():
         return "-nostdinc"
     else:
         return ""
+
+
+@functools.lru_cache(None)
+def is_conda_llvm_openmp_installed():
+    try:
+        command = "conda list llvm-openmp --json"
+        output = subprocess.check_output(command.split()).decode("utf8")
+        return len(json.loads(output)) > 0
+    except subprocess.SubprocessError:
+        return False
+
+
+@functools.lru_cache(None)
+def homebrew_libomp():
+    try:
+        # check if `brew` is installed
+        subprocess.check_output(["which", "brew"])
+        # get the location of `libomp` if it is installed
+        # this is the location that `libomp` **would** be installed
+        # see https://github.com/Homebrew/brew/issues/10261#issuecomment-756563567 for details
+        libomp_path = (
+            subprocess.check_output(["brew", "--prefix", "libomp"])
+            .decode("utf8")
+            .strip()
+        )
+        # check if `libomp` is installed
+        omp_available = os.path.exists(libomp_path)
+        return omp_available, libomp_path
+    except subprocess.SubprocessError:
+        return False, ""
 
 
 def get_include_and_linking_paths(
@@ -749,10 +811,13 @@ def get_include_and_linking_paths(
             else:
                 macros = f"-D{macros}"
         if cuda:
-            if config.is_fbcode():
-                libs += ["cuda"]
+            if torch.version.hip is not None:
+                libs += ["c10_hip", "torch_hip"]
             else:
-                libs += ["c10_cuda", "cuda", "torch_cuda"]
+                if config.is_fbcode():
+                    libs += ["cuda"]
+                else:
+                    libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -761,25 +826,44 @@ def get_include_and_linking_paths(
         ipaths = cpp_extension.include_paths(cuda) + [sysconfig.get_path("include")]
         lpaths = []
         if sys.platform == "darwin":
-            # GNU OpenMP generally is not available on MacOS
-            # There is either Intel OpenMP(for x86) or LLVM OpenMP (for both x86 and arm64)
-            libs = ["omp"]
-            if os.getenv("OMP_PREFIX") is not None:
-                # Support OpenMP on MacOS
-                ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
-                lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+            # only Apple builtin compilers (Apple Clang++) require openmp
+            omp_available = not is_apple_clang()
 
-            if os.getenv("CONDA_PREFIX") is not None:
-                # On MacOS OpenMP is not available via the system install
-                # But on conda can be provided using https://anaconda.org/anaconda/llvm-openmp
-                conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
-                ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
-                lpaths.append(conda_lib_path)
-                # Prefer Intel OpenMP on x86 machine
-                if os.uname().machine == "x86_64" and os.path.exists(
-                    os.path.join(conda_lib_path, "libiomp5.dylib")
-                ):
-                    libs = ["iomp5"]
+            # check the `OMP_PREFIX` environment first
+            if os.getenv("OMP_PREFIX") is not None:
+                header_path = os.path.join(os.getenv("OMP_PREFIX"), "include", "omp.h")
+                valid_env = os.path.exists(header_path)
+                if valid_env:
+                    ipaths.append(os.path.join(os.getenv("OMP_PREFIX"), "include"))
+                    lpaths.append(os.path.join(os.getenv("OMP_PREFIX"), "lib"))
+                else:
+                    warnings.warn("environment variable `OMP_PREFIX` is invalid.")
+                omp_available = omp_available or valid_env
+
+            libs = [] if omp_available else ["omp"]
+
+            # prefer to use openmp from `conda install llvm-openmp`
+            if not omp_available and os.getenv("CONDA_PREFIX") is not None:
+                omp_available = is_conda_llvm_openmp_installed()
+                if omp_available:
+                    conda_lib_path = os.path.join(os.getenv("CONDA_PREFIX"), "lib")
+                    ipaths.append(os.path.join(os.getenv("CONDA_PREFIX"), "include"))
+                    lpaths.append(conda_lib_path)
+                    # Prefer Intel OpenMP on x86 machine
+                    if os.uname().machine == "x86_64" and os.path.exists(
+                        os.path.join(conda_lib_path, "libiomp5.dylib")
+                    ):
+                        libs = ["iomp5"]
+
+            # next, try to use openmp from `brew install libomp`
+            if not omp_available:
+                omp_available, libomp_path = homebrew_libomp()
+                if omp_available:
+                    ipaths.append(os.path.join(libomp_path, "include"))
+                    lpaths.append(os.path.join(libomp_path, "lib"))
+
+            # if openmp is still not available, we let the compiler to have a try,
+            # and raise error together with instructions at compilation error later
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
@@ -813,6 +897,7 @@ def cpp_compile_command(
     vec_isa: VecISA = invalid_vec_isa,
     cuda=False,
     aot_mode=False,
+    compile_only=False,
 ):
     ipaths, lpaths, libs, macros = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -837,14 +922,24 @@ def cpp_compile_command(
         f"""
             {cpp_compiler()} {inp_name} {get_shared(shared)}
             {get_warning_all_flag(warning_all)} {cpp_flags()}
+            {get_glibcxx_abi_build_flags()}
             {ipaths} {lpaths} {libs} {macros} {linker_paths}
             {optimization_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
+            {get_compile_only(compile_only)}
             -o {out_name}
         """,
     ).strip()
+
+
+def run_command_and_check(cmd: str):
+    cmd = shlex.split(cmd)
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        raise exc.CppCompileError(cmd, e.output) from e
 
 
 class CudaKernelParamCache:
@@ -853,13 +948,19 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key, params, cubin):
+        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            "cubin",
-            hash_type="cubin",
-            specified_dir=config.aot_inductor_output_path,
+            bin_type,
+            hash_type=bin_type,
+            specified_dir=config.aot_inductor.output_path,
         )
-        params["cubin_path"] = path
+
+        if torch.version.hip is None:
+            params["cubin_path"] = path
+        else:
+            params["hsaco_path"] = path
+
         cls.cache[key] = params
 
     @classmethod
@@ -872,7 +973,7 @@ class AotCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def compile(cls, graph, source_code, cuda):
+    def compile(cls, graph, source_code, serialized_extern_kernel_nodes, cuda):
         # TODO: update cpp_compile_command for different platforms
         picked_vec_isa = invalid_vec_isa if cuda else pick_vec_isa()
         cpp_command = repr(
@@ -880,35 +981,112 @@ class AotCodeCache:
                 "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
+        if config.is_fbcode():
+            ld_command = build_paths.ld()
+            objcopy_command = build_paths.objcopy()
+        else:
+            ld_command = "ld"
+            objcopy_command = "objcopy"
         key, input_path = write(
             source_code,
             "cpp",
             extra=cpp_command,
-            specified_dir=config.aot_inductor_output_path,
+            specified_dir=config.aot_inductor.output_path,
         )
+
+        def _to_bytes(t: torch.Tensor) -> bytes:
+            # This serializes the tensor's untyped_storage to bytes by accessing
+            # the raw data of the underlying structure.
+            import ctypes
+
+            t_cpu = t.untyped_storage().cpu()
+            raw_array = ctypes.cast(
+                t_cpu.data_ptr(), ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes())
+            )
+
+            return bytes(raw_array.contents)
+
+        aot_constants = b""
+        for tensor in graph.constants.values():
+            aot_constants += _to_bytes(tensor)
+
+        consts_key, consts_path = write(
+            aot_constants,
+            "bin",
+            specified_dir=config.aot_inductor.output_path,
+        )
+
         if key not in cls.cache:
             from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
             with lock:
+                # Currently, this only support serializing extern nodes in fbcode
+                # Eventually, we should also have a serializer for OSS.
+                if config.is_fbcode() and serialized_extern_kernel_nodes:
+                    output_json = os.path.splitext(input_path)[0] + ".json"
+                    with open(output_json, "w") as f:
+                        f.write(serialized_extern_kernel_nodes)
+
                 output_so = os.path.splitext(input_path)[0] + ".so"
 
                 if not os.path.exists(output_so):
-                    cmd = shlex.split(
-                        cpp_compile_command(
-                            input=input_path,
-                            output=output_so,
-                            vec_isa=picked_vec_isa,
-                            cuda=cuda,
-                            aot_mode=graph.aot_mode,
-                        )
+                    output_o = os.path.splitext(input_path)[0] + ".o"
+                    cmd = cpp_compile_command(
+                        input=input_path,
+                        output=output_o,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                        compile_only=True,
                     )
-                    log.debug("aot compilation command: %s", " ".join(cmd))
-                    try:
-                        subprocess.check_call(cmd)
-                    except subprocess.CalledProcessError as e:
-                        raise exc.CppCompileError(cmd, e.output) from e
+                    log.debug("aot compilation command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    consts_o = os.path.splitext(consts_path)[0] + ".o"
+                    cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
+                    run_command_and_check(cmd)
+                    log.debug("aot constant binary command: %s", cmd)
+
+                    cmd = (
+                        f"{objcopy_command} --rename-section"
+                        " .data=.lrodata,alloc,load,readonly,data,contents"
+                        f" {consts_o} {consts_o}"
+                    )
+                    log.debug("aot constant obj command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    cmd = f"rm {consts_path}"
+                    log.debug("aot constant bin removal command: %s", cmd)
+                    run_command_and_check(cmd)
+
+                    body = re.sub(r"[\W_]+", "_", consts_path)
+                    symbol_list = []
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_start {consts_o}"
+                    )
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_start=_binary_constants_bin_size {consts_o}"
+                    )
+                    symbol_list.append(
+                        f"{objcopy_command} --redefine-sym _binary_{body}_end=_binary_constants_bin_end {consts_o}"
+                    )
+                    log.debug(
+                        "aot constant binary redefine symbol: %s", " ".join(symbol_list)
+                    )
+                    for cmd in symbol_list:
+                        run_command_and_check(cmd)
+
+                    cmd = cpp_compile_command(
+                        input=f"{output_o} {consts_o}",
+                        output=output_so,
+                        vec_isa=picked_vec_isa,
+                        cuda=cuda,
+                        aot_mode=graph.aot_mode,
+                    )
+                    log.debug("aot linkage command: %s", cmd)
+                    run_command_and_check(cmd)
                 else:
                     log.debug(
                         "aot_inductor dynamic library already exist: %s", output_so
@@ -916,7 +1094,11 @@ class AotCodeCache:
 
                 cls.cache[key] = output_so
 
-        return cls.cache[key]
+        def wrapper_call(*args):
+            assert len(graph.graph_outputs) > 0
+            return cls.cache[key], *(None for i in range(len(graph.graph_outputs) - 1))
+
+        return wrapper_call
 
 
 # Putting this fn in cpp.py (unfortunately) causes a deadlock, which is why it's in codecache.py.
@@ -981,11 +1163,18 @@ def compile_file(input_path, output_path, cmd) -> None:
             subprocess.check_output(cmd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
-        if "'omp.h' file not found" in output and sys.platform == "darwin":
-            output = (
-                output
-                + "\n\nTry setting OMP_PREFIX; see https://github.com/pytorch/pytorch/issues/95708"
+        openmp_problem = "'omp.h' file not found" in output or "libomp" in output
+        if openmp_problem and sys.platform == "darwin":
+            instruction = (
+                "\n\nOpenMP support not found. Please try one of the following solutions:\n"
+                "(1) Set the `CXX` environment variable to a compiler other than Apple clang++/g++ "
+                "that has builtin OpenMP support;\n"
+                "(2) install OpenMP via conda: `conda install llvm-openmp`;\n"
+                "(3) install libomp via brew: `brew install libomp`;\n"
+                "(4) manually setup OpenMP and set the `OMP_PREFIX` environment variable to point to a path"
+                " with `include/omp.h` under it."
             )
+            output += instruction
         raise exc.CppCompileError(cmd, output) from e
 
 
@@ -1134,8 +1323,10 @@ class CppWrapperCodeCache:
                         cuda=cuda,
                     )
                     _use_custom_generated_macros = use_custom_generated_macros()
+                    _cpp_wrapper_flags = cpp_wrapper_flags()
 
-                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_use_custom_generated_macros}"
+                    extra_cflags = f"{_cpp_flags} {_opt_flags} {_warning_all_flag} {_macros} {_cpp_wrapper_flags} \
+                    {_use_custom_generated_macros}"
                     # For CPP wrapper, add -ffast-math during linking to make CPU flush denormals.
                     # CPP wrapper leverages cpp_extension which will do the compilation and linking in two stages.
                     # We need to explicitly add -ffast-math as a linking flag.
@@ -1152,6 +1343,7 @@ class CppWrapperCodeCache:
                         extra_cflags=[extra_cflags],
                         extra_ldflags=[extra_ldflags],
                         extra_include_paths=[extra_include_paths],
+                        use_pch=True,
                     )
                     log.debug("Cpp wrapper done building %s", filepath)
                 else:

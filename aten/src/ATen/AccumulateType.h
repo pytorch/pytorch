@@ -96,9 +96,9 @@ MPS_ACC_TYPE(int16_t, int64_t);
 MPS_ACC_TYPE(int32_t, int64_t);
 MPS_ACC_TYPE(int64_t, int64_t);
 MPS_ACC_TYPE(bool, bool);
-MPS_ACC_TYPE(c10::complex<Half>, float);
-MPS_ACC_TYPE(c10::complex<float>, float);
-MPS_ACC_TYPE(c10::complex<double>, float);
+MPS_ACC_TYPE(c10::complex<Half>, c10::complex<float>);
+MPS_ACC_TYPE(c10::complex<float>, c10::complex<float>);
+MPS_ACC_TYPE(c10::complex<double>, c10::complex<float>);
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
 CUDA_ACC_TYPE(half, float);
