@@ -2,6 +2,7 @@ import copy
 import functools
 import math
 import operator
+from typing import Any, Tuple
 
 import torch
 from ..lowering import lowerings as L, require_channels_last
@@ -794,7 +795,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number):
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args = (
+            new_args: Tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,
@@ -949,7 +950,7 @@ def _register_qlinear_weight_prepack_pass(pattern, pass_number):
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args = (
+            new_args: Tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,

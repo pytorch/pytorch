@@ -48,3 +48,9 @@ def test_wrong_global():
 
     finally:
         tnp.random.USE_NUMPY_RANDOM = oldstate
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
