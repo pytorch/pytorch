@@ -286,7 +286,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
 
     result = prop_index(
         OpSchema(
-            func_schema=op_schema.func_schema,
+            op=op_schema.op,
             args_schema=(values_spec, all_indices_spec),
             kwargs_schema=op_schema.kwargs_schema,
         )
@@ -294,7 +294,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     if result.schema_suggestions:
         result.schema_suggestions = [
             OpSchema(
-                func_schema=op_schema.func_schema,
+                op=op_schema.op,
                 args_schema=(s.args_schema[0], dim, s.args_schema[1][dim]),
                 kwargs_schema=op_schema.kwargs_schema,
             )
@@ -331,7 +331,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     #    Here, we piggyback on the pointwise sharding rule for indices.
     indices_out = pointwise_rule(
         OpSchema(
-            func_schema=op_schema.func_schema,
+            op=op_schema.op,
             args_schema=tuple(v[1] for v in valid_indices_spec),
             kwargs_schema={},
         )
@@ -405,7 +405,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(
                         DTensorSpec(
                             mesh=values_spec.mesh,
@@ -545,7 +545,7 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(
                         tuple(tensor_list_specs_after),
                         *op_schema.args_schema[1:],
@@ -599,7 +599,7 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
             None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(input_spec,) + op_schema.args_schema[1:],
                     kwargs_schema=op_schema.kwargs_schema,
                 ),

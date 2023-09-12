@@ -27,6 +27,20 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
     )
 
 
+def _is_inplace_op(op: torch._ops.OpOverload):
+    # simple analysis of function schema to determine
+    # if this is an inplace variant, it might not
+    # be entirely correct, but it's good enough for now.
+    return op._schema.name[-1] == "_"
+
+
+def _is_out_variant_op(op: torch._ops.OpOverload):
+    # simple analysis of function schema to determine
+    # if this is an out variant, it might not
+    # be entirely correct, but it's good enough for now.
+    return "out" in op._schema.overload_name
+
+
 @dataclass
 class PlacementStrategy:
     """
@@ -116,47 +130,20 @@ class OpSchema:
     preserved). It is mainly used by the dispatching logic below to run things like
     sharding propagation.
 
-    Sharding propagation rules registered could utilize this data class and
-    do inplace update some fields (when necessary, i.e shape related ops) to make
-    sure the args/kwargs are legit before passing to the local tensor operator.
-    This is the main reason that we don't freeze this dataclass.
-
-    NOTE: greater access to the operator inputs comes with greater responsibility.
-    Here are some basic rules about what can be used and what can be changed.
+    NOTE: this should be used as a read only data class
+    TODO: make this a frozen dataclass
 
     Args:
-        func_schema: the function schema of the operator
+        op: the operator overload we are intercepting
         args_schema: contains args except that the DTensor args have been replaced
             with its DTensorSpec
         kwargs_schema: contains kwargs except that the DTensor kwargs have been replaced
             with its DTensorSpec
-
-    What can be used:
-        - every attribute within this class could be read to conduct
-          sharding propagation.
-    What can be changed:
-        - only the args_schema and kwargs_schema could be changed.
-        - every non-tensor args could be changed to accomodate for local tensor
-          operations (i.e. for ops like view/reshape/...)
-        - every "DTensorSpec" attribute inside `args_schema`, `kwargs_schema` and
-          `args_spec` SHOULD NOT be updated! DTensorSpec are read only and sharding
-          propagation shouldn't inplace update them, otherwise the input DTensor
-          placements will get implicitly changed and it's error-prone.
     """
 
-    func_schema: torch._C.FunctionSchema
+    op: torch._ops.OpOverload
     args_schema: ArgsType
     kwargs_schema: KwargsType
-
-    is_inplace: bool = False
-    is_out_variant: bool = False
-
-    def __post_init__(self) -> None:
-        # simple analysis of function schema to determine
-        # if this is an inplace/out variant, it might not
-        # be entirely correct, but it's good enough for now.
-        self.is_inplace = self.func_schema.name[-1] == "_"
-        self.is_out_variant = "out" in self.func_schema.overload_name
 
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
@@ -171,7 +158,7 @@ class OpSchema:
 
     def __repr__(self) -> str:
         return (
-            f"OpSchema(func_schema={self.func_schema},"
+            f"OpSchema(op={self.op},"
             f" args_schema={self.args_schema},"
             f" kwargs_schema={self.kwargs_schema})"
         )
@@ -181,7 +168,7 @@ class OpSchema:
         frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
         return hash(
             (
-                self.func_schema,
+                self.op,
                 tuple(tuple(e) if isinstance(e, list) else e for e in self.args_schema),
                 frozen_set_kwargs_schema,
             )
@@ -191,7 +178,7 @@ class OpSchema:
         if not isinstance(other, OpSchema):
             return False
         return (
-            self.func_schema == other.func_schema
+            self.op == other.op
             and self.args_schema == other.args_schema
             and self.kwargs_schema == other.kwargs_schema
         )
@@ -254,7 +241,6 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
 
-    op_call: torch._ops.OpOverload
     schema: OpSchema
     flat_args_schema: List[object]
     flat_kwargs_schema: List[object]
