@@ -1069,9 +1069,12 @@ def same(
                     )
 
                 res_error = rmse(fp64_ref, res).item()
-                # For amp, we find some workloads failed in benchmark correctness check
-                # But, actually the E2E model accuracy comparing amp and fp32 are less than 0.2%.
-                # So, we use multiplier of 3 instead of 2 for amp case.
+
+                # In the case of using AMP (Automatic Mixed Precision), certain models have
+                # failed the benchmark's correctness check. However, the end-to-end model's
+                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                # Thus, it's possible that the correctness check failures for these models are
+                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
                 multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
                 if (
