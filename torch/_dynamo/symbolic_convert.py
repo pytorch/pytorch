@@ -799,7 +799,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        self.symbolic_locals[inst.argval] = self.pop()
+        loaded_vt = self.pop()
+        name = inst.argval
+        loaded_vt = loaded_vt.rename(self, name)
+        self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -870,6 +873,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
+        value = value.rename(self, name)
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
