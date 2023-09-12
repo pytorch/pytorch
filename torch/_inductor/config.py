@@ -97,9 +97,10 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton.
+# Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
+# CUTLASS: Cutlass templates and kernels.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
@@ -428,6 +429,42 @@ class aot_inductor:
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
+
+
+class cuda:
+    # CUDA arch to use for CUDA template kernel compilation.
+    # e.g. "70", "75", "80", "90", etc.
+    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
+    arch = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, Inductor uses torch.version.cuda.
+    version = None
+
+    # Optimization level for the host compiler.
+    compile_opt_level = "-O1"
+
+    # Whether to enable device LTO (link-time-optimization).
+    enable_cuda_lto = False
+
+    # Whether to keep intermediate files dring compilation.
+    enable_ptxas_info = False
+
+    # Whether to enable debug info, e.g. line number, cutlass debug info.
+    enable_debug_info = False
+
+    # Whether to use fast math.
+    use_fast_math = False
+
+    # Path to the CUTLASS repo root directory.
+    # The default path only works under PyTorch local development environment.
+    cutlass_dir = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_DIR",
+        os.path.abspath(
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
+        ),
+    )
 
 
 # create a directory containing lots of debug information
