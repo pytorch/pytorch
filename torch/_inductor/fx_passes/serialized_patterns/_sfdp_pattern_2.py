@@ -72,6 +72,8 @@ _sfdp_pattern_2_training = MultiOutputPattern([view_default_5,
   view_default_11,
   None
 ])
+
+
 expand_default = CallFunction(aten.expand.default, KeywordArg('query'), Ignored())
 view_default = CallFunction(aten.view.default, expand_default, Ignored())
 permute_default = CallFunction(aten.permute.default, KeywordArg('key'), Ignored())

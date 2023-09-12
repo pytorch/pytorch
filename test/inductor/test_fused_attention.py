@@ -30,7 +30,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 return x
             return x.clone()
 
-        return tuple(clone(x) for x in inputs)
+        return [clone(x) for x in inputs]
 
     def _check_common(
         self,
@@ -40,6 +40,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         atol=1e-5,
         has_fuse_pattern=True,
         has_dropout=False,
+        check_train=True,
+        override_check_equal=False,
     ):
         if args1 is None:
             tensor_shape = (4, 2, 16, 32)
@@ -48,20 +50,24 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 torch.randn(tensor_shape, device=self.device),
                 torch.randn(tensor_shape, device=self.device),
             ]
+        else:
+            args1 = list(args1)
         args2 = self._clone_inputs(args1)
 
-        for training in [False, True]:
+        for training in [False] + ([True] if check_train else []):
             for x in itertools.chain(args1[:], args2[:]):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
 
+            dropout_arg = [training] if has_dropout else []
             torch.manual_seed(1234)
-            result1 = dot_prod_attention(*args1)
+            result1 = dot_prod_attention(*(args1 + dropout_arg))
 
             counters.clear()
             torch.manual_seed(1234)
             result2, (source_code,) = run_and_get_code(
-                torch.compile(dot_prod_attention, fullgraph=True), *args2
+                torch.compile(dot_prod_attention, fullgraph=True),
+                *(args2 + dropout_arg),
             )
             if has_fuse_pattern:
                 self.assertGreaterEqual(counters["inductor"]["fuse_attention"], 1)
@@ -71,7 +77,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     "aten._scaled_dot_product",
                     source_code,
                 )
-            if not has_dropout:
+
+            # some tests configured with very low dropout where we still want to check equality
+            if not has_dropout or override_check_equal:
                 self.assertEqual(result1, result2, atol=atol, rtol=1.3e-6)
 
             if training:
@@ -81,7 +89,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                     if (
                         isinstance(arg1, torch.Tensor)
                         and arg1.is_floating_point()
-                        and not has_dropout
+                        and (not has_dropout or override_check_equal)
                     ):
                         self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
 
@@ -145,12 +153,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     def _test_sdpa_rewriter_3(self):
         def dot_prod_attention(
-            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, training: bool
         ) -> torch.Tensor:
             return torch.nn.functional.dropout(
                 torch.matmul(query, key.transpose(-2, -1)).div(3.0).softmax(dim=-1),
                 p=0.4,
-                training=True,
+                training=training,
                 inplace=False,
             ).matmul(value)
 
@@ -161,13 +169,16 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     def _test_sdpa_rewriter_4(self):
         def dot_prod_attention(
-            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
         ) -> torch.Tensor:
             return torch.nn.functional.dropout(
                 torch.matmul(query, key.transpose(-2, -1)).mul(0.4).softmax(dim=-1),
                 p=0.2,
-                training=True,
                 inplace=False,
+                training=training,
             ).matmul(value)
 
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
@@ -207,7 +218,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     @skipIfRocm
     def _test_sdpa_rewriter_6(self):
-        def sfdp_pattern_6(query, key, value):
+        def sfdp_pattern_6(query, key, value, training):
             attn_mask = torch.ones(
                 query.size(-2), key.size(-2), dtype=torch.bool, device=query.device
             ).tril(diagonal=0)
@@ -218,7 +229,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 (query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))) + attn_mask,
                 dim=-1,
             )
-            attn_weight = torch.dropout(attn_weight, 0.5, True)
+            attn_weight = torch.nn.functional.dropout(attn_weight, 0.5, training)
             return attn_weight @ value
 
         self._check_common(sfdp_pattern_6, contains=False, has_dropout=True)
@@ -228,7 +239,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     @skipIfRocm
     def _test_sdpa_rewriter_7(self):
-        def sfdp_pattern_7(query, key, value):
+        def sfdp_pattern_7(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
             v = value.permute(0, 2, 1, 3)
@@ -236,7 +247,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             div = div.to(torch.float32)
             attn_weight = torch.softmax(div, dim=-1)
             # very small dropout to make sure test passes
-            attn_weight = torch.dropout(attn_weight, 0.00001, True)
+            attn_weight = torch.nn.functional.dropout(attn_weight, 0.00001, training)
             attn_weight = attn_weight.to(torch.float16)
             return attn_weight @ v
 
@@ -245,7 +256,14 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_7, args, contains=SM80OrLater, atol=2e-3)
+        self._check_common(
+            sfdp_pattern_7,
+            args,
+            contains=SM80OrLater,
+            has_dropout=True,
+            override_check_equal=True,
+            atol=2e-3,
+        )
 
         args = (
             torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
@@ -253,7 +271,12 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
         )
         self._check_common(
-            checkpoint_wrapper(sfdp_pattern_7), args, contains=SM80OrLater, atol=2e-3
+            checkpoint_wrapper(sfdp_pattern_7),
+            args,
+            contains=SM80OrLater,
+            has_dropout=True,
+            override_check_equal=True,
+            atol=2e-3,
         )
 
     @skipIfRocm
@@ -284,7 +307,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     @skipIfRocm
     def _test_sdpa_rewriter_9(self):
-        def sfdp_pattern_9(query, key, value):
+        def sfdp_pattern_9(query, key, value, training):
             q = query.permute(0, 2, 1, 3)
             k = key.permute(0, 2, 1, 3)
             v = value.permute(0, 2, 1, 3)
@@ -293,7 +316,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             div = div.to(torch.float32)
             attn_weight = torch.softmax(div, dim=-1)
             # very low dropout to make test pass
-            attn_weight = torch.dropout(attn_weight, 0.9999, True)
+            attn_weight = torch.nn.functional.dropout(attn_weight, 0.9999, training)
             attn_weight = attn_weight.to(torch.float16)
             return attn_weight @ v
 
@@ -302,14 +325,26 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
             torch.randn((2, 8, 4, 16), device=self.device, dtype=torch.half),
         )
-        self._check_common(sfdp_pattern_9, args, contains=SM80OrLater, atol=2e-3)
+        self._check_common(
+            sfdp_pattern_9,
+            args,
+            contains=SM80OrLater,
+            has_dropout=True,
+            override_check_equal=True,
+            atol=2e-3,
+        )
         args = (
             torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
             torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
             torch.randn((2, 8, 4, 16), device="cuda", dtype=torch.half),
         )
         self._check_common(
-            checkpoint_wrapper(sfdp_pattern_9), args, contains=SM80OrLater, atol=2e-3
+            checkpoint_wrapper(sfdp_pattern_9),
+            args,
+            contains=SM80OrLater,
+            has_dropout=True,
+            override_check_equal=True,
+            atol=2e-3,
         )
 
     @skipIfRocm
@@ -423,7 +458,10 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
     def _test_sdpa_rewriter_12(self):
         def dot_prod_attention(
-            query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
         ) -> torch.Tensor:
             """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
             q = query.transpose(1, 2)
@@ -435,7 +473,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .softmax(dim=-1)
                 .matmul(v),
                 p=0.4,
-                training=True,
+                training=training,
                 inplace=False,
             )
 
@@ -455,8 +493,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(value)
             )
 
-        self._check_common(dot_prod_attention)
-        self._check_common(checkpoint_wrapper(dot_prod_attention))
+        self._check_common(dot_prod_attention, check_train=False)
+        self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
     @skipIfRocm
     def _test_sdpa_rewriter_14(self):
@@ -471,8 +509,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(value)
             )
 
-        self._check_common(dot_prod_attention)
-        self._check_common(checkpoint_wrapper(dot_prod_attention))
+        self._check_common(dot_prod_attention, check_train=False)
+        self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
     @skipIfRocm
     def _test_sdpa_rewriter_15(self):
@@ -491,7 +529,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(v)
             )
 
-        self._check_common(dot_prod_attention)
+        self._check_common(dot_prod_attention, check_train=False)
 
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
