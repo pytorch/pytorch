@@ -138,6 +138,18 @@ test_failures = {
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     #
+
+    # Failed to find for loop/cpu kernel:
+    #
+    "test_add_uint8_tensor_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_add_int8_tensor_dynamic_shapes": TestFailure(("cpu",)),
+    "test_add_int16_tensor_dynamic_shapes": TestFailure(("cpu",)),
+    "test_multiply_uint8_tensor_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_square_uint8_tensor_overflow_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_multiply_uint8_tensor_overflow_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_square_uint8_tensor_dynamic_shapes": TestFailure(("cpu", "cuda")),
+
+    #
     # Failed to find for loop/triton kernel:
     #
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda")),
