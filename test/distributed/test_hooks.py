@@ -1,8 +1,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+from functools import wraps, partial
 import sys
-
+import threading
 import torch
 import torch.distributed as dist
 import torch.distributed.hooks as dhooks
@@ -12,12 +13,15 @@ if not dist.is_available():
     sys.exit(0)
 
 
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    skip_if_lt_x_gpu
+)
 
 from torch.testing._internal.common_utils import run_tests
 
 
-class TestMultiThreadedWait(MultiProcessTestCase):
+class PgHooks(MultiProcessTestCase):
     @property
     def world_size(self) -> int:
         return 4
@@ -55,6 +59,141 @@ class TestMultiThreadedWait(MultiProcessTestCase):
 
         self.assertEqual(len(pgs), 2)
         self.assertEqual(pgs[1][0], pg0 if self.rank < 2 else pg1)
+
+def with_comms(func=None):
+    if func is None:
+        return partial(
+            with_comms,
+        )
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self.init_comms()
+        func(self, *args, **kwargs)
+        self.destroy_comms()
+    return wrapper
+
+
+class CollectiveHooks:
+    @property
+    def world_size(self) -> int:
+        return 4
+
+    def _collective_hooks(self):
+        # it's ok to access them directly since there's a single bg thread poking at them.
+        starts = []
+        ends = []
+        cv = threading.Condition()
+
+        def coll_start(status):
+            starts.append(status)
+            print(f"col_start {len(starts)} rank{self.rank}")
+
+
+        def coll_end(status):
+            ends.append(status)
+            print(f"col_end {len(ends)} rank{self.rank}")
+            if len(ends) == 2:
+                with cv:
+                    cv.notify()
+
+
+        dhooks.register_collective_start_hook(coll_start)
+        dhooks.register_collective_end_hook(coll_end)
+
+        tensor = torch.ones([2, 3]).cuda(self.rank) * self.rank
+        tensor_list = [torch.empty_like(tensor) for _ in range(self.world_size)]
+
+        dist.all_gather(tensor_list, tensor)
+
+        tensor2 = torch.ones([2, 3]).cuda(self.rank) * self.rank
+        dist.all_reduce(tensor2)
+
+        with cv:
+            cv.wait(1)
+
+        default_pg_name = dist.group.WORLD.group_name
+        self.assertEqual(2, len(starts))
+        self.assertEqual(2, len(ends))
+
+        self.assertEqual(default_pg_name, starts[0].pg_name)
+        self.assertEqual(self.backend_name, starts[0].backend)
+        self.assertGreaterEqual(starts[0].sequence_number, 0)
+        self.assertGreaterEqual(starts[0].timestamp, 0)
+        self.assertEqual("ALLGATHER", starts[0].operation)
+
+
+        self.assertEqual(default_pg_name, ends[0].pg_name)
+        self.assertEqual(self.backend_name, ends[0].backend)
+
+
+        self.assertEquals(starts[0].sequence_number, ends[0].sequence_number)
+        self.assertLessEqual(starts[0].timestamp, ends[0].timestamp)
+        self.assertEqual("ALLGATHER", ends[0].operation)
+
+
+class GlooHooks(MultiProcessTestCase, CollectiveHooks):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def init_comms(self):
+        dist.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+
+    def destroy_comms(self):
+        dist.destroy_process_group()
+
+    @property
+    def backend_name(self):
+        return "gloo"
+
+    @with_comms
+    def test_collective_hooks(self):
+        self._collective_hooks()
+
+class NcclHooks(MultiProcessTestCase, CollectiveHooks):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def init_comms(self):
+        dist.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=dist.FileStore(self.file_name, self.world_size),
+        )
+
+    def destroy_comms(self):
+        dist.destroy_process_group()
+
+    @property
+    def backend_name(self):
+        return "nccl"
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_collective_hooks(self):
+        self._collective_hooks()
 
 
 if __name__ == "__main__":

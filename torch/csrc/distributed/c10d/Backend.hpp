@@ -354,6 +354,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return onCompletionHook_ != nullptr;
   }
 
+  // Do not call this directly, use ProcessGroup::setGroupName instead.
   void setGroupName(const std::string& name) {
     pg_name_ = name;
   }
