@@ -497,8 +497,9 @@ def _post_forward(
         # Clear FreeEventQueue here if in eval mode where we cannot rely on the
         # clean-up in post backward
         if (not state._is_training) and state._is_root:
-            while event_with_tensor := state._free_event_queue.dequeue():
-                _free_storage(event_with_tensor.tensor)
+            while tensor_free_event := state._free_event_queue.dequeue():
+                tensor, _ = tensor_free_event
+                _free_storage(tensor)
         return output
 
 
@@ -550,9 +551,6 @@ def _root_pre_forward(
             if _is_composable(state):
                 return _root_cast_forward_input(state, module, args, kwargs)
             return args, kwargs
-
-        # Each iteration before forward, we set the FreeEventQueue to use forward direction
-        state._free_event_queue.use_forward_direction()
 
         # We cast buffers back to full precision if we're forcing full precision. Disjointly, we check if buffers
         # are in full precision and if we should cast them back to lower precision, which happens when
@@ -668,8 +666,6 @@ def _pre_backward_hook(
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
             _reset_flat_param_grad_info_if_needed(state._all_handles)
-            # Switch direction of _FreeEventQueue to match backward order
-            state._free_event_queue.use_backward_direction()
         elif handle:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -1103,8 +1099,9 @@ def _post_backward_final_callback(
             handle._prefetched = False
 
     # If there are all-gather buffers left in the event queue, free them
-    while event_with_tensor := root_state._free_event_queue.dequeue():
-        _free_storage(event_with_tensor.tensor)
+    while tensor_free_event := root_state._free_event_queue.dequeue():
+        tensor, _ = tensor_free_event
+        _free_storage(tensor)
 
     # Reset for cases like one forward and multiple backwards
     root_state._post_backward_callback_queued = False

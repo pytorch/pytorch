@@ -1,6 +1,5 @@
-import collections
-from enum import Enum, auto
-from typing import Deque, Optional
+from collections import OrderedDict
+from typing import Optional, Tuple
 
 import torch
 
@@ -22,11 +21,6 @@ class EventWithTensor:
         self.tensor = tensor
 
 
-class _QueueDirection(Enum):
-    POP_LEFT = auto()
-    POP_RIGHT = auto()
-
-
 class _FreeEventQueue:
     """
     This tracks all pending frees corresponding to inflight all-gathers. The
@@ -38,52 +32,37 @@ class _FreeEventQueue:
         self,
         max_num_inflight_all_gathers: int,
     ) -> None:
-        self._queue: Deque[EventWithTensor] = collections.deque()
+        self._queue: OrderedDict[torch.Tensor, torch.cuda.Event] = OrderedDict()
         self._max_num_inflight_all_gathers = max_num_inflight_all_gathers
-        # Initial direction is forward
-        self._direction: _QueueDirection = _QueueDirection.POP_LEFT
 
-    def enqueue(self, free_event: EventWithTensor) -> None:
+    def enqueue(
+        self,
+        tensor: torch.Tensor,
+        event: torch.cuda.Event,
+    ) -> None:
         """Enqueues a free event."""
-        if self._direction == _QueueDirection.POP_LEFT:
-            self._queue.append(free_event)
-        else:
-            self._queue.appendleft(free_event)
+        # Delete and re-insert to maintain event order
+        if tensor in self._queue:
+            self._queue.pop(tensor)
 
-    def dequeue_if_needed(self) -> Optional[EventWithTensor]:
+        self._queue[tensor] = event
+
+    def dequeue_if_needed(self) -> Optional[Tuple[torch.Tensor, torch.cuda.Event]]:
         """Dequeues a single event if the limit is reached."""
         if len(self._queue) >= self._max_num_inflight_all_gathers:
             return self.dequeue()
         return None
 
-    def dequeue(self) -> Optional[EventWithTensor]:
+    def dequeue(self) -> Optional[Tuple[torch.Tensor, torch.cuda.Event]]:
         """Dequeues a free event if possible."""
         if self._queue:
-            if self._direction == _QueueDirection.POP_LEFT:
-                event = self._queue.popleft()
-            else:
-                event = self._queue.pop()
-            return event
+            # Set `last` to False to pop item in FIFO style
+            return self._queue.popitem(last=False)
         return None
 
-    def use_backward_direction(self) -> None:
-        self._direction = _QueueDirection.POP_RIGHT
-
-    def use_forward_direction(self) -> None:
-        self._direction = _QueueDirection.POP_LEFT
-
-    def enqueue_or_update(
+    def erase(
         self,
-        event: torch.cuda.Event,
-        tensor: torch.Tensor,
-    ) -> None:
-        """Enqueues or updates a free event."""
-        for item in self._queue:
-            if item.tensor is tensor:
-                item.event = event
-                return None
-        event_with_tensor = EventWithTensor(
-            event,
-            tensor,
-        )
-        self.enqueue(event_with_tensor)
+        tensor: torch.Tensor
+    ) -> Optional[torch.cuda.Event]:
+        """Erase tensor-event pair from queue"""
+        self._queue.pop(tensor, None)

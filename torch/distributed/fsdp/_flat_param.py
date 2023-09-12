@@ -1284,12 +1284,13 @@ class FlatParamHandle:
             # All-gather rate limiting coming into effect via stream wait
             # Current stream is unshard stream as we call `handle.unshard` in
             # its with-stream context
-            event_with_tensor = self._free_event_queue.dequeue_if_needed()
-            if event_with_tensor:
+            tensor_free_event = self._free_event_queue.dequeue_if_needed()
+            if tensor_free_event:
+                tensor, event = tensor_free_event
                 # Wait for a resharding event (compute done)
-                unshard_stream.wait_event(event_with_tensor.event)
+                unshard_stream.wait_event(event)
                 # Free the storage of the "-2" all-gather
-                _free_storage(event_with_tensor.tensor)
+                _free_storage(tensor)
                 # Caching allocator would recycle the stashed unshard buffer's
                 # storage into the unshard stream's pool, and potentially reuse
                 # it for the current unshard
@@ -1713,26 +1714,38 @@ class FlatParamHandle:
         # when setting `param.data = ...` in `_use_sharded_views()`.
         self._use_sharded_flat_param()
 
-        if free_unsharded_flat_param:
-            in_forward = self._training_state == HandleTrainingState.FORWARD
-            if self._limit_all_gathers and in_forward:
-                # In the new rate limiter, we stash an all-gather buffer to keep
-                # it from being freed by the caching allocator until two
-                # all-gathers later. So that the caching allocator would try to
-                # reuse its storage for the +2 all-gather.
-                # We also do not call `record_stream` to hand over the ownership
-                # to the compute stream (i.e. the ownership is still with the
-                # unshard stream). We keep the tensor alive via stashing.
-                comp_done_event = self._device_handle.Event()
-                comp_done_event.record()
-                unsharded_flat_param = self._get_padded_unsharded_flat_param()
-                self._free_event_queue.enqueue_or_update(
-                    comp_done_event,
-                    unsharded_flat_param,
-                )
-            else:
-                # Direct free if in backward or if there is no rate limiting
-                self._free_unsharded_flat_param()
+        if not free_unsharded_flat_param:
+            return
+
+        if not self._limit_all_gathers:
+            # Direct free if there is no rate limiting
+            self._free_unsharded_flat_param()
+            return
+
+        # Rate limiting in effect
+        unsharded_flat_param = self._get_padded_unsharded_flat_param()
+        in_forward = self._training_state == HandleTrainingState.FORWARD
+        if in_forward:
+            # In the new rate limiter, we stash an all-gather buffer to keep
+            # it from being freed by the caching allocator until two
+            # all-gathers later. So that the caching allocator would try to
+            # reuse its storage for the +2 all-gather.
+            # We also do not call `record_stream` to hand over the ownership
+            # to the compute stream (i.e. the ownership is still with the
+            # unshard stream). We keep the tensor alive via stashing.
+            comp_done_event = self._device_handle.Event()
+            comp_done_event.record()
+            self._free_event_queue.enqueue(
+                unsharded_flat_param,
+                comp_done_event,
+            )
+        else:
+            # In backward, we first check if the tensor is still stashed in queue
+            # e.g. last two layers of forward
+            # If it is, unstash it from queue
+            self._free_event_queue.erase(unsharded_flat_param)
+            # Then direct free
+            self._free_unsharded_flat_param()
 
     def post_reshard(self):
         """
