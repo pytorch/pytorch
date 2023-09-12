@@ -136,8 +136,8 @@ class TuningProcess:
         Push a work item to the child process.
         """
         # In case of a prior crash, ensure the subprocess is running
-        assert self.request_queue is not None
         self.initialize()
+        assert self.request_queue is not None
         self.request_queue.put(obj)
 
     def get(self) -> Any:
@@ -307,7 +307,7 @@ def benchmark_in_sub_process(
 
     tuning_process.put(choice.bmreq)
     try:
-        timing = tuning_process.get()
+        return tuning_process.get()
     except queue.Empty:
         warnings.warn(
             f"Fail to benchmark choice '{choice}'. It will be ignored. "
@@ -315,5 +315,3 @@ def benchmark_in_sub_process(
         )
         # return INF so this choice will be ignored
         return float("inf")
-
-    return timing
