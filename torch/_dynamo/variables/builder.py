@@ -90,6 +90,7 @@ from .distributed import (
     ProcessGroupVariable,
 )
 from .functions import (
+    AllToAllSingleFunctionalCollectiveVariable,
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
     UserFunctionVariable,
@@ -525,6 +526,17 @@ class VariableBuilder:
             return SkipFilesVariable(
                 value,
                 source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif AllToAllSingleFunctionalCollectiveVariable.can_rewrite(value):
+            new_fn, new_source = AllToAllSingleFunctionalCollectiveVariable.rewrite(value)
+            old_source = self.source
+            self.source = new_source
+            return AllToAllSingleFunctionalCollectiveVariable(
+                new_fn,
+                orig_fn=value,
+                orig_source=old_source,
+                source=new_source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         # NB: These can't be put in type_dispatch, they have to run later

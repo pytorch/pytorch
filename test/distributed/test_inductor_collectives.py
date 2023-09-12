@@ -220,15 +220,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor(self):
         def example(inp, input_split_sizes, output_split_sizes, *, tag, ranks, group_size):
-            a2a = torch.ops.c10d_functional.all_to_all_single(
+            a2a = _functional_collectives.all_to_all_single(
                 inp,
-                output_split_sizes=output_split_sizes,
-                input_split_sizes=input_split_sizes,
-                tag=tag,
-                ranks=ranks,
-                group_size=group_size,
+                output_split_sizes,
+                input_split_sizes,
+                ranks,
+                tag,
             )
-            a2a = torch.ops.c10d_functional.wait_tensor(a2a)
             out = a2a / a2a.sum(dim=0)
             return out
 
@@ -281,13 +279,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_output_split_sizes_none(self):
         def example(inp, input_split_sizes, *, tag, ranks, group_size):
-            a2a = torch.ops.c10d_functional.all_to_all_single(
+            a2a = _functional_collectives.all_to_all_single(
                 inp,
-                output_split_sizes=None,
-                input_split_sizes=input_split_sizes,
-                tag=tag,
-                ranks=ranks,
-                group_size=group_size,
+                None,
+                input_split_sizes,
+                ranks,
+                tag,
             )
             a2a = torch.ops.c10d_functional.wait_tensor(a2a)
             out = a2a / a2a.sum(dim=0)
@@ -322,13 +319,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_input_split_sizes_none(self):
         def example(inp, output_split_sizes, *, tag, ranks, group_size):
-            a2a = torch.ops.c10d_functional.all_to_all_single(
+            a2a = _functional_collectives.all_to_all_single(
                 inp,
-                output_split_sizes=output_split_sizes,
-                input_split_sizes=None,
-                tag=tag,
-                ranks=ranks,
-                group_size=group_size,
+                output_split_sizes,
+                None,
+                ranks,
+                tag,
             )
             a2a = torch.ops.c10d_functional.wait_tensor(a2a)
             out = a2a / a2a.sum(dim=0)
@@ -371,13 +367,12 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_split_sizes_none(self):
         def example(inp, *, tag, ranks, group_size):
-            a2a = torch.ops.c10d_functional.all_to_all_single(
+            a2a = _functional_collectives.all_to_all_single(
                 inp,
-                output_split_sizes=None,
-                input_split_sizes=None,
-                tag=tag,
-                ranks=ranks,
-                group_size=group_size,
+                None,
+                None,
+                ranks,
+                tag,
             )
             a2a = torch.ops.c10d_functional.wait_tensor(a2a)
             out = a2a / a2a.sum(dim=0)

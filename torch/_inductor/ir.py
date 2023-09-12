@@ -6284,13 +6284,13 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
     def codegen_collective(self, wrapper, output_name, input_names):
         tag, ranks, group_size = self.constant_args
 
-        if self.output_split_sizes is not None:
-            for s in self.output_split_sizes:
-                self.codegen_unbacked_symint_to_value(wrapper, s)
+        # if self.output_split_sizes is not None:
+        #     for s in self.output_split_sizes:
+        #         self.codegen_unbacked_symint_to_value(wrapper, s)
 
-        if self.input_split_sizes is not None:
-            for s in self.input_split_sizes:
-                self.codegen_unbacked_symint_to_value(wrapper, s)
+        # if self.input_split_sizes is not None:
+        #     for s in self.input_split_sizes:
+        #         self.codegen_unbacked_symint_to_value(wrapper, s)
 
         wrapper.writeline(
             f"{output_name} = fun_col_impl._all_to_all_single("
