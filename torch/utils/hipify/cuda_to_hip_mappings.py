@@ -2236,10 +2236,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipFuncAttributeSharedSizeBytes", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
         (
-            "CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES",
-            ("hipFuncAttributeMaxDynamicSharedMemorySize", CONV_TYPE, API_RUNTIME),
-        ),
-        (
             "CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES",
             ("hipFuncAttributeConstSizeBytes", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
@@ -2920,7 +2916,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cuEventQuery", ("hipEventQuery", CONV_EVENT, API_DRIVER)),
         ("cuEventRecord", ("hipEventRecord", CONV_EVENT, API_DRIVER)),
         ("cuEventSynchronize", ("hipEventSynchronize", CONV_EVENT, API_DRIVER)),
-        ("cuFuncSetAttribute", ("hipFuncSetAttribute", CONV_EVENT, API_DRIVER)),
         (
             "cuFuncGetAttribute",
             ("hipFuncGetAttribute", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
