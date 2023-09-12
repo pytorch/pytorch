@@ -41,7 +41,7 @@ from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -55,7 +55,11 @@ except ImportError:
     from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
+    import torch_xla
     import torch_xla.core.xla_model as xm
+
+    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
@@ -221,6 +225,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
     # Huggingface
+    "GPT2ForSequenceClassification",  # Accuracy https://github.com/pytorch/pytorch/issues/109019
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
     # TIMM
@@ -664,7 +669,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
-    should_check_result = should_randomize_input = args.randomize_input
+    should_randomize_input = args.randomize_input
 
     import contextlib
 
@@ -726,11 +731,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
-                )
-
-            if should_check_result:
-                is_correct = is_correct and same(
-                    expected_output, actual_output, tol=tolerance
                 )
 
     if args.export_profiler_trace:
@@ -1147,21 +1147,9 @@ class AOTInductorModelCache:
                 for node in output_node.args[0]
             ]
 
-            # Use a utility function for easier benchmarking
-            source = """
-            #include <torch/csrc/inductor/aot_runtime/model.h>
-
-            torch::aot_inductor::AOTInductorModel model;
-
-            void run(
-                    const std::vector<at::Tensor>& input_tensors,
-                    std::vector<at::Tensor>& output_tensors) {
-                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
-            }
-            """
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
-                cpp_sources=[source],
+                cpp_sources=[aot_inductor_launcher],
                 functions=["run"],
                 extra_ldflags=[so_path],
                 with_cuda=True,

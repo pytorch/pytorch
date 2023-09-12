@@ -159,7 +159,6 @@ inductor_skips = defaultdict(dict)
 
 
 inductor_skips["cpu"] = {
-    "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
 }
@@ -381,6 +380,16 @@ inductor_override_kwargs = {
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
 }
+
+
+if not TEST_WITH_ROCM:
+    inductor_override_kwargs.update(
+        {
+            # We have better precision than eager
+            ("cumsum", "cuda", f16): {"reference_in_float": True},
+        }
+    )
+
 
 # Always test with all sample for following ops
 inductor_all_samples = {
