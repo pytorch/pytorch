@@ -11,7 +11,7 @@ static NSString *gCompiledModelExtension = @"mlmodelc";
 static NSString *gVersionExtension = @"version";
 
 + (void)setCacheDirectory:(const std::string&)dir {
-  gCacheDirectory = [NSString stringWithCString:dir.c_str()];
+  gCacheDirectory = [NSString stringWithUTF8String:dir.c_str()];
 }
 
 + (nonnull NSString *)cacheDirectory {
@@ -25,7 +25,7 @@ static NSString *gVersionExtension = @"version";
 }
 
 + (BOOL)compileModel:(const std::string&)modelSpecs modelID:(const std::string&)modelID {
-  NSString *modelName = [NSString stringWithCString:modelID.c_str() encoding:NSUTF8StringEncoding];
+  NSString *modelName = [NSString stringWithUTF8String:modelID.c_str()];
   NSString *modelPath = [NSTemporaryDirectory() stringByAppendingPathComponent:modelName];
   NSURL *compiledURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gCompiledModelExtension];
   BOOL compiledModelIsCached = [[NSFileManager defaultManager] fileExistsAtPath:compiledURL.path];
@@ -56,7 +56,7 @@ static NSString *gVersionExtension = @"version";
 }
 
 + (nullable MLModel*)loadModel:(const std::string)modelID backend:(const std::string)backend allowLowPrecision:(BOOL)allowLowPrecision {
-  NSString *modelName = [NSString stringWithCString:modelID.c_str() encoding:NSUTF8StringEncoding];
+  NSString *modelName = [NSString stringWithUTF8String:modelID.c_str()];
   NSURL *modelURL = [PTMCoreMLCompiler _cacheURLForModel:modelName extension:gCompiledModelExtension];
 
   NSError *error;
