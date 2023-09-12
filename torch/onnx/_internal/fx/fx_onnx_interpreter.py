@@ -236,6 +236,9 @@ def _fill_tensor_shape_type(
     ):
         if expected_value is None:
             # There is no shape/type from None.
+            # NOTE: according to https://github.com/pytorch/pytorch/blob/main/torch/_meta_registrations.py,
+            # None could be a valid value for return type, so we need to handle it.
+            # e.g. the function: meta__scaled_dot_product_flash() in cpu mode.
             continue
         elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             # aten::sym_size output is a int, not a tensor, which stands
