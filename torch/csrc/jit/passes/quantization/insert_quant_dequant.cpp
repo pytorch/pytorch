@@ -126,7 +126,7 @@ Node* insertDeQuant(
   Node* dequant = graph->create(Symbol::aten("dequantize"), {quantized_val});
   dequant->output()
       ->setDebugName(
-          original_val->debugName() + ".dequant." + c10::guts::to_string(id))
+          original_val->debugName() + ".dequant." + std::to_string(id))
       ->setType(original_val->type());
   graph->insertNode(dequant);
   return dequant;

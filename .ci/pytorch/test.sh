@@ -584,8 +584,7 @@ test_libtorch() {
       test_libtorch_api
     fi
 
-    # still disable rocm
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* && (-z "${SHARD}" || "${SHARD}" == "2") ]]; then
+    if [[ -z "${SHARD}" || "${SHARD}" == "2" ]]; then
       test_libtorch_jit
     fi
 
@@ -1011,7 +1010,6 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  install_timm
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then

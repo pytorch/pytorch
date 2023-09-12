@@ -120,8 +120,8 @@ Args:
 
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
-      number of groups. Default: 1
+    groups: split input into groups, both :math:`\text{in\_channels}` and :math:`\text{out\_channels}`
+      should be divisible by the number of groups. Default: 1
 
 Examples::
 

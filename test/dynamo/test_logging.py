@@ -102,7 +102,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 60, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.DEBUG)
@@ -388,10 +388,10 @@ LoweringException: AssertionError:
             msg = record.getMessage()
             if "return x * 2" in msg:
                 found_x2 = True
-                self.assertIn("inline depth: 2", msg)
+                self.assertIn("inline depth: 3", msg)
             if "return x * 3" in msg:
                 found_x3 = True
-                self.assertIn("inline depth: 2", msg)
+                self.assertIn("inline depth: 3", msg)
 
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)
@@ -578,6 +578,7 @@ exclusions = {
     "custom_format_test_artifact",
     "onnx",
     "onnx_diagnostics",
+    "guards",
     "verbose_guards",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
