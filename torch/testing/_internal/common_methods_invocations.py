@@ -2401,7 +2401,7 @@ def reference_unbind(t, dim):
     """A numpy implementation of torch.unbind"""
     return tuple(s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
 
-def sample_inputs_gather(op_info, device, dtype, requires_grad, include_0d=True, include_empty=True, **kwargs):
+def sample_inputs_gather(op_info, device, dtype, requires_grad, include_0d=True, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     yield SampleInput(
         make_arg((M, S)),
@@ -2412,11 +2412,10 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, include_0d=True,
         1,
         gather_variable((M, S // 2), 0, S, True, device=device))
     # Empty index tensor case, see: https://github.com/pytorch/pytorch/pull/65006
-    if include_empty:
-        yield SampleInput(
-            make_arg((S,)),
-            0,
-            torch.tensor([], dtype=torch.uint8, device=device))
+    yield SampleInput(
+        make_arg((S,)),
+        0,
+        torch.tensor([], dtype=torch.uint8, device=device))
     # 0D tensor case
     if include_0d:
         yield SampleInput(
