@@ -56,7 +56,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             args1 = list(args1)
         args2 = self._clone_inputs(args1)
 
-        for training in [False] + ([True] if check_train else []):
+        for training in [False, True] if check_train else [False]:
             for x in itertools.chain(args1[:], args2[:]):
                 if isinstance(x, torch.Tensor) and x.is_floating_point():
                     x.requires_grad = training
