@@ -25,7 +25,7 @@ import warnings
 import weakref
 from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
-from ctypes import cdll, CDLL
+from ctypes import c_void_p, cdll, CDLL
 from dataclasses import field
 from functools import partial
 from importlib import abc
@@ -38,6 +38,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 import torch
 
 from torch._inductor import config, cuda_properties, exc
+from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.utils import developer_warning, is_linux
 
 if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
@@ -46,7 +48,6 @@ if TYPE_CHECKING:
 import concurrent.futures._base
 import concurrent.futures.process
 
-from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
@@ -236,7 +237,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         name: str,
         inputs: str,
-        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
+        benchmark: Callable[[Any], float],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -280,13 +281,11 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    timings = benchmark(choices)
-                    assert all(choice in timings for choice in choices)
-
-                    local_cache.setdefault(name, {})
-                    local_cache[name].setdefault(inputs, {})
-                    for choice, timing in timings.items():
-                        local_cache[name][inputs][choice.hash_key()] = timing
+                    for choice in choices:
+                        timings[choice] = benchmark(choice)
+                        local_cache.setdefault(name, {})
+                        local_cache[name].setdefault(inputs, {})
+                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -340,14 +339,12 @@ def get_path(
     return basename, subdir, path
 
 
-def get_hash(
-    content: Union[str, bytes], extra: str = "", hash_type: str = "code"
-) -> str:
-    assert hash_type in ["code", "cubin", "hsaco"], "Hash type not supported"
+def get_hash(content: Union[str, bytes], extra: str = "", hash_type: str = "code"):
     if hash_type == "code":
         return code_hash(content, extra)
-    else:
+    if hash_type == "cubin":
         return code_hash(repr(content))
+    raise AssertionError(f"Unknown hash type {hash_type}")
 
 
 def write(
@@ -813,6 +810,17 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
+                # This is a special treatment for Meta internal cuda-12 where all libs
+                # are in lib/cuda-12 and lib/cuda-12/stubs
+                for i, path in enumerate(lpaths):
+                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
+                        f"{path}/libcudart_static.a"
+                    ):
+                        for root, dirs, files in os.walk(path):
+                            if "libcudart_static.a" in files:
+                                lpaths[i] = os.path.join(path, root)
+                                lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -828,13 +836,10 @@ def get_include_and_linking_paths(
             else:
                 macros = f"-D{macros}"
         if cuda:
-            if torch.version.hip is not None:
-                libs += ["c10_hip", "torch_hip"]
+            if config.is_fbcode():
+                libs += ["cuda"]
             else:
-                if config.is_fbcode():
-                    libs += ["cuda"]
-                else:
-                    libs += ["c10_cuda", "cuda", "torch_cuda"]
+                libs += ["c10_cuda", "cuda", "torch_cuda"]
     else:
         # Note - this is effectively a header only inclusion. Usage of some header files may result in
         # symbol not found, if those header files require a library.
@@ -899,9 +904,14 @@ def get_include_and_linking_paths(
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
-    ipaths_str = " ".join("-I" + p for p in ipaths)
-    lpaths_str = " ".join("-L" + p for p in lpaths)
-    libs_str = " ".join("-l" + p for p in libs)
+    static_link_libs = []
+    if aot_mode and config.is_fbcode():
+        # For Meta internal cuda-12, it is recommended to static link cudart
+        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+
+    ipaths_str = " ".join(["-I" + p for p in ipaths])
+    lpaths_str = " ".join(["-L" + p for p in lpaths])
+    libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
     return ipaths_str, lpaths_str, libs_str, macros
 
 
@@ -965,19 +975,13 @@ class CudaKernelParamCache:
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
-        bin_type = "cubin" if torch.version.hip is None else "hsaco"
         _, path = write(
             cubin,
-            bin_type,
-            hash_type=bin_type,
+            "cubin",
+            hash_type="cubin",
             specified_dir=config.aot_inductor.output_path,
         )
-
-        if torch.version.hip is None:
-            params["cubin_path"] = path
-        else:
-            params["hsaco_path"] = path
-
+        params["cubin_path"] = path
         cls.cache[key] = params
 
     @classmethod
@@ -1407,6 +1411,263 @@ class TritonCodeCache:
         return getattr(mod, kernel_name)
 
 
+def _cuda_compiler() -> str:
+    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
+        return config.cuda.cuda_cxx
+    if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
+        return os.getenv("CUDACXX", "")
+    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
+        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+    return "nvcc"
+
+
+def _cutlass_include_paths() -> List[str]:
+    cutlass_path = config.cuda.cutlass_dir
+    return [
+        os.path.join(cutlass_path, "include"),
+        os.path.join(cutlass_path, "tools/library/include"),
+        os.path.join(cutlass_path, "tools/library/src"),
+        os.path.join(cutlass_path, "tools/util/include"),
+    ]
+
+
+def _cuda_lib_options() -> List[str]:
+    from torch.utils import cpp_extension
+
+    extra_ldflags: List[str] = []
+    if is_linux():
+        extra_lib_dir = "lib64"
+        if not os.path.exists(
+            cpp_extension._join_cuda_home(extra_lib_dir)
+        ) and os.path.exists(cpp_extension._join_cuda_home("lib")):
+            # 64-bit CUDA may be installed in "lib"
+            # Note that it's also possible both don't exist (see _find_cuda_home) - in that case we stay with "lib64"
+            extra_lib_dir = "lib"
+        extra_ldflags.append(f"-L{cpp_extension._join_cuda_home(extra_lib_dir)}")
+        extra_ldflags.append(
+            f'-L{cpp_extension._join_cuda_home(extra_lib_dir, "stubs")}'
+        )
+        extra_ldflags.append("-lcuda")
+        extra_ldflags.append("-lcudart")
+    else:
+        raise NotImplementedError(
+            "Unsupported env, failed to find cuda libs! Currently only Linux is supported."
+        )
+    return extra_ldflags
+
+
+def _nvcc_host_compiler_options() -> List[str]:
+    return [
+        "-fPIC",
+        "-fno-strict-aliasing",
+        "-fvisibility=hidden",
+        "-Wconversion",
+    ]
+
+
+def _nvcc_compiler_options() -> List[str]:
+    arch = cuda_env.get_cuda_arch()
+    if arch == "90":
+        # Required by cutlass compilation.
+        arch = "90a"
+    code = [f"sm_{arch}", f"compute_{arch}"]
+    if config.cuda.enable_cuda_lto:
+        code += [f"lto_{arch}"]
+    options = [
+        "-t=0",
+        "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+        "-w",
+        f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
+        config.cuda.compile_opt_level,
+        "-std=c++17",
+        "--expt-relaxed-constexpr",
+    ]
+    if config.cuda.enable_debug_info:
+        options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
+    if config.cuda.enable_ptxas_info:
+        options.extend(
+            [
+                "--keep",  # Keep the intermediate files for debugging (including ptx, sass, cubin etc.)
+                "--ptxas-options=--warn-on-local-memory-usage",  # warn us if local memory is used in CUDA Kernels
+                "--ptxas-options=--warn-on-spills",  # warn us if register spilling happens in CUDA Kernels
+                "--resource-usage",  # Report on CUDA resource usage (shared mem, registers etc.)
+                "--source-in-ptx",
+            ]
+        )  # Annotate the ptx file with source information
+    if config.cuda.use_fast_math:
+        options.extend(
+            [
+                "--use_fast_math",
+                "-DCUTLASS_USE_TANH_FOR_SIGMOID=1",
+            ]
+        )
+    return options
+
+
+def cuda_compile_command(
+    src_files: List[str],
+    dst_file: str,
+    dst_file_ext: str,
+) -> str:
+    include_paths = _cutlass_include_paths()
+    cuda_lib_options = _cuda_lib_options()
+    nvcc_host_compiler_options = _nvcc_host_compiler_options()
+    nvcc_compiler_options = _nvcc_compiler_options()
+    options = (
+        nvcc_compiler_options
+        + [
+            f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
+            for opt in nvcc_host_compiler_options
+        ]
+        + ["-I" + path for path in include_paths]
+        + cuda_lib_options
+    )
+    src_file = " ".join(src_files)
+    res = ""
+    if dst_file_ext == "o":
+        res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
+    elif dst_file_ext == "so":
+        options.append("-shared")
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+    else:
+        raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
+    log.debug("CUDA command: %s", res)
+    return res
+
+
+class DLLWrapper:
+    """A wrapper for a dynamic library."""
+
+    def __init__(
+        self,
+        lib_path: str,
+    ):
+        self.lib_path = lib_path
+        self.DLL = cdll.LoadLibrary(lib_path)
+        self.is_open = True
+
+    def close(self):
+        if self.is_open:
+            self._dlclose()
+            self.is_open = False
+
+    def _dlclose(self):
+        f_dlclose = None
+
+        if is_linux():
+            syms = CDLL(None)
+            if not hasattr(syms, "dlclose"):
+                # Apline Linux
+                syms = CDLL("libc.so")
+
+            if hasattr(syms, "dlclose"):
+                f_dlclose = syms.dlclose
+        else:
+            raise NotImplementedError("Unsupported env, failed to do dlclose!")
+
+        if f_dlclose is not None:
+            f_dlclose.argtypes = [c_void_p]
+            f_dlclose(self.DLL._handle)
+        else:
+            log.warning(
+                "dll unloading function was not found, library may not be unloaded properly!"
+            )
+
+    def __getattr__(self, name):
+        if not self.is_open:
+            raise RuntimeError(f"Cannot use closed DLL library: {self.lib_path}")
+
+        method = getattr(self.DLL, name)
+
+        def _wrapped_func(*args):
+            err = method(*args)
+            if err:
+                raise RuntimeError(f"Error in function: {method.__name__}")
+
+        return _wrapped_func
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+    def __del__(self):
+        self.close()
+
+
+class CUDACodeCache:
+    @dataclasses.dataclass
+    class CacheEntry:
+        input_path: str
+        output_path: str
+
+    cache: Dict[str, CacheEntry] = dict()
+    clear = staticmethod(cache.clear)
+    _SOURCE_CODE_SUFFIX = "cu"
+
+    @classmethod
+    def write(cls, source_code, dst_file_ext) -> Tuple[str, str]:
+        """
+        Writes source code into a file with dst_file_ext as the file extension.
+        Returns the hash key of source code, and the path to the file.
+        """
+
+        cuda_command = repr(
+            cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
+        )
+        key, input_path = write(
+            source_code, cls._SOURCE_CODE_SUFFIX, extra=cuda_command
+        )
+        return key, input_path
+
+    @classmethod
+    def compile(cls, source_code, dst_file_ext) -> Tuple[str, str, str]:
+        """
+        Compiles CUDA source_code into a file with dst_file_ext extension.
+        Returns a tuple of dst_file_path, hash_key, source_code_path
+        """
+
+        key, input_path = cls.write(source_code, dst_file_ext)
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
+                if not os.path.exists(output_path):
+                    cmd = cuda_compile_command(
+                        [input_path], output_path, dst_file_ext
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(
+                            cmd, stderr=subprocess.STDOUT, env=os.environ
+                        )
+                    except subprocess.CalledProcessError as error:
+                        raise exc.CUDACompileError(cmd, error.output) from error
+                cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
+
+        return (cls.cache[key].output_path, key, input_path)
+
+    @classmethod
+    def load(cls, source_code, dst_file_ext) -> Tuple[DLLWrapper, str, str]:
+        """
+        Compiles source code and loads the generated .so file.
+        Returns a tuple of DLLWrapper, hash_key, source_code_path
+        """
+
+        if dst_file_ext != "so":
+            raise RuntimeError(
+                f"Only support loading a .so file for now. "
+                f"Requested file extension: {dst_file_ext}. Source code: {source_code}"
+            )
+        dst_file_path, hash_key, source_code_path = cls.compile(
+            source_code, dst_file_ext
+        )
+        return (DLLWrapper(dst_file_path), hash_key, source_code_path)
+
+
 def _worker_compile(kernel_name: str, source_code: str, cc: int, device: int) -> None:
     cuda_properties.set_compiler_worker_current_device(device)
     kernel = TritonCodeCache.load(kernel_name, source_code)
@@ -1561,6 +1822,12 @@ class AsyncCompile:
     def cpp(self, source_code: str) -> ModuleType:
         def task():
             return CppCodeCache.load(source_code).kernel
+
+        return self.submit(task)
+
+    def cuda(self, source_code, dst_file_ext):
+        def task():
+            return CUDACodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
 
