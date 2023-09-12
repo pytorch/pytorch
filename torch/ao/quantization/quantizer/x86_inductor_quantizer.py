@@ -12,7 +12,6 @@ from torch.ao.quantization.observer import (
     PerChannelMinMaxObserver,
     PlaceholderObserver,
 )
-from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
 from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
@@ -32,6 +31,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 )
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import (
+    find_sequential_partitions,
     get_source_partitions,
     SourcePartition,
 )

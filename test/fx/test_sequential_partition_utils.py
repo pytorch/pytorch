@@ -5,15 +5,12 @@ import unittest
 import torch
 import torch._dynamo as torchdynamo
 
-from torch.ao.quantization.pt2e.graph_utils import (
+from torch.fx.passes.utils.source_matcher_utils import (
     find_sequential_partitions,
     get_equivalent_types,
     update_equivalent_types_dict,
 )
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, TestCase
 
 
 class TestGraphUtils(TestCase):
