@@ -1369,9 +1369,10 @@ class WelfordReduction(Reduction):
 class Scan(Loops):
     scan_ranges: List[Expr]
     size: List[Expr]
-    scan_op: str  # TODO make this a callable
+    combine_fn: Callable  # TODO make this a callable
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
+    init: Any
 
     # HACK we mimick reduction
 
@@ -1382,11 +1383,12 @@ class Scan(Loops):
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
         value = self.inner_fn(idx)
-        result = ops.scan(self.dtype, self.scan_op, value)
+        result = ops.scan(self.dtype, self.combine_fn, value, self.init)
         return ops.store(output_name, indexer(idx), result)
 
     def get_reduction_type(self):
-        return self.scan_op
+        # return self.scan_op
+        return "custom"
 
     def get_reduction_size(self):
         return self.scan_ranges
@@ -1417,10 +1419,10 @@ class Scan(Loops):
         inner_fn: Callable[[List[Expr]], Any],
         size: List[Expr],
         axis: int,
-        scan_op: str,
+        combine_fn: Callable,
+        init: Any,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
     ) -> Optional["TensorBox"]:
-        assert scan_op in {"sum", "prod"}
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -1451,7 +1453,7 @@ class Scan(Loops):
             axis=axis,
             pointwise_ranges=pointwise_ranges,
             scan_ranges=scan_ranges,
-            scan_op=scan_op,
+            combine_fn=combine_fn,
             scan_numel=scan_numel,
         )
         if num_splits > 1:
@@ -1471,8 +1473,9 @@ class Scan(Loops):
                 size=size,
                 ranges=pointwise_ranges,
                 scan_ranges=scan_ranges,
-                scan_op=scan_op,
+                combine_fn=combine_fn,
                 reindex=reindex,
+                init=init,
                 reduction_hint=reduction_hint,
             )
         )
@@ -1488,7 +1491,7 @@ class Scan(Loops):
         axis: int,
         pointwise_ranges: List[Expr],
         scan_ranges: List[Expr],
-        scan_op: str,
+        combine_fn: Callable,
         scan_numel: Expr,
     ):
         # TODO: custom splitting heuristic for scan
@@ -1502,7 +1505,7 @@ class Scan(Loops):
             inner_fn=wrapper_fn,
             ranges=pointwise_ranges,
             reduction_ranges=scan_ranges,
-            reduction_type=scan_op,
+            reduction_type="sum",
             reduction_numel=scan_numel,
         )
 
@@ -5638,6 +5641,17 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
+            def scan(dtype_proxy, combine_fn: Callable, value_proxy, init_proxy):
+
+                def shim(dtype, value, init):
+                    return V.ops.scan(dtype, combine_fn, value, init)
+
+                name = self.body.add_submodule(shim, "scan")
+                return tracer.create_proxy(
+                    "call_module", name, (dtype_proxy, value_proxy, init_proxy), {}
+                )
+
+            @staticmethod
             def indirect_indexing(index_proxy, size, check=True):
                 """
                 Flow data from tensors into indexing formulas.
@@ -5661,6 +5675,10 @@ class LoopBodyBlock:
             @staticmethod
             def output(result):
                 tracer.create_proxy("output", "output", (result,), {})
+
+            @staticmethod
+            def placeholder(name):
+                return tracer.create_proxy("placeholder", name, (), {})
 
         tracer = torch.fx.Tracer()
         tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)

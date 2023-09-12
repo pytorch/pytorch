@@ -66,12 +66,14 @@ class BoundVars:
                 result[key] = lambda mask, value: self.masked_subblock(
                     subblock, self._bounds, mask, value, result
                 )
-            else:
-                assert "set_indirect" in key
+            elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]
                 indirect = partial(self.set_indirect, var)
                 result[key] = indirect
+            else:
+                assert "scan" in key
+                result[key] = submodules[key]
 
         return result
 
