@@ -612,5 +612,11 @@ class TensorSubclassVariable(UserDefinedClassVariable):
         return super().call_function(tx, args, kwargs)
 
 
+def is_torch_function_user_object(obj):
+    return hasattr(obj, "__torch_function__") and hasattr(
+        type(obj), "__torch_function__"
+    )
+
+
 class TorchFunctionObjectVariable(UserDefinedObjectVariable):
     pass

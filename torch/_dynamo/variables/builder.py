@@ -132,8 +132,10 @@ from .tensor import (
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .user_defined import (
+    is_torch_function_user_object,
     KeyedJaggedTensorVariable,
     TensorSubclassVariable,
+    TorchFunctionObjectVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
@@ -687,7 +689,10 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
-            result = UserDefinedObjectVariable(
+            var_cls = UserDefinedObjectVariable
+            if is_torch_function_user_object(value):
+                var_cls = TorchFunctionObjectVariable
+            result = var_cls(
                 value,
                 source=self.source,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH),
