@@ -22,6 +22,7 @@ from torch.testing._internal.common_distributed import (
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
+from torch._custom_ops import get_ctx
 
 @requires_nccl()
 class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
@@ -219,11 +220,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor(self):
-        def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
-            input_split_sizes = input_split_sizes_tensor.tolist()
-            output_split_sizes = output_split_sizes_tensor.tolist()
-            for sz in input_split_sizes + output_split_sizes:
-                torch.export.constrain_as_size(sz)
+        def example(inp, input_split_sizes, output_split_sizes, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes=output_split_sizes,
@@ -245,33 +242,35 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
         ):
             row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
-            input_split_sizes_tensor = torch.tensor(
-                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
-                dtype=torch.int64,
-                device="cuda",
-            )
-            output_split_sizes_tensor = torch.tensor(
-                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
-                dtype=torch.int64,
-                device="cuda",
-            )
+            input_split_sizes = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
+            output_split_sizes = [(i + 1) * (self.rank + 1) for i in range(self.world_size)]
             inputs = (
                 torch.ones(int(row), 5, device="cuda") * (self.rank + 1),
-                input_split_sizes_tensor,
-                output_split_sizes_tensor,
+                input_split_sizes,
+                output_split_sizes,
             )
             trs = self.get_world_trs()
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
-            print(f"code: {code}")
-            FileCheck() \
-                .check("buf0_inputs = [arg2_1,arg4_1,arg5_1]") \
-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=buf0_inputs[1], input_split_sizes=buf0_inputs[2], tag='', ranks=[0, 1], group_size=2)") \
-                .check("buf1 = buf0") \
-                .check("i3 = buf1.size(0)") \
-                .check("buf1 = _wait_tensor(buf1)") \
-                .run(code)
+            if self.rank == 0:
+                FileCheck() \
+                    .check("buf0_inputs = [arg2_1]") \
+                    .check("i4 = 1") \
+                    .check("i5 = 1") \
+                    .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=[i4, s3], input_split_sizes=[i5, s2], tag='', ranks=[0, 1], group_size=2)") \
+                    .check("buf1 = buf0") \
+                    .check("i3 = buf1.size(0)") \
+                    .check("buf1 = _wait_tensor(buf1)") \
+                    .run(code)
+            else:
+                FileCheck() \
+                    .check("buf0_inputs = [arg2_1]") \
+                    .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=[s4, s5], input_split_sizes=[s2, s3], tag='', ranks=[0, 1], group_size=2)") \
+                    .check("buf1 = buf0") \
+                    .check("i3 = buf1.size(0)") \
+                    .check("buf1 = _wait_tensor(buf1)") \
+                    .run(code)
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -282,11 +281,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_output_split_sizes_none(self):
-        def example(inp, input_split_sizes_tensor, *, tag, ranks, group_size):
+        def example(inp, input_split_sizes, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes=None,
-                input_split_sizes=input_split_sizes_tensor,
+                input_split_sizes=input_split_sizes,
                 tag=tag,
                 ranks=ranks,
                 group_size=group_size,
@@ -296,19 +295,20 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             return out
 
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
-            input_split_sizes_tensor = torch.tensor(
-                [1] * self.world_size,
-                dtype=torch.int64,
-                device="cuda",
+            input_split_sizes = [1] * self.world_size
+            inputs = (
+                torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),
+                input_split_sizes,
             )
-            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), input_split_sizes_tensor)
             trs = self.get_world_trs()
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("buf0_inputs = [arg1_1,arg2_1]") \
-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=None, input_split_sizes=buf0_inputs[1], tag='', ranks=[0, 1], group_size=2)") \
+                .check("buf0_inputs = [arg1_1]") \
+                .check("i0 = 1") \
+                .check("i1 = 1") \
+                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=None, input_split_sizes=[i0, i1], tag='', ranks=[0, 1], group_size=2)") \
                 .check("buf1 = buf0") \
                 .check("buf1 = _wait_tensor(buf1)") \
                 .run(code)
@@ -322,10 +322,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_input_split_sizes_none(self):
-        def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
+        def example(inp, output_split_sizes, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
-                output_split_sizes=output_split_sizes_tensor,
+                output_split_sizes=output_split_sizes,
                 input_split_sizes=None,
                 tag=tag,
                 ranks=ranks,
@@ -343,19 +343,20 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 capture_scalar_outputs=True,
             )
         ):
-            output_split_sizes_tensor = torch.tensor(
-                [1] * self.world_size,
-                dtype=torch.int64,
-                device="cuda",
+            output_split_sizes = [1] * self.world_size
+            inputs = (
+                torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1),
+                output_split_sizes,
             )
-            inputs = (torch.ones(self.world_size, self.world_size, device="cuda") * (self.rank + 1), output_split_sizes_tensor)
             trs = self.get_world_trs()
 
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck() \
-                .check("buf0_inputs = [arg1_1,arg2_1]") \
-                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=buf0_inputs[1], input_split_sizes=None, tag='', ranks=[0, 1], group_size=2)") \
+                .check("buf0_inputs = [arg1_1]") \
+                .check("i0 = 1") \
+                .check("i1 = 1") \
+                .check("buf0 = fun_col_impl._all_to_all_single(input=buf0_inputs[0], output_split_sizes=[i0, i1], input_split_sizes=None, tag='', ranks=[0, 1], group_size=2)") \
                 .check("buf1 = buf0") \
                 .check("i3 = buf1.size(0)") \
                 .check("buf1 = _wait_tensor(buf1)") \

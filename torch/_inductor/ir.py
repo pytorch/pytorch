@@ -6215,12 +6215,10 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
         layout,
         inputs,
         constant_args,
-        # arg_index_to_input_index,
         output_split_sizes,
         input_split_sizes,
     ):
         super().__init__(layout, inputs, [], constant_args)
-        # self.arg_index_to_input_index = arg_index_to_input_index
         self.output_split_sizes = output_split_sizes
         self.input_split_sizes = input_split_sizes
 
@@ -6277,8 +6275,22 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
     def codegen_input(self, wrapper, output_name, input_names):
         wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
 
+    def codegen_unbacked_symint_to_value(self, wrapper, s):
+        if V.graph.sizevars.shape_env.is_unbacked_symint(s):
+            var_range = V.graph.sizevars.shape_env.var_to_range[s.node.expr]
+            assert var_range.lower == var_range.upper
+            wrapper.writeline(f"{s.node.expr} = {var_range.lower}")
+
     def codegen_collective(self, wrapper, output_name, input_names):
         tag, ranks, group_size = self.constant_args
+
+        if self.output_split_sizes is not None:
+            for s in self.output_split_sizes:
+                self.codegen_unbacked_symint_to_value(wrapper, s)
+
+        if self.input_split_sizes is not None:
+            for s in self.input_split_sizes:
+                self.codegen_unbacked_symint_to_value(wrapper, s)
 
         wrapper.writeline(
             f"{output_name} = fun_col_impl._all_to_all_single("

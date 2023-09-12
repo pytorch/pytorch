@@ -559,7 +559,6 @@ def _register_ops():
         "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
         "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
         "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
-        # "all_to_all_single(Tensor input, Tensor? output_split_sizes, Tensor? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
         "all_to_all_single(Tensor input, SymInt[]? output_split_sizes, SymInt[]? input_split_sizes, str tag, int[] ranks, int group_size) -> Tensor",  # noqa: B950
     ]
 

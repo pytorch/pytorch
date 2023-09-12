@@ -46,6 +46,7 @@ from .ir import (
 )
 from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
+from torch.fx.experimental.symbolic_shapes import constrain_range
 
 log = logging.getLogger(__name__)
 lowerings = {}
@@ -4823,17 +4824,31 @@ try:
         )
         return list(map(TensorBox.create, result))
 
-    # NOTE: Under torch.compile, the default `type_promotion_kind` will allocate float32 buffers
-    # for `output_split_sizes` and `input_split_sizes` and then copy the inputs (int64 tensors)
-    # into the float32 buffers, which is incorrect. Here we set `type_promotion_kind=None` to
-    # disable that behavior.
-    @register_lowering(c10d_functional.all_to_all_single, type_promotion_kind=None)
+    def replace_specialized_zero_or_one_with_unbacked_symint(sizes_list):
+        ret = []
+        for elem in sizes_list:
+            if elem in [0, 1]:
+                elem_symint = V.graph.sizevars.shape_env.create_unbacked_symint()
+                constrain_range(elem_symint, min=elem, max=elem)
+                ret.append(elem_symint)
+            else:
+                ret.append(elem)
+        return ret
+
+    @register_lowering(c10d_functional.all_to_all_single)
     def all_to_all_single(
         self, output_split_sizes, input_split_sizes, tag, ranks, group_size
     ):
+        if output_split_sizes is not None:
+            output_split_sizes = replace_specialized_zero_or_one_with_unbacked_symint(output_split_sizes)
+        if input_split_sizes is not None:
+            input_split_sizes = replace_specialized_zero_or_one_with_unbacked_symint(input_split_sizes)
         return TensorBox.create(
             ir.AllToAllSingle.create(
-                self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+                self,
+                output_split_sizes,
+                input_split_sizes,
+                tag, ranks, group_size
             )
         )
 
