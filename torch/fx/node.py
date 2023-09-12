@@ -628,6 +628,15 @@ class Node:
         assert isinstance(new_kwargs, dict)
         self.__update_args_kwargs(new_args, new_kwargs)
 
+    def rename(self, candidate: str):
+        if candidate == self.name:
+            return
+        name = self.graph._graph_namespace.create_name(candidate, None)
+        self.name = name
+        assert self in self.graph._graph_namespace._obj_to_name
+        self.graph._graph_namespace._obj_to_name[self] = name
+        self.graph._graph_namespace._used_names.add(name)
+
 
 @compatibility(is_backward_compatible=True)
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
