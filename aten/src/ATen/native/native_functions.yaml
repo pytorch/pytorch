@@ -8735,6 +8735,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: gt_quantized_cpu
+    NestedTensorCPU, NestedTensorCUDA: gt_scalar_nested
   tags: [core, pointwise]
 
 - func: gt.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
