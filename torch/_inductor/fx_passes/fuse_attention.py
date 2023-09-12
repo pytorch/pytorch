@@ -304,6 +304,23 @@ def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
     )
 
 
+def _sfdp_pattern_13(query, key, value, dropout_p):
+    attn_weight = torch.bmm(query, key.transpose(1, 2)).softmax(dim=-1)
+    attn_weight = torch.nn.functional.dropout(attn_weight, p=dropout_p)
+    return torch.bmm(attn_weight, value)
+
+
+def _sfdp_replacement_13(query, key, value, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.unsqueeze(0),
+        value.unsqueeze(0),
+        value.unsqueeze(0),
+        dropout_p=dropout_p,
+        scale=1.0,
+    ).squeeze(0)
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -387,12 +404,18 @@ def _get_sfdp_patterns():
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     d = {"dropout_p": 0.113377}
 
+    # we could also generate all these patterns in 3d.. TODO
+    g_3d_inp = functools.partial(
+        torch.empty, (1024, 128, 128), device=device, requires_grad=True
+    )
+
     # softmax will generate a dtype conversion on inputs if they are in half,
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
         c = functools.partial(c_inp, dtype=dtype)
+        g_3d = functools.partial(g_3d_inp, dtype=dtype)
 
         for pattern, replacement, args, workaround, extra_check in [
             (
@@ -478,6 +501,13 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), c()],
                 d,
                 _sfdp_scale_factor_check(aten.div.Tensor),
+            ),
+            (
+                _sfdp_pattern_13,
+                _sfdp_replacement_13,
+                [g_3d(), g_3d(), g_3d()],
+                d,
+                _sfdp_params_check,
             ),
         ]:
             # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
