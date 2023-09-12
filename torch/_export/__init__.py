@@ -63,23 +63,22 @@ from .wrappers import _wrap_submodules
 
 import sys
 
-from torch.fx.tensor_type import TensorType
+from typing import NewType
 
 
-class Dim:
+class _Dim(type):
+    pass
+
+
+def Dim(name, *, min=None, max=None):
     """
     Object describing possible values of a tensor dimension.
     Like a symbolic integer with a range.
     Can be shared by different dimensions of the same tensor, or of different tensors.
     """
-    def __init__(self, name, *, min=None, max=None):
-        self._name = name
-        self._min = 0 if min is None else min
-        self._max = sys.maxsize if max is None else max
-
-    @property
-    def name(self):
-        return self._name
+    _min = 0 if min is None else min
+    _max = sys.maxsize if max is None else max
+    return _Dim(name, (int,), {"min": _min, "max": _max})
 
 
 def dims(*names: str):
@@ -89,11 +88,15 @@ def dims(*names: str):
     return tuple(Dim(name) for name in names)
 
 
+_ = NewType("_", int)
+
+
+TensorType = types.new_class("TensorType", (Tuple,))
+
 # Different ways of specifying dynamic shapes.
-# 1. TensorType[dim0, None, dim2]
-# 2. (dim0, None, dim2)
-# 3. {0: dim0, 2: dim2}
-_DynamicShape = Union[TensorType, Tuple[Optional[Dim], ...], Dict[int, Dim]]
+# 1. TensorType[dim0, _, dim2]
+# 2. {0: dim0, 2: dim2}
+_DynamicShape = Union[TensorType[Dim, ...], Dict[int, Dim]]
 
 
 def export_(
@@ -101,7 +104,7 @@ def export_(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Tuple[_DynamicShape, ...]] = None,
+    dynamic_shapes: Optional[Dict[str, _DynamicShape]] = None,
 ) -> ExportedProgram:
     """
     API for different ways of exporting with dynamic shape specifications.
@@ -109,38 +112,60 @@ def export_(
     2. Or decorate exported function with expected dynamic shapes of inputs.
     3. Or type arguments of exported function with expected dynamic shapes.
     """
-    assert all(isinstance(arg, torch.Tensor) for arg in args)
-    assert kwargs is None
+    kwargs = kwargs if kwargs is not None else {}
 
-    import collections
-    symbols = collections.defaultdict(list)
+    from collections.abc import Mapping, Sequence
+    import typing_inspect
+
+    def typing_zip(args, types):
+        if isinstance(args, tuple):
+            if isinstance(types, Sequence):
+                for arg, type_ in zip(args, types):
+                    yield from typing_zip(arg, type_)
+            else:
+                assert typing_inspect.is_generic_type(types) and typing_inspect.get_origin(types) is list, f"Unexpected {types} matching tuple"
+                type_ = typing_inspect.get_args(types)[0]
+                for arg in args:
+                    yield from typing_zip(arg, type_)
+        if isinstance(args, dict):
+            if isinstance(types, Mapping):
+                for arg, type_ in zip(args.values(), types.values()):
+                    yield from typing_zip(arg, type_)
+            else:
+                assert typing_inspect.is_generic_type(types) and typing_inspect.get_origin(types) is dict, f"Unexpected {types} matching dict"
+                type_ = typing_inspect.get_args(types)[1]
+                for arg in args.values():
+                    yield from typing_zip(arg, type_)
+        else:
+            yield (args, types)
+
+    from collections import defaultdict
+    symbols = defaultdict(list)
+
     def update_symbols(tensor, shape: _DynamicShape):
-        if isinstance(shape, TensorType):
-            shape = shape.__args__
-        if isinstance(shape, dict):
+        if typing_inspect.is_tuple_type(shape):
+            for i, dim in enumerate(shape.__args__):
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i))
+        elif isinstance(shape, dict):
             for i, dim in shape.items():
-                symbols[dim.name].append(dynamic_dim(tensor, i))
-        elif isinstance(shape, tuple):
-            for i, dim in enumerate(shape):
-                if dim is not None:
-                    symbols[dim.name].append(dynamic_dim(tensor, i))
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i))
         else:
             raise ValueError(
                 f"Unexpected shape {shape} for dynamic tensor. "
-                "Must be either a TensorType annotation "
-                "or a Dict[int, Dim] or a Tuple[Optional[Dim], ...]."
+                "Must be either a TensorType annotation or a Dict[int, Dim]."
             )
 
-    if dynamic_shapes is not None:
-        for tensor, shape in zip(args, dynamic_shapes):
-            if shape is not None:
-                update_symbols(tensor, shape)
-    else:
-        import inspect
-        parameters = inspect.signature(f).parameters.values()
-        for tensor, parameter in zip(args, parameters):
-            if parameter.annotation is not inspect.Parameter.empty:
-                update_symbols(tensor, parameter.annotation)
+    import inspect
+    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+    combined_args = signature.bind(*args, **kwargs).arguments
+
+    if dynamic_shapes is None:
+        dynamic_shapes = {k: (parameter.annotation if parameter.annotation is not inspect.Parameter.empty else None) for k, parameter in signature.parameters.items()}
+    for tensor, shape in typing_zip(combined_args, dynamic_shapes):
+        if shape is not None:
+            update_symbols(tensor, shape)
 
     constraints = []
     for dynamic_dims in symbols.values():
@@ -151,7 +176,7 @@ def export_(
         else:
             constraints.append(primary)
 
-    return export(f, args, constraints=constraints)
+    return export(f, args, kwargs, constraints=constraints)
 
 
 def dynamic_dim(t: torch.Tensor, index: int):
