@@ -51,6 +51,15 @@ class PlacementStrategy:
     output_spec: DTensorSpec
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
+    # communication cost for this strategy
+    comm_cost: float = 0
+
+    # redistribute costs for this op placement strategy
+    # we need a nested list to record the cost for each
+    # operand of this operator, and for each operand of
+    # this operator it might have multiple placement strategies
+    redistribute_cost: List[List[float]] = []
+
     def pretty_print_placements(self, placements):
         return "".join([str(p) for p in placements])
 

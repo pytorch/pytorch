@@ -119,6 +119,7 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
     Just propagate input sharding, but expect replicated for boundaries input.
     """
     input_strategy = op_schema.args_schema[0]
+    boundaries_strategy = op_schema.args_schema[1]
     bucketize_strategy = OpStrategy([])
     assert isinstance(input_strategy, OpStrategy)
     for arg_strategy in input_strategy.strategies:

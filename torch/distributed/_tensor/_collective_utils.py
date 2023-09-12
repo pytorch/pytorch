@@ -1,9 +1,11 @@
 import logging
+import math
 
 from typing import List, Optional
 
 import torch
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
+from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import (
     all_to_all,
     broadcast,
@@ -158,3 +160,125 @@ def mesh_all_to_all(
             async_op=async_op,
         )
     return work
+
+
+def spec_to_bytes(spec: DTensorSpec) -> int:
+    assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
+    dtype_to_bytes = {
+        torch.bool: 1,
+        torch.uint8: 1,
+        torch.int8: 1,
+        torch.int16: 2,
+        torch.float16: 2,
+        torch.bfloat16: 2,
+        torch.float32: 4,
+        torch.int32: 4,
+        torch.float64: 8,
+        torch.complex64: 8,
+        torch.int64: 8,
+        torch.complex128: 16,
+    }
+    return dtype_to_bytes[spec.tensor_meta.dtype] * math.prod(spec.shape)
+
+
+def get_bandwidth_factor(mesh: DeviceMesh) -> List[float]:
+    # generate bandwidth factor for intra-host/inter-host communication pattern
+    factors = [1.0 * mesh.ndim]
+    num_devices_per_host = mesh_resources.num_devices_per_host(mesh.device_type)
+
+    num_devices = 1
+    for mesh_dim in reversed(range(mesh.ndim)):
+        num_devices *= mesh.size(mesh_dim)
+        if num_devices <= num_devices_per_host:
+            # magic number for intra-host communication bandwidth factor
+            # TODO: see if we need to tweak this or offer a way for user
+            # to specify the bandwidths
+            factors[mesh_dim] = 0.2
+
+    return factors
+
+
+def allgather_cost(num_bytes: float, mesh: DeviceMesh, mesh_dim: int) -> float:
+    num_devices_on_mesh_dim = mesh.size(mesh_dim)
+    bandwidth_factor = get_bandwidth_factor(mesh)[mesh_dim]
+    # constant latency factor + bandwidth cost
+    return (
+        1
+        + bandwidth_factor
+        * num_bytes
+        * (num_devices_on_mesh_dim - 1)
+        / num_devices_on_mesh_dim
+    )
+
+
+def allreduce_cost(num_bytes: float, mesh: DeviceMesh, mesh_dim: int) -> float:
+    num_devices_on_mesh_dim = mesh.size(mesh_dim)
+    bandwidth_factor = get_bandwidth_factor(mesh)[mesh_dim]
+    # allreduce have 2x comm bytes compare to allgather/reduce_scatter
+    return (
+        1
+        + 2
+        * bandwidth_factor
+        * num_bytes
+        * (num_devices_on_mesh_dim - 1)
+        / num_devices_on_mesh_dim
+    )
+
+
+def reduce_scatter_cost(
+    num_bytes: float,
+    mesh: DeviceMesh,
+    mesh_dim: int,
+) -> float:
+    num_devices_on_mesh_dim = mesh.size(mesh_dim)
+    bandwidth_factor = get_bandwidth_factor(mesh)[mesh_dim]
+    # constant latency factor + bandwidth cost
+    return (
+        1
+        + bandwidth_factor
+        * num_bytes
+        * (num_devices_on_mesh_dim - 1)
+        / num_devices_on_mesh_dim
+    )
+
+
+def redistributed_cost(current_spec: DTensorSpec, target_spec: DTensorSpec) -> float:
+    """
+    This function returns the cost of redistribute from current to target DTensorSpec.
+
+    NOTE:
+    1. Only consider communication cost here, since computation costs for redistribute
+       are quite trival (i.e. we only need to narrow)
+    2. Only consider redistribute cost on non-partial transformations, as for partial
+       placement, the cost would be embedded when we generate the actual PlacementStrategy
+       rather than a redistribute cost.
+    """
+    if current_spec.mesh != target_spec.mesh:
+        # make infinite cost if meshes are not same
+        # TODO: see if we want to support this once there's cross mesh communication
+        return float("inf")
+
+    if current_spec.is_replicated():
+        # comm cost is 0 if current spec is already full replication
+        return 0.0
+
+    mesh = current_spec.mesh
+    cost = 0.0
+    comm_bytes = spec_to_bytes(current_spec) / current_spec.num_shards
+    # Two transformation that considered for redistribute cost: 1. allgather 2. alltoall
+    for i, (current, target) in enumerate(
+        zip(current_spec.placements, target_spec.placements)
+    ):
+        if current == target:
+            continue
+        if current.is_shard() and target.is_replicate():
+            # allgather gives larger comm bytes
+            comm_bytes *= mesh.size(i)
+            # add up allgather comm cost
+            cost += allgather_cost(comm_bytes, current_spec.mesh, i)
+        elif current.is_shard() and target.is_shard():
+            # should be alltoall comm, since we haven't implement it yet, add penalty
+            # to favor allgather instead
+            cost += allgather_cost(comm_bytes, current_spec.mesh, i) + 1.0
+
+    return cost
