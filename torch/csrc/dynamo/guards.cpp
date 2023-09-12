@@ -5,8 +5,8 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <torch/extension.h>
 #include <torch/csrc/utils/python_symnode.h>
+#include <torch/extension.h>
 #include <sstream>
 
 namespace {

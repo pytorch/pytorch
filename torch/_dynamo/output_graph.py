@@ -39,7 +39,7 @@ from torch._guards import (
     TracingContext,
 )
 from torch._utils_internal import signpost_event
-from torch.fx.experimental.symbolic_shapes import free_symbols, ShapeEnv, is_symbolic
+from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables

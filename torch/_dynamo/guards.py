@@ -41,7 +41,11 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP, is_symbolic
+from torch.fx.experimental.symbolic_shapes import (
+    EqualityConstraint,
+    is_symbolic,
+    SYMPY_INTERP,
+)
 
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef, WeakIdRef
@@ -1048,10 +1052,7 @@ class CheckFunctionManager:
                     ]
                 )
                 for t in tensor_check_examples
-                if self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
-                    "stride"
-                ]
-                is not None
+                if not t.is_nested
             ]
 
             tensor_guards = TensorGuards(
@@ -1082,21 +1083,13 @@ class CheckFunctionManager:
                 device_index = t.device.index
                 requires_grad = t.requires_grad
                 sizes = dynamic_dims_sizes[i]
-                if not t.is_nested:
-                    strides = dynamic_dims_strides[i]
-                    add_code_part(
-                        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
-                        f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})",
-                        tensor_check_guards[i],
-                        log_only=True,
-                    )
-                else:
-                    add_code_part(
-                        f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
-                        f"device={device_index}, requires_grad={requires_grad}, size={sizes})",
-                        tensor_check_guards[i],
-                        log_only=True,
-                    )
+                strides = dynamic_dims_strides[i] if not t.is_nested else "None"
+                add_code_part(
+                    f"check_tensor({name}, {pytype.__qualname__}, {dispatch_key}, {dtype}, "
+                    f"device={device_index}, requires_grad={requires_grad}, size={sizes}, stride={strides})",
+                    tensor_check_guards[i],
+                    log_only=True,
+                )
 
         aotautograd_guards: List[GuardEnvExpr] = (
             self.output_graph.tracing_context.guards_context.aotautograd_guards
@@ -1269,9 +1262,7 @@ def guard_fail_hook(
         ) and not fail_reason:
             reason = part
             break
-        else:
-            # Maybe we should error here or something?
-            pass
+
     if first:
         stashed_first_fail_reason = reason
 

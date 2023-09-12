@@ -742,18 +742,25 @@ class TestSymNumberMagicMethods(TestCase):
 
         x = j1 == j2
 
-        # constant SymBool, bool
-        # constant SymBool, constant SymBool
-        # bool, constant SymBool
+        #
+        # Unary
+        #
+        # op(constant SymBool)
+        self.assertIs(x.__sym_not__(), False)
+
+        #
+        # Binary
+        #
+        # op(constant SymBool, bool)
+        # op(constant SymBool, constant SymBool)
+        # op(bool, constant SymBool)
         self.assertIs(operator.and_(x, True), True)
         self.assertIs(operator.and_(x, x), True)
         self.assertIs(operator.and_(True, x), True)
 
-        self.assertIs(x.__sym_not__(), False)
-
+        # op(symbolic SymBool, constant Symbool)
+        # op(constant SymBool, symbolic Symbool)
         shape_env = ShapeEnv()
-        # symbolic SymBool, constant Symbool
-        # constant SymBool, symbolic Symbool
         a = create_symint(shape_env, 2)
         b = create_symint(shape_env, 2)
         c = a == b  # symbolic SymBool

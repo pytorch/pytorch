@@ -407,9 +407,11 @@ class MetaConverter:
                 else:
                     is_leaf = safe_is_leaf(t)
                     if not t.is_nested:
-                        sizes, strides, storage_offset = sym_sizes_strides_storage_offset(
-                            t, source
-                        )
+                        (
+                            sizes,
+                            strides,
+                            storage_offset,
+                        ) = sym_sizes_strides_storage_offset(t, source)
 
                     def empty_create(inner_t, inner_src):
                         (
@@ -447,7 +449,10 @@ class MetaConverter:
                             # This is how we check that this is a non-symbolic SymNode
                             assert not is_symbolic(r._size[1])
                             # Avoid circular import
-                            from torch._dynamo.source import TensorProperty, TensorPropertySource
+                            from torch._dynamo.source import (
+                                TensorProperty,
+                                TensorPropertySource,
+                            )
 
                             sym_ragged_size = shape_env.create_symintnode(
                                 shape_env.create_symbol(
@@ -485,14 +490,11 @@ class MetaConverter:
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
-                    if (
-                        swr not in self.storage_memo
-                        and (
-                            t.is_nested or
-                            (
-                                r.stride() == strides
-                                and r.storage_offset() == storage_offset
-                            )
+                    if swr not in self.storage_memo and (
+                        t.is_nested
+                        or (
+                            r.stride() == strides
+                            and r.storage_offset() == storage_offset
                         )
                     ):
                         # You're normal and happy, install the fresh storage into the memo

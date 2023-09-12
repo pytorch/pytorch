@@ -289,7 +289,8 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
-    def __hash__(self) -> int:
+    def __hash__(self) -> builtins.int:
+        # Note that only singleton ints can be hashed today
         return hash(self.node)
 
 class SymFloat:

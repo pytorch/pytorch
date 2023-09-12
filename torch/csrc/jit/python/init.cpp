@@ -1259,13 +1259,18 @@ void initJITBindings(PyObject* module) {
       .def(
           "__hash__",
           [](const c10::SymNode& node){
-            // TODO: We should do this properly by adding a method to SymNodeImpl
+            // For now, we only support hashing singleton ints and only in
+            // Python.
             auto ms = node->singleton_int();
+            TORCH_CHECK(ms.has_value(), "non-singleton-int SymNode cannot be hashed")
             return *ms;
           })
       .def(
           "is_symbolic",
           [](const c10::SymNode& node){
+            // Only ConstantSymNode and SingletonIntSymNode are possible here,
+            // so always returning false does the trick.
+            // Only support querying for is_symbolic from python for now.
             return false;
           })
       .def(

@@ -192,7 +192,7 @@ def tensor_has_hints(t):
 
 def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     if isinstance(val, (SymInt, SymFloat)):
-        if hasattr(val.node, "expr"):
+        if is_symbolic(val):
             return val.node.expr.free_symbols
         else:
             return set()
@@ -1009,6 +1009,9 @@ class SymNode:
 
     def is_symbolic(self):
         return True
+
+    def __hash__(self):
+        raise AssertionError("non-singleton-int SymNode cannot be hashed")
 
 def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
     if isinstance(val, (int, float, bool)):

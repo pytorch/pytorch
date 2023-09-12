@@ -35,7 +35,7 @@ class NestedTensor(torch.Tensor):
         sym_size=None,
         raggedness_id=None,
         is_fake=False,
-        **kwargs
+        **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
@@ -62,15 +62,7 @@ class NestedTensor(torch.Tensor):
         r._values = values.detach() if values.requires_grad else values
         return r
 
-    def __init__(
-        self,
-        values,
-        offsets,
-        *,
-        sym_size=None,
-        raggedness_id=None,
-        **kwargs
-    ):
+    def __init__(self, values, offsets, *, sym_size=None, raggedness_id=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
@@ -83,8 +75,9 @@ class NestedTensor(torch.Tensor):
             self._size = sym_size
             self.raggedness_id = self._size[1]
         else:
-            # It's not enough to have the same offsets here, because we need to
-            # propagate the symbolic raggedness id.
+            # We need to pass in raggedness id because in the situation where
+            # raggedness id is symbolic, calling get_tensor_id with the same
+            # offsets would not help us recover the symbolic int.
             if raggedness_id is not None:
                 self.raggedness_id = raggedness_id
             else:
@@ -115,13 +108,20 @@ class NestedTensor(torch.Tensor):
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
-        return ["_values", "_offsets"], (self.size(1), self.requires_grad,)
+        return ["_values", "_offsets"], (
+            self.size(1),
+            self.requires_grad,
+        )
 
-    def __tensor_unflatten__(inner_tensors, meta):
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors: Dict, meta):
         assert len(inner_tensors) == 2
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
-        symint, requires_grad, = meta
+        (
+            symint,
+            requires_grad,
+        ) = meta
 
         # This pair of methods gets called during the initial creation and then
         B = offsets.shape[0] - 1
@@ -129,8 +129,8 @@ class NestedTensor(torch.Tensor):
         sym_size = (B, symint, D)
 
         return NestedTensor(
-            values, offsets=offsets, sym_size=sym_size,
-            requires_grad=requires_grad)
+            values, offsets=offsets, sym_size=sym_size, requires_grad=requires_grad
+        )
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

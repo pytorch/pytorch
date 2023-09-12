@@ -437,6 +437,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(lower_bound_str, expected_lower_bound)
         self.assertEqual(upper_bound_str, expected_upper_bound)
 
+
 class TestNestedTensor(torch._dynamo.test_case.TestCase):
     def test_compile_pointwise_binary_recompiles(self):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
@@ -468,6 +469,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
         compiled_f(nt1, nt3)
         self.assertEqual(compile_count[0], 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
