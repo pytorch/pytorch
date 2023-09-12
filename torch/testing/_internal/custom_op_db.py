@@ -162,7 +162,7 @@ def numpy_nonzero_impl(x):
 def numpy_nonzero_abstract(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
-    shape = [x.dim(), i0]
+    shape = [i0, x.dim()]
     result = x.new_empty(shape, dtype=torch.long)
     return result
 
