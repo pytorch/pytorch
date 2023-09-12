@@ -819,7 +819,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
     @staticmethod
     def can_dispatch_torch_function(tx, args, kwargs):
         if tx.output.torch_function_enabled:
-            all_args = args + tree_flatten(kwargs)[0]
+            all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
             return any(
                 isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args
             )
@@ -866,10 +866,10 @@ class TensorWithTFOverrideVariable(VariableTracker):
             types,
             variables.TupleVariable(list(args)),
         )
-        with torch._C.DisableTorchFunctionSubclass():
-            return tx.inline_user_function_return(
-                self.torch_function_var(tx), tf_args, kwargs
-            )
+
+        return tx.inline_user_function_return(
+            self.torch_function_var(tx), tf_args, kwargs
+        )
 
 
 class NumpyNdarrayVariable(TensorVariable):

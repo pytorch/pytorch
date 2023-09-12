@@ -76,6 +76,7 @@ class WrapperSubclass:
             kwargs = {}
 
         args = tree_map_only(WrapperSubclass, lambda x: x.tensor, args)
+        kwargs = tree_map_only(WrapperSubclass, lambda x: x.tensor, kwargs)
 
         return func(*args, **kwargs)
 

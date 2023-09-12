@@ -603,10 +603,14 @@ class TensorSubclassVariable(UserDefinedClassVariable):
         if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], TensorVariable):
             return TensorWithTFOverrideVariable.create(
                 tx,
-                args[-1],
-                args[-1].source,
+                args[0],
+                args[0].source,
                 self.value.__torch_function__.__func__,
                 self.value,
             )
 
         return super().call_function(tx, args, kwargs)
+
+
+class TorchFunctionObjectVariable(UserDefinedObjectVariable):
+    pass
