@@ -1281,7 +1281,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 2)
 
     def test_numpy_take_along_axis(self):
-        def fn(x, a, i):
+        def fn(x, i, a):
             return np.take_along_axis(x, i, a)
 
         def sample_to_args(s):
@@ -1298,11 +1298,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         i = 1
         for sample in samples:
             args = sample_to_args(sample)
-            # swap args order
             if len(args) < 3:
-                args = (args[0], 1, args[1])  # use ndim=1
-            else:
-                args = (args[0], args[2], args[1])
+                # if axis is None, second argument is treated as 1d array
+                args = (args[0], np.ravel(args[1]), None)
             self.assertEqual(fn(*args), opt_fn(*args))
             self.assertEqual(cnts.frame_count, i)
             i += 1
