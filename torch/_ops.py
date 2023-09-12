@@ -232,6 +232,7 @@ class HigherOrderOperator(OperatorBase):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
+        from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         if dispatch_key in self._dispatch_cache:
@@ -243,7 +244,9 @@ class HigherOrderOperator(OperatorBase):
             return dispatch_functorch(self, args, kwargs)
 
         if dispatch_key == torch._C.DispatchKey.Python:
-            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            # The place to handle ProxyTorchDispatchMode, FakeTensorMode, etc
+            from torch.utils._python_dispatch import _pop_mode_temporarily
+
             curr_mode = _get_current_dispatch_mode()
             assert (
                 curr_mode is not None
@@ -251,11 +254,17 @@ class HigherOrderOperator(OperatorBase):
             assert (
                 type(curr_mode) in self.python_key_mode_table
             ), f"Current active mode {curr_mode} not registered"
-            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+            handler = self.python_key_mode_table[type(curr_mode)]
+            if isinstance(curr_mode, ProxyTorchDispatchMode):
+                with _pop_mode_temporarily() as mode:
+                    args = (mode,) + args
+                    return handler(*args, **kwargs)
+            else:
+                return handler(*args, **kwargs)
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
         if functionality_key in mode_stack_per_key():
+            # The place to handle DispatchKey.PreDispatch
             curr_stack = mode_stack_per_key()[functionality_key]
             # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
             # calls inside of a mode.
@@ -265,7 +274,17 @@ class HigherOrderOperator(OperatorBase):
                 DispatchKey.Python
             ):
                 curr_mode = curr_stack[-1]
-                return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+                pre_dispatch_modes = mode_stack_per_key().get(
+                    DispatchKey.PreDispatch, []
+                )
+                handler = self.python_key_mode_table[type(curr_mode)]
+                if len(pre_dispatch_modes) > 0 and isinstance(
+                    curr_mode, ProxyTorchDispatchMode
+                ):
+                    with temporarily_pop_mode(pre_dispatch_modes) as mode:
+                        args = (mode,) + args
+                        return handler(*args, **kwargs)
+                return handler(*args, **kwargs)
 
         final_key = resolve_key(self, dispatch_key)
 
