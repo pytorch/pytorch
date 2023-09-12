@@ -528,9 +528,3 @@ class TestVander:
         # so assert_array_equal *should* be safe here (rather than, say,
         # assert_array_almost_equal).
         assert_array_equal(v, expected)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

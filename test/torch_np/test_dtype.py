@@ -51,9 +51,3 @@ def test_convert_np_dtypes(name, np_dtype):
         assert name.startswith("bool")
     else:
         assert tnp_dtype.name == name
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

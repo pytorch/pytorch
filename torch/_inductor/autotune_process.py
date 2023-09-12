@@ -1,19 +1,13 @@
-from __future__ import annotations
-
 import dataclasses
-import logging
-import os
-import pickle
-import subprocess
-import sys
+import queue
 import time
 import warnings
-
-from concurrent.futures import ThreadPoolExecutor
-from queue import Queue
+from multiprocessing.process import BaseProcess
+from multiprocessing.queues import Queue
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
@@ -22,14 +16,11 @@ from torch._inductor.codecache import PyCodeCache
 if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
-from . import config
 from .utils import do_bench
 from .virtualized import V
 
-
+DEBUG = False
 EXIT_HANDLER_REGISTERED = False
-
-log = logging.getLogger(__name__)
 
 
 # Used to synchronize between parent and child processes
@@ -43,169 +34,61 @@ class Pong:
 
 @dataclasses.dataclass
 class TuningProcess:
-    """
-    Abstraction for launching a helper process to benchmark kernels. Rather
-    than spawning the parent process, the approach Popens a new process with
-    an entry point that we control. Avoiding the spawn means we do not re-enter
-    the toplevel script. The subprocess communicates with the parent process
-    via pickling requests/responses over stdin/stdout pipes.
-    """
-
-    device: Optional[int] = None
-    process: Optional[subprocess.Popen[bytes]] = None
+    process: Optional[BaseProcess] = None
+    request_queue: Optional["Queue[Any]"] = None
+    response_queue: Optional["Queue[Any]"] = None
 
     @staticmethod
-    def process_main() -> None:
-        """
-        Entry point for the child process.
-        """
-        log.debug("Entering TuningProcess child main")
-        try:
-            TuningProcess.workloop()
-        except Exception:
-            log.exception("Exception in TuningProcess")
-
-    @staticmethod
-    def workloop() -> None:
-        """
-        Work loop for the benchmarking subprocess.
-        """
-
-        def reply(obj):
-            # Note this is subtly different than the put() method below.
-            pickle.dump(obj, sys.stdout.buffer)
-            sys.stdout.flush()
-
+    def process_main(
+        request_queue: "Queue[Any]",
+        response_queue: "Queue[Any]",
+    ) -> None:
+        print("enter child process main")
         while True:
-            obj = pickle.load(sys.stdin.buffer)
+            obj = request_queue.get()
+
             if obj is None:
-                # None is a sentinel for the child to terminate
-                break
+                break  # None is a sentinel for the child to terminate
             elif isinstance(obj, Ping):
-                reply(Pong())
+                response_queue.put(Pong())
             elif isinstance(obj, BenchmarkRequest):
-                reply(obj.benchmark())
+                response_queue.put(obj.benchmark())
             else:
                 raise RuntimeError(f"Invalid request type {type(obj)}")
 
-    def initialize(self) -> None:
-        """
-        Create child process. Set the environment to make only the provided
-        GPU device visible to the process.
-        """
-        if self.process is not None:
-            return
-
-        env = os.environ.copy()
-        if self.device is not None:
-            env["CUDA_VISIBLE_DEVICES"] = str(self.device)
-        self.process = subprocess.Popen(
-            [sys.executable, "-m", "torch._inductor.autotune_process_entry"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            env=env,
+    def valid(self) -> bool:
+        return (
+            self.process is not None
+            and self.request_queue is not None
+            and self.response_queue is not None
         )
 
-    def put(self, obj: Any) -> None:
-        """
-        Push a work item to the child process.
-        """
-        # In case of a prior crash, ensure the subprocess is running
-        self.initialize()
-        assert self.process is not None
-        assert self.process.stdin is not None
-        pickle.dump(obj, self.process.stdin)
-        self.process.stdin.flush()
+    def clear(self) -> None:
+        self.process = self.request_queue = self.response_queue = None
 
-    def get(self) -> Any:
+    def initialize(self) -> None:
         """
-        Get a response from the child process.
+        Create child process, request/response queues and do the warm up.
         """
-        assert self.process is not None
-        assert self.process.stdout is not None
-        try:
-            return pickle.load(self.process.stdout)
-        except EOFError:
-            # Child crashed; clean up
-            self.close()
-            raise
-        except pickle.UnpicklingError as ex:
-            raise RuntimeError(
-                "Error deserializing response from the benchmarking subprocess. "
-                "Is the benchmark code path writing to stdout?"
-            ) from ex
-
-    def close(self) -> None:
-        """
-        Close the communication pipes from the child process.
-        """
-        if self.process is not None:
-            assert self.process.stdin is not None
-            assert self.process.stdout is not None
-            self.process.stdin.close()
-            self.process.stdout.close()
-            self.process = None
-
-    def terminate(self) -> None:
-        """
-        Signal the child process to terminate.
-        """
-        if self.process is not None:
-            self.put(None)
-
-    def wait(self) -> None:
-        """
-        Wait for the child process to exit.
-        """
-        if self.process is not None:
-            self.process.wait()
-            self.close()
-
-
-@dataclasses.dataclass
-class TuningProcessPool:
-    """
-    Maintains a pool of TuningProcesses to benchmark kernels in parallel
-    across devices. By default, we create one TuningProcess per device and
-    set the sub-process environment to make only that device visible.
-    """
-
-    processes: Optional[Queue[TuningProcess]] = None
-    executor: Optional[ThreadPoolExecutor] = None
-
-    def initialize(self, count: Optional[int] = None) -> None:
-        """
-        Start the child processes.
-        """
-        assert (self.processes is None) == (self.executor is None)
-        if self.processes is not None:
+        if self.valid():
             return
 
-        if config.autotune_multi_device:
-            count = count or torch.cuda.device_count()
-        else:
-            count = 1
-        assert count > 0 and count <= torch.cuda.device_count()
+        # cuda runtime does not work with "fork", use "spawn" to start processes.
+        ctx = multiprocessing.get_context("spawn")
+        request_queue = self.request_queue = ctx.Queue()
+        response_queue = self.response_queue = ctx.Queue()
 
-        # Launch the child processes and push a msg to "warm up"
-        self.processes = Queue()
-        for device in range(count):
-            p = TuningProcess(device=device if config.autotune_multi_device else None)
-            p.initialize()
-            p.put(Ping())
-            self.processes.put(p)
+        process = self.process = ctx.Process(
+            target=self.process_main,
+            args=(
+                self.request_queue,
+                self.response_queue,
+            ),
+        )
+        process.start()
 
-        # Wait for the initialization to finish
-        for p in self.processes.queue:
-            assert isinstance(p.get(), Pong)
-
-        # Use a thread pool to manage distributing work to the subprocesses.
-        # Threads block on an available process, so it makes sense to match
-        # the number of threads with the number of devices.
-        self.executor = ThreadPoolExecutor(max_workers=count)
-
-        # Register the exit handler for the parent process so it will terminate
-        # the child processes.
+        # register the exit handler for the parent process so it will terminate
+        # the child processes
         global EXIT_HANDLER_REGISTERED
         if not EXIT_HANDLER_REGISTERED:
             EXIT_HANDLER_REGISTERED = True
@@ -213,65 +96,22 @@ class TuningProcessPool:
 
             atexit.register(lambda: self.terminate())
 
+        # wait for the initialization to be done
+        request_queue.put(Ping())
+        resp = response_queue.get()
+        assert isinstance(resp, Pong)
+
     def terminate(self) -> None:
-        """
-        Signal all child processes to terminate.
-        """
-        if self.executor is not None:
-            self.executor.shutdown()
-            self.executor = None
-
-        if self.processes is not None:
-            for p in self.processes.queue:
-                p.terminate()
-            for p in self.processes.queue:
-                p.wait()
-            self.processes = None
-
-    def target(self, choice: TritonTemplateCaller) -> float:
-        """
-        Entry point for the thread-pool helper threads: Wait for an open TuningProcess,
-        remove it from the queue, execute the benchmark in that subprocess, and return
-        the TuningProcess to the queue.
-        """
-        assert choice.bmreq is not None
-        assert self.processes is not None
-
-        process = self.processes.get()
-        process.put(choice.bmreq)
-        try:
-            return process.get()
-        except EOFError:
-            warnings.warn(
-                f"Failed to benchmark choice '{choice}'. It will be ignored. "
-                "Please debug the root cause in case the choice can bring perf gains."
-            )
-            # set to INF so this choice will be ignored
-            return float("inf")
-        finally:
-            self.processes.put(process)
-
-    def benchmark(
-        self,
-        choices: List[TritonTemplateCaller],
-    ) -> Dict[TritonTemplateCaller, float]:
-        """
-        Benchmark each choice in a separate process.
-        """
-        assert self.processes is not None, "Tuning process pool is not initialized"
-        assert self.executor is not None
-
-        results = {}
-
-        # Use a ThreadExecutorPool to spread the work across the subproccesses and
-        # to grab subprocesses as soon as they're free.
-        for choice, result in zip(choices, self.executor.map(self.target, choices)):
-            results[choice] = result
-
-        return results
+        if self.valid():
+            request_queue = self.request_queue
+            assert request_queue is not None
+            request_queue.put(None)
+            process = self.process
+            assert process is not None
+            process.join()
 
 
-tuning_pool = TuningProcessPool()
+tuning_process = TuningProcess()
 
 
 LayoutOrBuffer = Union[ir.Layout, ir.Buffer]
@@ -288,7 +128,7 @@ class TensorMeta:
     @classmethod
     def from_irnodes(
         cls, irnodes: Union[LayoutOrBuffer, Tuple[LayoutOrBuffer], List[LayoutOrBuffer]]
-    ) -> Union[TensorMeta, List[TensorMeta]]:
+    ) -> Union["TensorMeta", List["TensorMeta"]]:
         if isinstance(irnodes, (tuple, list)):
             result: List[Any] = [cls.from_irnodes(x) for x in irnodes]
             assert all(isinstance(x, TensorMeta) for x in result)
@@ -334,26 +174,24 @@ class BenchmarkRequest:
     num_stages: int
     num_warps: int
 
-    input_tensors: Union[TensorMeta, List[TensorMeta]]
-    output_tensor: Union[TensorMeta, List[TensorMeta]]
+    input_tensors: Union["TensorMeta", List["TensorMeta"]]
+    output_tensor: Union["TensorMeta", List["TensorMeta"]]
 
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
-        debug = log.isEnabledFor(logging.DEBUG)
-        if debug:
+        if DEBUG:
             start_ts = time.time()
 
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-        log.debug(
-            "benchmark module key: %s, path: %s",
-            self.module_cache_key,
-            self.module_path,
-        )
+        if DEBUG:
+            print(
+                f"benchmark module key: {self.module_cache_key}, path: {self.module_path}"
+            )
 
         run = getattr(mod, self.kernel_name).run
 
-        if debug:
+        if DEBUG:
             load_elapse = time.time() - start_ts
             start_ts = time.time()
 
@@ -367,7 +205,7 @@ class BenchmarkRequest:
             assert isinstance(self.output_tensor, TensorMeta)
             output_tensor = self.output_tensor.to_tensor()
 
-        if debug:
+        if DEBUG:
             create_tensor_elapse = time.time() - start_ts
             start_ts = time.time()
 
@@ -384,40 +222,52 @@ class BenchmarkRequest:
         out = do_bench(worker)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
-        if debug:
+        if DEBUG:
             bench_elapse = time.time() - start_ts
-            log.debug(
-                "InChildProcess %s: load %f, create tensor %f, bench %f",
-                self.module_cache_key,
-                load_elapse,
-                create_tensor_elapse,
-                bench_elapse,
+            print(
+                f"InChidProcess {self.module_cache_key}: load {load_elapse}, "
+                + f"create tensor {create_tensor_elapse}, bench {bench_elapse}"
             )
-
         return out
 
 
-class TestBenchmarkRequest(BenchmarkRequest):
-    """
-    Supports unit testing. Defined in this file so that the TuningProcess
-    sub-process knows how to unpickle these objects.
-    """
-
-    def __init__(self, value: Optional[float] = None) -> None:
-        self.value = value
-
-    def benchmark(
-        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
-    ) -> float:
-        if self.value is None:
-            raise Exception("Failed to run")
-        return self.value
-
-
 def benchmark_in_sub_process(
-    choices: List[TritonTemplateCaller],
-) -> Dict[TritonTemplateCaller, float]:
+    choice: "TritonTemplateCaller",
+) -> float:
     """
-    Do benchmarking in a subprocess and return the perf number (latency).
+    Do benchmarking in subprocess and return the perf number (latency).
     """
-    return tuning_pool.benchmark(choices)
+    assert choice.bmreq is not None
+    tuning_process.initialize()
+    assert tuning_process.valid()
+    process, request_queue, response_queue = (
+        tuning_process.process,
+        tuning_process.request_queue,
+        tuning_process.response_queue,
+    )
+    assert (
+        process is not None and request_queue is not None and response_queue is not None
+    )
+
+    request_queue.put(choice.bmreq)
+    while True:
+        try:
+            timing = response_queue.get(timeout=1.0)
+        except queue.Empty:
+            status = process.exitcode
+            if status is None:
+                # child process is still running
+                continue
+            # child process fail
+            assert status != 0
+
+            warnings.warn(
+                f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
+            )
+
+            tuning_process.clear()
+
+            # return INF so this choice will be ignored
+            return float("inf")
+
+        return timing

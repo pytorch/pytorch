@@ -555,9 +555,3 @@ class TestConstant:
         arr = np.zeros((3, 0, 2))
         result = np.pad(arr, [(0,), (2,), (1,)], mode="constant")
         assert result.shape == (3, 4, 4)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
