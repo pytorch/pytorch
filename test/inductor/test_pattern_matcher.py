@@ -8,7 +8,16 @@ from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
+from torch._inductor.pattern_matcher import (
+    Arg,
+    CallFunction,
+    KeywordArg,
+    Match,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch._inductor.utils import run_and_get_code
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX
@@ -409,7 +418,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         counters.clear()
         args = [
@@ -420,7 +429,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -438,7 +447,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -462,6 +471,10 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_cumsum(self):
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -474,7 +487,15 @@ class TestPaternMatcher(TestCase):
             ).to(torch.int64)
             return torch.cumsum(ones, 1)
 
-        for fn in (fn1, fn2):
+        def fn3():
+            twos = torch.full([5, 4, 3], 2, dtype=torch.int64)
+            return torch.cumsum(twos, 0)
+
+        def fn4():
+            x = torch.full([100], 0.1, dtype=torch.float32)
+            return torch.cumsum(x, 0)
+
+        for fn in (fn1, fn2, fn3, fn4):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
@@ -651,13 +672,6 @@ class TestPaternMatcher(TestCase):
         counters.clear()
 
     def test_match_with_mutation(self):
-        from torch._inductor.pattern_matcher import (
-            CallFunction,
-            KeywordArg,
-            PatternMatcherPass,
-            register_graph_pattern,
-        )
-
         counter = 0
         test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
@@ -762,6 +776,154 @@ class TestPaternMatcher(TestCase):
         # hit the view path
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_match_equivalent_function_invocations1(self):
+        counter = 0
+        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+
+        args = [
+            torch.randn(20, device="cuda"),
+            torch.randn(10, 15, device="cuda"),
+            torch.randn(15, 20, device="cuda"),
+        ]
+
+        def f0(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b)
+
+        def f1(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b, beta=1.0)
+
+        def f2(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b, beta=1.0, alpha=1.0)
+
+        # This graph pattern should successfully match all of the above functions
+        @register_graph_pattern(
+            CallFunction(
+                torch.ops.aten.addmm,
+                Arg(),
+                Arg(),
+                Arg(),
+                beta=KeywordArg("beta"),
+                alpha=KeywordArg("alpha"),
+            ),
+            pass_dict=test_pass,
+        )
+        def addmm_replacement(match: Match, inp, mat1, mat2, beta, alpha):
+            nonlocal counter
+            counter += 1
+
+            def repl(inp, x1, x2):
+                return (x1 @ x2) * alpha + inp * beta
+
+            with V.fake_mode:
+                match.replace_by_example(repl, [inp, mat1, mat2])
+
+        with unittest.mock.patch(
+            "torch._inductor.fx_passes.post_grad.pass_patterns",
+            torch._inductor.fx_passes.post_grad.pass_patterns + [test_pass],
+        ):
+            for fn in (f0, f1, f2):
+                counter = 0
+                expected = fn(*copy.deepcopy(args))
+                opt_fn = torch.compile(fn)
+                actual, (code) = run_and_get_code(opt_fn, args[0], args[1], args[2])
+                # pattern should match
+                self.assertEqual(counter, 1)
+                torch.testing.assert_close(actual, expected)
+                # addmm should be replaced
+                FileCheck().check_not("extern_kernels.addmm(").run(code[0])
+
+    def test_match_equivalent_function_invocations2(self):
+        counter = 0
+        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+
+        args = [
+            torch.randn(20, device="cuda"),
+            torch.randn(10, 15, device="cuda"),
+            torch.randn(15, 20, device="cuda"),
+        ]
+
+        def f0(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b)
+
+        def f1(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b, beta=1.0)
+
+        def f2(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b, beta=1.0, alpha=1.0)
+
+        # This graph pattern should only match f0
+        @register_graph_pattern(
+            CallFunction(torch.ops.aten.addmm, Arg(), Arg(), Arg()),
+            pass_dict=test_pass,
+        )
+        def addmm_replacement(match: Match, inp, mat1, mat2):
+            nonlocal counter
+            counter += 1
+
+            def repl(inp, x1, x2):
+                return x1 @ x2 + inp
+
+            with V.fake_mode:
+                match.replace_by_example(repl, [inp, mat1, mat2])
+
+        with unittest.mock.patch(
+            "torch._inductor.fx_passes.post_grad.pass_patterns",
+            torch._inductor.fx_passes.post_grad.pass_patterns + [test_pass],
+        ):
+            for fn in (f0, f1, f2):
+                counter = 0
+                expected = fn(*copy.deepcopy(args))
+                actual = torch.compile(fn)(*copy.deepcopy(args))
+                self.assertEqual(counter, 1)
+                torch.testing.assert_close(actual, expected)
+
+    def test_match_equivalent_function_invocations3(self):
+        counter = 0
+        test_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+
+        args = [
+            torch.randn(20, device="cuda"),
+            torch.randn(10, 15, device="cuda"),
+            torch.randn(15, 20, device="cuda"),
+        ]
+
+        def f0(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b)
+
+        def f1(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b, beta=1.0)
+
+        def f2(inp, a, b):
+            return torch.ops.aten.addmm(inp, a, b, beta=1.0, alpha=1.0)
+
+        # This graph pattern should only match f1
+        @register_graph_pattern(
+            CallFunction(
+                torch.ops.aten.addmm, Arg(), Arg(), Arg(), beta=KeywordArg("beta")
+            ),
+            pass_dict=test_pass,
+        )
+        def addmm_replacement(match: Match, inp, mat1, mat2, beta):
+            nonlocal counter
+            counter += 1
+
+            def repl(inp, x1, x2):
+                return x1 @ x2 + inp
+
+            with V.fake_mode:
+                match.replace_by_example(repl, [inp, mat1, mat2])
+
+        with unittest.mock.patch(
+            "torch._inductor.fx_passes.post_grad.pass_patterns",
+            torch._inductor.fx_passes.post_grad.pass_patterns + [test_pass],
+        ):
+            for fn in (f0, f1, f2):
+                counter = 0
+                expected = fn(*copy.deepcopy(args))
+                actual = torch.compile(fn)(*copy.deepcopy(args))
+                self.assertEqual(counter, 1)
+                torch.testing.assert_close(actual, expected)
 
 
 if __name__ == "__main__":
