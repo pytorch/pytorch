@@ -127,15 +127,17 @@ from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
-    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
-from .user_defined import (
+from .torch_function import (
     is_torch_function_user_object,
+    TensorWithTFOverrideVariable,
+    TorchFunctionObjectVariable,
+)
+from .user_defined import (
     KeyedJaggedTensorVariable,
     TensorSubclassVariable,
-    TorchFunctionObjectVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )

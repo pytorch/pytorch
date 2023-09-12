@@ -598,7 +598,8 @@ class TensorSubclassVariable(UserDefinedClassVariable):
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
-        from .tensor import TensorVariable, TensorWithTFOverrideVariable
+        from .tensor import TensorVariable
+        from .torch_function import TensorWithTFOverrideVariable
 
         if len(args) == 1 and len(kwargs) == 0 and isinstance(args[0], TensorVariable):
             return TensorWithTFOverrideVariable.create(
@@ -610,13 +611,3 @@ class TensorSubclassVariable(UserDefinedClassVariable):
             )
 
         return super().call_function(tx, args, kwargs)
-
-
-def is_torch_function_user_object(obj):
-    return hasattr(obj, "__torch_function__") and hasattr(
-        type(obj), "__torch_function__"
-    )
-
-
-class TorchFunctionObjectVariable(UserDefinedObjectVariable):
-    pass

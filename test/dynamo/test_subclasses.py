@@ -94,7 +94,6 @@ GLOBAL_TEST_SUBCLASSES = {
     PassthroughRightAddSubclass,
     PassthroughRightAddSubclassLeft,
     PassthroughMulSubclass,
-    WrapperSubclass,
     MockSubclass,
 }
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
@@ -272,13 +271,18 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_act, torch.ones(3, 3))
 
-    def test_unwrap_redispatch(self):
-        pass
+    def test_torch_function_wrapper_class(self):
+        x = torch.ones(2, 2)
+        wrapped = WrapperSubclass(x)
 
-    # For example, calling + on tensor subclass
-    # should trigger torch function tracing
-    def test_builtin_torch_function_trigger(self):
-        pass
+        def fn(w):
+            return torch.add(w, 1.0)
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+        self.assertEqual(res_exp, res_act)
 
     def test_disable_torch_function_context(self):
         import logging

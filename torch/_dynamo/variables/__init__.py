@@ -48,10 +48,10 @@ from .tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorVariable,
-    TensorWithTFOverrideVariable,
     UnspecializedPythonVariable,
 )
 from .torch import TorchVariable
+from .torch_function import TensorWithTFOverrideVariable, TorchFunctionObjectVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -89,6 +89,7 @@ __all__ = [
     "TensorVariable",
     "TensorWithTFOverrideVariable",
     "TorchVariable",
+    "TorchFunctionObjectVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",

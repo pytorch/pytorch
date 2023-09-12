@@ -15,7 +15,6 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
-from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
@@ -40,7 +39,11 @@ from .dicts import ConstDictVariable
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
-from .tensor import TensorWithTFOverrideVariable
+from .torch_function import (
+    can_dispatch_torch_function,
+    dispatch_torch_function,
+    TorchFunctionObjectVariable,
+)
 
 log = logging.getLogger(__name__)
 
@@ -381,17 +384,14 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
-        elif (
-            len(args) > 0 or len(kwargs) > 0
-        ) and TensorWithTFOverrideVariable.can_dispatch_torch_function(
+        elif (len(args) > 0 or len(kwargs) > 0) and can_dispatch_torch_function(
             tx, args, kwargs
         ):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
-            return TensorWithTFOverrideVariable.dispatch_torch_function(
-                tx, self, args, kwargs
-            )
-
+            return dispatch_torch_function(tx, self, args, kwargs)
+        elif any(isinstance(arg, TorchFunctionObjectVariable) for arg in args):
+            pass
         elif self.value in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
