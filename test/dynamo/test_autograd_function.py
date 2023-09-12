@@ -379,6 +379,29 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    def test_once_differentiable(self):
+        from torch.autograd.function import once_differentiable
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad):
+                return grad * 0.5
+
+        x = torch.randn([], requires_grad=True)
+
+        def f(x):
+            return ScaleGradient.apply(x)
+
+        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        output = opt_f(x)
+        (gx,) = torch.autograd.grad(output, x)
+        self.assertEqual(gx, torch.tensor(0.5))
+
     # I pulled all of these test cases from test_autograd.py
     # In the future, we should make the Dynamo test suite actually
     # run on test_autograd.py (it's disabled right now) and delete these.
