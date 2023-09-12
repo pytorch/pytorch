@@ -81,7 +81,7 @@ class CrossRefFakeMode(TorchDispatchMode):
             and torch.Tag.data_dependent_output not in func.tags
         ):
             try:
-                # enable_python_dispatcher() here
+                # TODO: enable_python_dispatcher() here
                 with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
                         torch.Tensor,
