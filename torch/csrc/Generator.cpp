@@ -142,12 +142,18 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   auto generator = self->cdata;
-  THPUtils_assert(
-      THPUtils_checkLong(seed),
-      "manual_seed expected a long, "
-      "but got %s",
-      THPUtils_typename(seed));
-  uint64_t unsigned_seed = unpack_uint64(seed);
+  uint64_t unsigned_seed = 0;
+  if (torch::is_symint(seed)) {
+    // We are only tracing, here.
+    unsigned_seed = 9999;
+  } else {
+    THPUtils_assert(
+        THPUtils_checkLong(seed),
+        "manual_seed expected a long, "
+        "but got %s",
+        THPUtils_typename(seed));
+    unsigned_seed = unpack_uint64(seed);
+  }
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(generator.mutex());
   generator.set_current_seed(unsigned_seed);

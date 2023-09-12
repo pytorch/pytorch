@@ -2348,8 +2348,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
-        self.assertEqual(cnts.op_count, 1)
-        self.assertEqual(cnts.frame_count, 1)
+
+        # Two problems:
+        #   - manual_seed graph breaks
+        #   - dynamo traces through manual_seed calls
+        # That gives us 3 frames and 3 ops + 1 (torch.seed()).
+        self.assertEqual(cnts.op_count, 4)
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
