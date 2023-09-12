@@ -209,9 +209,3 @@ def test_subtract():
     assert_allclose(
         np.subtract(0.5, 0.6), subtract(0.5, 0.6), atol=1e-7, check_dtype=False
     )
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
