@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo.utils import should_force_inline
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
@@ -32,8 +33,13 @@ from . import (
     skipfiles,
     variables,
 )
-from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
-from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
+from .allowed_functions import is_allowed, is_builtin_constant
+from .bytecode_analysis import (
+    get_indexof,
+    JUMP_OPNAMES,
+    livevars_analysis,
+    propagate_line_nums,
+)
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -43,6 +49,7 @@ from .bytecode_transformation import (
     is_generator,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
@@ -59,8 +66,10 @@ from .source import (
 from .utils import (
     counters,
     get_fake_value,
+    get_instruction_source_311,
     graph_break_dup_warning_checker,
     istype,
+    LazyString,
     proxy_args_kwargs,
 )
 from .variables.base import is_side_effect_safe, MutableLocal, typestr, VariableTracker
@@ -83,6 +92,7 @@ from .variables.lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -102,10 +112,15 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
+trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 trace_source_log = torch._logging.getArtifactLogger(__name__, "trace_source")
 
 
@@ -204,23 +219,19 @@ def _detect_and_normalize_assert_statement(
 
     current_instruction_pointer += 1
 
-    if current_instruction_pointer >= len(self.instructions):
-        return False
+    # Use dummy error message if its hard to extract
+    error_msg = "assertion error"
 
     inst = self.instructions[current_instruction_pointer]
-    has_error_msg = False
     # DETECT RAISE_VARARGS or LOAD CONST
     if inst.opname == "LOAD_CONST":
         if not isinstance(inst.argval, str):
             return False
-        self.LOAD_CONST(inst)
-        has_error_msg = True
+        error_msg = inst.argval
 
         # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
         # (PRECALL for Python 3.11+)
         current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
         if inst.opname not in ("CALL_FUNCTION", "PRECALL"):
             return False
@@ -230,16 +241,12 @@ def _detect_and_normalize_assert_statement(
         current_instruction_pointer += 1
         if inst.opname == "PRECALL":
             current_instruction_pointer += 1
-        if current_instruction_pointer >= len(self.instructions):
-            return False
         inst = self.instructions[current_instruction_pointer]
 
     if inst.opname != "RAISE_VARARGS":
         return False
 
-    if not has_error_msg:
-        # Push dummy value instead of error message
-        self.push(ConstantVariable("assertion error"))
+    self.push(ConstantVariable(error_msg))
 
     return True
 
@@ -390,6 +397,9 @@ def break_graph_if_unsupported(*, push):
             state = self.copy_graphstate()
             reason = None
             try:
+                TracingContext.set_current_loc(
+                    self.f_code.co_filename, self.lineno, self.f_code.co_name
+                )
                 return inner_fn(self, inst)
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
@@ -410,12 +420,16 @@ def break_graph_if_unsupported(*, push):
                     assert isinstance(ctx, GenericContextWrappingVariable)
                     unimplemented(f"Graph break under {ctx}")
 
+                if isinstance(excp, exc.UncapturedHigherOrderOpError):
+                    raise
+
                 if not self.should_compile_partial_graph():
                     raise
 
                 log.debug("break_graph_if_unsupported triggered compile", exc_info=True)
 
-                user_stack = [self.frame_summary()] + list(reversed(excp.real_stack))
+                user_stack = excp.real_stack
+                # TODO: Also report the traceback from the parent frame
                 user_stack_formatted = "".join(traceback.format_list(user_stack))
                 frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
                 # torch._dynamo.explain() formats this a little nicer, and presents a slightly
@@ -426,7 +440,7 @@ def break_graph_if_unsupported(*, push):
                     and graph_break_dup_warning_checker.add(frame_loc)
                 ):
                     graph_break_log.debug(
-                        "Graph break: %s from user code at %s",
+                        "Graph break: %s from user code at:\n%s",
                         excp,
                         user_stack_formatted,
                     )
@@ -602,16 +616,22 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.restore_graphstate(state)
             raise
 
-    def log_starts_line(self):
-        if not torch._logging._internal.log_state.is_artifact_enabled("trace_source"):
-            return
+    def get_line_of_code_header(self, lineno=None):
+        if lineno is None:
+            lineno = self.lineno
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        log_str = f"TRACE starts_line {self.f_code.co_name} {self.f_code.co_filename}:{self.lineno}{inline_depth_str}\n"
+        return f"{self.f_code.co_name} {self.f_code.co_filename}:{lineno}{inline_depth_str}"
+
+    def get_log_starts_line_log_str(self):
+        log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
         line = linecache.getline(self.f_code.co_filename, self.lineno).rstrip()
         log_str += f"    {line}"
-        trace_source_log.debug(log_str)
+        return log_str
+
+    def log_starts_line(self):
+        trace_source_log.debug("%s", LazyString(self.get_log_starts_line_log_str))
 
     def step(self):
         """Process exactly one instruction, return False we should exit"""
@@ -682,18 +702,12 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except BackendCompilerFailed:
-            raise
-        except Unsupported as exc:
-            exc.real_stack.append(self.frame_summary())
+        except Unsupported:
             if self.empty_checkpoint():
+                log.debug("empty checkpoint")
                 raise
+
             log.debug("step triggered compile", exc_info=True)
-        except Exception as exc:
-            real_stack = getattr(exc, "real_stack", [])
-            real_stack.append(self.frame_summary())
-            exc.real_stack = real_stack  # type: ignore[attr-defined]
-            raise
 
         # generate code from checkpoint
         assert not self.output.output_instructions
@@ -710,7 +724,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def run_ctx_mgr(self):
-        return contextlib.nullcontext()
+        # NB: Don't push the top level frame summary; set_current_loc will
+        # take care of it.  However, DO make sure we attach real_stack to
+        # exceptions
+        return TracingContext.current_frame(None)
 
     def run(self):
         with self.run_ctx_mgr():
@@ -883,7 +900,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if len(bits) < level:
             raise ImportError("attempted relative import beyond top-level package")
         base = bits[0]
-        return "{}.{}".format(base, name) if name else base
+        return f"{base}.{name}" if name else base
 
     def calc_package(self):
         """
@@ -970,7 +987,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         val = self.f_builtins[inst.argval]
 
         if callable(val):
-            assert is_builtin_callable(val)
             self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
         else:
             assert is_builtin_constant(val)
@@ -1273,6 +1289,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         options = VariableTracker.propagate(items)
         self.push(ListVariable(items, mutable_local=MutableLocal(), **options))
 
+    def BUILD_SET(self, inst):
+        if config.inject_BUILD_SET_unimplemented_TESTING_ONLY:
+            unimplemented("missing: BUILD_SET")
+        items = self.popn(inst.argval)
+        options = VariableTracker.propagate(items)
+        new_set = SetVariable(self, items, mutable_local=MutableLocal(), **options)
+        self.push(new_set)
+
     def BUILD_LIST_UNPACK(self, inst, cls=ListVariable):
         seqs = self.popn(inst.argval)
         options = VariableTracker.propagate(seqs)
@@ -1357,6 +1381,14 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             ),
         )
 
+    def SET_ADD(self, inst):
+        v = self.pop()
+        assert inst.argval > 0
+        obj = self.stack[-inst.arg]
+        assert isinstance(obj, SetVariable)
+        assert obj.mutable_local
+        return obj.call_method(self, "add", [v], {})
+
     def LIST_APPEND(self, inst):
         v = self.pop()
         assert inst.argval > 0
@@ -1423,7 +1455,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
 
     def UNPACK_SEQUENCE(self, inst):
         seq = self.pop()
-        if isinstance(seq, BaseListVariable):
+        if isinstance(seq, (BaseListVariable, SetVariable)):
             self.output.guards.update(seq.guards)
             val = seq.unpack_var_sequence(self)
         elif seq.is_python_constant() and isinstance(seq, ConstantVariable):
@@ -1821,7 +1853,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             additional_stack_frames = []
         return "".join(
             traceback.format_list(
-                ([self.frame_summary()] + list(reversed(additional_stack_frames)))
+                [self.frame_summary()] + list(reversed(additional_stack_frames))
             )
         )
 
@@ -1833,7 +1865,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             lookup_line=False,
         )
 
-    def store_dict_key(self, name, value):
+    def store_global_weakref(self, name, value):
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
@@ -1994,56 +2026,64 @@ class InstructionTranslator(InstructionTranslatorBase):
                 ), "Export without one graph - something has gone wrong."
 
             vars = list(code_options["co_varnames"])
-            vars.extend(x for x in self.cell_and_freevars() if x not in vars)
+            cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
+            vars.extend(cells_and_freevars)
+            cells_and_freevars_set = set(cells_and_freevars)
 
             self.symbolic_locals = collections.OrderedDict(
                 (
                     k,
-                    VariableBuilder(self, LocalSource(k))(f_locals[k]),
+                    VariableBuilder(
+                        self,
+                        LocalSource(k, cell_or_freevar=k in cells_and_freevars_set),
+                    )(f_locals[k]),
                 )
                 for k in vars
                 if k in f_locals
             )
 
-            # symbolic_locals contains the mapping from original f_locals to the
-            # Variable objects. During the Variable building phase, each object also
-            # has its associated guards. At the end, we will accumulate these
-            # guards.
-            #
-            # One way of handling these guards is to just accumulate all of them
-            # right now. However, many f_locals might not be used in the frame and
-            # thus can unnecessarily increase guard execution overhead.  Therefore,
-            # we selectively update output.guards as we run the Python Bytecode
-            # instruction by instruction.
-            #
-            # An exception here is list/dict variables. Guards related to these
-            # variables have indexed access, like Tensor_match on args[0], and if
-            # args is not used in this frame, we will miss a LIST_LENGTH check like
-            # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
-            # next invocation when args is not a list, and args[0] is a runtime
-            # error. Therefore, we recursively add guards for list/dict variable here.
-            for val in self.symbolic_locals.values():
-                if isinstance(
-                    val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
-                ):
-                    local_guards = VariableTracker.propagate(val)["guards"]
-                    index_guards = [
-                        guard
-                        for guard in local_guards
-                        if guard.create_fn
-                        in (
-                            GuardBuilder.LIST_LENGTH,
-                            GuardBuilder.DICT_KEYS,
-                            GuardBuilder.ODICT_KEYS,
-                            GuardBuilder.TUPLE_ITERATOR_LEN,
-                        )
-                    ]
-                    self.output.guards.update(index_guards)
+            self.init_local_index_guards_hack()
 
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
+
+    def init_local_index_guards_hack(self):
+        # symbolic_locals contains the mapping from original f_locals to the
+        # Variable objects. During the Variable building phase, each object also
+        # has its associated guards. At the end, we will accumulate these
+        # guards.
+        #
+        # One way of handling these guards is to just accumulate all of them
+        # right now. However, many f_locals might not be used in the frame and
+        # thus can unnecessarily increase guard execution overhead.  Therefore,
+        # we selectively update output.guards as we run the Python Bytecode
+        # instruction by instruction.
+        #
+        # An exception here is list/dict variables. Guards related to these
+        # variables have indexed access, like Tensor_match on args[0], and if
+        # args is not used in this frame, we will miss a LIST_LENGTH check like
+        # len(args) == 2. Missing the LIST_LENGTH check causes problem for the
+        # next invocation when args is not a list, and args[0] is a runtime
+        # error. Therefore, we recursively add guards for list/dict variable here.
+        for val in self.symbolic_locals.values():
+            if isinstance(
+                val, (ListIteratorVariable, BaseListVariable, ConstDictVariable)
+            ):
+                local_guards = VariableTracker.propagate(val)["guards"]
+                index_guards = [
+                    guard
+                    for guard in local_guards
+                    if guard.create_fn
+                    in (
+                        GuardBuilder.LIST_LENGTH,
+                        GuardBuilder.DICT_KEYS,
+                        GuardBuilder.ODICT_KEYS,
+                        GuardBuilder.TUPLE_ITERATOR_LEN,
+                    )
+                ]
+                self.output.guards.update(index_guards)
 
     def run(self):
         super().run()
@@ -2112,6 +2152,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(null_idxes),
         )
 
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", None
+        )
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)[
+                "orig_graphmodule"
+            ] = orig_graphmodule_maybe
+
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
@@ -2125,8 +2175,20 @@ class InstructionTranslator(InstructionTranslatorBase):
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
+    def symbolic_locals_contain_module_class(self):
+        for v in self.symbolic_locals.values():
+            if isinstance(v, UserDefinedClassVariable) and issubclass(
+                v.as_python_constant(), torch.nn.Module
+            ):
+                return True
+        return False
+
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if (
+            self.output.count_calls() == 0
+            and not self.symbolic_locals_contain_module_class()
+            and not self.export
+        ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
@@ -2155,6 +2217,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
+        if should_force_inline(func):
+            return True
+
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2178,13 +2243,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-            ]:
+            if (
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
+                and func.fn._origin
+                in [
+                    produce_trampoline_autograd_fwd,
+                    produce_trampoline_autograd_apply,
+                    produce_trampoline_autograd_bwd,
+                ]
+            ):
                 # Known sound
                 return
+
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
@@ -2231,7 +2302,28 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         # with a single alias
         if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
+        if sys.version_info >= (3, 11):
+            cur_inst = parent.current_instruction
+            parent_code = parent.f_code
+            header = parent.get_line_of_code_header(lineno=cur_inst.positions.lineno)
+
+            def get_trace_call_log_str():
+                line = get_instruction_source_311(parent_code, cur_inst).rstrip()
+                return f"TRACE inlined call {code.co_name} from {header}\n{line}"
+
+            trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
+
+        # Detect inline GraphModule calls in order to propgate node metadata,
+        # by checking if the first argument (self) is a variable tracking a GraphModule.
+        if args and isinstance(args[0], NNModuleVariable):
+            module = parent.output.get_submodule(args[0].module_key)
+            if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2289,6 +2381,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
+        instructions = cleaned_instructions(code)
+        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},
@@ -2296,7 +2390,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
-            instructions=cleaned_instructions(code),
+            instructions=instructions,
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,
@@ -2412,3 +2506,50 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items.append(self.pop())
         # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable(None))
+
+    def GET_YIELD_FROM_ITER(self, inst):
+        tos = self.stack[-1]
+        if not isinstance(tos, ListIteratorVariable):
+            self.pop()
+            res = BuiltinVariable(iter).call_function(self, [tos], {})
+            self.push(res)
+        return self.YIELD_FROM(inst)
+
+    def YIELD_FROM(self, inst):
+        while True:
+            tos = self.stack[-1]
+            if isinstance(tos, ConstantVariable) and tos.value is None:
+                self.pop()
+                return
+            if isinstance(tos, ListIteratorVariable):
+                self.output.guards.update(tos.guards)
+                try:
+                    val, next_iter = tos.next_variables()
+                    self.replace_all(tos, next_iter)
+                    self.push(val)
+                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                    self.YIELD_VALUE(inst)
+                    self.pop()
+                    self.push(next_iter)
+                except StopIteration:
+                    return
+            else:
+                unimplemented(f"YIELD_FROM {typestr(tos)}")
+
+    def SEND(self, inst):
+        assert len(self.stack) >= 2
+        val = self.pop()
+        tos = self.stack[-1]
+        if isinstance(tos, ListIteratorVariable):
+            if isinstance(val, ConstantVariable) and val.value is None:
+                self.push(val)
+                self.instruction_pointer = self.indexof[inst.target]
+            else:
+                # invoke send
+                # Unreachable code - if you hit this, you are implementing generator support and have
+                # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+                # subgenerator and lines up with this line in Python 3.11
+                # https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2597
+                unimplemented("Unreachable sub-generator code")
+        else:
+            unimplemented(f"SEND {typestr(tos)}")

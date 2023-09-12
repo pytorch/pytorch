@@ -60,6 +60,7 @@
       func<int8_t>(__VA_ARGS__);                 \
       break;                                     \
     case ::at::ScalarType::Byte:                 \
+    case ::at::ScalarType::Bool:                 \
       func<uint8_t>(__VA_ARGS__);                \
       break;                                     \
     case ::at::ScalarType::Int:                  \
@@ -89,6 +90,7 @@
       func<int8_t>(args);                        \
       break;                                     \
     case ::at::ScalarType::Byte:                 \
+    case ::at::ScalarType::Bool:                 \
       func<uint8_t>(args);                       \
       break;                                     \
     case ::at::ScalarType::Int:                  \
@@ -681,7 +683,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
-    throw std::system_error(errno, std::system_category());
+    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -708,7 +710,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
   auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
-    throw std::system_error(errno, std::system_category());
+    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.

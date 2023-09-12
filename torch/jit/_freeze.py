@@ -4,13 +4,15 @@ This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
 
-from typing import Optional, List
+from typing import List, Optional
 
 import torch
 from torch.jit._script import RecursiveScriptModule, ScriptModule
 
 
-def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: bool = True):
+def freeze(
+    mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: bool = True
+):
     r"""
     Freezing a :class:`ScriptModule` will clone it and attempt to inline the cloned
     module's submodules, parameters, and attributes as constants in the TorchScript IR Graph.
@@ -174,7 +176,9 @@ def run_frozen_optimizations(
         )
 
 
-def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]] = None) -> ScriptModule:
+def optimize_for_inference(
+    mod: ScriptModule, other_methods: Optional[List[str]] = None
+) -> ScriptModule:
     """
     Performs a set of optimization passes to optimize a model for the
     purposes of inference. If the model is not already frozen, optimize_for_inference
@@ -206,7 +210,8 @@ def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]]
     if not isinstance(mod, ScriptModule):
         raise RuntimeError(
             "optimize_for_inference expects a ScriptModule as input. "
-            "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
+            "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'."
+        )
 
     if other_methods is None:
         other_methods = []

@@ -235,7 +235,7 @@ if HAS_PYDOT:
                 return result
             elif isinstance(tm, dict):
                 result = ""
-                for k, v in tm.items():
+                for v in tm.values():
                     result += self._tensor_meta_to_label(v)
                 return result
             elif isinstance(tm, tuple):

@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch._inductor.cuda_properties import get_device_capability
 
@@ -49,12 +51,12 @@ def check_mm_compatible_shapes(f_name, lhs, rhs):
     )
 
 
-def check_dtype(f_name, t, dtype):
+def check_dtype(f_name, t, dtype, *additional_dtypes):
     check(
         t.dtype == dtype
-        and t.dtype in (torch.half, torch.bfloat16, torch.float),
+        and t.dtype in ((torch.half, torch.bfloat16, torch.float) + tuple(*additional_dtypes)),
         f"{f_name}(): all inputs are expected to be of the same dtype "
-        "and one of (half, bfloat16, float32), "
+        f"and one of (half, bfloat16, float32) or {additional_dtypes}, "
         f"but got dtype == {t.dtype}.",
     )
 
@@ -80,7 +82,7 @@ def check_blocksize(f_name, blocksize):
 
 
 def make_triton_contiguous(t):
-    if t.stride(-2) > 1 and t.stride(-1) > 1:
+    if (t.stride(-2) > 1 or t.dtype is torch.float32) and t.stride(-1) > 1:
         return t.contiguous()
     else:
         return t
@@ -170,7 +172,8 @@ def prepare_inputs(bsr, *dense_tensors):
     # Compute broadcasted batch dimension
     batch_dims_broadcasted = torch.broadcast_shapes(values.shape[:-3], *(t.shape[:-2] for t in tensors))
 
-    # Broadcast batch dimensions and squash
+    # Broadcast batch dimensions and squash.
+    # The result can be either a view or a copy.
     def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
         return t.broadcast_to(batch_dims + invariant_dims).flatten(
             0, len(batch_dims) - 1
@@ -212,7 +215,9 @@ def tile_to_blocksize(t, blocksize):
         n // blocksize[1],
         blocksize[1],
     ]
-    return t.reshape(new_shape).transpose(-3, -2)
+    # using .view instead of .reshape to ensure that the result is
+    # indeed a view:
+    return t.view(new_shape).transpose(-3, -2)
 
 
 if _has_triton():
@@ -329,7 +334,7 @@ if _has_triton():
                     mask=mask_k[:, None], other=0.0
                 )
 
-                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32)
+                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
 
             if IS_BETA_ZERO:
                 acc_block *= alpha
@@ -457,7 +462,7 @@ if _has_triton():
             dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
 
             # do block mm
-            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32)
+            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride
@@ -563,18 +568,26 @@ if _has_triton():
     ):
         f_name = "sampled_addmm"
 
+        check_bsr_layout(f_name, input)
         input_broadcasted = broadcast_batch_dims_bsr(f_name, input, mat1, mat2)
 
         if not skip_checks:
-            check_bsr_layout(f_name, input)
             check_device(f_name, mat1, input.device)
             check_device(f_name, mat2, input.device)
-            check_dtype(f_name, mat1, input.dtype)
-            check_dtype(f_name, mat2, input.dtype)
+            if beta != 0.0 and input.dtype is torch.bool:
+                check(
+                    False,
+                    f"{f_name}(): having beta == {beta} not equal to 0.0 with boolean mask is not allowed."
+                )
+            if input.dtype is not torch.bool:
+                check_dtype(f_name, mat1, input.dtype)
+                check_dtype(f_name, mat2, input.dtype)
+            else:
+                check_dtype(f_name, mat1, mat2.dtype)
             check_mm_compatible_shapes(f_name, mat1, mat2)
             if out is not None:
                 check_bsr_layout(f_name, out)
-                check_device(f_name, out, input.device)
+                check_device(f_name, out, mat1.device)
                 check_dtype(f_name, out, input.dtype)
                 check(
                     out.shape == input_broadcasted.shape
@@ -585,7 +598,7 @@ if _has_triton():
                 )
 
         if out is None:
-            out = input_broadcasted.clone()
+            out = input_broadcasted.to(mat1.dtype, copy=True)
         else:
             out.copy_(input_broadcasted)
 
@@ -835,7 +848,58 @@ if _has_triton():
             size=input.shape,
             layout=input.layout
         )
+
+    def _scaled_dot_product_attention(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: Optional[torch.Tensor],
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: Optional[float] = None
+    ):
+        f_name = "_scaled_dot_product_attention"
+        check(
+            not is_causal,
+            f"{f_name}(): is_causal == True is not supported."
+        )
+        check(
+            attn_mask is not None,
+            f"{f_name}(): attn_mask == None is not supported."
+        )
+        assert attn_mask is not None
+
+        check(
+            attn_mask.layout == torch.sparse_bsr,
+            f"{f_name}(): "
+            f"attn_mask.layout must be {torch.sparse_bsr}, but got "
+            f"attn_mask.layout == {attn_mask.layout}."
+        )
+
+        check_device(f_name, key, query.device)
+        check_device(f_name, value, query.device)
+        check_device(f_name, attn_mask, query.device)
+
+        check_dtype(f_name, key, query.dtype)
+        check_dtype(f_name, value, query.dtype)
+        if attn_mask.dtype is not torch.bool:
+            check_dtype(f_name, attn_mask, query.dtype)
+
+        sdpa = sampled_addmm(attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False)
+        if scale is None and query.size(-1) == 0 or scale == 0.0:
+            check(
+                False,
+                f"{f_name}(): current value of scale == {scale} "
+                "results in division by zero."
+            )
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        sdpa.values().mul_(scale_factor)
+        sdpa = bsr_softmax(sdpa)
+        torch.nn.functional.dropout(sdpa.values(), p=dropout_p, inplace=True)
+        sdpa = bsr_dense_mm(sdpa, value)
+        return sdpa
 else:
     bsr_softmax = None  # type: ignore[assignment]
     bsr_dense_mm = None  # type: ignore[assignment]
     sampled_addmm = None  # type: ignore[assignment]
+    _scaled_dot_product_attention = None  # type: ignore[assignment]
