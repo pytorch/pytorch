@@ -555,6 +555,8 @@ def select_decomp_table():
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
     if self.device.type == "cuda":
+        # This two-step algorithm is the same as eager CUDA, for eager CPU we
+        # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])
         source_idx = mask.reshape(-1).cumsum(0) - 1
         return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
