@@ -504,10 +504,9 @@ def _init_prefetching_state(
 ) -> _FSDPState:
     if backward_prefetch == BackwardPrefetch.BACKWARD_PRE:
         warnings.warn(
-            "The `BACKWARD_PRE` option for FSDP parameter `backward_prefetch` "
-            "has been consolidated with `BACKWARD_POST`. FSDP now supports `BACKWARD_POST` (prefetch "
-            "after an earlier instance's backward) or `None` (no prefetch at "
-            "all). Setting it to default value `BACKWARD_POST` now."
+            "The `BACKWARD_PRE` and `BACKWARD_POST` options for FSDP parameter "
+            "`backward_prefetch` has been consolidated. Both options would "
+            "perform the same prefetch during backward. "
         )
         backward_prefetch = BackwardPrefetch.BACKWARD_POST
     state.backward_prefetch = backward_prefetch

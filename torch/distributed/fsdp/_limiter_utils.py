@@ -4,23 +4,6 @@ from typing import Optional, Tuple
 import torch
 
 
-class EventWithTensor:
-    """
-    This data structure pairs the resharding event (i.e. forward done) with the
-    all-gather buffer being resharded. The purpose is to free the all-gather
-    buffer when we ask a new all-gather to wait for a resharding event (hence
-    avoiding OOM).
-    """
-
-    def __init__(
-        self,
-        event: torch.cuda.Event,
-        tensor: torch.Tensor,
-    ) -> None:
-        self.event = event
-        self.tensor = tensor
-
-
 class _FreeEventQueue:
     """
     This tracks all pending frees corresponding to inflight all-gathers. The
