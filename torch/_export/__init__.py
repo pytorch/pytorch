@@ -104,6 +104,17 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 DECOMP_TABLE = core_aten_decompositions()
 
 
+# TODO(zhxchen17) This is not needed if we output pre_dispatch graph upfront from export().
+@contextmanager
+def _disable_decomp_table():
+    global DECOMP_TABLE
+    prev, DECOMP_TABLE = DECOMP_TABLE, {}
+    try:
+        yield
+    finally:
+        DECOMP_TABLE = prev
+
+
 @compatibility(is_backward_compatible=False)
 def capture_pre_autograd_graph(
     f: Callable,
