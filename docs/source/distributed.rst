@@ -842,10 +842,20 @@ following matrix shows how the log level can be adjusted via the combination of 
 | ``INFO``                | ``DETAIL``                  | Trace (a.k.a. All)     |
 +-------------------------+-----------------------------+------------------------+
 
-Distributed has a custom Exception type derived from `RuntimeError` called `torch.distributed.DistBackendError`. This exception is thrown when a backend-specific error occurs. For example, if
-the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+Distributed has customs Exception types derived from `RuntimeError`:
 
+- `torch.distributed.DistError`: This is the base type of all distributed exceptions.
+- `torch.distributed.DistBackendError`: This exception is thrown when a backend-specific error occurs. For example, if
+  the `NCCL` backend is used and the user attempts to use a GPU that is not available to the `NCCL` library.
+- `torch.distributed.DistNetworkError`: This exception is thrown when networking
+  libraries encounter errors (ex: Connection reset by peer)
+- `torch.distributed.DistStoreError`: This exception is thrown when the Store encounters
+  an error (ex: TCPStore timeout)
+
+.. autoclass:: torch.distributed.DistError
 .. autoclass:: torch.distributed.DistBackendError
+.. autoclass:: torch.distributed.DistNetworkError
+.. autoclass:: torch.distributed.DistStoreError
 
 .. warning::
     The DistBackendError exception type is an experimental feature is subject to change.

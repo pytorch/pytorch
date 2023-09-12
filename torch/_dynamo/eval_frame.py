@@ -12,7 +12,6 @@ import threading
 import traceback
 import types
 import warnings
-from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -60,6 +59,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
+from .code_context import code_context
 from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
@@ -95,15 +95,26 @@ DONT_WRAP_FILES = {
 }
 
 
-CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
-def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+def _debug_get_cache_entry_list(
+    code: Union[types.CodeType, Callable[..., Any]]
+) -> List[CacheEntry]:  # type: ignore[valid-type]
     """
-    Given a code object, retrieve the cache entries stored in this code.
+    Given a code object or a callable object, retrieve the cache entries
+     stored in this code.
     """
-    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    return list(map(CacheEntry._make, cache_list))
+    if callable(code):
+        code = code.__code__
+    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    cache_list = []
+    while cache_head is not None:
+        cache_list.append(cache_head)
+        cache_head = cache_head.next
+    return cache_list
 
 
 class OptimizedModule(torch.nn.Module):
@@ -270,6 +281,14 @@ class _TorchDynamoContext:
             return self.compiler_config
 
         fn = innermost_fn(fn)
+
+        # add context containing GraphModule to any GraphModule forward functions
+        if isinstance(fn, torch.fx.GraphModule):
+            # Assume that the underlying node metadata of `fn`,
+            # a GraphModule instance, accurately represents
+            # all instances of type(fn).
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/onnx/back_compat.h>
 
 #include <ATen/ScalarOps.h>
 
@@ -88,6 +89,10 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
       return at::kComplexDouble;
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
+    case ::torch::onnx::TensorProto_DataType_FLOAT8E5M2:
+      return at::kFloat8_e5m2;
+    case ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FN:
+      return at::kFloat8_e4m3fn;
     default:
       TORCH_CHECK(
           false,
@@ -181,7 +186,7 @@ Node* createONNXConstant(
     at::Tensor value) {
   Node* constant_node = graph->create(onnx::Constant, 1);
   constant_node->insertBefore(n_to_insert_before);
-  constant_node->t_(attr::value, value);
+  constant_node->t_(attr::value, std::move(value));
   return constant_node;
 }
 
