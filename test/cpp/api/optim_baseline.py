@@ -42,6 +42,9 @@ OPTIMIZERS = {
     "SGD_with_weight_decay_and_momentum": lambda p: torch.optim.SGD(p, 0.1, momentum=0.9, weight_decay=1e-2),
     "SGD_with_weight_decay_and_nesterov_momentum":
         lambda p: torch.optim.SGD(p, 0.1, momentum=0.9, weight_decay=1e-6, nesterov=True),
+    "Adadelta": lambda p: torch.optim.Adadelta(p, 1.0),
+    "Adadelta_with_weight_decay": lambda p: torch.optim.Adadelta(p, 1.0, weight_decay=1e-2),
+    "Adadelta_with_weight_decay_and_lr_decay": lambda p: torch.optim.Adadelta(p, 1.0, weight_decay=1e-6, rho=1e-3),
 }
 
 

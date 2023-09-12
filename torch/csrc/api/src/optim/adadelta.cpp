@@ -19,11 +19,11 @@ AdadeltaOptions::AdadeltaOptions(double lr) : lr_(lr) {}
 
 bool operator==(const AdadeltaOptions& lhs, const AdadeltaOptions& rhs) {
   return (lhs.lr() == rhs.lr()) && (lhs.rho() == rhs.rho()) &&
-      (lhs.weight_decay() == rhs.weight_decay()) &&
-      (lhs.eps() == rhs.eps());
+      (lhs.weight_decay() == rhs.weight_decay()) && (lhs.eps() == rhs.eps());
 }
 
-void AdadeltaOptions::serialize(torch::serialize::OutputArchive& archive) const {
+void AdadeltaOptions::serialize(
+    torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(lr);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(rho);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(eps);
@@ -47,7 +47,7 @@ void AdadeltaOptions::set_lr(const double lr) {
 
 bool operator==(const AdadeltaParamState& lhs, const AdadeltaParamState& rhs) {
   return torch::equal(lhs.square_avg(), rhs.square_avg()) &&
-    torch::equal(lhs.accumulate(), rhs.accumulate());
+      torch::equal(lhs.accumulate(), rhs.accumulate());
 }
 
 void AdadeltaParamState::serialize(
@@ -60,7 +60,6 @@ void AdadeltaParamState::serialize(torch::serialize::InputArchive& archive) {
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, square_avg);
   _TORCH_OPTIM_DESERIALIZE_TORCH_ARG(Tensor, accumulate);
 }
-
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adadelta.py
@@ -76,20 +75,18 @@ Tensor Adadelta::step(LossClosure closure) {
       if (!p.grad().defined()) {
         continue;
       }
-      auto grad = p.grad();;
+      auto grad = p.grad();
 
       auto param_state =
-        state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
+          state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
 
       // State initialization
       if (param_state == state_.end()) {
         auto state = std::make_unique<AdadeltaParamState>();
-        state->square_avg(torch::full_like(
-            p.data(), 0, at::MemoryFormat::Preserve
-          ));
-        state->accumulate(torch::full_like(
-            p.data(), 0, at::MemoryFormat::Preserve
-          ));
+        state->square_avg(
+            torch::full_like(p.data(), 0, at::MemoryFormat::Preserve));
+        state->accumulate(
+            torch::full_like(p.data(), 0, at::MemoryFormat::Preserve));
         state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
             std::move(state);
       }
@@ -99,15 +96,22 @@ Tensor Adadelta::step(LossClosure closure) {
 
       auto& options = static_cast<AdadeltaOptions&>(group.options());
 
-      state.square_avg(
-        state.square_avg().mul_(options.rho()).addcmul_(grad, grad, 1 - options.rho())
-      );
+      if (options.weight_decay() != 0) {
+        TORCH_CHECK(
+            !p.grad().is_sparse(),
+            "weight_decay option is not compatible with sparse gradients");
+        grad = grad.add(p, options.weight_decay());
+      }
+
+      state.square_avg(state.square_avg()
+                           .mul_(options.rho())
+                           .addcmul_(grad, grad, 1 - options.rho()));
       auto std = state.square_avg().add(options.eps()).sqrt_();
       auto delta = state.accumulate().add(options.eps()).sqrt_();
       delta.div_(std).mul_(grad);
-      state.accumulate(
-        state.accumulate().mul_(options.rho()).addcmul_(delta, delta, 1 - options.rho())
-      );
+      state.accumulate(state.accumulate()
+                           .mul_(options.rho())
+                           .addcmul_(delta, delta, 1 - options.rho()));
       p.add_(delta, -options.lr());
     }
   }

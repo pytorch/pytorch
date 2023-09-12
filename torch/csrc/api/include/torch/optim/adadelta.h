@@ -38,7 +38,7 @@ struct TORCH_API AdadeltaOptions
   void set_lr(const double lr) override;
 };
 
-struct TORCH_API AdadeltaParamState 
+struct TORCH_API AdadeltaParamState
     : public OptimizerCloneableParamState<AdadeltaParamState> {
   TORCH_ARG(torch::Tensor, square_avg);
   TORCH_ARG(torch::Tensor, accumulate);
@@ -61,10 +61,7 @@ class TORCH_API Adadelta : public Optimizer {
             std::move(param_groups),
             std::make_unique<AdadeltaOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
-    TORCH_CHECK(
-        defaults.rho() >= 0,
-        "Invalid rho value: ",
-        defaults.rho());
+    TORCH_CHECK(defaults.rho() >= 0, "Invalid rho value: ", defaults.rho());
     TORCH_CHECK(
         defaults.weight_decay() >= 0,
         "Invalid weight_decay value: ",

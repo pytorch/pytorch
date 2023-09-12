@@ -280,6 +280,11 @@ TEST(OptimTest, XORConvergence_Adagrad) {
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
 }
 
+TEST(OptimTest, XORConvergence_Adadelta) {
+  ASSERT_TRUE(test_optimizer_xor<Adadelta>(
+      AdadeltaOptions(1.0).weight_decay(1e-6).rho(1e-3)));
+}
+
 TEST(OptimTest, XORConvergence_RMSprop) {
   ASSERT_TRUE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
 }
@@ -353,6 +358,23 @@ TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecayAndLRDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
       expected_parameters::Adagrad_with_weight_decay_and_lr_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_Adadelta) {
+  check_exact_values<Adadelta>(
+      AdadeltaOptions(1.0), expected_parameters::Adadelta());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdadeltaWithWeightDecay) {
+  check_exact_values<Adadelta>(
+      AdadeltaOptions(1.0).weight_decay(1e-2),
+      expected_parameters::Adadelta_with_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdadeltaWithWeightDecayAndLRDecay) {
+  check_exact_values<Adadelta>(
+      AdadeltaOptions(1.0).weight_decay(1e-6).rho(1e-3),
+      expected_parameters::Adadelta_with_weight_decay_and_lr_decay());
 }
 
 TEST(OptimTest, ProducesPyTorchValues_RMSprop) {
