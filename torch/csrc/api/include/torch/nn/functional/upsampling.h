@@ -107,6 +107,16 @@ inline Tensor interpolate(
     }
   }
 
+  TORCH_CHECK(
+      input.dim() >= 3 && input.dim() <= 5,
+      "Input Error: Only 3D, 4D and 5D input Tensors supported "
+      "(got ",
+      input.dim(),
+      "D) for the modes: nearest | linear | bilinear | bicubic | trilinear "
+      "(got ",
+      enumtype::get_enum_name(mode),
+      ")");
+
   auto scale_factor_len = input.dim() - 2;
   std::vector<c10::optional<double>> scale_factor_list(
       scale_factor_len, c10::nullopt);
