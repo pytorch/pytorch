@@ -208,7 +208,7 @@ def mps_ops_grad_modifier(ops):
 
 def mps_ops_modifier(ops):
     # Supported complex OPS
-    SUPPORTED_COMPLEX_OPS = [
+    SUPPORTED_COMPLEX_OPS = {
         '__radd__',
         '__rmul__',
         'add',
@@ -231,6 +231,8 @@ def mps_ops_modifier(ops):
         'kron',
         'linspace',
         'logspace',
+        'linspacetensor_overload',
+        'logspacetensor_overload',
         'mul',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
@@ -260,7 +262,7 @@ def mps_ops_modifier(ops):
         'vsplit',
         'zero_',
         'zeros',
-    ]
+    }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
         # Top 60

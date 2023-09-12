@@ -621,6 +621,27 @@ class TestFX(JitTestCase):
             self.assertTrue(node.stack_trace is not None)
             assert 'test_fx.py' in node.stack_trace
 
+    def test_lineno_map(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                a = torch.sin(a)
+                b = torch.cos(b)
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        expected = {1: 2, 2: 3, 3: 4, 4: 5}
+        self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+
+        # test custom codegen
+        def transform_code(code):
+            return ["print('hello!')\n", *code]
+        gm.graph.on_generate_code(lambda _: transform_code)
+        gm.recompile()
+        expected = {2: 2, 3: 3, 4: 4, 5: 5}
+        self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
