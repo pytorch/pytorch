@@ -147,7 +147,6 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
         return args[0]._size
 
     if func == torch.ops.aten.dim.default:
-        assert is_jagged(args[0])
         return len(args[0]._size)
 
     if func == torch.ops.aten.sym_numel.default:
@@ -232,7 +231,7 @@ def unbind_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     values = inp._values
-    offsets = inp.offsets
+    offsets = inp.offsets()
 
     views = []
     start = 0
