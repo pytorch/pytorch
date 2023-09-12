@@ -16,7 +16,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
+      docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks:9dd361d1c04129f8eaa9d6b43335917800dd6d24
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
