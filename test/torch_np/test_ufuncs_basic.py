@@ -388,9 +388,3 @@ class TestUfuncDtypeKwd:
         r = np.add([1.0, 2.0], 1.0e-15, dtype=np.float64, out=out32)
         assert (r == [1, 2]).all()
         assert r.dtype == np.float32
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

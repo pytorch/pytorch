@@ -1168,9 +1168,3 @@ class TestMultipleEllipsisError:
         assert_raises(IndexError, lambda: a[..., ...])
         assert_raises(IndexError, a.__getitem__, ((Ellipsis,) * 2,))
         assert_raises(IndexError, a.__getitem__, ((Ellipsis,) * 3,))
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
