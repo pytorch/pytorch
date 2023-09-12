@@ -365,5 +365,5 @@ venv/
 *.log
 sweep/
 
-# environment collection files 
+# environment collection files
 collect_env.py*
