@@ -2772,6 +2772,8 @@ class TritonScheduling(BaseScheduling):
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
         with config.patch("benchmark_kernel", True), V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
+
+        src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
         mod = PyCodeCache.load(src_code)
 
         def cache_file_path():
@@ -2800,7 +2802,7 @@ class TritonScheduling(BaseScheduling):
 
         args = mod.get_args()
         call = mod.call
-        wrapped_jit_function = mod.KERNEL_NAME
+        wrapped_jit_function = mod.triton_
         # We have to clone the inplace updated arguments to avoid earlier calls
         # generating out of range indices for later calls.
         ms = do_bench(lambda: call(wrapped_jit_function.clone_args(*args)))
