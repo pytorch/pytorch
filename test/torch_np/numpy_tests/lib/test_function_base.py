@@ -3710,9 +3710,3 @@ class TestSortComplex:
         actual = np.sort_complex(a)
         assert_equal(actual, expected)
         assert_equal(actual.dtype, expected.dtype)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
