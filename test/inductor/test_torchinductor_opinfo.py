@@ -262,7 +262,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    ("std_mean", "unbiased"): {f16},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16},
 }
@@ -372,6 +371,7 @@ inductor_override_kwargs = {
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
     "gradient": {"check_gradient": False},  # segfault on check_gradient
     # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
