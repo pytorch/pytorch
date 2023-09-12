@@ -6,7 +6,7 @@ import torch._decomp
 from torch import Tensor
 
 decomposition_table = torch._decomp.decomposition_table
-decomposition_table_for_jvp: Dict[torch._ops.OpOverload, Callable] = {}
+decomposition_table_for_jvp: Dict[torch._ops.OperatorBase, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition
 aten = torch.ops.aten
 
