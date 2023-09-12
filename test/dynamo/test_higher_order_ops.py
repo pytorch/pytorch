@@ -955,7 +955,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 1)
         y = torch.randn(3, 1)
-        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=False)
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
 
         ref = fn(x, y)
         res = compiled_fn(x, y)
