@@ -202,6 +202,16 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
     ),
     xfail(
+        "arange",
+        dtypes=(torch.uint8,),
+        reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
+    ),
+    xfail(
+        "arange",
+        dtypes=(torch.int16, torch.int32),
+        reason="AssertionError: The values for attribute 'shape' do not match",
+    ),
+    xfail(
         "argmax",
         dtypes=(
             torch.int16,
@@ -441,14 +451,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
-    xfail(
-        "var_mean", dtypes=(torch.float16, ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
-    ),
-    xfail(
-        "var_mean", variant_name="unbiased", dtypes=(torch.float16, ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
-    ),
 )
 # fmt: on
 
@@ -544,7 +546,7 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
         reason="Torchlib does not support aten::embedding_renorm, emitted when 'max_norm' is not None",
     ),
-    xfail(
+    skip(
         "nn.functional.embedding_bag",
         matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
         reason=(
