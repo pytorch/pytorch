@@ -1,4 +1,5 @@
 import functools
+import inspect
 import logging
 import math
 
@@ -303,81 +304,6 @@ def _sfdp_replacement_12(query, key, value, inv_scale_factor, dropout_p):
     )
 
 
-def _sfdp_pattern_13(query, key, value, inv_scale):
-    # dropout would create a clone() if eval() or p = 0
-    return (
-        torch.matmul(query, key.transpose(-2, -1))
-        .div(inv_scale)
-        .softmax(dim=-1)
-        .clone()
-        .matmul(value)
-    )
-
-
-def _sfdp_replacement_13(query, key, value, inv_scale):
-    counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
-        attn_mask=None,
-        dropout_p=0.0,
-        is_causal=False,
-        scale=1.0 / inv_scale,
-    )
-
-
-def _sfdp_pattern_14(query, key, value, scale_factor):
-    # dropout would create a clone() if eval() or p = 0
-    return (
-        torch.matmul(query, key.transpose(-2, -1))
-        .mul(scale_factor)
-        .softmax(dim=-1)
-        .clone()
-        .matmul(value)
-    )
-
-
-def _sfdp_replacement_14(query, key, value, scale_factor):
-    counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
-        attn_mask=None,
-        dropout_p=0.0,
-        is_causal=False,
-        scale=scale_factor,
-    )
-
-
-def _sfdp_pattern_15(query, key, value, inv_scale):
-    # dropout would create a clone() if eval() or p = 0
-    q = query.permute(0, 2, 1, 3)
-    k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
-    return (
-        torch.matmul(q, k.transpose(-2, -1))
-        .div(inv_scale)
-        .softmax(dim=-1)
-        .clone()
-        .matmul(v)
-    )
-
-
-def _sfdp_replacement_15(query, key, value, inv_scale):
-    counters["inductor"]["fuse_attention"] += 1
-    return aten.scaled_dot_product_attention(
-        query.transpose(1, 2),
-        key.transpose(1, 2),
-        value.transpose(1, 2),
-        attn_mask=None,
-        dropout_p=0.0,
-        is_causal=False,
-        scale=1.0 / inv_scale,
-    )
-
-
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -416,6 +342,28 @@ def _sfdp_scale_factor_check(scale_factor_op):
         return _sfdp_params_check(match)
 
     return fn
+
+
+def partialize_and_update_signature(func, **kwargs):
+    """
+    Equivalent to functools.partial but also updates the signature on returned function
+    """
+    original_sig = inspect.signature(func)
+    parameters = original_sig.parameters
+
+    new_parameters = {
+        key: value for key, value in parameters.items() if key not in kwargs
+    }
+    new_sig = inspect.Signature(parameters=list(new_parameters.values()))
+
+    partial_func = functools.partial(func, **kwargs)
+
+    def wrapper(*args, **kwargs):
+        return partial_func(*args, **kwargs)
+
+    wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+
+    return wrapper
 
 
 def _get_sfdp_patterns():
@@ -524,42 +472,30 @@ def _get_sfdp_patterns():
             d,
             _sfdp_scale_factor_check(aten.div.Tensor),
         ),
-        (
-            _sfdp_pattern_13,
-            _sfdp_replacement_13,
-            [g(), g(), g(), c()],
-            {},
-            _sfdp_scale_factor_check(aten.div.Tensor),
-        ),
-        (
-            _sfdp_pattern_14,
-            _sfdp_replacement_14,
-            [g(), g(), g(), c()],
-            {},
-            _sfdp_scale_factor_check(aten.mul.Tensor),
-        ),
-        (
-            _sfdp_pattern_15,
-            _sfdp_replacement_15,
-            [g(), g(), g(), c()],
-            {},
-            _sfdp_scale_factor_check(aten.div.Tensor),
-        ),
     ]:
         # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
         # gets serialized to a python file and does not require tracing at runtime.
-        args = [*args, *workaround.values()]
+        assert isinstance(workaround, dict)
+        training_args = [*args, *workaround.values()]
         name = pattern.__name__
 
         yield f"{name}_training", {
             "search_fn": pattern,
             "replace_fn": replacement,
-            "example_inputs": args,
+            "example_inputs": training_args,
             "trace_fn": training_graph,
             "pass_dict": patterns,
             "extra_check": extra_check,
             "scalar_workaround": workaround,
         }
+
+        if workaround:
+            assert len(workaround) == 1 and "dropout_p" in workaround
+            # functools.partial insufficient because we look at signature downstream
+            pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+            replacement = partialize_and_update_signature(replacement, dropout_p=0.0)
+            workaround = {}
+
         yield f"{name}_inference", {
             "search_fn": pattern,
             "replace_fn": replacement,

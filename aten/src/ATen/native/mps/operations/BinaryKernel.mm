@@ -5,6 +5,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/BinaryKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -155,6 +156,31 @@ kernel void polar<DTYPE>(              \
 REGISTER_POLAR_OP(float);
 REGISTER_POLAR_OP(half);
 
+template<typename T>
+kernel void complex_mul(constant void  * input_       [[buffer(0)]],
+                        constant void  * other_       [[buffer(1)]],
+                        device   void  * out_         [[buffer(2)]],
+                        constant uint3 * offsets      [[buffer(3)]],
+                        uint tid [[thread_position_in_grid]]) {
+  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  out[0] = input[0]*other[0] - input[1]*other[1];
+  out[1] = input[0]*other[1] + input[1]*other[0];
+}
+
+#define REGISTER_COMPLEX_MUL_OP(DTYPE)       \
+template                                     \
+[[host_name("complex_mul_" #DTYPE)]]         \
+kernel void complex_mul<DTYPE>(              \
+  constant void    * input,                  \
+  constant void    * other,                  \
+  device   void    * out,                    \
+  constant uint3   * offsets,                \
+  uint tid)
+
+REGISTER_COMPLEX_MUL_OP(float);
+REGISTER_COMPLEX_MUL_OP(half);
 )BINARY_METAL";
 
 using namespace mps;
@@ -269,6 +295,26 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
     }
   });
 }
+
+void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
+  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) && c10::isComplexType(other.scalar_type()));
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+  auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
+  auto input_as_real = at::view_as_real(input).select(input.dim(), 0);
+  auto other_as_real = at::view_as_real(other).select(other.dim(), 0);
+  auto iter =
+      TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
+
+  mps::binary_mps_impl(iter, "complex_mul");
+}
+
 } // namespace mps
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
