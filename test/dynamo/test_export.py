@@ -2272,6 +2272,21 @@ def forward(self, x):
         ):
             torch._export.export(qux, (t,), constraints=constraints)
 
+    def test_untracked_inputs_in_constraints(self):
+        from copy import copy
+
+        def foo(x, y):
+            return y + 1
+
+        x = torch.randn(2)
+        y = torch.randn(5, 4)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
+
+        example_inputs = (copy(x), y)
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+            ep(torch.randn(3), y)
+
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -3508,13 +3523,13 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_branch, ones_false_branch):
+def forward(self, l_x_, a_0, b_0, d_0, c_0_false_branch, b_0_false_branch, a_0_false_branch):
     add = l_x_ + l_x_;  l_x_ = None
-    cos = ones.cos();  ones = None
+    cos = a_0.cos();  a_0 = None
     add_1 = add + cos;  add = cos = None
-    cos_1 = ones_1.cos();  ones_1 = None
+    cos_1 = b_0.cos();  b_0 = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = ones_3.cos();  ones_3 = None
+    cos_2 = d_0.cos();  d_0 = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
     return add_3""",
         )
@@ -3522,13 +3537,13 @@ def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch, ones, ones_1, ones_2):
+def forward(self, l_x_, d_0_true_branch, b_0_true_branch, a_0_true_branch, a_0, b_0, c_0):
     mul = l_x_ * l_x_;  l_x_ = None
-    sin = ones.sin();  ones = None
+    sin = a_0.sin();  a_0 = None
     add = mul + sin;  mul = sin = None
-    sin_1 = ones_1.sin();  ones_1 = None
+    sin_1 = b_0.sin();  b_0 = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = ones_2.sin();  ones_2 = None
+    sin_2 = c_0.sin();  c_0 = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return add_2""",
         )
