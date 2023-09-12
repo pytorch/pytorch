@@ -1075,6 +1075,45 @@ class TestExport(TestCase):
         exp_source_fns = [("cos", "cos"), ("sin", "sin")]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
+    def test_lift_constants(self) -> None:
+        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
+
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 1)
+        self.assertEqual(len(ep.state_dict), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        nodes = list(ep.graph.nodes)
+
+        for node in nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 3)
+        self.assertEqual(len(ep.state_dict), 3)
+
+        # These constants should be placed after the param/buffers
+        self.assertTrue(
+            nodes[1].name in ep.graph_signature.inputs_to_buffers and
+            nodes[2].name in ep.graph_signature.inputs_to_buffers
+        )
+
 
 if __name__ == '__main__':
     run_tests()
