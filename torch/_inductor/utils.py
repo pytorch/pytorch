@@ -8,6 +8,7 @@ import logging
 import math
 import operator
 import os
+import platform
 import shutil
 import sys
 import tempfile
@@ -1040,6 +1041,10 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def is_linux() -> bool:
+    return platform.system() == "Linux"
 
 
 # Placeholder strings used in triton codegen.
