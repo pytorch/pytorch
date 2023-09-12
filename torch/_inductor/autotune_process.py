@@ -422,9 +422,7 @@ class BenchmarkRequest:
         return out
 
 
-def benchmark_in_sub_process(
-    choices: List[TritonTemplateCaller],
-) -> Dict[TritonTemplateCaller, float]:
+def benchmark_in_sub_process(choices: List[TritonTemplateCaller]) -> Dict[TritonTemplateCaller, float]:
     """
     Do benchmarking in a subprocess and return the perf number (latency).
     """
