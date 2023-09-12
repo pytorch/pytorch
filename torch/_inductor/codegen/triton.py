@@ -2336,10 +2336,15 @@ class TritonScheduling(BaseScheduling):
             hint = hints[0]  # all the hints are the same
 
         if hint == ReductionHint.INNER:
-            for node in nodes:
-                if not node.is_reduction() and not cls.all_contiguous(node):
-                    # fused with something more complex, forget the hint
-                    return ReductionHint.DEFAULT
+            non_contiguous_pw = [
+                node
+                for node in nodes
+                if not node.is_reduction() and not cls.all_contiguous(node)
+            ]
+
+            # heuristics if number of non-contiguous pw is more than other nodes, use DEFAULT hint
+            if len(non_contiguous_pw) > len(nodes) - len(non_contiguous_pw):
+                return ReductionHint.DEFAULT
         elif hint == ReductionHint.OUTER:
             for node in nodes:
                 if not node.is_reduction() and any(
