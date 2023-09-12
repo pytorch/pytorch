@@ -18,7 +18,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
 from . import config, ir
-from .autotune_process import BenchmarkRequest, TensorMeta
+from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -532,16 +532,16 @@ class TritonTemplate:
 
         # create the BenchmarkRequest
         grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
-        bmreq = BenchmarkRequest(
+        bmreq = TritonBenchmarkRequest(
             module_path=mod.__file__,
+            input_tensor_meta=TensorMeta.from_irnodes(input_nodes),
+            output_tensor_meta=TensorMeta.from_irnodes(layout),
             module_cache_key=mod.key,
             kernel_name=kernel_name,
             grid=grid,
             extra_args=extra_args,
             num_stages=num_stages,
             num_warps=num_warps,
-            input_tensors=TensorMeta.from_irnodes(input_nodes),
-            output_tensor=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(
