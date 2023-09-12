@@ -23,6 +23,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     ActivationWrapper,
@@ -422,6 +423,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ignored_states: Union[
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
+        device_mesh: Optional[DeviceMesh] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -436,8 +438,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         # over which sharding occurs, if sharding_strategy is {HYBRID_SHARD, _HYBRID_SHARD_ZERO2}.
         # Note that this is done before auto_wrapping, so that child FSDP modules simply pick up
         # the same process group state as the root FSDP module.
+        self.device_mesh = device_mesh
         _init_process_group_state(
-            self, process_group, sharding_strategy, auto_wrap_policy
+            self,
+            process_group,
+            sharding_strategy,
+            auto_wrap_policy,
+            device_mesh,
         )
         if auto_wrap_policy is not None:
             root_kwargs = {
@@ -664,6 +671,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_type (StateDictType): the desired ``state_dict_type`` to set.
             state_dict_config (Optional[StateDictConfig]): the configuration for the
                 target ``state_dict_type``.
+            optim_state_dict_config (Optional[OptimStateDictConfig]): the configuration
+                for the optimizer state dict.
+
         Returns:
             A StateDictSettings that include the previous state_dict type and
             configuration for the module.
@@ -763,6 +773,17 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                     "All FSDP modules must have the same state dict settings."
                     f"Got {submodule_settings} and {state_dict_settings}."
                 )
+
+            # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+            # _use_dtensor flag to be true for ShardedStateDictConfig() and ShardedOptimStateDictConfig().
+            if getattr(module, "device_mesh", None) and isinstance(
+                state_dict_settings.state_dict_config, ShardedStateDictConfig
+            ):
+                state_dict_settings.state_dict_config._use_dtensor = True
+            if getattr(module, "device_mesh", None) and isinstance(
+                state_dict_settings.optim_state_dict_config, ShardedOptimStateDictConfig
+            ):
+                state_dict_settings.optim_state_dict_config._use_dtensor = True
         return state_dict_settings
 
     @staticmethod
@@ -1880,7 +1901,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             >>> )
             >>> model.load_state_dict(state_dict)
             >>> optim_state_dict = FSDP.optim_state_dict_to_load(
-            >>>     optim_state_dict, model, optim
+            >>>     model, optim, optim_state_dict
             >>> )
             >>> optim.load_state_dict(optim_state_dict)
 

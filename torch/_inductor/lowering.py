@@ -353,7 +353,12 @@ def promote_constants(inputs, override_return_dtype=None):
                 )
             )
         elif isinstance(x, sympy.Expr):
-            out.append(IndexingConstant(x, ex.get_dtype(), ex.get_device()))
+            out.append(
+                ExpandView.create(
+                    IndexingConstant(x, ex.get_dtype(), ex.get_device()),
+                    list(ex.get_size()),
+                )
+            )
         else:
             out.append(x)
 
@@ -1888,6 +1893,7 @@ make_fallback(aten.topk)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten._scaled_mm.default)
 
+# TODO: This is done, just need to enable support in TorchInductor for complex types.
 make_fallback(aten.view_as_complex, require_contiguous)
 
 # The following were added as a result of https://github.com/pytorch/pytorch/pull/94039 to pass tests
