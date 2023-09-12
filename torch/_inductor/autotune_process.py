@@ -57,8 +57,8 @@ class TuningProcess:
         log.debug("Entering TuningProcess child main")
         try:
             TuningProcess.workloop(request_queue, response_queue)
-        except Exception:
-            log.exception("Exception in TuningProcess")
+        except Exception as ex:
+            log.exception("Exception in TuningProcess: %s", ex)
 
     @staticmethod
     def workloop(
