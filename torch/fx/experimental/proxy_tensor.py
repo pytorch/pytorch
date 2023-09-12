@@ -42,7 +42,7 @@ prim = torch.ops.prim
 log = logging.getLogger(__name__)
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
-CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
+CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OperatorBase, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
@@ -252,11 +252,9 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         not_implemented_log.debug("ProxyTensorMode tensors without proxy had unrecognized subclasses: %s", unrecognized_types)
         return NotImplemented
 
-    if func in CURRENT_DECOMPOSITION_TABLE:
-        with proxy_mode:
-            r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+    r = maybe_handle_decomp(proxy_mode, func, args, kwargs)
+    if r is not NotImplemented:
+        return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
     if not pre_dispatch:
@@ -870,6 +868,13 @@ def disable_proxy_modes_tracing(enable_current=False):
     finally:
         if maybe_old is not None:
             torch._C._set_dispatch_mode(maybe_old)
+
+
+def maybe_handle_decomp(proxy_mode, op, args, kwargs):
+    if op in CURRENT_DECOMPOSITION_TABLE:
+        with proxy_mode:
+            return CURRENT_DECOMPOSITION_TABLE[op](*args, **kwargs)
+    return NotImplemented
 
 
 def get_isolated_graphmodule(func, args, kwargs, tracing_mode="real"):

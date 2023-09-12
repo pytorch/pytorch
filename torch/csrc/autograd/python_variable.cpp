@@ -630,13 +630,15 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "DispatchKeySet _extra_dispatch_keys=None)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "DispatchKeySet _extra_dispatch_keys=None)",
   });
-  ParsedArgs<13> parsed_args{};
+  ParsedArgs<14> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -676,6 +678,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // resizable (have to define a custom allocator in that case)
   Tensor tensor;
   if (r.idx == 0) {
+    TORCH_CHECK(
+        !r.toDispatchKeySetOptional(13),
+        "This overload of _make_wrapper_subclass does not support _extra_dispatch_keys");
     tensor = at::for_blob(nullptr, r.intlist(1))
                  .strides(r.intlistOptional(2))
                  .storage_offset(r.toInt64Optional(3))
@@ -706,8 +711,12 @@ static PyObject* THPVariable_make_wrapper_subclass(
         /*allocator=*/c10::GetAllocator(c10::kMeta),
         /*resizeable=*/true};
 
+    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+    if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
+      keys = keys | *mb_extra_keys;
+    }
     tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), options.computeDispatchKey(), options.dtype());
+        std::move(storage), keys, options.dtype());
 
     auto sym_sizes = r.symintlist(1);
     auto sym_strides = r.symintlist(2);
@@ -1253,6 +1262,16 @@ PyObject* THPVariable_is_cuda(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_is_mtia(THPVariable* self, void* unused) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject*)self)) {
+    return handle_torch_function_getter(self, "is_mtia");
+  }
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(self_.is_mtia());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPVariable_is_xla(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1533,6 +1552,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
     {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
     {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
     {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+    {"is_mtia", (getter)THPVariable_is_mtia, nullptr, nullptr, nullptr},
     {"is_cpu", (getter)THPVariable_is_cpu, nullptr, nullptr, nullptr},
     {"is_xla", (getter)THPVariable_is_xla, nullptr, nullptr, nullptr},
     {"is_xpu", (getter)THPVariable_is_xpu, nullptr, nullptr, nullptr},

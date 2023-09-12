@@ -5,9 +5,9 @@ import os
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -165,6 +165,7 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode=False,
         user_visible_outputs=frozenset(),
         layout_opt=None,
+        extern_node_serializer=None,
     ):
         super().__init__(gm)
 
@@ -189,19 +190,23 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = set()
         self.cuda = False
         self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: Dict[str, torch.Tensor] = {}
+        self.constants: OrderedDict[str, torch.Tensor] = OrderedDict()
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        # See `ProxyExecutor Design Note` in ir.py for more details
+        self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
+        self.extern_node_serializer: Optional[
+            Callable[[List[ir.ExternKernelNode]], Any]
+        ] = extern_node_serializer
         self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
-        self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
@@ -432,7 +437,7 @@ class GraphLowering(torch.fx.Interpreter):
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
             return self.graph_inputs[buffer_name].get_dtype()
-        m = re.match(r"as_strided\(([a-zA-Z0-9_]+),", buffer_name)
+        m = re.match(r"(as_strided|reinterpret_tensor)\(([a-zA-Z0-9_]+),", buffer_name)
         if m:
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
@@ -503,9 +508,9 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
-    def add_tensor_constant(self, data):
-        def allocate():
-            for name, value in self.constants.items():
+    def add_tensor_constant(self, data, name=None):
+        def allocate(name):
+            for constant_name, value in self.constants.items():
                 if (
                     not data.is_mkldnn
                     and data.size() == value.size()
@@ -514,17 +519,21 @@ class GraphLowering(torch.fx.Interpreter):
                     and data.device == value.device
                     and torch.eq(data, value).all()
                 ):
-                    return name
-            name = f"constant{len(self.constants)}"
+                    return constant_name
+
+            if name is None:
+                name = f"constant{len(self.constants)}"
             self.constants[name] = data
             self.constant_reprs[name] = hashlib.sha256(
                 repr(data).encode("utf-8")
             ).hexdigest()
             return name
 
+        name = allocate(name)
+
         return TensorBox.create(
             ir.ConstantBuffer(
-                allocate(),
+                name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
@@ -619,7 +628,7 @@ class GraphLowering(torch.fx.Interpreter):
         value = getattr(self.module, target)
 
         if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value)
+            return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
@@ -630,7 +639,7 @@ class GraphLowering(torch.fx.Interpreter):
 
                 return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        return self.add_tensor_constant(value)
+        return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
         raise AssertionError()
@@ -948,9 +957,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
-        output_code_log.info("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -964,8 +973,24 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
+            serialized_extern_kernel_nodes = None
+            if (
+                config.is_fbcode()
+                and self.extern_kernel_nodes
+                and self.extern_node_serializer
+            ):
+                serialized_extern_kernel_nodes = self.extern_node_serializer(
+                    self.extern_kernel_nodes
+                )
+                output_code_log.debug(
+                    "Serialized Extern Kernel Nodes: \n%s",
+                    serialized_extern_kernel_nodes,
+                )
+
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(self, code, cuda=self.cuda)
+            return AotCodeCache.compile(
+                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
+            )
         else:
             return self.compile_to_module().call
 

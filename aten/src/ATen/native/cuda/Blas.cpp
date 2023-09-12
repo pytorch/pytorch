@@ -497,12 +497,6 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
       other.numel(),
       " elements respectively");
   TORCH_CHECK(
-      self.device() == other.device(),
-      "expected all tensors to be on the same device. Found: ",
-      self.device(),
-      ", ",
-      other.device());
-  TORCH_CHECK(
       (self.numel() <= INT_MAX) && (self.stride(0) <= INT_MAX) &&
           (other.stride(0) <= INT_MAX),
       "dot only supports n, incx, incy with the bound [val] <= %d",
@@ -729,6 +723,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& scale_result,
           Tensor& out, Tensor& amax) {
   // Check sizes
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  TORCH_CHECK(dprops->major >= 9, "torch._scaled_mm is only supported on devices with compute capability >= 9.0)");
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   TORCH_CHECK(
@@ -742,8 +738,14 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
-  TORCH_CHECK(mat1.sizes()[0] % 16 == 0 && mat1.sizes()[1] % 16 == 0, "mat1 shape (", mat1.sizes()[0], "x",
-       mat1.sizes()[1], " must be divisible by 16");
+  TORCH_CHECK(
+      mat1.sizes()[1] % 16 == 0,
+      "Expected trailing dimension of mat1 to be divisble by 16 ",
+      "but got mat1 shape: (",
+      mat1.sizes()[0],
+      "x",
+      mat1.sizes()[1],
+      ".");
   TORCH_CHECK(mat2.sizes()[0] % 16 == 0 && mat2.sizes()[1] % 16 == 0, "mat2 shape (", mat2.sizes()[0], "x",
        mat2.sizes()[1], " must be divisible by 16");
   // Check types
