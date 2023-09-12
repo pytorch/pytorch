@@ -1,4 +1,5 @@
 import contextlib
+from functools import partial
 import itertools
 import logging
 
@@ -11,6 +12,7 @@ import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
+from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
@@ -24,7 +26,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..source import FSDPNNModuleSource, GetItemSource, NNModuleSource
-from ..utils import proxy_args_kwargs
+from ..utils import identity, proxy_args_kwargs
 from .lists import ListVariable, TupleVariable
 from .nn_module import NNModuleVariable
 
@@ -840,6 +842,12 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 "NYI - torch.func.vmap is not implemented when chunk_size is passed"
             )
 
+        batch_input_args_transform = [identity for _ in batch_input_args]
+        for i, a in enumerate(batch_input_args):
+            if isinstance(a, ConstDictVariable):
+                batch_input_args_transform[i] = partial(ConstDictVariable, user_cls=a.user_cls)
+                batch_input_args[i] = a.items
+
         flat_args, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
         in_dims_v = in_dims.as_python_constant()
         in_dims_v = in_dims_v if isinstance(in_dims_v, int) else list(in_dims_v)
@@ -850,16 +858,20 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # We want to pass unbatched input to speculate subgraph.
         # So we loop through the inputs and select only one sample
         # from the batch.
-        unbatched_input_args = []
+        flat_unbatched_input_args = []
         for arg, in_dim in zip(flat_args, broadcasted_in_dims):
             if in_dim is not None:
                 assert isinstance(arg, TensorVariable)
                 unbatched_arg = arg.call_method(
                     tx, "select", (ConstantVariable(in_dim), ConstantVariable(0)), {}
                 )
-                unbatched_input_args.append(unbatched_arg)
+                flat_unbatched_input_args.append(unbatched_arg)
             else:
-                unbatched_input_args.append(arg)
+                flat_unbatched_input_args.append(arg)
+
+        unbatched_input_args = torch.utils._pytree.tree_unflatten(flat_unbatched_input_args, arg_spec)
+        for i, a in enumerate(unbatched_input_args):
+            unbatched_input_args[i] = batch_input_args_transform[i](a)
 
         # Ban ops like `stride`, `storage_offset` in the traced functions.
         # NOTE: We are conservatively banning more ops (vmap should be able
@@ -869,7 +881,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             _, body_graph, body_lifted_freevars = speculate_subgraph(
                 tx,
                 fn,
-                torch.utils._pytree.tree_unflatten(unbatched_input_args, arg_spec),
+                unbatched_input_args,
                 {},
                 graph_checkpoint,
                 checkpoint,
