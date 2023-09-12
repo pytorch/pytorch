@@ -29,6 +29,12 @@ def enable_2d_with_fsdp() -> bool:
 
     torch._C._log_api_usage_once("torch.distributed.tensor.parallel.enable_2d_with_fsdp")
 
+    warnings.warn(
+        "`enable_2d_with_fsdp` will be deprecated soon.",
+        "Please avoid using it.",
+        # TODO: Redirect users to the new 2D tutorial.
+    )
+
     try:
         from torch.distributed.fsdp._fsdp_extensions import (
             _set_fsdp_extensions,
