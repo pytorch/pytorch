@@ -60,9 +60,6 @@ class _FreeEventQueue:
             return self._queue.popitem(last=False)
         return None
 
-    def erase(
-        self,
-        tensor: torch.Tensor
-    ) -> Optional[torch.cuda.Event]:
+    def pop(self, tensor: torch.Tensor) -> Optional[torch.cuda.Event]:
         """Erase tensor-event pair from queue"""
-        self._queue.pop(tensor, None)
+        return self._queue.pop(tensor, None)

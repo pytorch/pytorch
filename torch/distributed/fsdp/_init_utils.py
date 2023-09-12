@@ -34,8 +34,8 @@ from torch.distributed.fsdp._common_utils import (
     _is_fsdp_flattened,
     _named_parameters_with_duplicates,
     clean_tensor_name,
-    TrainingState,
     DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS,
+    TrainingState,
 )
 from torch.distributed.fsdp._flat_param import (
     _FSDP_USE_FULL_PREC_IN_EVAL,

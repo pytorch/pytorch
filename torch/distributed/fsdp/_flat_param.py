@@ -35,7 +35,7 @@ from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
 )
-from torch.distributed.fsdp._limiter_utils import _FreeEventQueue, EventWithTensor
+from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 from torch.nn.parameter import _ParameterMeta  # type: ignore[attr-defined]
 
@@ -1244,6 +1244,17 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
+    @property
+    def in_forward(self):
+        return self._training_state == HandleTrainingState.FORWARD
+
+    @property
+    def in_backward(self):
+        return (
+            self._training_state == HandleTrainingState.BACKWARD_PRE
+            or self._training_state == HandleTrainingState.BACKWARD_POST
+        )
+
     def unshard(
         self,
         unshard_stream: torch.Stream,
@@ -1268,13 +1279,14 @@ class FlatParamHandle:
             self._use_unsharded_flat_param(unsharded_flat_param)
             return
 
-        in_forward = self._training_state == HandleTrainingState.FORWARD
-        in_backward = self._training_state == HandleTrainingState.BACKWARD_PRE or self._training_state == HandleTrainingState.BACKWARD_POST
-
-        if in_forward:
+        if self.in_forward:
             self._unshard_in_forward(unshard_stream)
-        elif in_backward:
+        elif self.in_backward:
             self._unshard_in_backward(unshard_stream)
+        else:
+            raise NotImplementedError(
+                "Unsharding parameter out of forward and backward is not implemented."
+            )
 
     def _unshard_in_forward(
         self,
@@ -1288,7 +1300,7 @@ class FlatParamHandle:
             if tensor_free_event:
                 tensor, event = tensor_free_event
                 # Wait for a resharding event (compute done)
-                unshard_stream.wait_event(event)
+                unshard_stream.wait_event(event)  # type: ignore[attr-defined]
                 # Free the storage of the "-2" all-gather
                 _free_storage(tensor)
                 # Caching allocator would recycle the stashed unshard buffer's
@@ -1297,7 +1309,9 @@ class FlatParamHandle:
 
         with self._device_handle.stream(unshard_stream):
             unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-            padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
+            padded_unsharded_flat_param = self._all_gather_flat_param(
+                unsharded_flat_param
+            )
             self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def _unshard_in_backward(
@@ -1308,16 +1322,16 @@ class FlatParamHandle:
             # Allocate buffer on default stream
             unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
             # Unshard stream wait for default stream
-            unshard_stream.wait_stream(
-                self._device_handle.current_stream()
-            )
+            unshard_stream.wait_stream(self._device_handle.current_stream())  # type: ignore[attr-defined]
         else:
             # Allocate buffer on unshard stream
             with self._device_handle.stream(unshard_stream):
                 unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
 
         with self._device_handle.stream(unshard_stream):
-            padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
+            padded_unsharded_flat_param = self._all_gather_flat_param(
+                unsharded_flat_param
+            )
             self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def needs_unshard(self) -> bool:
@@ -1724,8 +1738,7 @@ class FlatParamHandle:
 
         # Rate limiting in effect
         unsharded_flat_param = self._get_padded_unsharded_flat_param()
-        in_forward = self._training_state == HandleTrainingState.FORWARD
-        if in_forward:
+        if self.in_forward:
             # In the new rate limiter, we stash an all-gather buffer to keep
             # it from being freed by the caching allocator until two
             # all-gathers later. So that the caching allocator would try to
@@ -1743,7 +1756,7 @@ class FlatParamHandle:
             # In backward, we first check if the tensor is still stashed in queue
             # e.g. last two layers of forward
             # If it is, unstash it from queue
-            self._free_event_queue.erase(unsharded_flat_param)
+            self._free_event_queue.pop(unsharded_flat_param)
             # Then direct free
             self._free_unsharded_flat_param()
 

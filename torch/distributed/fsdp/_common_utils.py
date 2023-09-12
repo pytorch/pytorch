@@ -60,6 +60,7 @@ _MODULE_TO_INP_DTYPE: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 DEFAULT_MAX_IN_FLIGHT_ALL_GATHERS = 2
 
+
 class _FSDPDeviceHandle:
     """
     This is a simple abstraction for FSDP computing devices,
