@@ -719,6 +719,11 @@ endif()
 
 set(BUILD_ONEDNN_GRAPH OFF)
 
+if(MSVC)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
@@ -817,6 +822,8 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
+# Re-include to override append_cxx_flag_if_supported from third_party/FBGEMM
+include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   # Eigen fails to build with some versions, so convert this to a warning
@@ -933,8 +940,6 @@ else()
   add_compile_definitions(_UCRT_LEGACY_INFINITY)
   # disable min/max macros
   add_compile_definitions(NOMINMAX)
-  # The source code is in utf-8 encoding
-  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
   # Turn off these warnings on Windows.
   # destructor was implicitly defined as delete
   append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
