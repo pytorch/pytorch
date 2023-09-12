@@ -247,37 +247,37 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-py3-clang7-mobile-custom-build-static:
-    name: linux-focal-py3-clang7-mobile-custom-build-static
+  linux-focal-py3-clang9-mobile-custom-build-static:
+    name: linux-focal-py3-clang9-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3-clang7-mobile-custom-build-static
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-mobile-custom-build-static
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       build-generates-artifacts: false
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-focal-py3_8-clang8-xla-build:
-    name: linux-focal-py3_8-clang8-xla
+  linux-focal-py3_8-clang9-xla-build:
+    name: linux-focal-py3_8-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-py3_8-clang8-xla
+      build-environment: linux-focal-py3_8-clang9-xla
       docker-image-name: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/xla_base:v1.0
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
 
-  linux-focal-py3_8-clang8-xla-test:
-    name: linux-focal-py3_8-clang8-xla
+  linux-focal-py3_8-clang9-xla-test:
+    name: linux-focal-py3_8-clang9-xla
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_8-clang8-xla-build
+    needs: linux-focal-py3_8-clang9-xla-build
     with:
-      build-environment: linux-focal-py3_8-clang8-xla
-      docker-image: ${{ needs.linux-focal-py3_8-clang8-xla-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_8-clang8-xla-build.outputs.test-matrix }}
+      build-environment: linux-focal-py3_8-clang9-xla
+      docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3
@@ -317,23 +317,23 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
-    name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
+  linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single:
+    name: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit:
-    name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
+  linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: linux-focal-py3-clang9-android-ndk-r19c-gradle-custom-build-single-full-jit
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
