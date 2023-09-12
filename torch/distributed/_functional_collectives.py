@@ -305,8 +305,6 @@ def _is_view_op(tgt):
 
 def all_to_all_single(
     self: torch.Tensor,
-    # output_split_sizes: Optional[torch.Tensor],
-    # input_split_sizes: Optional[torch.Tensor],
     output_split_sizes: Optional[List[int]],
     input_split_sizes: Optional[List[int]],
     group: RANK_TYPES,
