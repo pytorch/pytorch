@@ -14,8 +14,43 @@ def is_torch_function_user_object(obj):
     )
 
 
+def call_torch_function(
+    tx, torch_function_type, torch_function_var, fn, types, args, kwargs
+):
+    # signature:
+    # def __torch_function__(cls, func, types, args=(), kwargs=None):
+    tf_args = (torch_function_type, fn, types, TupleVariable(list(args)))
+    return tx.inline_user_function_return(torch_function_var, tf_args, kwargs)
+
+
 class TorchFunctionObjectVariable(UserDefinedObjectVariable):
-    pass
+    def __init__(self, *args, subclass_type=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if not subclass_type:
+            self.subclass_type = self.value_type
+
+    def subclass_type_var(self):
+        return UserDefinedClassVariable(self.value_type)
+
+    def torch_function_var(self, tx):
+        from .builder import VariableBuilder
+
+        source = AttrSource(
+            AttrSource(self.source, "__torch_function__"),
+            "__func__",
+        )
+        return VariableBuilder(tx, source)(self.value.__torch_function__.__func__)
+
+    def call_torch_function(self, tx, fn, types, args, kwargs):
+        return call_torch_function(
+            tx,
+            self.subclass_type_var(),
+            self.torch_function_var(tx),
+            fn,
+            types,
+            args,
+            kwargs,
+        )
 
 
 class TensorWithTFOverrideVariable(VariableTracker):
@@ -27,14 +62,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def create(
         tx,
         tensor_variable,
-        tensor_variable_source,
         torch_function_fn,
         subclass_type,
         **kwargs,
     ):
         var = TensorWithTFOverrideVariable(
             tensor_variable,
-            tensor_variable_source,
             torch_function_fn,
             subclass_type,
             **kwargs,
@@ -48,14 +81,12 @@ class TensorWithTFOverrideVariable(VariableTracker):
     def __init__(
         self,
         tensor_variable,
-        tensor_variable_source,
         torch_function_fn,
         subclass_type,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.tensor_variable = tensor_variable
-        self.tensor_variable_source = tensor_variable_source
         self.torch_function_fn = torch_function_fn
         self.subclass_type = subclass_type
 
@@ -64,9 +95,6 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
     def python_type(self):
         return self.subclass_type
-
-    def var_getattr(self, tx, name: str) -> VariableTracker:
-        return self.tensor_variable.var_getattr(tx, name)
 
     def torch_function_var(self, tx):
         from .builder import VariableBuilder
@@ -99,7 +127,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return TensorWithTFOverrideVariable.inline_torch_function_unwrapped(
             tx,
             func_var,
-            self.orig_tensor_variable_source,
+            self.source,
             self.subclass_torch_function__func,
             self.subclass_type,
             options,
@@ -111,24 +139,24 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return f"__subclass_{self.subclass_type.__name__}"
 
     def call_torch_function(self, tx, fn, types, args, kwargs):
-        # signature:
-        # def __torch_function__(cls, func, types, args=(), kwargs=None):
-        tf_args = (
-            self.subclass_type_var(),  # cls
-            fn,  # func
+        return call_torch_function(
+            tx,
+            self.subclass_type_var(),
+            self.torch_function_var(tx),
+            fn,
             types,
-            TupleVariable(list(args)),
-        )
-
-        return tx.inline_user_function_return(
-            self.torch_function_var(tx), tf_args, kwargs
+            args,
+            kwargs,
         )
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
     if tx.output.torch_function_enabled:
         all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
-        return any(isinstance(arg, TensorWithTFOverrideVariable) for arg in all_args)
+        return any(
+            isinstance(arg, (TensorWithTFOverrideVariable, TorchFunctionObjectVariable))
+            for arg in all_args
+        )
     else:
         return False
 
@@ -138,7 +166,13 @@ def dispatch_torch_function(tx, fn, args, kwargs):
 
     all_args = args + tree_flatten(kwargs)[0]
     overloaded_args = _get_overloaded_args(
-        [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
+        [
+            arg
+            for arg in all_args
+            if isinstance(
+                arg, (TensorWithTFOverrideVariable, TorchFunctionObjectVariable)
+            )
+        ],
         lambda x: x.subclass_type,
     )
 

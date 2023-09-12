@@ -605,7 +605,6 @@ class TensorSubclassVariable(UserDefinedClassVariable):
             return TensorWithTFOverrideVariable.create(
                 tx,
                 args[0],
-                args[0].source,
                 self.value.__torch_function__.__func__,
                 self.value,
             )

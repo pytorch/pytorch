@@ -39,11 +39,7 @@ from .dicts import ConstDictVariable
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
-from .torch_function import (
-    can_dispatch_torch_function,
-    dispatch_torch_function,
-    TorchFunctionObjectVariable,
-)
+from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
 log = logging.getLogger(__name__)
 
@@ -384,14 +380,35 @@ class TorchVariable(VariableTracker):
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
+        elif self.value == torch.fx._pytree.tree_flatten_spec:
+            if len(args) != 2:
+                unimplemented("Unsupported flatten_spec with len(args) != 2")
+
+            flattened, spec = torch.fx._pytree.tree_flatten_spec(args[0], args[1].value)
+            return TupleVariable(
+                [ListVariable(flattened), ConstantVariable(spec)], **options
+            )
+        elif self.value == torch.utils._pytree.tree_map_only:
+            if len(args) != 3:
+                unimplemented("Unsupported tree_map_only with len(args) != 3")
+
+            ty = args[0].value  # type
+            fn = args[1]  # map fn
+            tree = args[2]  # tree
+
+            def map_fn(v):
+                if ty == v.python_type():
+                    return fn.call_function(tx, [v], {})
+                else:
+                    return v
+
+            return torch.utils._pytree.tree_map(map_fn, tree)
         elif (len(args) > 0 or len(kwargs) > 0) and can_dispatch_torch_function(
             tx, args, kwargs
         ):
             # This code block implements inlining the __torch_function__
             # override of a tensor.
             return dispatch_torch_function(tx, self, args, kwargs)
-        elif any(isinstance(arg, TorchFunctionObjectVariable) for arg in args):
-            pass
         elif self.value in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
@@ -613,30 +630,6 @@ class TorchVariable(VariableTracker):
                     )
 
             return _wrap_in_dynamo_variables(unflattened)
-
-        elif self.value == torch.fx._pytree.tree_flatten_spec:
-            if len(args) != 2:
-                unimplemented("Unsupported flatten_spec with len(args) != 2")
-
-            flattened, spec = torch.fx._pytree.tree_flatten_spec(args[0], args[1].value)
-            return TupleVariable(
-                [ListVariable(flattened), ConstantVariable(spec)], **options
-            )
-        elif self.value == torch.utils._pytree.tree_map_only:
-            if len(args) != 3:
-                unimplemented("Unsupported tree_map_only with len(args) != 3")
-
-            ty = args[0].value  # type
-            fn = args[1]  # map fn
-            tree = args[2]  # tree
-
-            def map_fn(v):
-                if ty == v.python_type():
-                    return fn.call_function(tx, [v], {})
-                else:
-                    return v
-
-            return torch.utils._pytree.tree_map(map_fn, tree)
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):

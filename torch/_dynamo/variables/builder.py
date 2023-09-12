@@ -1022,9 +1022,9 @@ class VariableBuilder:
             return TensorWithTFOverrideVariable.create(
                 self.tx,
                 tensor_variable,
-                source,
                 value.__torch_function__.__func__,
                 type(value),
+                source=source,
             )
 
         return tensor_variable
