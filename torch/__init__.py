@@ -291,8 +291,9 @@ class SymInt:
 
     def __hash__(self) -> builtins.int:
         if self.node.is_singleton_int():
-            return hash(self.node)
+            return self.node.hash()
         else:
+            # We could support constant SymInts as well, but not doing it for now
             raise TypeError("unhashable type: non-singleton SymInt")
 
 class SymFloat:
@@ -389,6 +390,17 @@ class SymBool:
 
     def __repr__(self):
         return str(self.node)
+
+    def __eq__(self, other):
+        if self.node.is_constant():
+            if isinstance(other, builtins.bool):
+                return self.node.bool_() == other
+            elif isinstance(other, SymBool) and other.node.is_constant():
+                return self.node.bool_() == other.node.bool_()
+        return self is other
+
+    def __hash__(self):
+        return self.node.hash()
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.
