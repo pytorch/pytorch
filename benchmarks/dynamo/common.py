@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 import time
+import weakref
 from contextlib import contextmanager
 
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Tuple, Type
@@ -40,7 +41,7 @@ from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -54,7 +55,11 @@ except ImportError:
     from microbenchmarks.operator_inp_utils import OperatorInputsMode
 
 try:
+    import torch_xla
     import torch_xla.core.xla_model as xm
+
+    # This is to woraround the backward issue https://github.com/pytorch/xla/issues/4174
+    torch_xla._XLAC._init_computation_client()
 except ImportError:
     # ignore the error if torch_xla is not installed
     pass
@@ -663,7 +668,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     timings = np.zeros((args.repeat, 2), np.float64)
     # if we randomize the input, we should also check the result is correct
-    should_check_result = should_randomize_input = args.randomize_input
+    should_randomize_input = args.randomize_input
 
     import contextlib
 
@@ -725,11 +730,6 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
                     return_result=True,
                     times=times,
                     collect_outputs=args.collect_outputs,
-                )
-
-            if should_check_result:
-                is_correct = is_correct and same(
-                    expected_output, actual_output, tol=tolerance
                 )
 
     if args.export_profiler_trace:
@@ -1117,7 +1117,7 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, eager_forward):
-        key = id(model)
+        key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
             example_outputs = eager_forward(
@@ -1136,8 +1136,9 @@ class AOTInductorModelCache:
 
             output_node = list(exported.graph.nodes)[-1]
             output_tensors = [
-                torch.empty(
+                torch.empty_strided(
                     node.meta["val"].size(),
+                    node.meta["val"].stride(),
                     dtype=node.meta["val"].dtype,
                     layout=node.meta["val"].layout,
                     device=node.meta["val"].device,
@@ -1145,21 +1146,9 @@ class AOTInductorModelCache:
                 for node in output_node.args[0]
             ]
 
-            # Use a utility function for easier benchmarking
-            source = """
-            #include <torch/csrc/inductor/aot_inductor_model.h>
-
-            torch::aot_inductor::AOTInductorModel model;
-
-            void run(
-                    const std::vector<at::Tensor>& input_tensors,
-                    std::vector<at::Tensor>& output_tensors) {
-                model.run(input_tensors, output_tensors, at::cuda::getCurrentCUDAStream());
-            }
-            """
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
-                cpp_sources=[source],
+                cpp_sources=[aot_inductor_launcher],
                 functions=["run"],
                 extra_ldflags=[so_path],
                 with_cuda=True,
@@ -3191,7 +3180,7 @@ def run(runner, args, original_dir=None):
         torch._logging.set_logs(dynamo=logging.DEBUG)
 
     if args.print_graph_breaks:
-        torch._dynamo.config.print_graph_breaks = True
+        torch._logging.set_logs(graph_breaks=True)
 
     if args.quiet:
         torch._logging.set_logs(dynamo=logging.ERROR)

@@ -45,6 +45,22 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# register custom graph optimizatin pass hook. so far, pre/post passes are
+# only applied before/after pattern_matcher in post_grad_passes.
+#
+# def my_custom_pre_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# def my_custom_post_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
+# torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+post_grad_custom_pre_pass = None
+post_grad_custom_post_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
@@ -68,11 +84,8 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# AOTInductor output path
-# If an absolute path is specified, the generated lib files will be stored under the directory;
-# If a relative path is specified, it will be used as a subdirectory under the default caching path;
-# If not specified, a temp directory will be created under the default caching path
-aot_inductor_output_path = ""
+# TODO: capture whether the graph is from export
+from_export = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -407,6 +420,14 @@ class triton:
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
+
+
+class aot_inductor:
+    # AOTInductor output path
+    # If an absolute path is specified, the generated lib files will be stored under the directory;
+    # If a relative path is specified, it will be used as a subdirectory under the default caching path;
+    # If not specified, a temp directory will be created under the default caching path
+    output_path = ""
 
 
 # create a directory containing lots of debug information

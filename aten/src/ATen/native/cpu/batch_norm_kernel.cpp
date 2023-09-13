@@ -616,7 +616,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
   using opmath_t = at::opmath_type<scalar_t>;
   using bVec = Vectorized<scalar_t>;
-  using fVec = Vectorized<at::opmath_type<scalar_t>>;
+  using fVec = Vectorized<opmath_t>;
   int64_t n_batch = input.size(0);
   int64_t n_channel = input.size(1);
   int64_t image_size = input.numel() / n_batch / n_channel;

@@ -50,6 +50,7 @@ from .bytecode_transformation import (
     Instruction,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
 from .exc import (
@@ -628,12 +629,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         *names,
         **options,
     ):
-        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
-        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
-        # but route here fore registration of children.
-        if is_dynamic_nn_module(target) and not getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
+        if is_dynamic_nn_module(target):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
@@ -641,25 +637,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         assert "source" in options
         source = options["source"]
         assert not isinstance(source, ParamBufferSource)
-
-        if is_dynamic_nn_module(target) and getattr(
-            target, "_is_fsdp_managed_module", False
-        ):
-            name = "_".join(map(str, names))
-            base = name
-            for i in itertools.count():
-                if name not in self.nn_modules:
-                    self.nn_modules[name] = target
-                    break
-                name = f"{base}_{i}"
-            options["guards"].add(source.make_guard(GuardBuilder.TYPE_MATCH))
-            options["guards"].add(source.make_guard(GuardBuilder.ID_MATCH))
-            vt = variables.nn_module.FSDPManagedNNModuleVariable(
-                target,
-                name,
-                **options,
-            )
-            return self.side_effects.track_object_existing(source, target, vt)
 
         if isinstance(target, torch.Tensor):
             tracer = self.current_tracer
@@ -832,6 +809,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
+        # NB: Typically (i.e., for graph compile from RETURN_VALUE),
+        # symbolic_locals will be empty at this point, as prune_dead_locals
+        # will clear out all of symbolic_locals because RETURN_VALUE is the
+        # last instruction and no more locals are used.  The fanciness here
+        # is only needed for partial graphs.
         for k, v in tx.symbolic_locals.items():
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
@@ -1229,6 +1211,11 @@ class SubgraphTracer(fx.Tracer):
         self.lifted_freevars = collections.OrderedDict()
         self.prev_inst = None
 
+        self._cur_code = None
+        self._orig_gm_meta = None
+        self._orig_gm_lineno_map = None
+        self._orig_gm_firstlineno = None
+
     def create_proxy(
         self,
         kind,
@@ -1306,6 +1293,43 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
+        # update reference to original meta if we're tracing a new code object
+        if tx.f_code is not self._cur_code:
+            orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
+                "orig_graphmodule", None
+            )
+            if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                self._orig_gm_meta = [
+                    nd.meta for nd in orig_graphmodule_maybe.graph.nodes
+                ]
+                self._orig_gm_lineno_map = orig_graphmodule_maybe._lineno_map
+                self._orig_gm_firstlineno = (
+                    orig_graphmodule_maybe.forward.__code__.co_firstlineno
+                )
+            else:
+                self._orig_gm_meta = None
+                self._orig_gm_lineno_map = None
+                self._orig_gm_firstlineno = None
+
+        # preserve original meta if it is available
+        if (
+            self._orig_gm_meta
+            and self._orig_gm_lineno_map
+            and self._orig_gm_firstlineno
+        ):
+            lineno = tx.current_instruction.starts_line
+            node_idx = None
+            if lineno is not None:
+                node_idx = self._orig_gm_lineno_map.get(
+                    lineno - self._orig_gm_firstlineno, None
+                )
+            if node_idx is not None:
+                meta = self._orig_gm_meta[node_idx]
+                for key in ("nn_module_stack", "source_fn", "stack_trace"):
+                    if key in meta:
+                        rv.node.meta[key] = meta[key]
+                return rv
+
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
@@ -1378,6 +1402,11 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        log.debug(
+            "create_graph_input %s %s",
+            name,
+            source.name() if source is not None else "(none)",
+        )
         if source is None:
             assert (
                 self.parent is not None

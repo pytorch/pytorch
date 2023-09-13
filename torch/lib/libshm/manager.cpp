@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <memory>
-#include <optional>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -92,7 +91,7 @@ int main(int argc, char* argv[]) {
           "could not generate a random directory for manager socket");
     }
 
-    std::string tempfile = (tempdir->name / "manager.sock").string();
+    std::string tempfile = tempdir->name + "/manager.sock";
 
     srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
