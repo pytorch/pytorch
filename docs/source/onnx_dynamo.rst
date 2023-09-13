@@ -8,7 +8,7 @@ TorchDynamo-based ONNX Exporter
     :depth: 3
 
 .. warning::
-  The ONNX exporter for TorchDynamo is under active development and is subject to rapid change.
+  The ONNX exporter for TorchDynamo is a rapidly evolving beta technology.
 
 Overview
 --------
@@ -80,7 +80,7 @@ As the code above shows, all you need is to provide :func:`torch.onnx.dynamo_exp
 The exporter will then return an instance of :class:`torch.onnx.ExportOutput` that contains the exported ONNX graph along with extra information.
 
 The in-memory model available through ``export_output.model_proto`` is an ``onnx.ModelProto`` object in compliance with the `ONNX IR spec <https://github.com/onnx/onnx/blob/main/docs/IR.md>`_.
-The ONNX model be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ExportOutput.save` API.
+The ONNX model may then be serialized into a `Protobuf file <https://protobuf.dev/>`_ using the :meth:`torch.onnx.ExportOutput.save` API.
 
 .. code-block:: python
 
