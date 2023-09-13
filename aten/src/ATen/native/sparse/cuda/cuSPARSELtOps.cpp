@@ -162,7 +162,6 @@ at::Tensor _cslt_sparse_mm(
     {
         TORCH_CHECK(false, "Setting out_dtype is only supported for int8 input and fp16 output.");
     }
-        
   }
 
   int64_t k = dense_B.size(0);
