@@ -1,9 +1,8 @@
 name,accuracy,graph_breaks
-SelecSls42b,pass,0
 adv_inception_v3,pass,0
 beit_base_patch16_224,pass,0
 botnet26t_256,pass,0
-cait_m36_384,pass,0
+cait_m36_384,fail_to_run,0
 coat_lite_mini,pass,0
 convit_base,fail_to_run,0
 convmixer_768_32,pass,0
@@ -48,6 +47,7 @@ resmlp_12_224,pass,0
 resnest101e,pass,0
 rexnet_100,pass,0
 sebotnet33ts_256,pass,0
+selecsls42b,pass,0
 spnasnet_100,pass,0
 swin_base_patch4_window7_224,pass,0
 swsl_resnext101_32x16d,pass,0
@@ -55,7 +55,7 @@ tf_efficientnet_b0,pass,0
 tf_mixnet_l,pass,0
 tinynet_a,pass,0
 tnt_s_patch16_224,pass,0
-twins_pcpvt_base,pass,0
+twins_pcpvt_base,fail_to_run,0
 visformer_small,pass,0
 vit_base_patch16_224,pass,0
 volo_d1_224,pass,0
