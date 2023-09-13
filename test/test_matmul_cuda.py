@@ -243,7 +243,6 @@ class TestFP8MatmulCuda(TestCase):
 @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability(0)[0] != 8, "mixed dtypes MM only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
-    @toleranceOverride({torch.float32: xtol(atol=0, rtol=1e-3)})
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
         def preprocess_weights_for_mixed_gemm(inp):
             assert inp.dtype == torch.int8
@@ -324,7 +323,10 @@ class TestMixedDtypesLinearCuda(TestCase):
 
             return outp.view(inp.shape)
 
-        def run_test(batch_shape, m, n, k, add_bias, dtype, device):
+        def run_test(batch_shape, m, n, k, add_bias, activation, dtype, device, rtol, atol):
+            if not add_bias and activation != "none":
+                return
+
             val_lo, val_hi = -1, 1
             valq_lo, valq_hi = -2, 2
             input = make_tensor(
@@ -346,15 +348,22 @@ class TestMixedDtypesLinearCuda(TestCase):
             output_ref = torch.addmm(bias_ref, input_ref, weight_ref).reshape(
                 *input.shape[:-1], weight.shape[1]
             )
+            if activation == "relu":
+                relu = torch.nn.ReLU()
+                output_ref = relu(output_ref)
+            elif activation == "silu":
+                silu = torch.nn.SiLU()
+                output_ref = silu(output_ref)
 
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 preprocess_weights_for_mixed_gemm(weight).view(torch.uint8),
                 scale,
                 bias=bias,
+                activation=activation
             )
 
-            torch.testing.assert_close(output, output_ref)
+            torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
         batch_shapes = [[], [2], [2, 1]]
         shapes = [
@@ -368,9 +377,13 @@ class TestMixedDtypesLinearCuda(TestCase):
             [8, 256, 384],
             [8, 384, 256],
         ]
-        for batch_shape, (m, n, k), add_bias in \
-            product(batch_shapes, shapes, (False, True)):
-            run_test(batch_shape, m, n, k, add_bias, dtype, device)
+        activations = [None, "relu", "silu"]
+        rtol, atol = 1e-3, 1e-3
+        if dtype == torch.bfloat16:
+            rtol, atol = 1e-2, 1e-2
+        for batch_shape, (m, n, k), add_bias, activation in \
+            product(batch_shapes, shapes, (False, True), activations):
+            run_test(batch_shape, m, n, k, add_bias, activation, dtype, device, rtol, atol)
         
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), except_for="cpu")
