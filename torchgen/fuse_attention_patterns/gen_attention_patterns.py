@@ -111,6 +111,8 @@ def serialize_functions() -> None:
         with open(file_path / f"{pattern_name}.py", write_mode) as f:
             if write_mode == "w":
                 f.write(file_template)
+            else:
+                f.write("\n\n")
             f.write(serialized_pattern)
             f.write("\n")
 
