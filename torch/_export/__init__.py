@@ -110,7 +110,6 @@ def export_(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    from typing import _GenericAlias
 
     def typing_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, tuple):
@@ -118,7 +117,7 @@ def export_(
                 for arg, shape in zip(combined_args, dynamic_shapes):
                     yield from typing_zip(arg, shape)
             else:
-                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ is list, f"Unexpected {dynamic_shapes} matching tuple"
+                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ in (list, List), f"Unexpected {dynamic_shapes} matching tuple"
                 shape = dynamic_shapes.__args__[0]
                 for arg in combined_args:
                     yield from typing_zip(arg, shape)
@@ -127,7 +126,7 @@ def export_(
                 for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
                     yield from typing_zip(arg, shape)
             else:
-                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ is dict, f"Unexpected {dynamic_shapes} matching dict"
+                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ in (dict, Dict), f"Unexpected {dynamic_shapes} matching dict"
                 shape = dynamic_shapes.__args__[1]
                 for arg in combined_args.values():
                     yield from typing_zip(arg, shape)
@@ -139,7 +138,7 @@ def export_(
     symbols = defaultdict(list)
 
     def update_symbols(tensor, shape):
-        if isinstance(shape, (_GenericAlias, types.GenericAlias)) and shape.__origin__ is TensorType:
+        if hasattr(shape, "__origin__") and shape.__origin__ is TensorType:
             for i, dim in enumerate(shape.__args__):
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i))
