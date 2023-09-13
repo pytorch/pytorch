@@ -483,9 +483,10 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
     Tensor output, inverse;
     if (sorted) {
       std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(
-          self, return_inverse, false, IsUnique<scalar_t, /* equal_nan */ false>());
+          self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
     } else {
-      std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(self, sorted, return_inverse, false);
+      std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(
+          self, /* sorted */false, return_inverse, /* return_counts */false);
     }
     return std::make_tuple(output, inverse);
   });
@@ -498,7 +499,7 @@ _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, c
       return unique_cpu_sorted_template<scalar_t>(
           self, return_inverse, return_counts, IsUnique<scalar_t, /* equal_nan */ false>());
     } else {
-      return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
+      return unique_cpu_template<scalar_t>(self, /* sorted */false, return_inverse, return_counts);
     }
   });
 }
