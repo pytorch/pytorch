@@ -3778,10 +3778,6 @@ class DynamicScalar(ExternKernelAlloc):
         # Signal to codegen that our output buffer isn't safe to reuse
         return [self.inputs[0].get_name()]
 
-    def codegen_reference(self):
-        traceback.print_stack()
-        return self.get_name()
-
     def __str__(self):
         return self.get_name()
 
