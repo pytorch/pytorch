@@ -451,13 +451,7 @@ class SideEffects:
                     and handle.user_code_variable_name
                 ):
                     # register_hook stored with variable name assigned to the handle
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=handle.user_code_variable_name
-                            )
-                        ]
-                    )
+                    cg.extend_output([cg.create_store(handle.user_code_variable_name)])
                 else:
                     # register_hook stored w/o a variable name assigned to the handle
                     cg.extend_output([create_instruction("POP_TOP")])
@@ -467,13 +461,7 @@ class SideEffects:
                     and handle.user_code_variable_name
                 ):
                     cg(handle)
-                    cg.extend_output(
-                        [
-                            create_instruction(
-                                "STORE_FAST", argval=handle.user_code_variable_name
-                            )
-                        ]
-                    )
+                    cg.extend_output([cg.create_store(handle.user_code_variable_name)])
 
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []

@@ -11,6 +11,12 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
+# Invoke is a higher order op meant for both invoking a bound hook,
+# and for registering it as a call_function in the backward graph.
+# This allows us to re-enter dynamo during compiled autograd to trace (or graph break)
+# the hook as needed. This, in turn, means we can support hooks in backward with complex python
+# state mutation. If we were to not do this, the hooks would get inlined into their composing aten ops,
+# and we would lose the python state mutation.
 def invoke(fn, grad, reenter):
     return invoke_op(fn, grad, reenter)
 
@@ -19,6 +25,9 @@ invoke_op = HigherOrderOperator("invoke")
 
 
 def dynamo_interceding_fn_wrapper(grad, *, fn):
+    # This wrapper intercepts calls to fn, and calls the real fn via invoke
+    # However, as reenter is set to false, the call_function created during trace
+    # will point to the actual fn, and not to this function.
     return invoke_op(fn, grad, reenter=False)
 
 
@@ -29,6 +38,11 @@ def inner_trace(fn, grad, reenter):
         fn.__name__ = fn.func.__name__  # type: ignore[attr-defined]
     original_fn = fn
     if reenter:
+        # If the reenter flag is set, we wrap the original fn in dynamo_interceding_fn_wrapper
+        # and write that to the graph. This produces an aot_autograd graph during backwards that
+        # points to dynamo_interceding_fn_wrapper. Then, during compiled autograd, we use
+        # dynamo_interceding_fn_wrapper to invoke the original fn under dynamo. The actual
+        # dynamo part of dynamo_interceding_fn_wrapper happens during compiled autograd.
         fn = functools.partial(dynamo_interceding_fn_wrapper, fn=fn)
         fn.__name__ = fn.func.__name__
     grad = torch._functorch.aot_autograd.from_fun(grad)

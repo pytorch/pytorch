@@ -9,8 +9,6 @@ try:
 except ModuleNotFoundError:
     np = None
 
-import itertools
-import weakref
 
 import sympy
 
@@ -26,7 +24,7 @@ from .. import config, variables
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource
 from ..utils import (
     fqn,
     get_custom_getattr,
@@ -41,8 +39,6 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
-import itertools
-import weakref
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -678,25 +674,35 @@ class TensorVariable(VariableTracker):
                 **options,
             )
             if not self.source:
+                # Intermediary
+
+                # This function is only invoked if the passed-in func has no source,
+                # useful for intermediary created functions.
                 def _lifted_fn_src(name):
                     base = name
                     for i in itertools.count():
                         if name not in tx.output.global_scope:
                             src = GlobalSource(name)
-                            tx.output.guards.add(src.make_guard(GuardBuilder.WEAKREF_ALIVE))
+                            tx.output.guards.add(
+                                src.make_guard(GuardBuilder.WEAKREF_ALIVE)
+                            )
                             tx.output.install_global(name, weakref.ref(fn))
                             break
                         name = f"{base}_{i}"
                     return src
 
+                # Either we have a source already, or we must make a weakref to the original fn
+                # and reference that.
                 src = fn_var.source if fn_var.source else _lifted_fn_src(name)
 
-                # Intermediary
                 from .builder import GraphArg
 
-                original_fn = fn
+                # This wraps our user provided fn with a function that intercedes and
+                # uses our `invoke` higher order op to record a hook invocation in bwd graph.
                 fn = functools.partial(record_hook, real_hook=fn)
 
+                # This little piece of logic ensures we only ever lift a given hook up once
+                # this important, because a dynamo->aot_autograd invariant is no duplicate sources in inputs.
                 hook_proxy = None
                 for node in tx.output.root_tracer.graph.nodes:
                     if node.op == "placeholder":
@@ -711,7 +717,6 @@ class TensorVariable(VariableTracker):
                     )
                     hook_proxy.node.meta["source"] = src
                     grapharg = GraphArg(src, fn, False, None)
-                    grapharg.has_symbols = False
                     hook_proxy.node.meta["grapharg"] = grapharg
                     hook_proxy.node.meta["proxy"] = hook_proxy
                 # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity

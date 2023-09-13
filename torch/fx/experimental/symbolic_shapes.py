@@ -216,6 +216,8 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
         for s in val:
             r |= free_symbols(s)
         return r
+    elif isinstance(val, functools.partial):
+        return set()
     else:
         raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
