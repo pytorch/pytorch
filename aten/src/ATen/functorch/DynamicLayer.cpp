@@ -499,37 +499,6 @@ TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerBackMode, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackFallback>());
 }
 
-TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
-  m.impl("size", torch::CppFunction::makeFallthrough());
-  m.impl("sym_size", torch::CppFunction::makeFallthrough());
-  m.impl("stride", torch::CppFunction::makeFallthrough());
-  m.impl("sym_stride", torch::CppFunction::makeFallthrough());
-  m.impl("storage_offset", torch::CppFunction::makeFallthrough());
-  m.impl("sym_storage_offset", torch::CppFunction::makeFallthrough());
-  m.impl("is_contiguous", torch::CppFunction::makeFallthrough());
-  m.impl("is_contiguous.memory_format", torch::CppFunction::makeFallthrough());
-  m.impl("is_strides_like_format", torch::CppFunction::makeFallthrough());
-  m.impl("is_non_overlapping_and_dense", torch::CppFunction::makeFallthrough());
-  m.impl("dim", torch::CppFunction::makeFallthrough());
-  m.impl("numel", torch::CppFunction::makeFallthrough());
-  m.impl("sym_numel", torch::CppFunction::makeFallthrough());
-}
-TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerBackMode, m) {
-  m.impl("size", torch::CppFunction::makeFallthrough());
-  m.impl("sym_size", torch::CppFunction::makeFallthrough());
-  m.impl("stride", torch::CppFunction::makeFallthrough());
-  m.impl("sym_stride", torch::CppFunction::makeFallthrough());
-  m.impl("storage_offset", torch::CppFunction::makeFallthrough());
-  m.impl("sym_storage_offset", torch::CppFunction::makeFallthrough());
-  m.impl("is_contiguous", torch::CppFunction::makeFallthrough());
-  m.impl("is_contiguous.memory_format", torch::CppFunction::makeFallthrough());
-  m.impl("is_strides_like_format", torch::CppFunction::makeFallthrough());
-  m.impl("is_non_overlapping_and_dense", torch::CppFunction::makeFallthrough());
-  m.impl("dim", torch::CppFunction::makeFallthrough());
-  m.impl("numel", torch::CppFunction::makeFallthrough());
-  m.impl("sym_numel", torch::CppFunction::makeFallthrough());
-}
-
 
 #define SPECIAL_GRAD_CASE(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackGradSpecialCase>());
