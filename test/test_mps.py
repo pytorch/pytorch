@@ -12,6 +12,7 @@ import tempfile
 import os
 import copy
 import gc
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -60,6 +61,12 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
+
+        # precision issues
+        'digamma': [torch.float32],
+        'special.polygammaspecial_polygamma_n_0': [torch.float16],
+        'polygammapolygamma_n_0': [torch.float16],
+
         # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
         'addr': [torch.float16],
 
@@ -208,7 +215,7 @@ def mps_ops_grad_modifier(ops):
 
 def mps_ops_modifier(ops):
     # Supported complex OPS
-    SUPPORTED_COMPLEX_OPS = [
+    SUPPORTED_COMPLEX_OPS = {
         '__radd__',
         '__rmul__',
         'add',
@@ -231,6 +238,8 @@ def mps_ops_modifier(ops):
         'kron',
         'linspace',
         'logspace',
+        'linspacetensor_overload',
+        'logspacetensor_overload',
         'mul',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.unfold',
@@ -260,7 +269,7 @@ def mps_ops_modifier(ops):
         'vsplit',
         'zero_',
         'zeros',
-    ]
+    }
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
         # Top 60
@@ -374,6 +383,21 @@ def mps_ops_modifier(ops):
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
+        # Failure due to precision issues (still present on 13.3+) as well as non-standard behavior of
+        # cpu ops for the negative integers.
+        # Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
+        # - CPU output: tensor([102.668, 1.129e+15])
+        # - MPS output: tensor([102.6681, inf])
+        # In the latter case, inf is probably correct (this is what scipy does).
+        'polygamma': [torch.float32, torch.uint8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
@@ -420,6 +444,20 @@ def mps_ops_modifier(ops):
         # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
         # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
         'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+
+        # Failure due to precision issues as well as non-standard behavior of cpu ops for the
+        # negative integers. Example for torch.polygamma(1, tensor([-0.9, -1.0], dtype=torch.float32)):
+        # - CPU output: tensor([102.668, 1.129e+15])
+        # - MPS output: tensor([102.6681, inf])
+        # In the latter case, inf is probably correct (this is what scipy does).
+        'polygamma': [torch.float32, torch.uint8],
+        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
+        'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int32, torch.int64, torch.int8],
     }
 
     # Those ops are not expected to work
@@ -464,7 +502,6 @@ def mps_ops_modifier(ops):
         'cholesky_solve': None,
         'cummax': None,
         'cummin': None,
-        'digamma': None,
         'erfc': None,
         'frexp': None,
         'gcd': None,
@@ -481,7 +518,6 @@ def mps_ops_modifier(ops):
         'isposinf': None,
         'kthvalue': None,
         'lcm': None,
-        'lgamma': None,
         'linalg.cholesky': None,
         'linalg.cholesky_ex': None,
         'linalg.cond': None,
@@ -517,10 +553,6 @@ def mps_ops_modifier(ops):
         'masked.median': None,
         'matrix_exp': None,
         'mode': None,
-        'mvlgamma': None,
-        'mvlgammamvlgamma_p_1': None,
-        'mvlgammamvlgamma_p_3': None,
-        'mvlgammamvlgamma_p_5': None,
         'nanquantile': None,
         'nanmedian': None,
         'native_dropout_backward': None,
@@ -557,12 +589,6 @@ def mps_ops_modifier(ops):
         'ormqr': None,
         'pca_lowrank': None,
         'pinverse': None,
-        'polygamma': None,
-        'polygammapolygamma_n_0': None,
-        'polygammapolygamma_n_1': None,
-        'polygammapolygamma_n_2': None,
-        'polygammapolygamma_n_3': None,
-        'polygammapolygamma_n_4': None,
         'qr': None,
         'quantile': None,
         'rsub': None,
@@ -605,8 +631,6 @@ def mps_ops_modifier(ops):
         'special.modified_bessel_k0': None,
         'special.modified_bessel_k1': None,
         'special.ndtri': None,
-        'special.polygamma': None,
-        'special.polygammaspecial_polygamma_n_0': None,
         'special.scaled_modified_bessel_k0': None,
         'special.scaled_modified_bessel_k1': None,
         'special.spherical_bessel_j0': None,
@@ -9738,6 +9762,15 @@ class TestAdvancedIndexing(TestCaseMPS):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def test_nonzero_multi_threading(self):
+        # Test that MPS does not crash if nonzero called concurrently
+        # See https://github.com/pytorch/pytorch/issues/100285
+        x = torch.rand(3, 3, device="mps")
+        t1 = threading.Thread(target=torch.nonzero, args=(x,))
+        t2 = threading.Thread(target=torch.nonzero, args=(x,))
+        t1.start()
+        t2.start()
+
     def test_masked_select(self):
         x = torch.randn(3, 4)
         x_mps = x.to("mps")
@@ -10625,11 +10658,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.lgamma`
+        # This can be changed once we actually implement 'lcm'
         # Should return fn, args, kwargs, string_version
-        return (torch.lgamma,
-                torch.tensor([100], device='mps'), {},
-                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
+        return (torch.lcm,
+                [torch.tensor([1], device='mps'), torch.tensor([2], device='mps')], {},
+                "torch.lcm(torch.tensor([1], device='mps'), torch.tensor([2], device='mps'))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
@@ -10783,10 +10816,14 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
+        'nn.functional.batch_norm',
+        'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',
+        '_native_batch_norm_legit',
+        'native_batch_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

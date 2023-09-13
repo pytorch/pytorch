@@ -90,24 +90,57 @@ compile_lock = threading.RLock()
 guarded_backend_cache = threading.local()
 
 
-@contextlib.contextmanager
-def backend_cache_wrapper(backend: CompilerFn):
-    def _set_current_backend(backend: CompilerFn):
-        if not hasattr(guarded_backend_cache, "current_backend"):
-            guarded_backend_cache.current_backend = None
-        if not hasattr(guarded_backend_cache, "cached_backends"):
-            guarded_backend_cache.cached_backends = {}
-        prev_backend = guarded_backend_cache.current_backend
-        guarded_backend_cache.current_backend = backend
-        # Mapping id of a CompilerFn to itself
-        guarded_backend_cache.cached_backends[id(backend)] = backend
-        return prev_backend
+def _maybe_init_guarded_backend_cache():
+    if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):
+        guarded_backend_cache.skip_backend_check_for_run_only_mode = False
+    if not hasattr(guarded_backend_cache, "current_backend"):
+        guarded_backend_cache.current_backend = None
+    if not hasattr(guarded_backend_cache, "cached_backends"):
+        guarded_backend_cache.cached_backends = {}
 
-    prev_backend = _set_current_backend(backend)
-    try:
-        yield backend
-    finally:
-        _set_current_backend(prev_backend)
+
+def _reset_guarded_backend_cache():
+    _maybe_init_guarded_backend_cache()
+    guarded_backend_cache.skip_backend_check_for_run_only_mode = False
+    guarded_backend_cache.current_backend = None
+    cached_backends = guarded_backend_cache.cached_backends
+    for backend in cached_backends.values():
+        if hasattr(backend, "reset"):
+            backend.reset()
+    cached_backends.clear()
+    guarded_backend_cache.cached_backends = {}
+
+
+@contextlib.contextmanager
+def backend_cache_wrapper(callback: CompilerFn):
+    _maybe_init_guarded_backend_cache()
+
+    # callback is False for RunOnlyContext. RunOnlyContext is used
+    # as a way to re-use the previous compiled cache.
+    # We therefore skip the check and re-use whatever code that's already cached.
+    # Note: the cache that's actually used depends on the caching policy.
+    if callback is False:
+        try:
+            prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = True
+            yield None
+        finally:
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
+    else:
+        backend = innermost_fn(callback)
+
+        def _set_current_backend(backend: CompilerFn):
+            prev_backend = guarded_backend_cache.current_backend
+            guarded_backend_cache.current_backend = backend
+            # Mapping id of a CompilerFn to itself
+            guarded_backend_cache.cached_backends[id(backend)] = backend
+            return prev_backend
+
+        prev_backend = _set_current_backend(backend)
+        try:
+            yield backend
+        finally:
+            _set_current_backend(prev_backend)
 
 
 DONT_WRAP_FILES = {
@@ -284,7 +317,7 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
-        self.backend_cache_manager = backend_cache_wrapper(innermost_fn(self.callback))
+        self.backend_cache_manager = backend_cache_wrapper(self.callback)
         self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
@@ -306,14 +339,6 @@ class _TorchDynamoContext:
             return self.compiler_config
 
         fn = innermost_fn(fn)
-
-        # add context containing GraphModule to any GraphModule forward functions
-        if isinstance(fn, torch.fx.GraphModule):
-            # Assume that the underlying node metadata of `fn`,
-            # a GraphModule instance, accurately represents
-            # all instances of type(fn).
-            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
-
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
@@ -364,7 +389,7 @@ class _TorchDynamoContext:
 
             on_enter()
             prior = set_eval_frame(callback)
-            backend_cache_manager = backend_cache_wrapper(innermost_fn(self.callback))
+            backend_cache_manager = backend_cache_wrapper(self.callback)
             backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()

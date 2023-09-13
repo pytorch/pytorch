@@ -151,6 +151,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.export.dynamic_dim,
         torch.export.export,
         torch.export.load,
+        torch.export.register_dataclass,
         torch.export.save,
         torch.eye,
         torch.fft.fftfreq,
