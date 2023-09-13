@@ -36,12 +36,15 @@ float get_uniform(ivec4 pos, float from, float to) {
 float get_gaussrand(ivec4 pos, float mean, float std) {
   // Implementation of Box-Muller transform from the pseudo from Wikipedia,
   // which converts two uniformly sampled random numbers into two numbers of
-  // Gaussian distribution. Since the shader file can only use one for a position,
-  // we flip a coin by the 3rd uniformly sampled number to decide which one to keep.
+  // Gaussian distribution. Since the shader file can only use one for a
+  // position, we flip a coin by the 3rd uniformly sampled number to decide
+  // which one to keep.
   // https://en.wikipedia.org/wiki/Box%E2%80%93Muller_transform
   float u1 = rand2_nonzero(pos);
-  float u2 = rand2_nonzero(ivec4(pos.x+10, pos.y+20, pos.z+30, pos.w+40));
-  float u3 = rand2_nonzero(ivec4(pos.x-10, pos.y-20, pos.z-30, pos.w-40));
+  float u2 =
+      rand2_nonzero(ivec4(pos.x + 10, pos.y + 20, pos.z + 30, pos.w + 40));
+  float u3 =
+      rand2_nonzero(ivec4(pos.x - 10, pos.y - 20, pos.z - 30, pos.w - 40));
 
   float mag = std * sqrt(-2.0 * log(u1));
   float v;
