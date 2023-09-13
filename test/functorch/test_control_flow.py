@@ -27,6 +27,20 @@ def from_fun(t):
     torch._sync(t)
     return torch._from_functional_tensor(t.elem)
 
+def to_fun_old(t):
+    if isinstance(t, torch.Tensor) and not torch._is_functional_tensor(t):
+        out = torch._to_functional_tensor(t)
+        torch._mirror_autograd_meta_to(t, out)
+        return out
+    return t
+
+def from_fun_old(t):
+    # quick sanity assert
+    if isinstance(t, torch.Tensor):
+        assert torch._is_functional_tensor(t)
+        torch._sync(t)
+        return torch._from_functional_tensor(t)
+    return t
 
 def from_fun(x):
     if not isinstance(x, torch.Tensor):
@@ -511,7 +525,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(4, 5)
         try:
-            example_input_func = torch._to_functional_tensor(example_input)
+            example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
                 f(example_input_func)
@@ -549,7 +563,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(5, 5)
         try:
-            example_input_func = torch._to_functional_tensor(example_input)
+            example_input_func = to_fun_old(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
                 f(example_input_func)
@@ -594,10 +608,10 @@ class TestControlFlowTraced(TestCase):
                 torch._enable_functionalization(reapply_views=False)
                 try:
                     func_args = pytree.tree_map(
-                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, args)
                     func_kwargs = pytree.tree_map(
-                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
-                    return pytree.tree_map(torch._from_functional_tensor, func(*func_args, **func_kwargs))
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(from_fun_old, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1034,7 +1048,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(torch._from_functional_tensor, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun_old, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1098,7 +1112,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(torch._from_functional_tensor, func(*args, **kwargs))
+                    return pytree.tree_map(from_fun_old, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1448,10 +1462,10 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 torch._enable_functionalization(reapply_views=False)
                 try:
                     func_args = pytree.tree_map(
-                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, args)
                     func_kwargs = pytree.tree_map(
-                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
-                    return pytree.tree_map(torch._from_functional_tensor, func(*func_args, **func_kwargs))
+                        lambda x: to_fun_old(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(from_fun_old, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
