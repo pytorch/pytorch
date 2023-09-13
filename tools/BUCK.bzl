@@ -132,6 +132,7 @@ def define_tools_targets(
             "autograd/templates/python_linalg_functions.cpp",
             "autograd/templates/python_nested_functions.cpp",
             "autograd/templates/python_nn_functions.cpp",
+            "autograd/templates/python_return_types.h",
             "autograd/templates/python_return_types.cpp",
             "autograd/templates/python_sparse_functions.cpp",
             "autograd/templates/python_special_functions.cpp",
