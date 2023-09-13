@@ -4,7 +4,7 @@ import io
 import pathlib
 import typing
 from enum import auto, Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
 
@@ -17,6 +17,13 @@ from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+
+from torch.utils._pytree import (
+    FlattenFunc,
+    FromDumpableContextFn,
+    ToDumpableContextFn,
+    UnflattenFunc,
+)
 
 
 __all__ = [
@@ -33,6 +40,7 @@ __all__ = [
     "dynamic_dim",
     "export",
     "load",
+    "register_dataclass",
     "save",
 ]
 
@@ -50,11 +58,11 @@ class ExportBackwardSignature:
 @dataclasses.dataclass
 class ExportGraphSignature:
     """
-    ExportGraphSignature models the input/output signature of Export Graph,
+    :class:`ExportGraphSignature` models the input/output signature of Export Graph,
     which is a fx.Graph with stronger invariants gurantees.
 
     Export Graph is functional and does not access "states" like parameters
-    or buffers within the graph via `getattr` nodes. Instead, torch.export()
+    or buffers within the graph via ``getattr`` nodes. Instead, :func:`export`
     gurantees that parameters and buffers are lifted out of the graph as inputs.
     Similarly, any mutations to buffers are not included in the graph either,
     instead the updated values of mutated buffers are modeled as additional outputs
@@ -215,17 +223,17 @@ class ModuleCallEntry:
 
 class ExportedProgram:
     """
-    Package of a program from :func:`torch.export.export()`. It contains
-    an fx.Graph that represents Tensor computation, a state_dict containing
+    Package of a program from :func:`export`. It contains
+    an :class:`torch.fx.Graph` that represents Tensor computation, a state_dict containing
     tensor values of all lifted parameters and buffers, and various metadata.
 
     You can call an ExportedProgram like the original callable traced by
-    :func:`torch.export.export()` with the same calling convention.
+    :func:`export` with the same calling convention.
 
-    To perform transformations on the graph, use `.module` property to access
+    To perform transformations on the graph, use ``.module`` property to access
     an :class:`torch.fx.GraphModule`. You can then use
     `FX transformation <https://pytorch.org/docs/stable/fx.html#writing-transformations>`_
-    to rewrite the graph. Afterwards, you can simply use :func:`torch.export.export()`
+    to rewrite the graph. Afterwards, you can simply use :func:`export`
     again to construct a correct ExportedProgram.
     """
 
@@ -285,6 +293,40 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def state_dict(self):
         return self._state_dict
+
+    @compatibility(is_backward_compatible=False)
+    def parameters(self) -> Iterator[torch.nn.Parameter]:
+        """
+        Returns an iterator over original module's parameters.
+        """
+        for _, param in self.named_parameters():
+            yield param
+
+    @compatibility(is_backward_compatible=False)
+    def named_parameters(self) -> Iterator[Tuple[str, torch.nn.Parameter]]:
+        """
+        Returns an iterator over original module parameters, yielding
+        both the name of the parameter as well as the parameter itself.
+        """
+        for param_name in self.graph_signature.parameters:
+            yield param_name, self.state_dict[param_name]
+
+    @compatibility(is_backward_compatible=False)
+    def buffers(self) -> Iterator[torch.Tensor]:
+        """
+        Returns an iterator over original module buffers.
+        """
+        for _, buf in self.named_buffers():
+            yield buf
+
+    @compatibility(is_backward_compatible=False)
+    def named_buffers(self) -> Iterator[Tuple[str, torch.Tensor]]:
+        """
+        Returns an iterator over original module buffers, yielding
+        both the name of the buffer as well as the buffer itself.
+        """
+        for buffer_name in self.graph_signature.buffers:
+            yield buffer_name, self.state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -379,8 +421,9 @@ class ExportedProgram:
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
-            f"Graph Signature: {self.graph_signature}\n"
-            f"Symbol to range: {self.range_constraints}\n"
+            f"Graph signature: {self.graph_signature}\n"
+            f"Range constraints: {self.range_constraints}\n"
+            f"Equality constraints: {self.equality_constraints}\n"
         )
         return string
 
@@ -429,103 +472,66 @@ class ExportedProgram:
             }
             return range_constraints
 
-        def get_output_node_names(gm):
-            output_node = list(gm.graph.nodes)[-1]
-            assert output_node.op == "output"
-
-            return [str(arg) for arg in output_node.args[0]]
-
-        def get_input_node_names(gm):
-            return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
-
-        def _generate_new_graph_signature(old_ep, new_gm):
+        def _get_updated_graph_signature(
+            old_signature: ExportGraphSignature,
+            new_gm: torch.fx.GraphModule,
+        ) -> ExportGraphSignature:
             """
-            Update graph_signature according to graph after transformation.
-            Transformations can lead to node name changes, which are used in
-            graph_signature to identify inputs and outputs. Therefore, after each
-            transformation, we need to update the graph_signature according to
-            new node names.
-
-            WARNING: This implementation makes a few assumptions
-                - The transformation doesn't change number of inputs/outputs
-                - Each input/output still has the same meaning.
-                    - For inputs, that means that the inputs in transformed
-                        graph map to the same lifted parameter/buffer or user
-                        input as the input of the same position in the graph
-                        before transformation.
-                    - Similarly for outputs, each output should correspond to the
-                        same mutated buffer or user output as the output value of
-                        the same position  in the graph before transformation.
-
-            It is difficult to programatically validate these assumptions, but they
-            should hold true most of the time as inputs/outputs of the graph rarely
-            need to be changed.
+            Update the graph signature's user_input/user_outputs.
             """
-            old_signature = old_ep.graph_signature
-            old_gm = old_ep.graph_module
-
-            old_graph_input_node_names = get_input_node_names(old_gm)
-            new_graph_input_node_names = get_input_node_names(new_gm)
-            assert len(old_graph_input_node_names) == len(
-                new_graph_input_node_names
-            ), f"""
-                Number of input nodes changed from {len(old_graph_input_node_names)}
-                to {len(new_graph_input_node_names)} after transformation. This
-                transformation is currently not supported.
-                """
-
-            old_graph_output_node_names = get_output_node_names(old_gm)
-            new_graph_output_node_names = get_output_node_names(new_gm)
-            assert len(old_graph_output_node_names) == len(
-                new_graph_output_node_names
-            ), f"""
-                Number of output values changed from {len(old_graph_output_node_names)}
-                to {len(new_graph_output_node_names)} after transformation. This
-                transformation is currently not supported.
-                """
-
-            node_names_mapping = dict(
-                zip(
-                    old_graph_input_node_names + old_graph_output_node_names,
-                    new_graph_input_node_names + new_graph_output_node_names,
-                )
+            new_graph_inputs = [
+                node.name for node in new_gm.graph.nodes if node.op == "placeholder"
+            ]
+            num_inputs = (
+                len(old_signature.parameters)
+                + len(old_signature.buffers)
+                + len(old_signature.user_inputs)
             )
 
-            new_signature = copy.deepcopy(old_signature)
-            new_signature.user_inputs = [
-                node_names_mapping[old_user_input]
-                for old_user_input in old_signature.user_inputs
+            assert len(new_graph_inputs) == num_inputs, (
+                f"Number of input nodes changed from {len(new_graph_inputs)} "
+                f"to {num_inputs} after transformation. This transformation "
+                "is currently not supported."
+            )
+            new_parameter_inputs = new_graph_inputs[: len(old_signature.parameters)]
+            num_param_buffers = len(old_signature.buffers) + len(
+                old_signature.parameters
+            )
+            new_buffer_inputs = new_graph_inputs[
+                len(old_signature.parameters) : num_param_buffers
             ]
-            new_signature.user_outputs = [
-                node_names_mapping[old_user_output]
-                for old_user_output in old_signature.user_outputs
-            ]
-            new_signature.inputs_to_parameters = {
-                node_names_mapping[old_input_name]: old_signature.inputs_to_parameters[
-                    old_input_name
-                ]
-                for old_input_name in old_signature.inputs_to_parameters.keys()
-            }
-            new_signature.inputs_to_buffers = {
-                node_names_mapping[old_input_name]: old_signature.inputs_to_buffers[
-                    old_input_name
-                ]
-                for old_input_name in old_signature.inputs_to_buffers.keys()
-            }
-            new_signature.buffers_to_mutate = {
-                node_names_mapping[old_output_name]: old_signature.buffers_to_mutate[
-                    old_output_name
-                ]
-                for old_output_name in old_signature.buffers_to_mutate.keys()
-            }
-            return new_signature
+            new_user_inputs = new_graph_inputs[num_param_buffers:]
 
-        new_graph_signature = _generate_new_graph_signature(self, transformed_gm)
+            output_node = list(new_gm.graph.nodes)[-1]
+            assert output_node.op == "output"
+            new_graph_outputs = [arg.name for arg in output_node.args[0]]
+
+            assert len(new_graph_outputs) == len(old_signature.buffers_to_mutate) + len(
+                old_signature.user_outputs
+            ), (
+                f"Number of output nodes changed from {len(new_graph_outputs)} "
+                f"to {len(old_signature.buffers_to_mutate) + len(old_signature.user_outputs)} "
+                "after transformation. This transformation is currently not supported."
+            )
+            new_user_outputs = new_graph_outputs[len(old_signature.buffers_to_mutate) :]
+
+            new_signature = ExportGraphSignature(
+                copy.deepcopy(old_signature.parameters),
+                copy.deepcopy(old_signature.buffers),
+                new_user_inputs,
+                new_user_outputs,
+                copy.deepcopy(old_signature.inputs_to_parameters),
+                copy.deepcopy(old_signature.inputs_to_buffers),
+                copy.deepcopy(old_signature.buffers_to_mutate),
+                copy.deepcopy(old_signature.backward_signature),
+                copy.deepcopy(old_signature.assertion_dep_token),
+            )
+            return new_signature
 
         transformed_ep = ExportedProgram(
             transformed_gm,
             transformed_gm.graph,
-            new_graph_signature,
+            _get_updated_graph_signature(self.graph_signature, transformed_gm),
             copy.deepcopy(self.call_spec),
             self.state_dict,
             _get_updated_range_constraints(transformed_gm),
@@ -573,7 +579,7 @@ class ExportedProgram:
 class _ConstraintTarget:
     """
     This represents input tensor dimensions.  Don't create this
-    class directly; instead, use :func:`torch.export.dynamic_dim`.
+    class directly; instead, use :func:`dynamic_dim`.
     """
 
     w_tensor: Any  # weakref to torch.Tensor
@@ -584,7 +590,7 @@ class _ConstraintTarget:
 
 class _ConstraintFactory(type):
     """
-    Metaclass that ensures a private constructor for Constraint
+    Metaclass that ensures a private constructor for :class:`Constraint`
     """
 
     def __call__(cls, *args, **kwargs):
@@ -606,7 +612,7 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     """
 
     .. warning::
-        Do not construct `Constraint` directly, use :func:`torch.export.dynamic_dim` instead.
+        Do not construct :class:`Constraint` directly, use :func:`dynamic_dim` instead.
 
     This represents constraints on input tensor dimensions, e.g., requiring
     them to be fully polymorphic or within some range.
@@ -698,16 +704,24 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
 
 def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = None):
     """
-    Hint `export()` about the constraint of an intermediate scalar value so that subsequent
+    Hint :func:`export` about the constraint of an intermediate scalar value so that subsequent
     branching behaviors that check on the range of aforementioned scalar value can be
     soundly traced.
 
     .. warning::
-        (Note that if the intermediate scalar value will be used as a shape,
-        call `constrain_as_size` API instead.)
+        (Note that if the intermediate scalar value will be used like a size, including
+        being passed as size arg to a tensor factory or view, call :func:`constrain_as_size`
+        instead.)
 
-    For example, following program can not be traced soundly wihout using
-    `constrain_as_value` to give `export()` a hint about which branch to take::
+    Args:
+        symbol: Intermediate scalar value (int-only now) to apply range constraint on.
+        min (Optional[int]): Minimum possible value of given symbol (inclusive)
+        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+
+    Returns:
+        None
+
+    For example, following program can not be traced soundly::
 
         def fn(x):
             v = x.max().item()
@@ -716,7 +730,10 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
             else:
                 return x * 2
 
-    `export()` would give following error::
+    ``v`` is a data-dependent value, which is assumed to have a range of (-inf, inf).
+    :func:`export()` a hint about which branch to take would not be able to determine
+    if the traced branching decision is correct or not. Thus :func:`export()`
+    would give following error::
 
         torch._dynamo.exc.UserError: Consider annotating your code using
         torch.export.constrain_as_size() or torch.export().constrain_as_value() APIs.
@@ -724,8 +741,8 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
         is data-dependent (and thus we do not know the true value.)  The expression we were
         trying to evaluate is f0 > 1024 (unhinted: f0 > 1024).
 
-    Assuming the actual range of `v` can be between [10, 200], you can add a call to
-    `constrain_as_value` in the source code like this::
+    Assuming the actual range of ``v`` can be between [10, 200], you can add a call to
+    :func:`constrain_as_value` in the source code like this::
 
         def fn(x):
             v = x.max().item()
@@ -738,8 +755,8 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
             else:
                 return x * 2
 
-    With the additional hint, `export()` would be able to trace the program correctly by taking
-    the `else` branch, resulting in following graph::
+    With the additional hint, :func:`export` would be able to trace the program correctly by taking
+    the ``else`` branch, resulting in following graph::
 
         graph():
             %arg0_1 := placeholder[target=arg0_1]
@@ -764,6 +781,18 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
             %mul := call_function[target=torch.ops.aten.mul.Tensor](args = (%arg0_1, 2), kwargs = {})
             return (mul,)
 
+    """
+    from torch._export.constraints import constrain_as_value
+
+    return constrain_as_value(symbol, min, max)
+
+
+def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    Hint :func:`export` about the constraint of an intermediate scalar value that
+    represents shape of a tensor so that subsequent tensor constructors can be
+    traced correctly because many operators need to make assumption about range
+    of sizes.
 
     Args:
         symbol: Intermediate scalar value (int-only now) to apply range constraint on.
@@ -773,40 +802,27 @@ def constrain_as_value(symbol, min: Optional[int] = None, max: Optional[int] = N
     Returns:
         None
 
-    """
-    from torch._export.constraints import constrain_as_value
-
-    return constrain_as_value(symbol, min, max)
-
-
-def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = None):
-    """
-    Hint `export()` about the constraint of an intermediate scalar value that
-    represents shape of a tensor so that subsequent tensor constructors can be
-    traced correctly because many operators need to make assumption about range
-    of sizes.
-
     For example, following program can not be traced soundly wihout using
-    `constrain_as_size` to give `export()` a hint about shape ranges::
+    :func:`constrain_as_size` to give :func:`export` a hint about shape ranges::
 
         def fn(x):
             d = x.max().item()
             return torch.ones(v)
 
-    `export()` would give following error::
+    :func:`export` would give following error::
 
         torch._dynamo.exc.Unsupported: guard on data-dependent symbolic int/float
 
-    Assuming the actual range of `d` can be between [3, 10], you can add a call to
-    `constrain_as_size` in the source code like this::
+    Assuming the actual range of ``d`` can be between [3, 10], you can add a call to
+    :func:`constrain_as_size` in the source code like this::
 
         def fn(x):
             d = x.max().item()
             torch.export.constrain_as_size(d, min=3, max=10)
             return torch.ones(d)
 
-    With the additional hint, `export()` would be able to trace the program correctly by taking
-    the `else` branch, resulting in following graph::
+    With the additional hint, :func:`export` would be able to trace the program correctly by taking
+    the ``else`` branch, resulting in following graph::
 
         graph():
             %arg0_1 := placeholder[target=arg0_1]
@@ -836,16 +852,8 @@ def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = No
 
 
     .. warning::
-        It is illegal to specify a range that contains 0 and 1. 0/1 values are always specialized
-        and can not be part of dynamic range.
-
-    Args:
-        symbol: Intermediate scalar value (int-only now) to apply range constraint on.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
-
-    Returns:
-        None
+        if your size is intended to be dynamic, do NOT test if sizes are equal to 0 or 1,
+        these will SILENTLY report false and be bypassed
 
     """
 
@@ -856,11 +864,20 @@ def constrain_as_size(symbol, min: Optional[int] = None, max: Optional[int] = No
 
 def dynamic_dim(t: torch.Tensor, index: int):
     """
-    `dynamic_dim` constructs a `Constraint` object that describes the dynamism of
-    a dimension `index` of tensor `t`. `Constraint` objects should be passed to
-    `constraints` argument of `export()`.
+    :func:`dynamic_dim` constructs a :class:`Constraint` object that describes the dynamism of
+    a dimension ``index`` of tensor ``t``. :class:`Constraint` objects should be passed to
+    ``constraints`` argument of :func:`export`.
 
-    Specifically `dynamic_dim` can be used to express following types of dynamism.
+    Args:
+        t (torch.Tensor): Example input tensor that have dynamic dimension size(s)
+        index (int): Index of dynamic dimension
+
+    Returns:
+        A :class:`Constraint` object that describes shape dynamism. It can be passed to :func:`export` so
+        that :func:`export` does not assume static size of specified tensor, i.e. keeping it dynamic
+        as a symbolic size rather than specializing according to size of example tracing input.
+
+    Specifically :func:`dynamic_dim` can be used to express following types of dynamism.
 
     - Size of a dimension is dynamic and unbounded::
 
@@ -910,15 +927,6 @@ def dynamic_dim(t: torch.Tensor, index: int):
 
     - Mix and match all types above as long as they do not express conflicting requirements
 
-    Args:
-        t (torch.Tensor): Example input tensor that have dynamic dimension size(s)
-        index (int): Index of dynamic dimension
-
-    Returns:
-        A `Constraint` object that describes shape dynamism. It can be passed to `export()` so
-        that `export()` does not assume static size of specified tensor, i.e. keeping it dynamic
-        as a symbolic size rather than specializing according to size of example tracing input.
-
     """
     from torch._export import dynamic_dim
 
@@ -927,179 +935,61 @@ def dynamic_dim(t: torch.Tensor, index: int):
 
 def export(
     f: Callable,
-    args: Tuple[Any],
+    args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
 ) -> ExportedProgram:
     """
-    `export()` is a one-shot process for capturing a computation graph from
-    a PyTorch program Ahead-of-Time (AOT).
-
-    This function traces a callable (an nn.Module, a function or a method)
-    containing PyTorch operations and produces an ExportedProgram. The
-    ExportedProgram includes PyTorch operations that perform computations
-    equivalent to those in the given nn.Module or callable.
-
-    In specific terms, `export()` traces a function `f` by executing it
-    with the provided `args` and `kwargs`. It records the PyTorch operations
-    invoked during execution to produce the ExportedProgram.
-
-
-    **Acceptable input/output types**
-
-    Acceptable types of inputs (for `args` and `kwargs`) and outputs include:
-
-    - Primitive types, i.e. `torch.Tensor`, `int`, `float`, `bool` and `str`.
-    - Dataclasses (must be registered with torch._export.utils.register_dataclass_as_pytree_node` first)
-    - (Nested) Data structures comprising of `dict`, `list`, `tuple`, `namedtuple` and
-      `OrderedDict` containing all above types.
-
-
-    **What's specialized in the program?**
-
-    1. Non-tensor inputs
-
-    `export()` specializes the traced program based on the values of
-    inputs that are not torch.Tensors, ie. `int`, `float`, `bool` and `str`.
-
-    For example::
-
-        from torch.export import export
-
-        def fn(x: torch.Tensor, i: int):
-            return x + i
-
-        example_inputs = (torch.rand(2, 2), 1)  # i is set to 1 in example inputs
-        ep = export(fn, example_inputs)
-
-    would yield an `ExportedProgram` containing following graph::
-
-        %arg0_1 := placeholder[target=arg0_1]
-        %arg1_1 := placeholder[target=arg1_1]
-        %add := call_function[target=torch.ops.aten.add.Tensor](args = (%arg0_1, 1), kwargs = {})
-        return (add,)
-
-    Notice that `%add` is computed by adding `%arg0_1` and `1`, which is a
-    constant rather than `%arg1_1` because integers are specialized.
-
-    2. Rank and static shapes (not values) of input Tensors
-
-    Rank of a tensor is always specialized and treated as constant. Sizes of
-    dimensions are also specialized as constant, i.e. static shapes unless
-    specified as dynamic via `dynamic_dim` API, for example::
-
-        from torch.export import export
-
-        def fn(x):
-            if x.shape[0] > 5:
-                return x + 1
-            else:
-                return x
-
-        example_inputs = (torch.rand(10, 2))
-        ep = export(fn, example_inputs)
-
-    Would produce an `ExportedProgram` containing following graph::
-
-        %arg0_1 := placeholder[target=arg0_1]
-        %add := call_function[target=torch.ops.aten.add.Tensor](args = (%arg0_1, 1), kwargs = {})
-        return (add,)
-
-    You can see that the conditional on `x.shape[0]>5` is removed because the
-    example inputs has the static shape of `(10, 2)`. `torch.export()` specializes
-    on the static shape, thus the `else` branch will never be reached, thus it
-    does not show up in the exported program.
-
-    Note:
-    If you want to preserve dynamic branching behavior based on value or
-    shape of torch.Tensor in the generated graph, you will need to use
-    `torch.export.dynamic_dim` to make a dimension of input tensor to be dynamic
-    and rewrite the source code using control flow operations like
-    `torch.ops.higher_order.cond`.
-
-    3. Control flow
-
-    By default, control flow (like `if`) branching decisions are spcialized
-    according to execution flow observed during tracing run. See following
-    section on how to preserve dynamic control flow
-
-    **How to express Dynamism**
-
-    1. Shape Dynamism
-
-    Because static shape use cases are more dominant, `export()` chooses to
-    assume shapes are all static by default unless there are explicit user
-    instructions that say otherwise. Specifically, users can use
-    `torch.export.dynamic_dim` to give a hint to `export()` about dynamism
-    and range of an input tensor dimension.
-
-    2. Dynamic Control Flow
-
-    To preserve dynamic branching behavior of control flows (like `if`), users
-    need to rewrite source code of original program to use PyTorch's higher order
-    operators (like `torch.ops.higher_order.cond`).
-
+    :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
+    a method) and produces a traced graph representing only the Tensor
+    computation of the function in an Ahead-of-Time (AOT) fashion, which can
+    subsequently be executed with different outputs or serialized.  The traced
+    graph (1) produces a normalized operator set consisting only of functional
+    `Core ATen Operator Set <https://pytorch.org/docs/stable/ir.html>`_
+    and user specified custom operators, (2) has eliminated all Python control
+    flow and data structures (except for certain
+    conditions), and (3) has the set of shape constraints needed to show that
+    this normalization and control flow elimination is sound for a future
+    input.
 
     **Soundness Guarantee**
 
-    While tracing, `export()` takes note of shape-related assumptions
+    While tracing, :func:`export()` takes note of shape-related assumptions
     made by the user program and the underlying PyTorch operator kernels.
-    The output ExportedProgram is considered valid only when these
+    The output :class:`ExportedProgram` is considered valid only when these
     assumptions hold true.
 
     There are 2 types of assumptions made during tracing
 
     - Shapes (not values) of input tensors.
-    - Ranges (lower and upper bound) of values extracted from intermediate tensors via `.item()` or direct indexing.
+    - Ranges (lower and upper bound) of values extracted from intermediate tensors via ``.item()`` or direct indexing.
 
 
-    All assumptions must be validated at graph capture time for `export()`
+    All assumptions must be validated at graph capture time for :func:`export`
     to succeed. Specifically:
 
     - Assumptions on static shapes of input tensors are automatically validated without additional effort.
     - Assumptions on dynamic shape of input tensors require explicit `Input Constraint`
-      constructed with `torch.export.dynamic_dim` APIs
+      constructed with :func:`dynamic_dim` APIs
     - Assumptions on range of intermediate values require explicit `Inline Constraint`,
-      constructed use `constrain_as_size` and `constraint_as_value` APIs.
+      constructed use :func:`constrain_as_size` and :func:`constraint_as_value` APIs.
 
     If any assumption can not be validated, a fatal error will be raised. When that happens,
     the error message will include suggested code needed to construct necessary
-    constraints to validate the assumptions, for example `export()` would suggest
+    constraints to validate the assumptions, for example :func:`export` would suggest
     following code for input constraints::
 
         def specify_constraints(x):
             return [
                 # x:
-                dynamic_dim(x, 0),
                 dynamic_dim(x, 0) <= 5,
             ]
 
-    This example means the program requires the dim 0 of input `x` to be less
+    This example means the program requires the dim 0 of input ``x`` to be less
     than or equal to 5 to be valid. You can inspect the constraints needed and
     then copy this exact function into your code to generated needed
-    constraints to be passed into `constraints` argument.
-
-    **ExportedProgram Invariants**
-
-    The returned `ExportedProgram` maintains the following invariants:
-
-    - It is guaranteed to be a sound representation of the original
-      program.
-    - It maintains the exact calling convention of the original program.
-    - It contains a `state_dict` that stores the `torch.nn.Parameters`
-      involved in computation of the original program.
-    - It includes an fx.GraphModule that represents the computation of
-      the original program. The GraphModule:
-
-     - Contains only `placeholder`, `call_function`, `get_attr` and `return` nodes.
-     - Inlines all submodules from the original programs.
-     - Lifts all parameters and buffers of the original program as inputs to the graph.
-     - Does not mutate intermediate values, parameters, or buffers.
-     - Does not include operations with side effects.
-     - Contains only a curated subset of ATen operations and registered
-       custom operations (by default). See the list of Core ATen Ops
-       here: https://pytorch.org/docs/stable/ir.html
+    constraints to be passed into ``constraints`` argument.
 
     Args:
         f: The callable to trace.
@@ -1111,13 +1001,22 @@ def export(
         constraints: An optional list of constraints on the dynamic arguments
          that specify their possible range of shapes. By default, shapes of
          input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use `torch.export.dynamic_dim()`
-         to define `Constraint` objects that specify the dynamics and the possible
-         range of shapes. See torch.export.dynamic_dim() docstring for examples on
+         is expected to have dynamic shapes, please use :func:`dynamic_dim`
+         to define :class:`Constraint` objects that specify the dynamics and the possible
+         range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
     Returns:
-        An ExportedProgram containing the traced callable.
+        An :class:`ExportedProgram` containing the traced callable.
+
+    **Acceptable input/output types**
+
+    Acceptable types of inputs (for ``args`` and ``kwargs``) and outputs include:
+
+    - Primitive types, i.e. ``torch.Tensor``, ``int``, ``float``, ``bool`` and ``str``.
+    - Dataclasses, but they must be registered by calling :func:`register_dataclass` first.
+    - (Nested) Data structures comprising of ``dict``, ``list``, ``tuple``, ``namedtuple`` and
+      ``OrderedDict`` containing all above types.
 
     """
 
@@ -1239,3 +1138,37 @@ def load(
     return load(
         f, extra_files=extra_files, expected_opset_version=expected_opset_version
     )
+
+
+def register_dataclass(typ: Any) -> None:
+    """
+    Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
+
+    Args:
+        typ: the dataclass type to register
+
+    Example::
+
+        @dataclass
+        class InputDataClass:
+            feature: torch.Tensor
+            bias: int
+
+        class OutputDataClass:
+            res: torch.Tensor
+
+        torch.export.register_dataclass(InputDataClass)
+        torch.export.register_dataclass(OutputDataClass)
+
+        def fn(o: InputDataClass) -> torch.Tensor:
+            res = res=o.feature + o.bias
+            return OutputDataClass(res=res)
+
+        ep = torch.export.export(fn, (InputDataClass(torch.ones(2, 2), 1), ))
+        print(ep)
+
+    """
+
+    from torch._export.utils import register_dataclass_as_pytree_node
+
+    return register_dataclass_as_pytree_node(typ)

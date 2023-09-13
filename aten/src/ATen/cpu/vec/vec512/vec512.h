@@ -18,7 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <ostream>
+#include <iostream>
 
 namespace at {
 namespace vec {

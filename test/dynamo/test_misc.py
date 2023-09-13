@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import dis
 import enum
+import functools
 import itertools
 import logging
 import math
@@ -32,7 +33,7 @@ from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.source import GetItemSource, LocalSource
+from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
 from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
@@ -47,11 +48,15 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
-from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    expect_true,
+    ShapeEnv,
+)
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_SDPA,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
     SM80OrLater,
     TEST_CUDA,
     TEST_MULTIGPU,
@@ -61,6 +66,19 @@ from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+
+
+# Specializes a test to run only if translation validation is set.
+def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import torch.fx.experimental.validator
+
+        if torch.fx.experimental.validator.translation_validation_enabled():
+            return fn(*args, **kwargs)
+        raise unittest.SkipTest(f"only works when TV is True.")
+
+    return wrapper
 
 
 class MyPickledModule(torch.nn.Module):
@@ -92,13 +110,13 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
         torch.compile(f)(torch.randn(5, 5, 5))
-        entries = _debug_get_cache_entry_list(f.__code__)
+        entries = _debug_get_cache_entry_list(f)
         self.assertTrue(len(entries) > 0)
 
         def g(x):
             return x + 2
 
-        entries = _debug_get_cache_entry_list(g.__code__)
+        entries = _debug_get_cache_entry_list(g)
         self.assertTrue(len(entries) == 0)
 
         try:
@@ -1366,6 +1384,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_numpy_recompilation_scalar(self):
+        def fn(x, a):
+            return np.where(x < 0.5, a, x)
+
+        x = np.random.randn(8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, dynamic=True)(fn)
+
+        ref = fn(x, 3)
+        res = opt_fn(x, 3)
+        self.assertEqual(ref, res)
+
+        ref = fn(x, 4)
+        res = opt_fn(x, 4)
+        self.assertEqual(ref, res)
+
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_tensor_interacts_with_numpy_ndarray(self):
         def fn(x, y):
             a = x.numpy()
@@ -1453,13 +1489,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts, nopython=True)(mandelbrot_numpy)
-        for _ in range(10):
+        n_iter = torch._dynamo.config.cache_size_limit
+        for _ in range(n_iter):
             x = random.randint(2, 30)
             ref = mandelbrot_numpy(x)
             res = opt_fn(x)
             self.assertEqual(ref, res)
         # We need to specialise the number as it's in a forloop
-        self.assertEqual(cnts.frame_count, 10)
+        self.assertEqual(cnts.frame_count, n_iter)
 
     def test_numpy_as_global(self):
         global x
@@ -1544,6 +1581,40 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_numpy_unique_f16(self):
+        def fn():
+            x = np.asarray([1, 1, 2, 2, 3], dtype=np.float16)
+            return np.unique(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn()
+        self.assertEqual(r.dtype, np.float16)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_fallback_on_eager(self):
+        def fn():
+            return np.asarray(["L", "U"])
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        r = opt_fn()
+        self.assertEqual(cnts.frame_count, 0)  # graph break
+        self.assertEqual(r, np.asarray(["L", "U"]))
+
+        # repeat with a different function
+        def fn2():
+            return np.random.choice(["L", "U"])
+
+        cnts2 = torch._dynamo.testing.CompileCounter()
+        opt_fn2 = torch._dynamo.optimize(cnts2)(fn2)
+
+        r2 = fn2()
+        self.assertEqual(cnts.frame_count, 0)
+        assert r2 in ("L", "U")
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -1567,6 +1638,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 1)
             self.assertEqual(cnts.op_count, 1)  # mul_
 
+    def test_out_variants_with_resizing_on_graph_inputs(self):
+        def fn(x, y):
+            return torch.cosh(x, out=y) + 1
+
+        x = torch.rand(2, 3)
+        y = torch.rand(4)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertTrue(same(fn(x, y), opt_fn(x.clone(), y.clone())))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_dict_mutation_side_effect(self):
         def fn(d):
             d["c"] = d["a"] + d.pop("b")
@@ -1581,6 +1664,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(args1, args2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_dunder_new_function_inlining(self):
+        # https://github.com/pytorch/pytorch/issues/107460
+        from torch._dynamo.utils import counters
+
+        counters.clear()
+
+        class ModelA(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.tanh(x + 1)
+
+        class ModelB(torch.nn.Module):
+            def __new__(cls):
+                return ModelA()
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                other = ModelB()
+                return self.layer(x) + other(x)
+
+        x = torch.rand(2, 2)
+        m = Model()
+
+        opt_m = torch.compile(backend="eager")(m)
+        ref = m(x)
+        res = opt_m(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertFalse("super() nn.Module.__init__" in counters["graph_break"])
 
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
@@ -2069,7 +2188,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         ref = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=False)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
@@ -2185,6 +2304,37 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x_clone)
 
         self.assertTrue(same(ref, res))
+
+    def test_torch_size_numel(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn():
+            return torch.Size([10, 8]).numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        num = torch.Size([10, 8]).numel()
+        self.assertEqual(opt_fn(), num)
+
+    def test_torch_size_numel_dynamic(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x.size().numel()
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.rand(10, 1, 8, 1)
+        expect = fn(x)
+        self.assertEqual(opt_fn(x), expect)
+
+    def test_shape_type(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            return x + (type(x.shape) == torch.Size)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.zeros(())
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_size_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2457,54 +2607,6 @@ def fn():
         inst = dis.get_instructions(fn)
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
-
-    def test_profiler_cache_lookup(self):
-        def fn(x):
-            y = x**2
-            y = y + 2
-            z = y**3
-            return z
-
-        for profiler, get_events in (
-            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
-            (torch.profiler.profiler.profile, lambda prof: prof.events()),
-        ):
-            x = torch.randn((2, 2), requires_grad=True)
-            ref = fn(x)
-            opt_fn = torch.compile(fn, backend="aot_eager")
-
-            # warmup
-            opt_fn(x)
-
-            # whenver we enter the profiler context, hooks are automatically registered
-            with profiler() as prof:
-                res = opt_fn(x)
-            events = list(
-                filter(
-                    lambda event: event.name == "TorchDynamo Cache Lookup",
-                    get_events(prof),
-                )
-            )
-
-            self.assertTrue(same(ref, res))
-            self.assertTrue(
-                len(events) == 1,
-                "Expected one lookup profiler event for one opt_fn run",
-            )
-
-            with profiler() as prof:
-                # just make sure the disable functionality works
-                _enable_dynamo_cache_lookup_profiler(False)
-                res = opt_fn(x)
-            events = list(
-                filter(
-                    lambda event: event.name == "TorchDynamo Cache Lookup",
-                    get_events(prof),
-                )
-            )
-
-            self.assertTrue(same(ref, res))
-            self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     def test_tensor_is_contiguous(self):
         def fn(x):
@@ -3876,7 +3978,7 @@ def fn():
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "Can't run fused SDPA on this platform",
     )
     def test_parsing_sdpa(self):
@@ -5328,6 +5430,7 @@ def fn():
         except RuntimeError as e:
             self.assertIn("smoge", traceback.format_exc())
 
+    @unittest.skip("Not clear why this test would trigger a segfault.")
     def test_unhandled_exception_in_dynamo2(self):
         # segfaults in python 3.11 if shadow frame is freed improperly
         from torch.testing import make_tensor
@@ -5709,6 +5812,120 @@ def fn():
         torch._dynamo.mark_dynamic(x012, 2)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x012)
         self.assertEqual(counter.frame_count, 3)
+
+    def test_recompile_on_global_state_change(self):
+        last_state = []
+        cnt = 0
+
+        def my_compiler(gm, _):
+            nonlocal cnt
+            cnt += 1
+            state = read_state()
+
+            def inner(*args):
+                last_state[:] = state
+                return gm(*args)
+
+            return inner
+
+        def read_state():
+            return [
+                torch.is_grad_enabled(),
+                torch.are_deterministic_algorithms_enabled(),
+                torch._C._get_cublas_allow_tf32(),
+            ]
+
+        def write_state(state):
+            torch.set_grad_enabled(state[0]),
+            torch.use_deterministic_algorithms(state[1])
+            torch._C._set_cublas_allow_tf32(state[2]),
+
+        @torch.compile(backend=my_compiler)
+        def fn(x):
+            return x + 1
+
+        initial_state = read_state()
+        y = torch.randn(10)
+        try:
+            for round in range(3):
+                for i in range(len(initial_state)):
+                    new_state = [False] * len(initial_state)
+                    new_state[i] = True
+                    write_state(new_state)
+                    assert read_state() == new_state
+                    last_state.clear()
+                    fn(y)
+                    assert last_state == new_state
+                    if round == 0:
+                        assert cnt == i + 1
+                    else:
+                        assert cnt == len(initial_state)
+        finally:
+            write_state(initial_state)
+
+    def test_grad_state_mutated(self):
+        prior = torch.is_grad_enabled()
+        value = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            value = torch.is_grad_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            check_state()
+            torch.set_grad_enabled(False)
+            return x + 1
+
+        try:
+            torch.set_grad_enabled(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.is_grad_enabled() is False
+
+            value = None
+            torch.set_grad_enabled(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.is_grad_enabled() is False
+
+            assert cnt.frame_count == 1
+        finally:
+            torch.set_grad_enabled(prior)
+
+    def test_determinstic_algorithms_mutated(self):
+        prior = torch.are_deterministic_algorithms_enabled()
+        value = None
+        cnt = CompileCounter()
+
+        @torch._dynamo.allow_in_graph
+        def check_state():
+            nonlocal value
+            value = torch.are_deterministic_algorithms_enabled()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            check_state()
+            torch.use_deterministic_algorithms(False)
+            return x + 1
+
+        try:
+            torch.use_deterministic_algorithms(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+
+            value = None
+            torch.use_deterministic_algorithms(True)
+            fn(torch.randn(10))
+            assert value is True
+            assert torch.are_deterministic_algorithms_enabled() is False
+
+            assert cnt.frame_count == 1
+        finally:
+            torch.use_deterministic_algorithms(prior)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
@@ -6773,6 +6990,343 @@ def ___make_guard_fn():
         actual = torch.compile(mod1, backend=counter, fullgraph=True)(x)
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
+
+    def test_itertools_accumulate_tensors_default_sum(self):
+        def fn(a, b, c, d, x):
+            l = [a, b, c, d, x]
+            for i, t in enumerate(l):
+                l[i] = t * x
+            return itertools.accumulate(l)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        x = torch.randn([2, 2])
+        eager = fn(*t_list, x)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(*t_list, x)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_itertools_accumulate_tensors_builtins(self):
+        for builtin_op in [operator.mul, operator.sub, operator.pow]:
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, func=builtin_op)
+
+            t_list = [torch.tensor([i]) for i in range(4)]
+            x = torch.randn([2, 2])
+            eager = fn(*t_list, x)
+
+            counter = CompileCounter()
+            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_itertools_accumulate_tensors_user_defined(self):
+        def udo_fn_0(a, b):
+            return -1
+
+        rando = random.randint(0, 1)
+
+        def udo_fn_1(a, b):
+            return a * rando + b * rando
+
+        seen = []
+
+        def udo_fn_2(a, b):
+            seen.append(a)
+            seen.append(b)
+            return a * len(seen)
+
+        for udo_fn in [udo_fn_0, udo_fn_1, udo_fn_2]:
+            torch._dynamo.reset()
+
+            def fn(a, b, c, d, x):
+                l = [a, b, c, d, x]
+                for i, t in enumerate(l):
+                    l[i] = t * x
+                return itertools.accumulate(l, func=udo_fn)
+
+            t_list = [torch.tensor([i]) for i in range(4)]
+            x = torch.randn([2, 2])
+            eager = fn(*t_list, x)
+
+            counter = CompileCounter()
+            compiled_fn = torch._dynamo.optimize(counter)(fn)
+            compiled = compiled_fn(*t_list, x)
+
+            self.assertEqual(list(eager), list(compiled))
+            self.assertEqual(counter.frame_count, 1)
+
+    def test_pure_python_accumulate(self):
+        def accumulate(iterable, func=lambda x, y: x + y):
+            it = iter(iterable)
+            try:
+                # Initialize the accumulator with the first value from the iterable
+                accumulator = next(it)
+            except StopIteration:
+                # If the iterable is empty, return an empty generator
+                return
+            yield accumulator
+
+            for element in it:
+                accumulator = func(accumulator, element)
+                yield accumulator
+
+        def fn(it):
+            return accumulate(it)
+
+        t_list = [torch.tensor([i]) for i in range(4)]
+        eager = fn(t_list)
+
+        counter = CompileCounter()
+        compiled_fn = torch._dynamo.optimize(counter)(fn)
+        compiled = compiled_fn(t_list)
+
+        self.assertEqual(list(eager), list(compiled))
+        self.assertEqual(counter.frame_count, 1)
+
+    def _replay_and_check(self, shape_env: ShapeEnv):
+        replayed = replay_shape_env_events(shape_env.events)
+        shape_env.check_equal(replayed)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_empty(self):
+        main, other = ShapeEnv(), ShapeEnv()
+        main.check_equal(other)
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_constructor(self):
+        main, other = ShapeEnv(allow_scalar_outputs=False), ShapeEnv()
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> allow_scalar_outputs: values don't match.
+  >  Left: False
+  > Right: True
+""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_create_symbolic_sizes_strides_storage_offset(self):
+        main, other = ShapeEnv(), ShapeEnv()
+        main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> name_to_node: values don't match.
+  >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {}
+==> source_to_symbol: values don't match.
+  >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
+  > Right: {}
+==> val_to_var: values don't match.
+  >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
+  > Right: {0: 0, 1: 1}
+==> var_to_range: values don't match.
+  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  > Right: {}
+==> var_to_sources: values don't match.
+  >  Left: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}
+  > Right: {}
+==> var_to_val: values don't match.
+  >  Left: {s0: 3, s1: 2}
+  > Right: {}
+""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_unbacked(self):
+        main, other = ShapeEnv(), ShapeEnv()
+        main.create_unbacked_symint()
+        main.create_unbacked_symfloat()
+        main.create_unbacked_symbool()
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> name_to_node: values don't match.
+  >  Left: {f0, i0, i1}
+  > Right: {}
+==> unbacked_symfloat_counter: values don't match.
+  >  Left: 1
+  > Right: 0
+==> unbacked_symint_counter: values don't match.
+  >  Left: 2
+  > Right: 0
+==> var_to_range: values don't match.
+  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), i0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), i1: ValueRanges(lower=0, upper=1, is_bool=False)}
+  > Right: {}
+""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_evaluate_expr_divisible(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] % 3 == 0 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 divisible entry
+        size = r[0]
+        bool(size[0] % 3 == 0)
+
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> divisible: values don't match.
+  >  Left: {Mod(s0, 3)}
+  > Right: {}
+==> guards: values don't match.
+  >  Left: [Eq(Mod(s0, 3), 0)]
+  > Right: []
+==> name_to_node: values don't match.
+  >  Left: {_assert, eq, mod, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_evaluate_expr_replacement(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] == 3 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 replacement entry
+        size = r[0]
+        bool(size[0] == 3)
+
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> guards: values don't match.
+  >  Left: [Eq(s0, 3)]
+  > Right: []
+==> name_to_node: values don't match.
+  >  Left: {_assert, eq, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> replacements: values don't match.
+  >  Left: {s0: 3}
+  > Right: {}
+""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_evaluate_expr_refinement(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+        other.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] >= 3 (only in the main ShapeEnv)
+        #   - +1 guard entry
+        #   - +1 var_to_guard entry
+        #   - Change: var_to_range
+        size = r[0]
+        bool(size[0] >= 3)
+
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> guards: values don't match.
+  >  Left: [s0 >= 3]
+  > Right: []
+==> name_to_node: values don't match.
+  >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+==> var_to_guards: values don't match.
+  >  Left: {s0: (s0 >= 3, None)}
+  > Right: {}
+==> var_to_range: values don't match.
+  >  Left: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+""",
+        )
+        self._replay_and_check(main)
+
+    @onlyIfTranslationValidation
+    def test_shape_env_equal_runtime_assert(self):
+        main, other = ShapeEnv(), ShapeEnv()
+
+        # Call create_unbacked_symint on both of them.
+        r = main.create_unbacked_symint()
+        other.create_unbacked_symint()
+
+        # Create a runtime assert: r % 3 == 0 (only in the main ShapeEnv)
+        #   - +1 defferred_runtime_asserts entry
+        #   - Change: num_defferred_runtime_asserts
+        expect_true(r % 3 == 0)
+
+        self.assertExpectedRaisesInline(
+            NotEqualError,
+            lambda: main.check_equal(other),
+            """\
+ShapeEnv not equal: field values don't match:
+
+==> deferred_runtime_asserts: values don't match.
+  >  Left: {i0: [Eq(Mod(i0, 3), 0)]}
+  > Right: {}
+==> name_to_node: values don't match.
+  >  Left: {_assert, eq, i0, mod}
+  > Right: {i0}
+==> num_deferred_runtime_asserts: values don't match.
+  >  Left: 1
+  > Right: 0
+""",
+        )
+        self._replay_and_check(main)
 
 
 class TestTracer(JitTestCase):

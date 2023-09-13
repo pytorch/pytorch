@@ -1,4 +1,5 @@
 import contextlib
+import itertools
 import logging
 
 from typing import Dict, List, Optional
@@ -7,6 +8,7 @@ import torch._C
 import torch.fx
 import torch.nn
 import torch.onnx.operators
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -64,8 +66,13 @@ def are_tensors(var):
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
-    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
-    from .builder import wrap_fx_proxy
+    from . import (
+        AutogradFunctionContextVariable,
+        ConstantVariable,
+        SymNodeVariable,
+        TensorVariable,
+    )
+    from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
     assert tracer.parent is not None
 
@@ -90,6 +97,17 @@ def validate_args_and_maybe_create_graph_inputs(
                 example_value = a.as_proxy().node.meta["example_value"]
                 new_arg = wrap_fx_proxy(
                     tx=tx, proxy=new_proxy, example_value=example_value
+                )
+            else:
+                new_arg = a
+        elif isinstance(a, SymNodeVariable):
+            if manually_set_subgraph_inputs:
+                new_proxy = tracer.create_graph_input(str(a.sym_num.node.expr))
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=SymNodeVariable,
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=a.sym_num,
                 )
             else:
                 new_arg = a
@@ -290,10 +308,10 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
     def check_kwargs(self, kwargs, supported_types):
-        assert (
-            all(isinstance(value, supported_types) for value in kwargs.values())
-            or not kwargs
-        ), "only constant kwargs are supported"
+        if not all(isinstance(value, supported_types) for value in kwargs.values()):
+            raise unimplemented(
+                f"Only kwargs of the following types are supported: {supported_types}"
+            )
 
     def call_function(
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
@@ -313,8 +331,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             UserFunctionVariable,
         )
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
@@ -509,8 +525,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         from .builder import wrap_fx_proxy
 
-        self.check_kwargs(kwargs, ConstantVariable)
-
         assert type(args[0]) in (UserFunctionVariable, NestedUserFunctionVariable)
         assert type(args[1]) is TensorVariable
 
@@ -631,8 +645,6 @@ class FunctorchGradHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from . import ConstantVariable
         from .builder import wrap_fx_proxy
-
-        self.check_kwargs(kwargs, ConstantVariable)
 
         # TODO: Support `fn` with kwargs.
         if not torch._dynamo.config.capture_func_transforms:
@@ -912,9 +924,10 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # We compute the example_value by actually calling
         # `vmap` with FakeTensors.
-        fake_batched_fn_args = tuple(
-            arg.as_proxy().node.meta["example_value"] for arg in batch_input_args
-        ) + tuple(arg.node.meta["example_value"] for arg in body_lifted_freevars)
+        fake_batched_fn_args = itertools.chain(
+            (get_fake_value(arg.as_proxy().node, tx) for arg in batch_input_args),
+            (get_fake_value(arg.node, tx) for arg in body_lifted_freevars),
+        )
         actual_in_dims = tuple(
             pytree.tree_map(lambda x: x.value, updated_in_dims.items)
         )
@@ -922,7 +935,7 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # NOTE: `body_graph` might have operators which
         # will create new tensors. So it is required
         # that we run `vmap` under FakeMode.
-        with tx.fake_mode:
+        with tx.fake_mode, enable_python_dispatcher():
             example_value = torch._functorch.vmap.vmap_impl(
                 torch.fx.GraphModule(tx.output.nn_modules, body_graph),
                 actual_in_dims,
@@ -1096,7 +1109,7 @@ class OutDtypeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         op = p_args[0]
         output_dtype = p_args[1]
         fake_sub_args = pytree.tree_map_only(
-            torch.fx.Proxy, lambda a: get_fake_value(a.node, tx), p_args[2:]
+            torch.fx.Proxy, lambda a: a.node.meta["example_value"], p_args[2:]
         )
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
