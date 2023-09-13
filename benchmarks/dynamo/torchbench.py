@@ -93,6 +93,7 @@ SKIP_FOR_CPU = {
     "llama_v2_7b_16h",  # model is CUDA only
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
+    "simple_gpt",
 }
 
 SKIP_FOR_CUDA = {
@@ -110,6 +111,7 @@ SKIP_TRAIN = {
     "maml",
     "llama",
     "llama_v2_7b_16h",
+    "simple_gpt",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -245,6 +247,11 @@ CANARY_MODELS = {
     "torchrec_dlrm",
 }
 
+ONLY_MULTIPROCESS = {
+    # Models that should only run in --multiprocess mode
+    "simple_gpt"
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
@@ -299,6 +306,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.accuracy and self.args.training:
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
+
+    @property
+    def skip_multiprocess_models(self):
+        return ONLY_MULTIPROCESS
 
     def load_model(
         self,

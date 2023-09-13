@@ -1783,6 +1783,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_multiprocess_models(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -2968,7 +2972,7 @@ def parse_args(args=None):
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
-        args.use_distributed,
+        args.multiprocess,
         rank=rank,
         world_size=args.world_size,
         port=args.distributed_master_port,
@@ -3000,7 +3004,6 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    args.use_distributed = args.multiprocess
     if args.multiprocess:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
@@ -3202,6 +3205,9 @@ def run(runner, args, original_dir=None):
         runner.skip_models.update(runner.skip_models_for_cpu)
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
+
+    if not args.multiprocess:
+        runner.skip_models.update(runner.skip_multiprocess_models)
 
     if args.no_skip:
         runner.skip_models.clear()
