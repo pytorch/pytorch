@@ -84,9 +84,6 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# TODO: capture whether the graph is from export
-from_export = False
-
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 

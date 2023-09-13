@@ -307,8 +307,8 @@ class OptimizeForInferenceTemplate(TestCase):
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "frozen_param"
-                ).check_not("frozen_param").check_next("return").run(code[0])
+                    "constant"
+                ).check_not("constant").check_next("return").run(code[0])
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2

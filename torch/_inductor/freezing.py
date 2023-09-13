@@ -73,19 +73,13 @@ def freeze(
     # See the details in fx_codegen_and_compile of compile_fx.py.
     view_to_reshape(aot_autograd_gm)
 
-    if torch._guards.TracingContext.get():
-        fw_metadata = torch._guards.TracingContext.get().fw_metadata
-        params_flat = torch._guards.TracingContext.get().params_flat
-        assert fw_metadata is not None and params_flat is not None
+    fw_metadata = torch._guards.TracingContext.get().fw_metadata
+    params_flat = torch._guards.TracingContext.get().params_flat
+    assert fw_metadata is not None and params_flat is not None
 
-        preserved_arg_indices = replace_params_with_constants(
-            aot_autograd_gm, params_flat, fw_metadata
-        )
-    else:
-        inputs = [
-            node for node in aot_autograd_gm.graph.nodes if node.op == "placeholder"
-        ]
-        preserved_arg_indices = list(range(len(inputs)))
+    preserved_arg_indices = replace_params_with_constants(
+        aot_autograd_gm, params_flat, fw_metadata
+    )
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops
     cse_graph = fx_graph_cse(aot_autograd_gm.graph)

@@ -52,10 +52,12 @@ class AOTInductorModelRunner:
         optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
             model, example_inputs, example_outputs, options
         )
+        param_buffer_values = list(exported.state_dict.values())
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
-        optimized(flat_example_inputs, output_tensors)
+        all_args = (*param_buffer_values, *flat_example_inputs)
+        optimized(all_args, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
 
@@ -68,47 +70,6 @@ class AotInductorTests(TestCase):
 
             def forward(self, x, y):
                 return x + torch.nn.functional.linear(y, self.weight)
-
-        model = Repro()
-        example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
-        )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
-
-    def test_large(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(250112, 512, device="cuda")
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
-
-        model = Repro()
-        example_inputs = (
-            torch.randn(1, 250112, device="cuda"),
-            torch.randn(1, 512, device="cuda"),
-        )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
-
-    def test_with_offset(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.orig_tensor = torch.randn(2, 15, 10, device="cuda")[0]
-                self.tensor = self.orig_tensor[5:, :]
-
-            def forward(self, x, y):
-                return (
-                    x
-                    + torch.nn.functional.linear(y, self.orig_tensor[:10, :])
-                    + self.tensor
-                )
 
         model = Repro()
         example_inputs = (
