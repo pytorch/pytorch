@@ -127,7 +127,7 @@ def cond(pred, true_fn, false_fn, operands):
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
-        if not isinstance(pred, (bool, torch.Tensor)):
+        if not isinstance(pred, (bool, torch.Tensor, torch.SymBool)):
             raise RuntimeError(f"Expected pred to be bool or tensor, but got {pred}.")
 
         if isinstance(pred, torch.Tensor) and pred.numel() != 1:
