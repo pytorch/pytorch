@@ -136,6 +136,16 @@ MetricTable.register_table(
     ],
 )
 
+# track the fusion statistics for each graph
+MetricTable.register_table(
+    "graph_stats",
+    [
+        "graph_id",
+        "num_nodes_before_fusion",
+        "num_nodes_after_fusion",
+    ],
+)
+
 
 def purge_old_log_files():
     """
@@ -166,6 +176,10 @@ def enabled_metric_tables() -> Set[str]:
         ), f"Metric table name {name} is not registered"
         enabled.add(name)
     return enabled
+
+
+def is_metric_table_enabled(name):
+    return name in enabled_metric_tables()
 
 
 def get_metric_table(name):

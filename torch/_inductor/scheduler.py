@@ -12,7 +12,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
-from torch._inductor.metrics import get_metric_table
+from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
@@ -1036,12 +1036,16 @@ class NodeUser:
         )
 
 
+_post_grad_graph_counter = itertools.count()
+
+
 class Scheduler:
     @dynamo_timed
     def __init__(self, nodes):
         super().__init__()
         self.backends = {}
         self.fuse_cache = {}
+        self.post_grad_graph_id = next(_post_grad_graph_counter)
 
         self.nodes = []
         self.available_buffer_names = {
@@ -1078,7 +1082,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
-        self.has_speedup_by_fusion = dict()
+        self.logged_slow_fusion = set()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1093,7 +1097,13 @@ class Scheduler:
         # for debug attribution
         self.origin_to_index = {}
 
-        log.info("Number of scheduler nodes after fusion %d", len(self.nodes))
+        get_metric_table("graph_stats").add_row(
+            lambda: {
+                "graph_id": self.post_grad_graph_id,
+                "num_nodes_before_fusion": self.num_orig_nodes,
+                "num_nodes_after_fusion": len(self.nodes),
+            }
+        )
 
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
@@ -1383,9 +1393,6 @@ class Scheduler:
 
         from triton.compiler.errors import CompilationError
 
-        if (node1, node2) in self.has_speedup_by_fusion:
-            return self.has_speedup_by_fusion[(node1, node2)]
-
         try:
             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
@@ -1393,7 +1400,6 @@ class Scheduler:
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
-                self.has_speedup_by_fusion[(node1, node2)] = True
                 return True  # allow fusion
             else:
                 raise
@@ -1414,7 +1420,12 @@ class Scheduler:
                     red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
                 )
 
-        if ms_fused >= ms1 + ms2:
+        if (
+            is_metric_table_enabled("slow_fusion")
+            and ms_fused >= ms1 + ms2
+            and (path1, path2) not in self.logged_slow_fusion
+        ):
+            self.logged_slow_fusion.add((path1, path2))
             get_metric_table("slow_fusion").add_row(
                 lambda: {
                     "kernel1_path": path1,
@@ -1426,7 +1437,6 @@ class Scheduler:
                     "slow_down_ratio": ms_fused / (ms1 + ms2),
                 }
             )
-        self.has_speedup_by_fusion[(node1, node2)] = ms_fused < ms1 + ms2
         return ms_fused < ms1 + ms2
 
     def fuse_nodes_once(self):
