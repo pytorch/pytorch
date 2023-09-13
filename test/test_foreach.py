@@ -244,7 +244,7 @@ class TestForeach(TestCase):
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
-    def test_pointwise_op(self, device, dtype, op, is_fastpath):
+    def test_pointwise_op_with_tensor_of_scalarlist_overload(self, device, dtype, op, is_fastpath):
         for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
             assert isinstance(sample.args, tuple)
             assert len(sample.args) == 2
