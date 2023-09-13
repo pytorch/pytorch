@@ -715,12 +715,15 @@ class TestSymNumberMagicMethods(TestCase):
 
             self._do_test(fn, inp1, inp2, shape_env, is_unary_fn)
 
+    def get_constant_bool(self, val):
+        return SymBool(torch._C._get_constant_bool_symnode(val))
+
     def test_symnode_hashing(self):
         j1 = torch._C._get_singleton_int(1)
         j2 = torch._C._get_singleton_int(1)
         j3 = torch._C._get_singleton_int(2)
-        b = j1 == j1
-        c = j2 == j2
+        b = self.get_constant_bool(True)
+        c = self.get_constant_bool(True)
         self.assertIsInstance(b, torch.SymBool)
         shape_env = ShapeEnv()
         s1 = create_symint(shape_env, 2)
@@ -742,7 +745,7 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertTrue(b == c)
         self.assertEqual(hash(b), hash(c))
         # SymBool and bool have the same hash if they have the same value
-        self.assertTrue(b == True)
+        self.assertTrue(b == True)  # noqa: E712
         self.assertEqual(hash(b), hash(True))
 
         self.assertFalse(j1 == j3)
@@ -763,19 +766,13 @@ class TestSymNumberMagicMethods(TestCase):
         self.assertFalse(j1 == 3)
         self.assertFalse(3 >= j2)
 
-        def test_constant_symbool(x, val):
-            self.assertIsInstance(x, torch.SymBool)
-            self.assertFalse(is_symbolic(x))
-            self.assertIs(x.node.guard_bool("", 0), val)
+        self.assertIs(j1 == j1, True)
+        self.assertIs(j1 == j2, True)
+        self.assertIs(j1 == j3, False)
+        self.assertIs(j1 != j3, True)
+        self.assertIs(j1 != j2, False)
 
-        test_constant_symbool(j1 == j1, True)
-        test_constant_symbool(j1 == j2, True)
-        test_constant_symbool(j1 == j3, False)
-        test_constant_symbool(j1 != j3, True)
-        test_constant_symbool(j1 != j2, False)
-
-        x = j1 == j2
-
+        x = self.get_constant_bool(True)
         #
         # Unary
         #
@@ -798,7 +795,7 @@ class TestSymNumberMagicMethods(TestCase):
         a = create_symint(shape_env, 2)
         b = create_symint(shape_env, 2)
         c = a == b  # symbolic SymBool
-        d = j1 == j2  # constant SymBool
+        d = self.get_constant_bool(True)
         e = operator.and_(c, d)
         f = operator.and_(d, c)
         self.assertTrue(is_symbolic(e))
