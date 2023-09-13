@@ -163,13 +163,6 @@ class ShapeEnvEvent:
     def is_defer_runtime_assert(self) -> bool:
         return self.name == "defer_runtime_assert"
 
-    def getarg(self, *, index: int, key: str) -> Any:
-        if self.args is not None and index < len(self.args):
-            return self.args[index]
-        elif self.kwargs is not None and key in self.kwargs:
-            return self.kwargs[key]
-        return None
-
 
 # Extracts a ShapeEnv instance inside args and kwargs.
 # Specifically, it looks for:

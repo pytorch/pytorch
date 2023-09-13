@@ -717,9 +717,21 @@ def bisect(shape_env):
         assert event.is_defer_runtime_assert(), f"unexpected event type: {event}"
         failed_action = "adding runtime assert"
 
+    args = event.args
+    assert args is not None
+    assert len(args) >= 2, (
+        f"bisecting expects {event.name} to have at least 2 positional arguments. "
+        f"Got: {len(args)}"
+    )
+    sympy.Eq
+    assert isinstance(args[1], sympy.Basic), (
+        f"bisecting expects {event.name} to have a SymPy expression as its second argument. "
+        f"Got: {type(args[1])}"
+    )
+
     raise BisectValidationException(
         exception[left],
-        expr=event.getarg(index=1, key="orig_expr"),
+        expr=args[1],
         failed_action=failed_action,
         traced_node=node.meta["node"],
     )
