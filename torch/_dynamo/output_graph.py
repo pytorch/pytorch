@@ -10,7 +10,17 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Set,
+    Union,
+)
 
 import sympy
 
@@ -42,7 +52,12 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
-from .exc import BackendCompilerFailed, unimplemented
+from .exc import (
+    BackendCompilerFailed,
+    exceptions_allowed_to_be_fallback,
+    unimplemented,
+    unimplemented_with_warning,
+)
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
@@ -65,6 +80,7 @@ from .utils import (
     counters,
     dynamo_timed,
     get_instruction_source_311,
+    get_static_address_type,
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
@@ -96,6 +112,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    register_finalizer_fns: List[Callable[[fx.GraphModule], None]]
     global_state: Optional[Dict[str, bool]]
     param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
@@ -249,41 +266,37 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # In export mode, we force the shape_env to strictly disallow any constraining
-        # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                frame_id=frame_state["_id"],
-                co_fields=self.co_fields,
-            ),
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
-        # Register a SHAPE_ENV guard to make sure we setup shape guards
-        # that show up in ShapeEnv
-        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
-        )
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
-
-        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
-
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
-
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+
+        shape_env = ShapeEnv(
+            # Reference Cycle!
+            # Share a reference to the list of TrackedFake.
+            #
+            # ShapeEnv needs this in order to be able to reproduce the call
+            # to produce_guards at an arbitrary time point. That is because
+            # TrackedFake instances may have its metadata changed throughout
+            # the program execution.
+            tracked_fakes=self.tracked_fakes,
+            allow_scalar_outputs=config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            co_fields=self.co_fields,
+        )
+
+        # In export mode, we force the shape_env to strictly disallow any constraining
+        # of the user marked dynamic dims
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=shape_env,
+            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+            allow_non_fake_inputs=True if self.export else False,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.init_ambient_guards()
+
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
@@ -300,6 +313,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # used to track nodes that are added between calls of copy_graphstate
         # and restore_graphstate
         self.timestamp = 0
+
+        # A list of register_finalizer_fns to apply to the output graph module
+        self.register_finalizer_fns: List[Callable[[fx.GraphModule], None]] = []
 
         # Not checkpointed
         self.compiler_fn: CompilerFn = compiler_fn
@@ -326,6 +342,12 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
         self.torch_function_enabled = torch._C._is_torch_function_enabled()
+        # Tracks if the output graph has a user defined allowed function in the
+        # graph. This is used later to determine if we should fallback to eager
+        # for certain exceptions. THe idea is that if the user has applied
+        # allow_in_graph, they would like to see the error instead of falling
+        # back for backend errors.
+        self.has_user_defined_allowed_in_graph = False
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -333,6 +355,25 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+    # This gets its own helper function so guards DEBUG logs are more
+    # informative
+    def init_ambient_guards(self):
+        # Register a SHAPE_ENV guard to make sure we setup shape guards
+        # that show up in ShapeEnv
+        self.guards.add(ShapeEnvSource().make_guard(GuardBuilder.SHAPE_ENV))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        )
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GRAD_MODE))
+
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
+
+        self.guards.add(
+            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        )
 
     @property
     def root_tracer(self):
@@ -460,6 +501,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             list(self.tracked_fakes),
             guards_graph_state,
             module_state,
+            list(self.register_finalizer_fns),
             global_state,
             dict(self.param_name_to_source),
             self.side_effects.clone(),
@@ -476,6 +518,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             module_state,
+            self.register_finalizer_fns,
             global_state,
             self.param_name_to_source,
             self.side_effects,
@@ -564,7 +607,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
         for i in itertools.count():
-            var = f"___{name}_{i}"
+            var = f"{name}_{i}"
             if var not in existing:
                 self.code_options["co_varnames"] += (var,)
                 return var
@@ -573,6 +616,22 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         """Ensure self.code_options.co_names contains name"""
         if name not in self.code_options["co_names"]:
             self.code_options["co_names"] += (name,)
+
+    @staticmethod
+    def module_key_name(*names):
+        # create a new unique name
+        name = "_".join(map(str, names))
+        # Strip the guard lookup L/G access
+        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+
+        if not name or not name[0].isalpha():
+            name = "sub" + name
+
+        return name
 
     def register_attr_or_module(
         self,
@@ -608,9 +667,13 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
+            if get_static_address_type(target) == "guarded":
+                options["guards"].add(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
+
                 return wrap_fx_proxy(
                     self.root_tx,
                     tracer.create_proxy("get_attr", module_key, tuple(), {}),
@@ -673,17 +736,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-        # create a new unique name
-        name = "_".join(map(str, names))
-        # Strip the guard lookup L/G access
-        name = re.sub(r"^[GL]\['?(.*?)'?\]$", r"\1", name)
-        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-        name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
-        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
-        name = re.sub(r"[^a-zA-Z0-9]", "_", name)
 
-        if not name or not name[0].isalpha():
-            name = "sub" + name
+        name = OutputGraph.module_key_name(*names)
+
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
@@ -764,6 +819,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         ] = collections.OrderedDict()
         if stack_values:
             val_to_names[stack_values[-1]] = list()
+        # NB: Typically (i.e., for graph compile from RETURN_VALUE),
+        # symbolic_locals will be empty at this point, as prune_dead_locals
+        # will clear out all of symbolic_locals because RETURN_VALUE is the
+        # last instruction and no more locals are used.  The fanciness here
+        # is only needed for partial graphs.
         for k, v in tx.symbolic_locals.items():
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
@@ -925,6 +985,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
 
         gm = fx.GraphModule(root, self.graph)
+        for register_finalizer in self.register_finalizer_fns:
+            register_finalizer(gm)
+
         gm.compile_subgraph_reason = self.compile_subgraph_reason
         name = unique_id("__compiled_fn")
 
@@ -933,7 +996,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -989,6 +1051,17 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
+        except exceptions_allowed_to_be_fallback as e:
+            if self.has_user_defined_allowed_in_graph:
+                raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                    e.__traceback__
+                ) from None
+            msg = (
+                "Backend compiler failed with a fake tensor exception at \n"
+                f"{self.root_tx.format_frame_summary()}"
+                "Adding a graph break."
+            )
+            unimplemented_with_warning(e, self.root_tx.f_code, msg)
         except Exception as e:
             raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
                 e.__traceback__
@@ -1093,9 +1166,15 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.real_value_cache.clear()
         self.input_name_to_proxy.clear()
         self.side_effects.clear()
+        self.register_finalizer_fns.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
+
+    def add_graph_finalizer(
+        self, register_finalizer: Callable[[fx.GraphModule], None]
+    ) -> None:
+        self.register_finalizer_fns.append(register_finalizer)
 
 
 class SubgraphTracer(fx.Tracer):
@@ -1290,6 +1369,11 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        log.debug(
+            "create_graph_input %s %s",
+            name,
+            source.name() if source is not None else "(none)",
+        )
         if source is None:
             assert (
                 self.parent is not None

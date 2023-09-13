@@ -1,14 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass
-from typing import cast, List, Optional, Sequence, Tuple
+from typing import cast, List, NamedTuple, Optional, Tuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
+from torch.distributed._tensor._collective_utils import mesh_broadcast, mesh_scatter
 from torch.distributed._tensor.device_mesh import DeviceMesh
-from torch.fx.passes.shape_prop import TensorMetadata
 
 
 class Placement:
@@ -166,7 +166,7 @@ class Shard(Placement):
         )
 
         output = torch.empty_like(scatter_list[my_coordinate[mesh_dim]])
-        mesh.scatter(output, scatter_list, mesh_dim=mesh_dim)
+        mesh_scatter(output, scatter_list, mesh, mesh_dim=mesh_dim)
 
         # Only unpad if the local_tensor was padded on the dimension.
         pad_size = pad_sizes[my_coordinate[mesh_dim]]
@@ -311,7 +311,7 @@ class Replicate(Placement):
             return tensor.new_empty(0, requires_grad=tensor.requires_grad)
 
         tensor = tensor.contiguous()
-        mesh.broadcast(tensor, mesh_dim=mesh_dim)
+        mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim)
         return tensor
 
 
@@ -351,7 +351,7 @@ class _Partial(Placement):
         return self.reduce_op == other.reduce_op
 
     def __hash__(self) -> int:
-        return hash(self.reduce_op)
+        return 1 + hash(self.reduce_op)
 
     def __repr__(self) -> str:
         """
@@ -366,31 +366,57 @@ class _Partial(Placement):
         return "P"
 
 
+class TensorMeta(NamedTuple):
+    # simple named tuple to represent tensor metadata
+    # intentionally to stay simple only for sharding
+    # propagation purposes.
+    shape: torch.Size
+    stride: Tuple[int, ...]
+    dtype: torch.dtype
+
+
 # used internally to propagate the placements
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
-    placements: Sequence[Placement]
+    placements: Tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
-    tensor_meta: Optional[TensorMetadata] = None
+    tensor_meta: Optional[TensorMeta] = None
 
     def __hash__(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
-        # propagation results. We only need to consider the mesh, placements and shape
+        # propagation results. We only need to consider the mesh, placements, shape
+        # dtype and stride.
         # Caveat: we need to keep this in mind and sync hash and eq if we add more
-        # fields to them,
+        # fields to them.
         if self.tensor_meta is not None:
-            return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
+            return hash(
+                (
+                    self.mesh,
+                    self.placements,
+                    self.tensor_meta.shape,
+                    self.tensor_meta.stride,
+                    self.tensor_meta.dtype,
+                )
+            )
         else:
-            return hash((self.mesh, tuple(self.placements)))
+            return hash((self.mesh, self.placements))
 
     def __eq__(self, __o: object) -> bool:
-        return (
+        if not (
             isinstance(__o, DTensorSpec)
             and self.mesh == __o.mesh
             and self.placements == __o.placements
-            and self.tensor_meta == __o.tensor_meta
+        ):
+            return False
+        if self.tensor_meta is None or __o.tensor_meta is None:
+            return self.tensor_meta == __o.tensor_meta
+
+        return (
+            self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
+            and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
+            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
         )
 
     @property
@@ -469,7 +495,7 @@ class DTensorSpec:
         mesh: DeviceMesh,
         dim_map: List[int],
         sums: List[int],
-        tensor_meta: Optional[TensorMetadata] = None,
+        tensor_meta: Optional[TensorMeta] = None,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -480,7 +506,7 @@ class DTensorSpec:
                 tensor dimension, see `dim_map` property doc for details
             sums (List[int]): a list of integer that represents the dist tensor have
                 pending sum on which device mesh dimension.
-            tensor meta (TensorMetadata): DTensor metadata
+            tensor meta (TensorMeta): DTensor metadata
 
         Return:
             a class:`DTensorSpec` object
@@ -506,4 +532,4 @@ class DTensorSpec:
                     )
                 placements[m] = Shard(i)
 
-        return cls(mesh, placements, tensor_meta=tensor_meta)
+        return cls(mesh, tuple(placements), tensor_meta=tensor_meta)

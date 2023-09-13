@@ -59,9 +59,18 @@ and ``RowwiseParallel`` for each parameter. There might be some code changes nee
 since we are parallelizing on the head dim of the ``MultiheadAttention`` module.
 
 
-We also enabled 2D parallelism to integrate with ``FullyShardedDataParallel``.
-Users just need to call the following API explicitly:
+We also support 2D parallelism, where we compose tensor parallelism with data parallelism.
+To integrate with ``FullyShardedDataParallel``,
+users just need to call the following API explicitly:
 
 
 .. currentmodule:: torch.distributed.tensor.parallel.fsdp
 .. autofunction::  enable_2d_with_fsdp
+
+
+To integrate with ``DistributedDataParallel``,
+users just need to call the following API explicitly:
+
+
+.. currentmodule:: torch.distributed.tensor.parallel.ddp
+.. autofunction::  pre_dp_module_transform

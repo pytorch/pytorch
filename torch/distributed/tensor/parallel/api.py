@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.distributed._tensor.random as random
 from torch.distributed._tensor import (
     DeviceMesh,
-    DTensor,
     distribute_module,
     distribute_tensor,
     Replicate,
@@ -16,7 +15,6 @@ from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     TensorParallelRNGTracker,
 )
-from torch.distributed._tensor.sharding_prop import _CachingPropagator
 from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
@@ -30,9 +28,6 @@ __all__ = [
     "parallelize_module",
 ]
 
-# switch the DTensor propagator to use the caching propagator to speed up
-# the TP eager execution time.
-DTensor._propagator = _CachingPropagator(DTensor._propagator)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
@@ -89,7 +84,7 @@ def parallelize_module(  # type: ignore[return]
         is_rng_supported_mesh(device_mesh) and
         not isinstance(random._rng_tracker, TensorParallelRNGTracker)
     ):
-        random._rng_tracker = TensorParallelRNGTracker()
+        random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
         # TODO: we should allow user to pass in the default seed from a config
         random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
         # By default we execute random ops in non-tensor-parallel region. If users want

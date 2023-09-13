@@ -2,11 +2,13 @@
 
 import os
 import sys
+import weakref
 from functools import wraps, partial
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.distributed._functional_collectives_impl as ft_c_impl
 import torch.distributed.distributed_c10d as c10d
 import torch.distributed._tensor as dt
 
@@ -455,6 +457,86 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(2, len(res))
         self.assertEqual(torch.ones([4 * dist.get_world_size()]), res[0])
         self.assertEqual(torch.ones([4 * dist.get_world_size()]) + 1, res[1])
+
+
+class TestOpWaitiness(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    def tearDown(self):
+        super().tearDown()
+        ft_c_impl._wait_all()
+
+
+    def test_wait_reduce_outstanding_work_count(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+
+        res.trigger_wait()
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
+
+
+    def test_add_triggers_wait(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+
+        foo = res + torch.ones([4])
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
+        self.assertFalse(isinstance(foo, ft_c.AsyncCollectiveTensor))
+
+    def test_view_does_not_trigger_wait(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+
+        foo = res.view([2, 2])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        self.assertTrue(ft_c_impl._tensor_needs_wait(foo))
+        self.assertTrue(isinstance(foo, ft_c.AsyncCollectiveTensor))
+
+        foo.trigger_wait()
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+    def test_dead_wrapper_triggers_wait(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+
+        wr = weakref.ref(res)
+        self.assertTrue(wr() is not None)
+        res = None
+        self.assertTrue(wr() is None)
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+    def test_dead_wrapper_plus_view(self):
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+        tensor = torch.ones([4])
+        res = ft_c.all_reduce(tensor, "sum", [0])
+        res = res.view([2, 2])
+        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
+        res = None
+        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
 if __name__ == "__main__":
     run_tests()

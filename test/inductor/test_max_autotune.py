@@ -1,5 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+import os
+import unittest
+
+from typing import List
+
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
@@ -8,17 +13,24 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
+from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
+
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+
+_CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
@@ -135,6 +147,24 @@ class TestDoBench(TestCase):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
     @parametrize("dynamic", (False, True))
+    def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic):
+        """
+        Make sure autotuning mm_plus_mm with zero-size input works without crashes.
+        """
+        m, n, k = 0, 1536, 64
+
+        def mm_plus_mm(a, b, c, d):
+            return a @ b + c @ d
+
+        a = torch.randn(m, k).cuda()
+        b = torch.randn(k, n).cuda()
+        c = torch.randn(m, k).cuda()
+        d = torch.randn(k, n).cuda()
+
+        with config.patch({"max_autotune": True}):
+            torch.compile(mm_plus_mm, dynamic=dynamic)(a, b, c, d)
+
+    @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm(self, dynamic: bool):
         """
         Make sure autotuning mm in sub processes work without crashes.
@@ -151,10 +181,98 @@ class TestDoBench(TestCase):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
     @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
+        """
+        Make sure autotuning mm with zero-size input works without crashes.
+        """
+
+        def mm(a, b):
+            a = torch.sin(a)
+            return a @ b
+
+        a = torch.randn(0, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+
+        with config.patch({"max_autotune": True}):
+            torch.compile(mm, dynamic=dynamic)(a, b)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    def test_max_autotune_cutlass_backend_regular_mm(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda().half()
+        b = torch.randn(10, 100).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
+            Y = mm(a, b)
+            torch.testing.assert_close(Y_compiled, Y)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    def test_max_autotune_cutlass_backend_mm_bias(
+        self, dynamic: bool, max_autotune_gemm_backends: str
+    ):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def mm(a, b, bias):
+            return torch.nn.functional.linear(a, b, bias)
+
+        a = torch.randn(2048, 4096).cuda().half()
+        bias = torch.randn(2048).cuda().half()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            Y = mm(a, a, bias)
+            Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
+
+    @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm(self, dynamic):
         """
         Make sure autotuning addmm in sub processes work without crashes.
         """
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         def addmm(x, a, b):
             return torch.addmm(x, a, b)
@@ -163,7 +281,107 @@ class TestDoBench(TestCase):
         a = torch.randn(100, 10).cuda()
         b = torch.randn(10, 100).cuda()
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+            Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            Y = addmm(x, a, b)
+            torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
+
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm_zero_size_input(self, dynamic):
+        """
+        Make sure autotuning addmm with zero-size input works without crashes.
+        """
+
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        x = torch.randn(100).cuda()
+        a = torch.randn(0, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+        with config.patch({"max_autotune": True}):
             torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+    # TODO: Enable dynamic test cases when dynamic support is added.
+    @unittest.skipIf(not SM75OrLater, "need sm_75")
+    @parametrize("dynamic", (False,))
+    @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    def test_max_autotune_cutlass_backend_addmm(
+        self, dynamic, max_autotune_gemm_backends
+    ):
+        """
+        Make sure autotuning addmm in sub processes work without crashes.
+        """
+
+        if max_autotune_gemm_backends == "CUTLASS" and torch.version.hip:
+            return
+
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        def addmm(x, a, b, alpha, beta):
+            return torch.addmm(x, a, b, alpha=alpha, beta=beta)
+
+        def compare_results(
+            m: int, k: int, n: int, alpha: float, beta: float, x_shape: List[int]
+        ) -> None:
+            x = torch.randn(x_shape).cuda().half()
+            a = torch.randn(m, k).cuda().half()
+            b = torch.randn(k, n).cuda().half()
+            y_expected = addmm(x, a, b, alpha, beta)
+
+            compiled_fn = torch.compile(addmm, dynamic=dynamic)
+            y = compiled_fn(x, a, b, alpha, beta)
+            torch.testing.assert_close(y, y_expected)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_gemm_backends": max_autotune_gemm_backends,
+                "cuda.cutlass_dir": _CUTLASS_DIR,
+                "cuda.cutlass_max_profiling_configs": 2,
+            }
+        ):
+            # No broadcast
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 2048])
+            # Broadcast first dim.
+            compare_results(4096, 25728, 2048, 2.0, 0.4, [2048])
+            # Broadcast last dim.
+            if not SM90OrLater and max_autotune_gemm_backends == "CUTLASS":
+                with self.assertRaisesRegex(RuntimeError, "No choices to select"):
+                    # CUTLASS2 doesn't support Bias last-dim broadcast.
+                    compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+            else:
+                compare_results(4096, 25728, 2048, 2.0, 0.4, [4096, 1])
+
+    @skipIfRocm
+    def test_autotune_conv1x1(self):
+        # Assuming input has 3 channels and we want to produce 16 channels as output
+        conv1x1 = (
+            torch.nn.Conv2d(in_channels=3, out_channels=16, kernel_size=1)
+            .to(memory_format=torch.channels_last)
+            .cuda()
+        )
+
+        # Example input tensor: batch size = 4, channels = 3, height = 32, width = 32
+        # The memory format is set to `channels_last`
+        input_tensor = (
+            torch.randn(4, 3, 32, 32)
+            .contiguous(memory_format=torch.channels_last)
+            .cuda()
+        )
+
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+
+            @torch.compile()
+            def foo(mod, x):
+                return mod(x)
+
+            with torch.no_grad():
+                out, code = run_and_get_code(foo, conv1x1, input_tensor)
+
+            FileCheck().check_not("extern_kernels.convolution").run(code[0])
+            self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
     def test_cat_addmm(self):
         def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
@@ -234,5 +452,6 @@ class TestDoBench(TestCase):
 
 
 if __name__ == "__main__":
+    # Set env to make it work in CI.
     if HAS_CUDA:
         run_tests()

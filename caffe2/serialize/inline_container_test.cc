@@ -23,6 +23,8 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
+  // Inplace memory buffer
+  std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
@@ -74,7 +76,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(dst.data(), data1.data(), size), 0);
   // chunked getRecord() test
   ret = reader.getRecord(
-      "key1", dst.data(), size, 3, [](void* dst, const void* src, size_t n) {
+      "key1", dst.data(), size, 3, buf.data(), [](void* dst, const void* src, size_t n) {
         memcpy(dst, src, n);
       });
   ASSERT_EQ(ret, size);
@@ -94,7 +96,7 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   ASSERT_EQ(memcmp(dst.data(), data2.data(), size), 0);
   // chunked getRecord() test
   ret = reader.getRecord(
-      "key2", dst.data(), size, 3, [](void* dst, const void* src, size_t n) {
+      "key2", dst.data(), size, 3, buf.data(), [](void* dst, const void* src, size_t n) {
         memcpy(dst, src, n);
       });
   ASSERT_EQ(ret, size);
@@ -112,6 +114,9 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
+
+  // Inplace memory buffer
+  std::vector<uint8_t> buf;
 
   for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
@@ -154,6 +159,7 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
           dst.data(),
           data1.size(),
           3,
+          buf.data(),
           [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); }),
       c10::Error);
 
@@ -171,6 +177,8 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
   });
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
+  // Inplace memory buffer
+  std::vector<uint8_t> buf(data1.size());
 
   for (auto i : c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
@@ -218,6 +226,7 @@ TEST(PytorchStreamWriterAndReader, SkipDebugRecords) {
       dst.data(),
       data1.size(),
       3,
+      buf.data(),
       [](void* dst, const void* src, size_t n) { memcpy(dst, src, n); });
   EXPECT_EQ(ret, 0);
   // clean up

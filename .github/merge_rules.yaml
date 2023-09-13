@@ -7,10 +7,13 @@
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
+  - docs/source/_static/img/onnx/**
   - scripts/onnx/**
   - test/onnx/**
   - tools/onnx/**
+  - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
+  - torch/_C/_onnx.pyi
   - torch/csrc/jit/passes/onnx.*
   - torch/csrc/jit/passes/onnx/**
   - torch/csrc/jit/serialization/export.*
@@ -90,8 +93,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_8-clang8-xla / build
-  - pull / linux-bionic-py3_8-clang8-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull / linux-bionic-py3_8-clang9-xla / build
+  - pull / linux-bionic-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -114,6 +117,23 @@
   - IvanKobzarev
   - dreiss
   - raziel
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: PrimTorch
+  patterns:
+  - aten/src/ATen/native_functions.yaml
+  - aten/src/ATen/native/**
+  - test/**
+  - torch/_meta_registrations.py
+  - torch/_decomp/**
+  - torch/_refs/**
+  - torch/_prims/**
+  - torch/_prims_common/**
+  approved_by:
+  - nkaretnikov
   mandatory_checks_name:
   - EasyCLA
   - Lint

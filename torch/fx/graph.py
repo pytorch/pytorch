@@ -195,11 +195,18 @@ class _Namespace:
 
         return False
 
+    def _rename_object(self, obj: Any, name: str):
+        assert obj in self._obj_to_name
+        self._obj_to_name[obj] = name
+        self._used_names.add(name)
+
 dtype_abbrs = {
     torch.bfloat16: 'bf16',
     torch.float64: 'f64',
     torch.float32: 'f32',
     torch.float16: 'f16',
+    torch.float8_e4m3fn: 'f8e4m3fn',
+    torch.float8_e5m2: 'f8e5m2',
     torch.complex32: 'c32',
     torch.complex64: 'c64',
     torch.complex128: 'c128',

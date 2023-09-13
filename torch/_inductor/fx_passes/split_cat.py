@@ -1,3 +1,4 @@
+import itertools
 import logging
 import operator
 from typing import Callable, List, Sequence, Tuple, Union
@@ -117,12 +118,21 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         log.info("couldn't find cat args")
         return
     assert isinstance(tensors, (list, tuple))
-    if "example_value" not in tensors[0].meta:
-        log.warning("example value absent for node: %s", tensors[0])
-        return
+    for tensor in itertools.chain([cat_node], tensors):
+        if "example_value" not in tensor.meta:
+            log.warning("example value absent for node: %s", tensor)
+            return
 
-    ndim = tensors[0].meta["example_value"].dim()
-    assert all(ndim == x.meta["example_value"].dim() for x in tensors)
+    ndim = cat_node.meta["example_value"].dim()
+
+    def is_empty_tensor(x):
+        # special case where torch.cat supports cat'ing with an empty tensor
+        x_shape = x.meta["example_value"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(
+        ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
+    )
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
@@ -771,7 +781,7 @@ class UnbindCatRemover(SplitCatSimplifier):
         split_dim = unbind_node.kwargs["dim"]
         transform_params_list = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            cat_dim = get_arg_value(user_node, 1, "dim")
+            cat_dim = get_arg_value(user_node, 1, "dim") or 0
             transform_params = []
             for user_input in user_inputs:
                 if isinstance(user_input, tuple):

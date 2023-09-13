@@ -158,8 +158,7 @@ void Adagrad::load(serialize::InputArchive& archive) {
       auto state = std::make_unique<AdagradParamState>();
       state->step(step_buffers[idx]);
       state->sum(sum_buffers[idx]);
-      state_[c10::guts::to_string(params[idx].unsafeGetTensorImpl())] =
-          std::move(state);
+      state_[params[idx].unsafeGetTensorImpl()] = std::move(state);
     }
   }
 }
