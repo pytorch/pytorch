@@ -91,7 +91,10 @@ PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   int64_t device = THPUtils_unpackLong(arg);
 
   torch::utils::cuda_lazy_init();
-  THCPModule_setDevice(device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    THCPModule_setDevice(device);
+  }
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -105,8 +108,12 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
+  int current_device = 0;
   torch::utils::cuda_lazy_init();
-  int current_device = c10::cuda::ExchangeDevice(device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    current_device = c10::cuda::ExchangeDevice(device);
+  }
 
   return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
@@ -120,8 +127,12 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
+  int current_device = 0;
   torch::utils::cuda_lazy_init();
-  int current_device = c10::cuda::MaybeExchangeDevice(device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    current_device = c10::cuda::MaybeExchangeDevice(device);
+  }
 
   return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
@@ -129,9 +140,13 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
 
 PyObject* THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  int32_t device = 0;
   torch::utils::cuda_lazy_init();
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  auto device = static_cast<int32_t>(c10::cuda::current_device());
+  {
+    pybind11::gil_scoped_release no_gil;
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+    device = static_cast<int32_t>(c10::cuda::current_device());
+  }
   return THPUtils_packInt32(device);
   END_HANDLE_TH_ERRORS
 }
@@ -156,8 +171,12 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
   int64_t device = THPUtils_unpackLong(arg1);
   int64_t peer_device = THPUtils_unpackLong(arg2);
 
+  bool can_access = false;
   torch::utils::cuda_lazy_init();
-  auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
+  }
   return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS
 }
@@ -165,7 +184,12 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
 PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   poison_fork();
-  return THPUtils_packUInt64(at::cuda::device_count());
+  uint64_t device_count = 0;
+  {
+    pybind11::gil_scoped_release no_gil;
+    device_count = at::cuda::device_count();
+  }
+  return THPUtils_packUInt64(device_count);
   END_HANDLE_TH_ERRORS
 }
 
@@ -217,7 +241,12 @@ PyObject* THCPModule_getCurrentStream_raw(
   THPUtils_assert(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
-  return PyLong_FromVoidPtr(at::cuda::getCurrentCUDAStream(device).stream());
+  void* stream = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    stream = at::cuda::getCurrentCUDAStream(device).stream();
+  }
+  return PyLong_FromVoidPtr(stream);
   END_HANDLE_TH_ERRORS
 }
 
@@ -266,14 +295,17 @@ PyObject* THCPModule_setStream_wrap(
           &device_type)) {
   }
 
-  auto stream = at::cuda::CUDAStream::unpack3(
-      stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+  {
+    pybind11::gil_scoped_release no_gil;
+    auto stream = at::cuda::CUDAStream::unpack3(
+        stream_id, device_index, static_cast<c10::DeviceType>(device_type));
 
-  auto device = c10::cuda::current_device();
-  if (device != stream.device_index()) {
-    THCPModule_setDevice(stream.device_index());
+    auto device = c10::cuda::current_device();
+    if (device != stream.device_index()) {
+      THCPModule_setDevice(stream.device_index());
+    }
+    at::cuda::setCurrentCUDAStream(stream);
   }
-  at::cuda::setCurrentCUDAStream(stream);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -310,8 +342,11 @@ PyObject* THCPModule_cudaCachingAllocator_raw_alloc(
   }
   auto size = PyLong_AsSsize_t(size_o);
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
-  void* mem =
-      c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  void* mem = nullptr;
+  {
+    pybind11::gil_scoped_release no_gil;
+    mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
+  }
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
 }
@@ -420,7 +455,10 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     PyObject* obj) {
   HANDLE_TH_ERRORS
   void* mem_ptr = PyLong_AsVoidPtr(obj);
-  c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -442,15 +480,19 @@ PyObject* THCPModule_getAllocatorBackend(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::device_synchronize();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::device_synchronize();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_cudaIPCCollect(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  torch::CudaIPCCollect();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    torch::CudaIPCCollect();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -459,7 +501,11 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
   HANDLE_TH_ERRORS
   THPUtils_assert(
       THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
-  at::cuda::sleep(THPUtils_unpackLong(cycles));
+  int64_t unpacked_cycles = THPUtils_unpackLong(cycles);
+  {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::sleep(unpacked_cycles);
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -528,14 +574,19 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   double fraction = PyFloat_AsDouble(fraction_o);
   int64_t device = PyLong_AsLongLong(device_o);
 
-  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, device);
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
 
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -550,6 +601,11 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   using c10::cuda::CUDACachingAllocator::Stat;
   using c10::cuda::CUDACachingAllocator::StatArray;
   using c10::cuda::CUDACachingAllocator::StatType;
+  c10::cuda::CUDACachingAllocator::DeviceStats stats;
+  {
+    pybind11::gil_scoped_release no_gil;
+    stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device);
+  }
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -570,9 +626,6 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
     }
     return dict;
   };
-
-  const DeviceStats stats =
-      c10::cuda::CUDACachingAllocator::getDeviceStats(device);
 
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
@@ -602,7 +655,10 @@ PyObject* THCPModule_resetAccumulatedMemoryStats(
       THPUtils_checkLong(arg),
       "invalid argument to reset_accumulated_memory_stats");
   const int device = (int)THPUtils_unpackLong(arg);
-  c10::cuda::CUDACachingAllocator::resetAccumulatedStats(device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::resetAccumulatedStats(device);
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -612,7 +668,10 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       THPUtils_checkLong(arg), "invalid argument to reset_peak_memory_stats");
   const int device = (int)THPUtils_unpackLong(arg);
-  c10::cuda::CUDACachingAllocator::resetPeakStats(device);
+  {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::resetPeakStats(device);
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -819,25 +878,28 @@ PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       THPUtils_checkLong(arg), "invalid argument to set_sync_debug_mode");
   int64_t debug_mode = THPUtils_unpackLong(arg);
-  TORCH_CHECK(
-      debug_mode >= 0 && debug_mode <= 2,
-      "invalid value of debug_mode, expected one of 0,1,2");
-  c10::cuda::SyncDebugMode l;
-  switch (debug_mode) {
-    case 0:
-      l = c10::cuda::SyncDebugMode::L_DISABLED;
-      break;
-    case 1:
-      l = c10::cuda::SyncDebugMode::L_WARN;
-      break;
-    case 2:
-      l = c10::cuda::SyncDebugMode::L_ERROR;
-      break;
-    default:
-      l = c10::cuda::SyncDebugMode::L_DISABLED;
-      break; // can't happen
+  {
+    pybind11::gil_scoped_release no_gil;
+    TORCH_CHECK(
+        debug_mode >= 0 && debug_mode <= 2,
+        "invalid value of debug_mode, expected one of 0,1,2");
+    c10::cuda::SyncDebugMode l;
+    switch (debug_mode) {
+      case 0:
+        l = c10::cuda::SyncDebugMode::L_DISABLED;
+        break;
+      case 1:
+        l = c10::cuda::SyncDebugMode::L_WARN;
+        break;
+      case 2:
+        l = c10::cuda::SyncDebugMode::L_ERROR;
+        break;
+      default:
+        l = c10::cuda::SyncDebugMode::L_DISABLED;
+        break; // can't happen
+    }
+    c10::cuda::warning_state().set_sync_debug_mode(l);
   }
-  c10::cuda::warning_state().set_sync_debug_mode(l);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
