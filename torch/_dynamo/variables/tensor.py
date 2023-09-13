@@ -660,11 +660,9 @@ class TensorVariable(VariableTracker):
                 fn = fn_var.fn
                 name = fn_var.fn.__name__
 
-            handle = self.as_proxy().node.meta["example_value"].register_hook(fn)
+            self.as_proxy().node.meta["example_value"].register_hook(fn)
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
-                handle,
-                user_code_variable_name=None,
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
@@ -676,7 +674,6 @@ class TensorVariable(VariableTracker):
             # not always lift up to globals, but to use the lowest level scope possible to match the
             # func lifecycle.
             if not self.source:
-                src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=True)
                 # Intermediary
                 unimplemented("Intermediary tensors with registered hooks - NYI")
             else:

@@ -381,7 +381,13 @@ class SideEffects:
             )
 
     def register_hook(self, tensor, hook, handle):
+        idx = len(self.tensor_hooks)
         self.tensor_hooks.append((tensor, hook, handle))
+        assert not handle.idx
+        handle.idx = idx
+
+    def remove_hook(self, idx):
+        del self.tensor_hooks[idx]
 
     def codegen_hooks(self, cg):
         for (
