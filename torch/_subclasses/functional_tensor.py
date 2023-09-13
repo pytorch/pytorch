@@ -265,7 +265,20 @@ def unset_functional_temporarily():
 #   functorch transforms, since these transforms always run above __torch_dispatch__.
 #   That's why this util lives here, and not in functorch.
 def dispatch_functionalize(func):
-    from torch._functorch.aot_autograd import from_fun, to_fun
+    # TODO: pull these from aot autograd
+    def to_fun(t):
+        if isinstance(t, torch.Tensor):
+            return FunctionalTensor.to_functional(t)
+        return t
+
+    def from_fun(t):
+        if not isinstance(t, FunctionalTensor):
+            # quick sanity assert
+            if isinstance(t, torch.Tensor):
+                assert not torch._is_functional_tensor(t)
+            return t
+        torch._sync(t)
+        return torch._from_functional_tensor(t.elem)
 
     def inner(*args, **kwargs):
         func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
@@ -280,11 +293,6 @@ def dispatch_functionalize(func):
         with disable_above, FunctionalTensorMode():
             func_outputs = func(*func_args, **func_kwargs)
             outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
-
-            # sync any input mutations
-            for a in flattened_wrapped_args + flattened_wrapped_kwargs:
-                if isinstance(a, torch.Tensor):
-                    torch._sync(a)
 
             return outputs
 
