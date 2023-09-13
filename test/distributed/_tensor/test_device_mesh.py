@@ -419,7 +419,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
             scattered_tensor = funcol.reduce_scatter_tensor(
                 tensor_to_reduce,
-                op="sum",
+                reduceOp="sum",
                 scatter_dim=shard_dim,
                 group=(device_mesh, 0),
             )
