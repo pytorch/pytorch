@@ -1,6 +1,5 @@
 import os
 import textwrap
-import warnings
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import cast, Optional
@@ -13,17 +12,7 @@ from .config import is_fbcode
 from .utils import counters
 
 if is_fbcode():
-    try:
-        from torch.fb.exportdb.logging import exportdb_error_message
-    except ModuleNotFoundError as err:
-        warnings.warn(
-            f"is_fbcode() is True, but could not import exportdb_error_message function: {err}. "
-            "Creating dummy replacement for it."
-        )
-
-        def exportdb_error_message(case_name):
-            return ""
-
+    from torch.fb.exportdb.logging import exportdb_error_message
 else:
 
     def exportdb_error_message(case_name):

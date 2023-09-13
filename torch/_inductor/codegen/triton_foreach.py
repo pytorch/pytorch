@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 
 from .. import metrics
-from ..utils import ceildiv
+from ..utils import ceildiv, Placeholder
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
@@ -153,6 +153,7 @@ class ForeachKernel(Kernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
+        triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)
         return (
             f"@foreach(num_warps={self.num_warps}, meta={triton_meta!r})\n"
             + "@triton.jit"
@@ -181,7 +182,9 @@ class ForeachKernel(Kernel):
         )
         argdefs, _, _ = self.args.python_argdefs()
         code.writeline(self.jit_line())
-        code.writeline(f"def {name or 'KERNEL_NAME'}({', '.join(argdefs)}):")
+        code.writeline(
+            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
+        )
 
         with code.indent():
             code.splice("xpid = tl.program_id(0)")
