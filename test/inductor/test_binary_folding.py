@@ -8,6 +8,7 @@ import unittest
 
 import torch
 from torch import nn
+from torch._inductor import config as inductor_config
 from torch.testing._internal.common_cuda import TEST_CUDNN
 
 # Make the helper files in test/ importable
@@ -159,6 +160,9 @@ class BinaryFoldingTemplate(TestCase):
             )
 
     def test_conv_bn_folding(self):
+        original_config = inductor_config.efficient_conv_bn_eval_fx_passes
+        inductor_config.efficient_conv_bn_eval_fx_passes = False
+
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):
             class ConvOp(nn.Module):
@@ -225,6 +229,7 @@ class BinaryFoldingTemplate(TestCase):
                 module,
                 expect_success=True,
             )
+        inductor_config.efficient_conv_bn_eval_fx_passes = original_config
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
