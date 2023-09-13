@@ -11388,6 +11388,8 @@ take_along_dim(input, indices, dim=None, *, out=None) -> Tensor
 
 Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
 
+If :attr:`dim` is None, the input array is treated as if it has been flattened to 1d.
+
 Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
 are designed to work with this function. See the examples below.
 
