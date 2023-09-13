@@ -201,7 +201,6 @@ exclude_patterns = [
     'torch/_inductor/bounds.py',
     'torch/_inductor/config.py',
     'torch/_inductor/ir.py',
-    'torch/_inductor/codecache.py',
     'torch/_inductor/test_operators.py',
     'torch/_inductor/inductor_prims.py',
     'torch/_inductor/scheduler.py',
