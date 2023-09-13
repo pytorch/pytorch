@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -1192,8 +1193,8 @@ def split_with_sizes(
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check(
-            length >= 0,
+        torch._check_is_size(
+            length,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
         # We know this is true thanks to the sum, but this assertion helps
@@ -1216,6 +1217,31 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     split_sizes = [split_size for i in range(chunks)]
     split_sizes[-1] = split_size - (split_size * chunks - dim_size)
     return torch.split(self, split_sizes, dim)
+
+
+@aten.tensor_split.tensor_indices_or_sections.py_impl(
+    DispatchKey.CompositeImplicitAutograd
+)
+def tensor_split_tensor_indices_or_sections_py_impl(
+    self: Tensor,
+    tensor_indices_or_sections: Tensor,
+    dim: int = 0,
+) -> List[Tensor]:
+    assert tensor_indices_or_sections.device.type == "cpu"
+    assert tensor_indices_or_sections.dtype == torch.int64
+    split_dim = tensor_indices_or_sections.dim()
+    torch._check(
+        split_dim == 1 or split_dim == 0,
+        lambda: "tensor_split expected tensor_indices_or_sections to be a zero-dimensional "
+        f"or one-dimensional tensor, but got a tensor with {split_dim} dims",
+    )
+    if split_dim == 0:
+        sections = tensor_indices_or_sections.item()
+        assert isinstance(sections, IntLike)
+        return self.tensor_split(sections, dim)
+    else:
+        indices = [i.item() for i in tensor_indices_or_sections]
+        return self.tensor_split(indices, dim)
 
 
 # TODO: this doesn't appear to have enough precision in bfloat16
@@ -2067,6 +2093,12 @@ def _index_add(
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    index_size = index.size(0) if index.ndim == 1 else 1
+    tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
+    torch._check(
+        tensor_size == index_size,
+        lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
@@ -3270,15 +3302,21 @@ def affine_grid_generator(theta: Tensor, size: List[int], align_corners: bool):
         return _affine_grid_generator_5d(theta, size, align_corners=align_corners)
 
 
-@register_decomposition(aten.grid_sampler_2d)
-@pw_cast_for_opmath
-def grid_sampler_2d(
+def _grid_sampler_2d(
     a: Tensor,
     grid: Tensor,
     interpolation_mode: int = 0,
     padding_mode: int = 0,
     align_corners: bool = False,
+    _expand_grid: bool = True,
 ) -> Tensor:
+    # This method is a copy of grid_sampler_2d implementation and introduced with additional arg _expand_grid to
+    # optionaly expand the input grid for performance reasons.
+    # Experimenting locally it was found that compiled CUDA code is accelerated by ~5x
+    # and CPU code by ~2x on bicubic mode, if we expand the grid from (N, H, W, 2) into (N, C, H, W, 2)
+    # However, this leads to a slowdown around ~0.8x on CPU bilinear mode, channels first.
+    # Thus we apply this hack to not expand the grid for this case.
+
     torch._check(
         interpolation_mode in (0, 1, 2),
         lambda: f"Invalid interpolation mode {interpolation_mode}",
@@ -3327,7 +3365,16 @@ def grid_sampler_2d(
         return compute_coordinates(coords_un, size)
 
     N, C, iH, iW = a.shape
-    _, oH, oW, _ = grid.shape
+    _, oH, oW, two = grid.shape
+    assert two == 2
+
+    if _expand_grid:
+        # Let's expand grid to [N, C, oH, oW, 2]
+        # This allows to generate a single triton cuda kernel instead of two kernels.
+        # Two kernels are due source indices, weights have shape (N, 1, oH, oW), xnumel=N*oH*oW
+        # and output has shape (N, C, oH, oW), xnumel=N*C*oH*oW
+        # Expanding grid to (N, C, oH, oW, two) unifies xnumel to N*C*oH*oW
+        grid = grid.view(N, 1, oH, oW, two).expand(N, C, oH, oW, 2)
 
     def in_bounds_cond(xs: Tensor, ys: Tensor) -> Tensor:
         return torch.logical_and(
@@ -3343,8 +3390,9 @@ def grid_sampler_2d(
         # to (x, y) = (0, 0) and also set the weight to 0
         # We also change the shape of the tensor to the appropriate one for
         # broadcasting with N_idx, C_idx for the purposes of advanced indexing
+        c = C if _expand_grid else 1
         return tuple(
-            torch.where(cond, t, 0).view(N, 1, oH, oW)
+            torch.where(cond, t, 0).view(N, c, oH, oW)
             for t in (xs.to(dtype=torch.int64), ys.to(dtype=torch.int64), ws)
         )
 
@@ -3397,6 +3445,10 @@ def grid_sampler_2d(
         tx = ix - ix_nw
         ty = iy - iy_nw
 
+        if not _expand_grid:
+            tx = tx.unsqueeze(1)
+            ty = ty.unsqueeze(1)
+
         def get_value_bounded(ix: Tensor, iy: Tensor) -> Tensor:
             x = compute_coordinates(ix, iW)
             y = compute_coordinates(iy, iH)
@@ -3410,10 +3462,28 @@ def grid_sampler_2d(
                 get_value_bounded(ix_nw + 1, iy_ofs),
                 get_value_bounded(ix_nw + 2, iy_ofs),
             )
-            return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
+            return _upsample_cubic_interp1d(cs, tx)
 
         coeffs = tuple(get_coeff(ofs) for ofs in range(4))
-        return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
+        return _upsample_cubic_interp1d(coeffs, ty)
+
+
+@register_decomposition(aten.grid_sampler_2d)
+@pw_cast_for_opmath
+def grid_sampler_2d(
+    a: Tensor,
+    grid: Tensor,
+    interpolation_mode: int = 0,
+    padding_mode: int = 0,
+    align_corners: bool = False,
+) -> Tensor:
+    return _grid_sampler_2d(
+        a,
+        grid=grid,
+        interpolation_mode=interpolation_mode,
+        padding_mode=padding_mode,
+        align_corners=align_corners,
+    )
 
 
 @register_decomposition(aten.mv)
@@ -3429,39 +3499,6 @@ def mv(self, vec):
         lambda: f"size mismatch, got input ({self.size(0)}x{self.size(1)}), vec ({vec.size(0)})",
     )
     return (self * vec).sum(dim=1)
-
-
-@register_decomposition(aten.dot)
-@out_wrapper()
-@pw_cast_for_opmath
-def dot(self, other):
-    if self.is_complex():
-        if self.is_conj():
-            if other.is_conj():
-                return torch.dot(self.conj(), other.conj()).conj()
-            else:
-                return torch.vdot(self.conj(), other)
-        elif other.is_conj():
-            return torch.vdot(other.conj(), self)
-
-    torch._check(
-        self.dim() == 1 and other.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
-    )
-    torch._check(
-        self.dtype == other.dtype,
-        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
-    )
-
-    def numel_error():
-        return (
-            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
-            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
-        )
-
-    torch._check(self.numel() == other.numel(), numel_error)
-
-    return (self * other).sum()
 
 
 @register_decomposition(aten.binary_cross_entropy_with_logits)
@@ -3765,6 +3802,13 @@ def arange_start(
     )
 
 
+@register_decomposition(out_dtype)
+def out_dtype_decomp(*args, **kwargs):
+    from torch._higher_order_ops.out_dtype import out_dtype_dense
+
+    return out_dtype_dense(*args, **kwargs)
+
+
 @register_decomposition(aten.multi_margin_loss)
 @aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
@@ -3861,6 +3905,119 @@ def multilabel_margin_loss_forward(
     # result
     is_target = is_target.to(input.dtype).reshape(orig_target_shape)
     return z, is_target
+
+
+# scaled_dot_product_attention used to be decomposed in pre-autograd, given that
+# it calls _scaled_dot_product_attention_math and
+# _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
+# kernel. As a result it's decomposed into ops with finer granularity.
+# However recent PRs (#103826 #105131) added new logic in
+# scaled_dot_product_attention and now it calls
+# _scaled_dot_product_flash_attention which contains a CPU kernel. This results
+# in _scaled_dot_product_flash_attention showing up in torch.export().
+# This decomposition ensures scaled_dot_product_attention is still decomposed
+# the same way as before, i.e., going through
+# _scaled_dot_product_attention_math. Notice that this decomp rule should be
+# excluded by inductor.
+@register_decomposition(aten._scaled_dot_product_flash_attention.default)
+def scaled_dot_product_flash_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
+    dtype = query.dtype
+    batchSize, num_head, qSize, headSize = (
+        query.shape[0],
+        query.shape[1],
+        query.shape[2],
+        query.shape[3],
+    )
+
+    torch._check(
+        torch.is_floating_point(query) and dtype is not torch.half,
+        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+    )
+    torch._check(
+        query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
+        lambda: "q, k, v must be a 4 dimensional tensor",
+    )
+    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
+        lambda: "q, k, v should have the same head size",
+    )
+    torch._check(
+        return_debug_mask is False, lambda: "return_debug_mask is not supported."
+    )
+
+    logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
+    cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    max_q, max_k = 0, 0
+    philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    debug_attn_mask = torch.empty(
+        [],
+        dtype=query.dtype,
+        device=query.device,
+        requires_grad=query.requires_grad,
+    )
+    output, _ = aten._scaled_dot_product_attention_math.default(
+        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+    )
+    # Why this change?
+    # In pre-dispatch export scaled_dot_product_attention is executed via
+    # * flash_attention.
+    # flash_attention allocates output tensor as (N, L, H, E)
+    #   it then tranposes that to get (N, H, L, E) which is supposed to be the return
+    # tensor dim for scaled_dot_product_attention
+    # assume x: [N, H, L, E] is the output sdpa
+    # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
+    # (L, N, H, E) dim tensor
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+    # During pre autograd dispatch call to contiguous is not traced because
+    # flash_attention output after the x.permute is already contiguous
+    # on which the view is valid
+    # However, during 2nd stage export, post-dispatch, we run _match variant
+    # instead of flash* to get the decomposition. _match variant returns
+    # x: [N, H, L, E] applying x.permute(2, 0, 1, 3) returns
+    # x: [L, N, H, E] and without converting this to contiguous tensor
+    # subsequent view is not valid and the export fails
+    # solution is to maintain the return tensor view from the decomp to be
+    # exactly same as *flash* variant.
+    # flash variants output is contiguous as [N, L, H, E]
+    # _match variant out is contiguous as [N, H, L, E]
+    # out = out.tranpose(1, 2).contiguous gets output as contiguous
+    # in [N, L, H, E].
+    # Subsrequent tranpose(1, 2) then returns a view on which
+    # aforementioned code snippet, as showm below, is valid
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+
+    # Really the invairant you want to maintain is:
+    # pre-dispatch op-output and its decomposed representation must
+    # return tensor with same view and dims
+    output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
+    return (
+        output.transpose(1, 2),
+        logsumexp,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask,
+    )
 
 
 def register_inplace(aten_op, outplace_op):

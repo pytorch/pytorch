@@ -189,10 +189,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
     xfail(
-        "all",
-        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
-    ),
-    xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -204,10 +200,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
-    ),
-    xfail(
-        "any",
-        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
     ),
     xfail(
         "arange",
@@ -680,6 +672,12 @@ def _run_test_output_match(
                     # Relax atol and rtol for float32 based on empirical results
                     rtol = 1e-5
                     atol = 2e-5
+                elif (
+                    dtype == torch.float16
+                    and op.name in test_suite.fp16_low_precision_list
+                ):
+                    rtol = 1e-2
+                    atol = 1e-3
                 else:
                     rtol = None
                     atol = None
@@ -714,6 +712,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
+
+    fp16_low_precision_list = [
+        "nn.functional.batch_norm",
+        "native_batch_norm",
+    ]
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],

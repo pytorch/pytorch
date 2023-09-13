@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import ast
 import builtins
 import collections
@@ -47,7 +49,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import TypeSource
+from .source import LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -86,12 +88,6 @@ CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
-        ("___is_grad_enabled", torch.is_grad_enabled),
-        (
-            "___are_deterministic_algorithms_enabled",
-            torch.are_deterministic_algorithms_enabled,
-        ),
-        ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -172,14 +168,16 @@ class GuardBuilder(GuardBuilderBase):
         self,
         id_ref: Callable[[Type[object]], str],
         source_ref: Callable[[Source], str],
+        lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
-        check_fn_manager: "CheckFunctionManager",
+        check_fn_manager: CheckFunctionManager,
         *,
         local: bool,
     ):
         self.local = local
         self.id_ref = id_ref
         self.source_ref = source_ref
+        self.lookup_weakrefs = lookup_weakrefs
         if user_scope:
             scope = {"L" if local else "G": user_scope}
         else:
@@ -223,6 +221,10 @@ class GuardBuilder(GuardBuilderBase):
         self.tensor_check_guards: List[Guard] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
+        # Keep track of weak references of objects with ID_MATCH guard. This
+        # info is stored alongside optimized_code and check_fn and is used to
+        # limit the number of cache entries with same ID_MATCH'd object.
+        self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
     # Warning: use this with care!  This lets you access what the current
     # value of the value you are guarding on is.  You probably don't want
@@ -286,8 +288,22 @@ class GuardBuilder(GuardBuilderBase):
                 )
             )
 
-        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        code = f"___check_obj_id({ref}, {self.id_ref(val)})"
         self._produce_guard_code(guard, [code])
+
+        # Keep track of ID_MATCH'd objects. This will be used to modify the
+        # cache size logic
+        if self.local and isinstance(guard.originating_source, LocalSource):
+            # TODO(janimesh) - This is currently restricted to nn.Module objects
+            # because many other ID_MATCH'd objects fail - like DeviceMesh.
+            # Increase the scope of ID_MATCH'd objects.
+            if isinstance(val, torch.nn.Module):
+                local_name = guard.originating_source.local_name
+                weak_id = self.lookup_weakrefs(val)
+                if weak_id is not None:
+                    self.id_matched_objs[local_name] = weak_id
 
     def NAME_MATCH(self, guard: Guard):
         obj = self.get(guard.name)
@@ -515,34 +531,13 @@ class GuardBuilder(GuardBuilderBase):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
-        """Guard on the initial grad state"""
-        assert guard.name == ""
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_grad_state:
-            code = "___is_grad_enabled()"
-        else:
-            code = "not ___is_grad_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard):
-        """Guard on the initial determinism algorithms state"""
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_deterministic_algorithms_state:
-            code = "___are_deterministic_algorithms_enabled()"
-        else:
-            code = "not ___are_deterministic_algorithms_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def TORCH_FUNCTION_STATE(self, guard: Guard):
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_torch_function_state:
-            code = "___is_torch_function_enabled()"
-        else:
-            code = "not ___is_torch_function_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
@@ -574,22 +569,27 @@ class GuardBuilder(GuardBuilderBase):
         if output_graph.export_constraints:
             source_pairs: List[Tuple[Source, Source]] = []
             for constraint in output_graph.export_constraints:
-                source, *other_sources = get_sources(constraint.t_id, constraint.dim)
-                # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                # constraints that make src0 "equal" to src1, ..., srcN.
-                source_pairs.extend(
-                    (source, other_source) for other_source in other_sources
-                )
-                if constraint.shared is not None:
-                    # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                    # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                    # constraints that also make src0 "equal" to src1', ..., srcN'.
-                    other_sources = get_sources(
-                        constraint.shared.t_id, constraint.shared.dim
+                if constraint.t_id in output_graph.tracked_fakes_id_to_source:
+                    source, *other_sources = get_sources(
+                        constraint.t_id, constraint.dim
                     )
+                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
+                    # constraints that make src0 "equal" to src1, ..., srcN.
                     source_pairs.extend(
                         (source, other_source) for other_source in other_sources
                     )
+                    if constraint.shared is not None:
+                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
+                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
+                        # constraints that also make src0 "equal" to src1', ..., srcN'.
+                        other_sources = get_sources(
+                            constraint.shared.t_id, constraint.shared.dim
+                        )
+                        source_pairs.extend(
+                            (source, other_source) for other_source in other_sources
+                        )
+                else:
+                    log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
                 warn_only=False,
@@ -790,7 +790,7 @@ class PyExprCSEPass:
         expr_to_name: Dict[str, str]
 
     class ExprCounter(ast.NodeVisitor):
-        def __init__(self, config: "PyExprCSEPass.Config") -> None:
+        def __init__(self, config: PyExprCSEPass.Config) -> None:
             self._config = config
 
         def visit(self, node: ast.AST) -> Any:
@@ -801,7 +801,7 @@ class PyExprCSEPass:
     class Replacer(ast.NodeTransformer):
         def __init__(
             self,
-            config: "PyExprCSEPass.Config",
+            config: PyExprCSEPass.Config,
             gen_name: Callable[[], str],
         ) -> None:
             super().__init__()
@@ -900,13 +900,20 @@ class CheckFunctionManager:
         local_builder = GuardBuilder(
             self.id_ref,
             source_ref,
+            self.lookup_weakrefs,
             combine_scopes(output_graph.global_scope, output_graph.local_scope),
             self,
             local=True,
         )
         global_builder = GuardBuilder(
-            self.id_ref, source_ref, output_graph.global_scope, self, local=False
+            self.id_ref,
+            source_ref,
+            self.lookup_weakrefs,
+            output_graph.global_scope,
+            self,
+            local=False,
         )
+
         # We need to transplant a copy here, because some guards
         # might get a cross ref between local and global, like L['mod_name'][G['some_key']]
         # the inverse is illegal.
@@ -931,6 +938,15 @@ class CheckFunctionManager:
             local_builder, global_builder, guards, guard_fail_fn
         )
         self._weakrefs.clear()
+        # Keep track of weak references of objects with ID_MATCH guard. This
+        # info is stored alongside optimized_code and check_fn and is used to
+        # limit the number of cache entries with same ID_MATCH'd object.
+        # TODO(janimesh) - Currently this information is stored as an attr on
+        # the check_fn itself to avoid changing CacehEntry datastrucutre in
+        # eval_frame.c. In future, we should probably replace check_fn with a
+        # queryable data structure such that this information is already present
+        # in some form.
+        self.check_fn.id_matched_objs = local_builder.id_matched_objs
 
     def compile_check_fn(
         self, local_builder, global_builder, guards_out, guard_fail_fn
@@ -939,13 +955,11 @@ class CheckFunctionManager:
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = local_builder.argnames
         largs += ["**___kwargs_ignored"]
-        args = ",".join(largs)
 
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
-        code_parts = ["___guarded_code.valid"]
-        base = os.path.dirname(__file__)
+        code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
             if guards_log.isEnabledFor(logging.DEBUG):
@@ -967,7 +981,8 @@ class CheckFunctionManager:
                 maybe_stack = ""
                 maybe_user_stack = ""
                 if guard is not None:
-                    maybe_stack = f"\nStack:\n{''.join(guard.stack.format())}"
+                    if guard.stack:
+                        maybe_stack = f"\nStack:\n{''.join(guard.stack.format())}"
                     if guard.user_stack:
                         maybe_user_stack = (
                             f"\nUser stack:\n{''.join(guard.user_stack.format())}"
@@ -1006,8 +1021,6 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
-            dynamic_dims_sizes = None
-            dynamic_dims_strides = None
 
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
@@ -1093,12 +1106,16 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard)
 
         assert not global_builder.shape_env_code
-
+        global_state = convert_frame.initial_global_state
+        if global_state is None:
+            # we should only hit this case in NopTests()
+            global_state = convert_frame.GlobalStateGuard()
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("___check_global_state", global_state.check),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
@@ -1135,6 +1152,9 @@ class CheckFunctionManager:
 
     def invalidate(self):
         # A weakref is no longer valid, self.check_fn should return false
+        # TODO(janimesh) - Free up cache entry after the cache entry formation
+        # is in python, and the underlying data structure is a doubly linked
+        # list.
         self.valid = False
 
     def id_ref(self, obj):
@@ -1149,6 +1169,12 @@ class CheckFunctionManager:
         except TypeError:
             pass  # cannot weakref bool object
         return id(obj)
+
+    def lookup_weakrefs(self, obj):
+        """Lookup the _weakrefs created in id_ref function for ID_MATCH'd objects"""
+        if id(obj) in self._weakrefs:
+            return self._weakrefs[id(obj)]
+        return None
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:

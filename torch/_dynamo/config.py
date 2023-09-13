@@ -31,7 +31,13 @@ minimum_call_count = 1
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
-cache_size_limit = 64
+
+# controls the maximum number of cache entries with a guard on same ID_MATCH'd
+# object. It also controls the maximum size of cache entries if they don't have
+# any ID_MATCH'd guards.
+cache_size_limit = 8
+# controls the maximum number of entries for a code object.
+accumulated_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -250,6 +256,22 @@ translation_validation = (
 translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
+# Disables bisection for translation validation.
+#
+# Translation validation bisection is enabled by default, if translation validation
+# is also enabled. This should help finding guard simplification issues. However,
+# since validation uses Z3 for bisecting, it might take a lot of time.
+#
+# Set this configuration option so as to avoid bisecting.
+translation_validation_no_bisect = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
+)
+# Disables ShapeEnv event recording.
+# See: [Note: Recording ShapeEnv Events]
+dont_record_shape_env_events = False
+# Checks whether replaying ShapeEnv events on a freshly constructed one yields
+# the a ShapeEnv with the same state. This should be used only in testing.
+check_shape_env_recorded_events = False
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
@@ -259,6 +281,9 @@ trace_numpy = True
 numpy_default_float = "float64"
 numpy_default_complex = "complex128"
 numpy_default_int = "int64"
+
+# use numpy's PRNG if True, pytorch otherwise
+use_numpy_random_stream = False
 
 
 def is_fbcode():

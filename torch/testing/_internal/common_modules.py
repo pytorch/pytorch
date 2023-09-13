@@ -1414,6 +1414,10 @@ def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, 
             constructor_input=FunctionInput([5], 1e-3),
             forward_input=FunctionInput(make_input((0, 5))),
             desc='1d_empty_elementwise_affine'),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3, elementwise_affine=True, bias=False),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_elementwise_affine_no_bias'),
     ]
 
 
@@ -1809,7 +1813,8 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
-    for mask, key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
+    for mask, key_padding_mask, norm_first, bias in \
+            itertools.product(attn_masks, key_padding_masks, (True, False), (True, False)):
         # Using same mask for tgt and memory
         src_mask , tgt_mask = (mask,) * 2
         src_key_padding_mask, tgt_key_padding_mask = (key_padding_mask,) * 2
@@ -1817,7 +1822,7 @@ def module_inputs_torch_nn_Transformer(module_info, device, dtype, requires_grad
             ModuleInput(
                 constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
                                                 num_encoder_layers=1, num_decoder_layers=1,
-                                                dropout=0.0, batch_first=True, norm_first=norm_first),
+                                                dropout=0.0, batch_first=True, norm_first=norm_first, bias=bias),
                 forward_input=FunctionInput(
                     make_input((3, 4)), make_input((3, 4)), tgt_mask=tgt_mask, src_mask=src_mask,
                     tgt_key_padding_mask=tgt_key_padding_mask, src_key_padding_mask=src_key_padding_mask
@@ -2519,6 +2524,22 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
     return samples
 
 
+def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+    samples = [
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="hidden_size must be greater than zero"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(10, 10, 0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="num_layers must be greater than zero"
+        ),
+    ]
+    return samples
 
 def module_error_inputs_torch_nn_Pad1d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3126,13 +3147,16 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
-               dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=False),
+               dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64, torch.bfloat16]),
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_memory_format', device_type='cpu'),
                    # No channels_last support for GroupNorm currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cuda'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='mps'),
                    DecorateInfo(unittest.skip("Skipped!"), "TestModule", "test_grad",
                                 active_if=TEST_WITH_ROCM, device_type='cuda'),)
                ),
@@ -3433,6 +3457,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.RNN,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
@@ -3440,12 +3465,14 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.GRU,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_LSTM,
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # LSTM with projections is not currently supported with MPS
                    DecorateInfo(skipMPS),),
