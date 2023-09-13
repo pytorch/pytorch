@@ -81,6 +81,12 @@ void RNNImplBase<Derived>::reset() {
   }
 
   TORCH_CHECK(
+      options_base.hidden_size() > 0, "hidden_size must be greater than zero");
+
+  TORCH_CHECK(
+      options_base.num_layers() > 0, "num_layers must be greater than zero");
+
+  TORCH_CHECK(
       0 <= options_base.proj_size() &&
           options_base.proj_size() < options_base.hidden_size(),
       "proj_size has to be a positive integer, smaller than ",
