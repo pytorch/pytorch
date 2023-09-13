@@ -341,7 +341,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("addr", "cuda", f16): {"reference_in_float": True},
-    ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},
+    ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
     ("asin", "cuda", f16): {"reference_in_float": True},
     ("atanh", "cuda", f16): {"reference_in_float": True},
