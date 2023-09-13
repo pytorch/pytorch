@@ -3757,13 +3757,11 @@ class DynamicScalar(ExternKernelAlloc):
         return False
 
     def has_side_effects(self):
-        # Prevents dead code elimination
+        # Prevents dead code elimination, because the Python scalar value might be reused later
         return True
 
     def can_free(self):
-        # Prevents buffer freeing, since:
-        # 1. there is no need to free a Python scalar value
-        # 2. the Python scalar value might be reused later
+        # Prevents buffer freeing, because the Python scalar value might be reused later
         return False
 
     def codegen(self, wrapper):
