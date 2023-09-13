@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import unittest
 from typing import Any, Dict, Tuple
 
 import torch
@@ -17,7 +18,6 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     TestHelperModules,
 )
-import unittest
 
 
 @skipIfNoQNNPACK
@@ -235,7 +235,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence={},
-            non_ref_node_occurrence={}
+            non_ref_node_occurrence={},
         )
 
     def test_qdq_per_channel(self):
