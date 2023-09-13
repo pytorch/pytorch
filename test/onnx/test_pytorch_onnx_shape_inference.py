@@ -7,7 +7,7 @@ import onnx
 import pytorch_test_common
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
-from torch.onnx import _constants, symbolic_helper, utils
+from torch.onnx import _constants, utils
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
