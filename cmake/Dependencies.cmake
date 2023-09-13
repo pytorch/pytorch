@@ -1328,12 +1328,10 @@ if(USE_NCCL)
     caffe2_update_option(USE_NCCL OFF)
   elseif(USE_CUDA)
     include(${CMAKE_CURRENT_LIST_DIR}/External/nccl.cmake)
-    # fmt::fmt-header-only is needed by the NCCL code in torch/csrc/distributed/c10d
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl fmt::fmt-header-only)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
   elseif(USE_ROCM)
     include(${CMAKE_CURRENT_LIST_DIR}/External/rccl.cmake)
-    # fmt::fmt-header-only is needed by the NCCL code in torch/csrc/distributed/c10d
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl fmt::fmt-header-only)
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
   endif()
 endif()
 
