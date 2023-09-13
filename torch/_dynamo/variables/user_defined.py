@@ -592,16 +592,23 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     # TODO Handle getattr for _length_per_key and _offset_per_key properly.
 
 
-class RemovableHandleVariable(UserDefinedObjectVariable):
+class RemovableHandleVariable(VariableTracker):
     def __init__(
         self,
-        value,
-        value_type=None,
         mutable_local=None,
+        idx = None,
         **kwargs,
     ):
-        super().__init__(value, value_type, **kwargs)
+        super().__init__(**kwargs)
         self.mutable_local = mutable_local
+        self.idx = idx
+
+    def call_method(self, tx, method_name, args, kwargs):
+        if method_name == "remove":
+            tx.output.side_effects.remove_hook(self.idx)
+            return variables.ConstantVariable(None)
+        super().call_method(tx, method_name, args, kwargs)
+
 
     # This reconstruct is actually pretty unique - it does not construct the object from scratch.
     # Handles always come from a register_hook call on a tensor, and so, rerunning that for the codegen of a

@@ -267,26 +267,37 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # In export mode, we force the shape_env to strictly disallow any constraining
-        # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                co_fields=self.co_fields,
-            ),
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.init_ambient_guards()
-
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+
+        shape_env = ShapeEnv(
+            # Reference Cycle!
+            # Share a reference to the list of TrackedFake.
+            #
+            # ShapeEnv needs this in order to be able to reproduce the call
+            # to produce_guards at an arbitrary time point. That is because
+            # TrackedFake instances may have its metadata changed throughout
+            # the program execution.
+            tracked_fakes=self.tracked_fakes,
+            allow_scalar_outputs=config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            co_fields=self.co_fields,
+        )
+
+        # In export mode, we force the shape_env to strictly disallow any constraining
+        # of the user marked dynamic dims
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=shape_env,
+            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+            allow_non_fake_inputs=True if self.export else False,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.init_ambient_guards()
+
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,

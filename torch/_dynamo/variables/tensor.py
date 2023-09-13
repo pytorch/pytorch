@@ -668,11 +668,9 @@ class TensorVariable(VariableTracker):
                 fn = fn_var.fn
                 name = fn_var.fn.__name__
 
-            handle = self.as_proxy().node.meta["example_value"].register_hook(fn)
+            self.as_proxy().node.meta["example_value"].register_hook(fn)
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
-                handle,
-                user_code_variable_name=None,
                 mutable_local=variables.base.MutableLocal(),
                 **options,
             )
@@ -685,6 +683,7 @@ class TensorVariable(VariableTracker):
             # func lifecycle.
             if not self.source:
                 src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=True)
+
                 # Intermediary
                 from .builder import GraphArg
 
@@ -698,8 +697,6 @@ class TensorVariable(VariableTracker):
                             if node.meta["source"] == src:
                                 hook_proxy = node.meta["proxy"]
                                 break
-
-                new_name = tx.store_handle("intermed_handle", handle)
 
                 if hook_proxy is None:
                     hook_proxy = tx.output.root_tracer.create_graph_input(
