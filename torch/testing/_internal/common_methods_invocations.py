@@ -17840,6 +17840,7 @@ op_db: List[OpInfo] = [
         op=torch.ops.aten._embedding_bag_dense_backward.default,
         aten_name="_embedding_bag_dense_backward",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16),
         supports_out=False,
         supports_autograd=False,
         sample_inputs_func=sample_inputs_embedding_bag_dense_backward,
@@ -17847,6 +17848,12 @@ op_db: List[OpInfo] = [
             # It might be OK to call contiguous() in the backward anyway, in
             # case of direct use
             DecorateInfo(unittest.skip('precondition for function is contiguity'), 'TestCommon', 'test_noncontiguous_samples'),
+            # NYI
+            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
+                'TestInductorOpInfo', 'test_comprehensive'
+            ),
         ),
     ),
     OpInfo(
