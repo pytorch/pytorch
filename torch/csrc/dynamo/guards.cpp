@@ -574,16 +574,30 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
-typedef std::pair<int, std::string> DebugInfo;
+struct DebugInfo {
+  DebugInfo(int num_guards_executed, std::string failure_str) {
+    this->num_guards_executed = num_guards_executed;
+    this->failure_str = failure_str;
+  }
+
+  std::string repr() {
+    return "DebugInfo(num_guards_executed=" +
+        std::to_string(num_guards_executed) + ", failure_str=" + failure_str +
+        ")";
+  }
+  std::string failure_str;
+  int num_guards_executed;
+};
+
 class LeafGuard {
  public:
   std::pair<bool, DebugInfo> check_with_debug_info(py::object value) {
     bool result = run_guards(value);
     if (result == false) {
       std::string reason = get_failure_reason(value);
-      return std::make_pair(result, std::make_pair(0, reason));
+      return std::make_pair(result, DebugInfo(0, reason));
     }
-    return std::make_pair(result, std::make_pair(0, ""));
+    return std::make_pair(result, DebugInfo(0, "PASS"));
   }
 
   bool check(py::object value) {
@@ -679,6 +693,24 @@ class ItemGuardAccessor : public GuardAccessor {
   py::str _attr_name;
 };
 
+class PythonLambdaGuardAccessor : public GuardAccessor {
+ public:
+  PythonLambdaGuardAccessor(py::function accessor_fn) {
+    _accessor_fn = accessor_fn;
+  }
+
+  bool equals(py::function accessor_fn) const {
+    return _accessor_fn.equal(accessor_fn);
+  }
+
+  py::object access(py::object obj) const override {
+    return _accessor_fn(obj);
+  }
+
+ private:
+  py::function _accessor_fn;
+};
+
 class GuardManager;
 typedef std::pair<std::unique_ptr<GuardAccessor>, std::unique_ptr<GuardManager>>
     ChildGuardType;
@@ -695,14 +727,18 @@ class GuardManager {
   }
 
   template <typename GuardAccessorT>
-  GuardManager* get_attr_guard_manager(py::str name) {
+  GuardManager* get_child_manager(py::object accessor_key) {
+    // accessor_key type depends on the GuardAccessorT
+    // for AttrGuardAccessor - its py::str name
+    // for ItemGuardAccessor - its py::str name
+    // for PythonLambdaGuardAccessor - its py::function lambda
     for (auto& child_guard : _child_guards) {
       GuardAccessor* child_accessor = child_guard.first.get();
 
       // Find the child accessor matching the new GuardAccessorT
       auto maybe_attr_accessor = dynamic_cast<GuardAccessorT*>(child_accessor);
       if (maybe_attr_accessor != nullptr) {
-        if (maybe_attr_accessor->equals(name)) {
+        if (maybe_attr_accessor->equals(accessor_key)) {
           auto& child_mananger = child_guard.second;
           return child_mananger.get();
         }
@@ -711,7 +747,7 @@ class GuardManager {
 
     // Construct a new child manager
     std::unique_ptr<GuardAccessorT> accessor =
-        std::make_unique<GuardAccessorT>(name);
+        std::make_unique<GuardAccessorT>(accessor_key);
     std::unique_ptr<GuardManager> mananger = std::make_unique<GuardManager>();
     auto child_guard = std::make_pair(std::move(accessor), std::move(mananger));
     _child_guards.emplace_back(std::move(child_guard));
@@ -731,18 +767,19 @@ class GuardManager {
   }
 
   std::pair<bool, DebugInfo> run_guards(py::object value) {
-    int debug_guards_run_count = 0;
+    int debug_num_guards_executed = 0;
     bool result = true;
     for (const auto& guard : _leaf_guards) {
       const std::pair<bool, DebugInfo>& tmp =
           guard->check_with_debug_info(value);
       result &= tmp.first;
-      debug_guards_run_count++;
+      debug_num_guards_executed++;
       // TODO (janimesh): Does this check adds overhead?
       if (result == false) {
         auto& debug_info = tmp.second;
         return std::make_pair(
-            result, std::make_pair(debug_guards_run_count, debug_info.second));
+            result,
+            DebugInfo(debug_num_guards_executed, debug_info.failure_str));
       }
     }
 
@@ -754,9 +791,10 @@ class GuardManager {
           manager->check_with_debug_info(accessor->access(value));
       result &= tmp.first;
       auto& debug_info = tmp.second;
-      debug_guards_run_count += debug_info.first;
-      reason = debug_info.second;
+      debug_num_guards_executed += debug_info.num_guards_executed;
       if (result == false) {
+        reason = debug_info.failure_str;
+        ;
         break;
       }
     }
@@ -778,8 +816,7 @@ class GuardManager {
             return a.second->fail_count() >= b.second->fail_count();
           });
     }
-    return std::make_pair(
-        result, std::make_pair(debug_guards_run_count, reason));
+    return std::make_pair(result, DebugInfo(debug_num_guards_executed, reason));
   }
 
   int fail_count() const {
@@ -843,6 +880,12 @@ PyObject* torch_c_dynamo_guards_init() {
   }
 
   auto py_m = py::handle(m).cast<py::module>();
+  py::class_<DebugInfo, std::unique_ptr<DebugInfo>>(py_m, "DebugInfo")
+      .def(py::init<int, std::string>())
+      .def_readwrite("num_guards_executed", &DebugInfo::num_guards_executed)
+      .def_readwrite("failure_reason", &DebugInfo::failure_str)
+      .def("__repr__", &DebugInfo::repr);
+
   py::class_<LeafGuard, std::unique_ptr<LeafGuard>>(py_m, "LeafGuard");
 
   py::class_<PythonLambdaGuard, LeafGuard, std::unique_ptr<PythonLambdaGuard>>(
@@ -867,13 +910,20 @@ PyObject* torch_c_dynamo_guards_init() {
       // of GuardManager
       .def(
           "__getattr__",
-          &GuardManager::get_attr_guard_manager<AttrGuardAccessor>,
+          &GuardManager::get_child_manager<AttrGuardAccessor>,
           py::return_value_policy::reference)
       // the pointer is returned as a reference to avoid multiple deallocation
       // of GuardManager
       .def(
           "__getitem__",
-          &GuardManager::get_attr_guard_manager<ItemGuardAccessor>,
+          &GuardManager::get_child_manager<ItemGuardAccessor>,
+          py::return_value_policy::reference)
+      // the pointer is returned as a reference to avoid multiple deallocation
+      // of GuardManager
+      .def(
+          "lambda_accessor",
+          &GuardManager::get_child_manager<PythonLambdaGuardAccessor>,
           py::return_value_policy::reference);
+
   return m;
 }

@@ -41,6 +41,24 @@ guard_manager["foo"].add_lambda_guard(lambda x: x >= 5, print_const_guard_failur
 print(guard_manager["foo"].check(9), guard_manager["foo"].check(11))
 
 
+# Check python lambda accessor
+guard_manager = guards.GuardManager()
+
+
+def accessor_fn(x):
+    return type(x)
+
+
+guard_manager.lambda_accessor(accessor_fn).add_lambda_guard(
+    lambda x: x is int, lambda x: "type mismatch"
+)
+guard_manager.lambda_accessor(accessor_fn).add_lambda_guard(
+    lambda x: x is not str, lambda x: "type mismatch"
+)
+
+print(guard_manager.check(5))
+print(guard_manager.check("foo"))
+
 # Put everything together - f_locals is a dictionary (__getitem__). f_locals["bar"] is a pair of x, y
 
 
@@ -54,6 +72,7 @@ class PairImpostor:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+
 
 f_locals = {
     "foo": 5,
@@ -96,6 +115,7 @@ print(
 
 def fn(x, foo, bar):
     return x * foo * bar.x * bar.y
+
 
 opt_fn = torch.compile(fn, backend="eager")
 opt_fn(torch.randn(4), 5, Pair(1, 2))
