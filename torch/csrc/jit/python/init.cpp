@@ -1266,7 +1266,7 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "is_symbolic",
-          [](const c10::SymNode& node){
+          [](const c10::SymNode& node) {
             return (
                 !node->singleton_int().has_value()
                 && !node->constant_bool().has_value()
@@ -1274,26 +1274,13 @@ void initJITBindings(PyObject* module) {
             );
           })
       .def(
-          "is_singleton_int",
-          [](const c10::SymNode& node){
-            return node->singleton_int().has_value();
-          })
-      .def(
-          "hash",
-          [](const c10::SymNode& node) -> size_t {
-            if (node->singleton_int().has_value()) {
-              return std::hash<int64_t>()(node->singleton_int().value());
-            } else if (node->constant_bool().has_value()) {
-              return (size_t) node->constant_bool().value();
-            } else if (node->constant_int().has_value()) {
-              TORCH_CHECK(false, "NYI");
-            }
-            return std::hash<void*>()(node.get());
+          "singleton_int",
+          [](const c10::SymNode& node) {
+            return node->singleton_int();
           });
 
   // clang-format on
 
-  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;
