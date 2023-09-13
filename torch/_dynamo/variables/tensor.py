@@ -23,7 +23,7 @@ from .. import config, variables
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, ConstantSource, GlobalSource
 from ..utils import (
     fqn,
     get_custom_getattr,
@@ -38,6 +38,8 @@ from ..utils import (
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+import itertools
+import weakref
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -682,7 +684,18 @@ class TensorVariable(VariableTracker):
             # not always lift up to globals, but to use the lowest level scope possible to match the
             # func lifecycle.
             if not self.source:
-                src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=True)
+                def _lifted_fn_src(name):
+                    base = name
+                    for i in itertools.count():
+                        if name not in tx.output.global_scope:
+                            src = GlobalSource(name)
+                            tx.output.guards.add(src.make_guard(GuardBuilder.WEAKREF_ALIVE))
+                            tx.output.install_global(name, weakref.ref(fn))
+                            break
+                        name = f"{base}_{i}"
+                    return src
+
+                src = fn_var.source if fn_var.source else _lifted_fn_src(name)
 
                 # Intermediary
                 from .builder import GraphArg
@@ -717,8 +730,9 @@ class TensorVariable(VariableTracker):
                         fn_var.source.make_guard(GuardBuilder.ID_MATCH)
                     )
             else:
-                src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=False)
-                fn_var.source = src
+                assert (
+                    fn_var.source
+                ), "Unreachable - See unimplemented for lambdas above"
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
 
