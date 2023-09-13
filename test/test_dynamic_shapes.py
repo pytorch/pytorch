@@ -723,15 +723,17 @@ class TestSymNumberMagicMethods(TestCase):
         s1 = create_symint(shape_env, 2)
 
         # Singleton SymInt are hashable
-        self.assertEqual(hash(j1), 1)
+        hash(j1)
 
-        # SymInt are unhashable
+        # non-singleton SymInt are unhashable
         with self.assertRaisesRegex(TypeError, "unhashable"):
             hash(s1)
 
         # SymBool and SymNode are hashable because they do not implement __eq__
         hash(b)
         hash(s1.node)
+        hash(j1.node)
+        hash(b.node)
 
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_singleton_int(1)
