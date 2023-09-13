@@ -5061,8 +5061,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         x_grad_ref = torch.where(mask, grad, z)
         self.assertEqual(x.grad, x_grad_ref)
 
-    # Temporary renaming for CI test
-    def test_batchnorm_nhwc_rename(self):
+    def test_batchnorm_nhwc_cpu(self):
         def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last, precision=None):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device='cpu', requires_grad=True)

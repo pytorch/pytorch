@@ -18,6 +18,13 @@ from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 
+from torch.utils._pytree import (
+    FlattenFunc,
+    FromDumpableContextFn,
+    ToDumpableContextFn,
+    UnflattenFunc,
+)
+
 
 __all__ = [
     "ArgumentKind",
@@ -33,6 +40,7 @@ __all__ = [
     "dynamic_dim",
     "export",
     "load",
+    "register_dataclass",
     "save",
 ]
 
@@ -1006,6 +1014,7 @@ def export(
     Acceptable types of inputs (for ``args`` and ``kwargs``) and outputs include:
 
     - Primitive types, i.e. ``torch.Tensor``, ``int``, ``float``, ``bool`` and ``str``.
+    - Dataclasses, but they must be registered by calling :func:`register_dataclass` first.
     - (Nested) Data structures comprising of ``dict``, ``list``, ``tuple``, ``namedtuple`` and
       ``OrderedDict`` containing all above types.
 
@@ -1129,3 +1138,37 @@ def load(
     return load(
         f, extra_files=extra_files, expected_opset_version=expected_opset_version
     )
+
+
+def register_dataclass(typ: Any) -> None:
+    """
+    Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
+
+    Args:
+        typ: the dataclass type to register
+
+    Example::
+
+        @dataclass
+        class InputDataClass:
+            feature: torch.Tensor
+            bias: int
+
+        class OutputDataClass:
+            res: torch.Tensor
+
+        torch.export.register_dataclass(InputDataClass)
+        torch.export.register_dataclass(OutputDataClass)
+
+        def fn(o: InputDataClass) -> torch.Tensor:
+            res = res=o.feature + o.bias
+            return OutputDataClass(res=res)
+
+        ep = torch.export.export(fn, (InputDataClass(torch.ones(2, 2), 1), ))
+        print(ep)
+
+    """
+
+    from torch._export.utils import register_dataclass_as_pytree_node
+
+    return register_dataclass_as_pytree_node(typ)

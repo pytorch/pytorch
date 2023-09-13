@@ -211,7 +211,6 @@ exclude_patterns = [
     'torch/_inductor/freezing.py',
     'torch/_inductor/pattern_matcher.py',
     'torch/_inductor/fx_utils.py',
-    'torch/_inductor/virtualized.py',
     'torch/_inductor/cuda_properties.py',
     'torch/_inductor/codegen/triton_foreach.py',
     'torch/_inductor/codegen/__init__.py',
