@@ -579,19 +579,19 @@ static struct PyModuleDef _module = {
  * failure. The data structure is also accessible in Python.
  */
 struct GuardDebugInfo {
-  GuardDebugInfo(int num_guards_executed, std::string failure_str) {
+  GuardDebugInfo(int num_guards_executed, std::string failure_reason) {
     this->num_guards_executed = num_guards_executed;
-    this->failure_str = failure_str;
+    this->failure_reason = failure_reason;
   }
 
   std::string repr() {
     return "GuardDebugInfo(num_guards_executed=" +
-        std::to_string(num_guards_executed) + ", failure_str=" + failure_str +
-        ")";
+        std::to_string(num_guards_executed) +
+        ", failure_reason=" + failure_reason + ")";
   }
 
   // Failure reason for a leaf guard.
-  std::string failure_str;
+  std::string failure_reason;
 
   // Total number of executed guards so far.
   int num_guards_executed;
@@ -619,6 +619,7 @@ class LeafGuard {
 
   virtual bool run_guards(py::object value) = 0;
   virtual std::string get_failure_reason(py::object value) = 0;
+  virtual ~LeafGuard() = default;
 };
 
 /**
@@ -700,11 +701,8 @@ class ItemGuardAccessor : public GuardAccessor {
   }
 
   py::object access(py::object obj) const override {
-    // Is there a faster way to access? There is no py::getitem.
-    if (py::isinstance<py::dict>(obj)) {
-      return py::dict(obj)[_attr_name];
-    }
-    return py::getattr(py::getattr(obj, "__dict__"), _attr_name);
+    // There is no py::getitem helper.
+    return py::getattr(obj, "__getitem__")(_attr_name);
   }
 
  private:
@@ -798,14 +796,14 @@ class GuardManager {
     // for AttrGuardAccessor - py::str name
     // for ItemGuardAccessor - py::str name
     // for PythonLambdaGuardAccessor - py::function lambda
-    for (auto& child_guard : _child_guards) {
-      GuardAccessor* child_accessor = child_guard.first.get();
+    for (auto& child_accessor_and_manager : _child_managers) {
+      GuardAccessor* child_accessor = child_accessor_and_manager.first.get();
 
       // Find the child accessor matching the new GuardAccessorT
       auto maybe_attr_accessor = dynamic_cast<GuardAccessorT*>(child_accessor);
       if (maybe_attr_accessor != nullptr) {
         if (maybe_attr_accessor->equals(accessor_key)) {
-          auto& child_mananger = child_guard.second;
+          auto& child_mananger = child_accessor_and_manager.second;
           return child_mananger.get();
         }
       }
@@ -815,9 +813,10 @@ class GuardManager {
     std::unique_ptr<GuardAccessorT> accessor =
         std::make_unique<GuardAccessorT>(accessor_key);
     std::unique_ptr<GuardManager> mananger = std::make_unique<GuardManager>();
-    auto child_guard = std::make_pair(std::move(accessor), std::move(mananger));
-    _child_guards.emplace_back(std::move(child_guard));
-    return _child_guards.back().second.get();
+    auto child_accessor_and_manager =
+        std::make_pair(std::move(accessor), std::move(mananger));
+    _child_managers.emplace_back(std::move(child_accessor_and_manager));
+    return _child_managers.back().second.get();
   }
 
   bool check(py::object value) {
@@ -845,21 +844,22 @@ class GuardManager {
         auto& debug_info = tmp.second;
         return std::make_pair(
             result,
-            GuardDebugInfo(debug_num_guards_executed, debug_info.failure_str));
+            GuardDebugInfo(
+                debug_num_guards_executed, debug_info.failure_reason));
       }
     }
 
     std::string reason = "";
-    for (const auto& child_guard : _child_guards) {
-      auto& accessor = child_guard.first;
-      auto& manager = child_guard.second;
+    for (const auto& child_accessor_and_manager : _child_managers) {
+      auto& accessor = child_accessor_and_manager.first;
+      auto& manager = child_accessor_and_manager.second;
       const std::pair<bool, GuardDebugInfo>& tmp =
           manager->check_with_debug_info(accessor->access(value));
       result &= tmp.first;
       auto& debug_info = tmp.second;
       debug_num_guards_executed += debug_info.num_guards_executed;
       if (result == false) {
-        reason = debug_info.failure_str;
+        reason = debug_info.failure_reason;
         ;
         break;
       }
@@ -871,13 +871,13 @@ class GuardManager {
       // next check_with_debug_info.
 
       // An alternate implementation was to use priority queue directly on
-      // _child_guards, but it was rejected because of the complexity of popping
-      // and creating a new pq on each run_guards. Moreover, this sort is
-      // happening on the unhappy path when check_with_debug_info guard fails.
-      // So, its probably ok.
+      // _child_managers, but it was rejected because of the complexity of
+      // popping and creating a new pq on each run_guards. Moreover, this sort
+      // is happening on the unhappy path when check_with_debug_info guard
+      // fails. So, its probably ok.
       std::sort(
-          _child_guards.begin(),
-          _child_guards.end(),
+          _child_managers.begin(),
+          _child_managers.end(),
           [](const ChildGuardType& a, const ChildGuardType& b) {
             return a.second->fail_count() >= b.second->fail_count();
           });
@@ -890,13 +890,32 @@ class GuardManager {
     return _fail_count;
   }
 
+  std::vector<std::pair<GuardAccessor*, GuardManager*>> get_child_managers()
+      const {
+    std::vector<std::pair<GuardAccessor*, GuardManager*>> ret;
+    for (const auto& child_accessor_and_manager : _child_managers) {
+      const auto& accessor = child_accessor_and_manager.first;
+      const auto& manager = child_accessor_and_manager.second;
+      ret.emplace_back(std::make_pair(accessor.get(), manager.get()));
+    }
+    return ret;
+  }
+
+  std::vector<LeafGuard*> get_leaf_guards() const {
+    std::vector<LeafGuard*> ret;
+    for (const auto& guard : _leaf_guards) {
+      ret.push_back(guard.get());
+    }
+    return ret;
+  }
+
  private:
   // Leaf guards are the terminal guards on this object, e.g, type check on a
   // list. These guards have to be run before any children are run
   std::vector<std::unique_ptr<LeafGuard>> _leaf_guards;
 
   // Child guards managers - its a pair of accessor and guard manager
-  std::vector<ChildGuardType> _child_guards;
+  std::vector<ChildGuardType> _child_managers;
 
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
@@ -955,21 +974,48 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardDebugInfo, std::unique_ptr<GuardDebugInfo>>(
       py_m, "GuardDebugInfo")
       .def(py::init<int, std::string>())
-      .def_readwrite(
-          "num_guards_executed", &GuardDebugInfo::num_guards_executed)
-      .def_readwrite("failure_reason", &GuardDebugInfo::failure_str)
+      .def_readonly("num_guards_executed", &GuardDebugInfo::num_guards_executed)
+      .def_readonly("failure_reason", &GuardDebugInfo::failure_reason)
       .def("__repr__", &GuardDebugInfo::repr);
 
+  // Leaf Guards
   py::class_<LeafGuard, std::unique_ptr<LeafGuard>>(py_m, "LeafGuard");
-
   py::class_<PythonLambdaGuard, LeafGuard, std::unique_ptr<PythonLambdaGuard>>(
       py_m, "PythonLambdaGuard")
       .def(py::init<py::function, py::function>())
       .def("__call__", &PythonLambdaGuard::check);
 
+  // Guard Accessors - These are present so that we can iterate over the
+  // GuardManager hierarchy. We intentionally do not provide even an init
+  // function on these, because these should be constructed from within C++.
+  py::class_<GuardAccessor, std::unique_ptr<GuardAccessor>>(
+      py_m, "GuardAccessor");
+  py::class_<
+      AttrGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<AttrGuardAccessor>>(py_m, "AttrGuardAccessor");
+  py::class_<
+      ItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<ItemGuardAccessor>>(py_m, "ItemGuardAccessor");
+  py::class_<
+      PythonLambdaGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<PythonLambdaGuardAccessor>>(
+      py_m, "PythonLambdaGuardAccessor");
+
+  // Guard Manager
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       .def(py::init<>())
       .def("check", &GuardManager::check)
+      .def(
+          "get_child_managers",
+          &GuardManager::get_child_managers,
+          py::return_value_policy::reference)
+      .def(
+          "get_leaf_guards",
+          &GuardManager::get_leaf_guards,
+          py::return_value_policy::reference)
       .def("check_with_debug_info", &GuardManager::check_with_debug_info)
       .def(
           "add_lambda_guard",
