@@ -729,15 +729,14 @@ class TestSymNumberMagicMethods(TestCase):
         with self.assertRaisesRegex(TypeError, "unhashable"):
             hash(s1)
 
-        # SymNode is hashable because it does not implement __eq__
+        # SymNode have default __eq__ and __hash__ behavior
         hash(s1.node)
-        # They don't necessarily hash to the same values though
-        # (This test would fail if there's a hash collision)
         self.assertNotEqual(hash(b.node), hash(c.node))
         self.assertNotEqual(hash(j1.node), hash(j2.node))
 
-        # Constant and Singleton SymInt/SymBool are hashable and have
-        # the same hash if they have the same value.
+        # Constant and Singleton SymInt/SymBool should be hashed based on their
+        # values rather than their identity, e.g. they should have the same hash
+        # if they have the same value.
         self.assertTrue(j1 == j2)
         self.assertEqual(hash(j1), hash(j2))
         self.assertTrue(b == c)

@@ -1005,8 +1005,8 @@ class SymNode:
     def is_symbolic(self):
         return True
 
-    def is_singleton_int(self):
-        return False
+    def singleton_int(self):
+        return None
 
     def is_constant(self):
         return False
