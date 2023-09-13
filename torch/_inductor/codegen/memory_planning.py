@@ -630,7 +630,7 @@ class ReuseFromPoolLine(ReuseLine):
 
 
 @dataclasses.dataclass
-class MemoryPlanner(object):
+class MemoryPlanner:
     """
     Coordination object to run memory planning passes during wrapper
     codegen.
