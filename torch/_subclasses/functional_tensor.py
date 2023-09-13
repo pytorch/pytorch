@@ -279,18 +279,13 @@ def dispatch_functionalize(func):
         )
         with disable_above, FunctionalTensorMode():
             func_outputs = func(*func_args, **func_kwargs)
-            outputs = pytree.tree_map_only(FunctionalTensor, func_outputs, from_fun)
+            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
             # sync any input mutations
             for a in flattened_wrapped_args + flattened_wrapped_kwargs:
                 if isinstance(a, torch.Tensor):
                     torch._sync(a)
 
-            # For now, we will do nothing with input mutations.
-            # This API is only used by higher order, which ban input mutations.
-            # (Eventually we might want to relax this?)
-            if torch.Tag.inplace_view in func.tags:
-                assert isinstance(args[0], FunctionalTensor)
             return outputs
 
     return inner
