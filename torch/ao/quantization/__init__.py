@@ -12,7 +12,7 @@ from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
-from .pt2e.eval_utils import _move_model_to_eval as move_model_to_eval
+from .pt2e.eval_utils import _move_exported_model_to_eval as move_exported_model_to_eval
 from typing import Union, List, Callable, Tuple, Optional
 from torch import Tensor
 import torch
@@ -120,7 +120,7 @@ __all__ = [
     "get_quantized_operator",
     "get_static_quant_module_class",
     "load_observer_state_dict",
-    "move_model_to_eval",
+    "move_exported_model_to_eval",
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
