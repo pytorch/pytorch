@@ -273,7 +273,7 @@ class ConvertIntSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        return f"convert_to_symint({self.base.name()})"
+        return f"cast_symbool_to_symint_guardless({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)
