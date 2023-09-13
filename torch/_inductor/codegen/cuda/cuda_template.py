@@ -1,21 +1,18 @@
-import functools
 import itertools
 import logging
-
 from typing import List, Optional
 from unittest.mock import patch
 
 import sympy
 
 import torch
-
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
 from ...ir import Buffer, IRNode, Layout
+
 from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
-
-from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+from .cuda_kernel import CUDATemplateBuffer, CUDATemplateCaller, CUDATemplateKernel
 
 log = logging.getLogger(__name__)
 
@@ -30,19 +27,50 @@ class CUDATemplate(KernelTemplate):
         layout: Layout,
         input_reorder: Optional[List[int]] = None,
     ):
+        """
+
+        Baseclass for CUDA/CUTLASS templates, derived from KernelTemplate. Not to be instantiated directly.
+
+        Args:
+            name (str): The name of the CUDATemplate object.
+            input_nodes (List[IRNode]): A list of input IRNodes.
+            layout (Layout): The layout of the output buffer / tensor.
+            input_reorder (Optional[List[int]]): An optional list that specifies the order of the input nodes.
+
+        """
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node = Buffer("buf_out", layout)
         self.input_reorder = input_reorder
+        self.layout = layout
 
-    def generate(self, **kwargs) -> CUDATemplateCaller:
+    def generate(
+        self,
+        op: "cutlass_gemm_op.GemmOperation",  # type: ignore[name-defined]
+        epilogue_nodes: Optional[List[IRNode]] = None,
+        **kwargs,
+    ) -> CUDATemplateCaller:
+        """
+        Generates the CUDA template caller object for the given GEMM template and operation. This CUDATemplateCaller
+        may be used to call and benchmark the generated CUDA kernel in a standalone manner to enable Autotuning.
+
+        Args:
+            op: The cutlass_gemm_op.GemmOperation object representing the operation to be generated.
+            epilogue_nodes: Optional list of IRNodes representing the epilogue operations.
+            kwargs: Additional keyword arguments.
+
+        Returns:
+            A CUDATemplateCaller object representing the generated CUDA template caller.
+        """
         kernel_name = f"cuda_{self.name}"
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
         ), CUDATemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
-            code = self.render(kernel=kernel, **kwargs)
+            code = self.render(
+                kernel=kernel, op=op, epilogue_nodes=epilogue_nodes, **kwargs
+            )
             _, call_args, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
@@ -78,26 +106,18 @@ class CUDATemplate(KernelTemplate):
             extra_args=extra_args,
             source_code=code,
         )
-
-        def make_kernel_render(output_node):
-            kernel = CUDATemplateKernel(
-                kernel_name="KERNEL_NAME",
-            )
-            render = functools.partial(
-                self.render,
-                kernel=kernel,
-                output_node=output_node,
-                **kwargs,
-            )
-            return kernel, render
+        cuda_template_buffer = CUDATemplateBuffer(
+            template=self,
+            op=op,
+            epilogue_nodes=epilogue_nodes,
+            workspace_size=lambda: bmreq.workspace_size,  # Not known yet, determined via CUDABenchmarkRequest
+        )
 
         return CUDATemplateCaller(
             kernel_hash_name,
             self.name,
-            self.input_nodes,
-            self.output_node.get_layout(),
-            make_kernel_render,
             bmreq,
+            cuda_template_buffer,
         )
 
     def header(self) -> IndentedBuffer:
@@ -137,14 +157,30 @@ class CUDATemplate(KernelTemplate):
     def render(self, **kwargs) -> str:
         raise NotImplementedError
 
+    def can_fuse_node(self, node: IRNode) -> bool:
+        """Returns true if a given node may be fused into this template.
+        to be overridden
+        """
+        return False
+
+    def fuse_node(self, node: IRNode):
+        raise NotImplementedError()
+
 
 class CUTLASSTemplate(CUDATemplate):
+    """
+    CUTLASSTemplate is a class that provides a template for generating CUTLASS Templates. Used as a baseclass for the
+    CUTLASSGemmTemplate, providing functionality that might also be relevant for non-GEMM CUTLASS Kernels.
+    """
+
     def header(self) -> IndentedBuffer:
         res = super().header()
         res.splice(
             """
+                #include "cute/tensor.hpp"
                 #include "cutlass/cutlass.h"
                 #include "cutlass/numeric_types.h"
+                #include "cutlass/tensor_ref.h"
                 #include "cutlass/util/host_tensor.h"
                 #include "cutlass/util/reference/host/tensor_fill.h"
                 #include "cutlass/util/reference/device/tensor_fill.h"
@@ -157,6 +193,7 @@ class CUTLASSTemplate(CUDATemplate):
         res = super().globals()
         res.splice(
             """
+                using namespace cute;
                 #define CUTLASS_CHECK(status)                                                      \\
                 {                                                                                  \\
                   cutlass::Status error = status;                                                  \\
@@ -166,6 +203,14 @@ class CUTLASSTemplate(CUDATemplate):
                     throw std::runtime_error(msg);                                                 \\
                   }                                                                                \\
                 }
+
+                // Used as pass-through functor in EVT just for type casting / rounding
+                template <typename T>
+                struct identity_op {
+                  CUTLASS_HOST_DEVICE
+                  T operator()(T val) const { return val; }
+                };
+
             """
         )
         return res

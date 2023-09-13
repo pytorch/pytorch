@@ -559,7 +559,7 @@ class WrapperCodeGen(CodeGen):
         self.generate_end(result)
 
         self.add_benchmark_harness(result)
-
+        # excellent place for a breakpoint to inspect generated code
         return result.getvaluewithlinemap()
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
