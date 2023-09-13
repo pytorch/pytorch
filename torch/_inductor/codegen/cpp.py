@@ -2865,8 +2865,6 @@ class KernelGroup:
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
 
-        code.writelines(["#include <cassert>"])
-
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
             if enable_kernel_profile:
