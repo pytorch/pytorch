@@ -155,6 +155,7 @@ test_failures = {
     "test_square_uint8_tensor_overflow_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_multiply_uint8_tensor_overflow_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_square_uint8_tensor_dynamic_shapes": TestFailure(("cpu", "cuda")),
+
     #
     # Failed to find for loop/triton kernel:
     #
