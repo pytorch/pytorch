@@ -118,7 +118,7 @@ def export_(
                 for arg, shape in zip(combined_args, dynamic_shapes):
                     yield from typing_zip(arg, shape)
             else:
-                assert isinstance(dynamic_shapes, (_GenericAlias, types.GenericAlias)) and dynamic_shapes.__origin__ is list, f"Unexpected {dynamic_shapes} matching tuple"
+                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ is list, f"Unexpected {dynamic_shapes} matching tuple"
                 shape = dynamic_shapes.__args__[0]
                 for arg in combined_args:
                     yield from typing_zip(arg, shape)
@@ -127,7 +127,7 @@ def export_(
                 for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
                     yield from typing_zip(arg, shape)
             else:
-                assert isinstance(dynamic_shapes, (_GenericAlias, types.GenericAlias)) and dynamic_shapes.__origin__ is dict, f"Unexpected {dynamic_shapes} matching dict"
+                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ is dict, f"Unexpected {dynamic_shapes} matching dict"
                 shape = dynamic_shapes.__args__[1]
                 for arg in combined_args.values():
                     yield from typing_zip(arg, shape)
