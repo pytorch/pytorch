@@ -569,22 +569,27 @@ class GuardBuilder(GuardBuilderBase):
         if output_graph.export_constraints:
             source_pairs: List[Tuple[Source, Source]] = []
             for constraint in output_graph.export_constraints:
-                source, *other_sources = get_sources(constraint.t_id, constraint.dim)
-                # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                # constraints that make src0 "equal" to src1, ..., srcN.
-                source_pairs.extend(
-                    (source, other_source) for other_source in other_sources
-                )
-                if constraint.shared is not None:
-                    # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                    # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                    # constraints that also make src0 "equal" to src1', ..., srcN'.
-                    other_sources = get_sources(
-                        constraint.shared.t_id, constraint.shared.dim
+                if constraint.t_id in output_graph.tracked_fakes_id_to_source:
+                    source, *other_sources = get_sources(
+                        constraint.t_id, constraint.dim
                     )
+                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
+                    # constraints that make src0 "equal" to src1, ..., srcN.
                     source_pairs.extend(
                         (source, other_source) for other_source in other_sources
                     )
+                    if constraint.shared is not None:
+                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
+                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
+                        # constraints that also make src0 "equal" to src1', ..., srcN'.
+                        other_sources = get_sources(
+                            constraint.shared.t_id, constraint.shared.dim
+                        )
+                        source_pairs.extend(
+                            (source, other_source) for other_source in other_sources
+                        )
+                else:
+                    log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
                 warn_only=False,
