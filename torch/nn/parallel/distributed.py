@@ -459,7 +459,7 @@ class DistributedDataParallel(Module, Joinable):
         checkpointing with :meth:`torch.utils.checkpoint`.
         If the checkpoint is done with use_reentrant=False (recommended), DDP
         will work as expected without any limitations.
-        If, however, the checkpoint is done with use_reentrant=True (the default), 
+        If, however, the checkpoint is done with use_reentrant=True (the default),
         DDP will work as expected when there are no unused parameters in the model
         and each layer is checkpointed at most once (make sure you are not passing
         `find_unused_parameters=True` to DDP). We currently do not support the
