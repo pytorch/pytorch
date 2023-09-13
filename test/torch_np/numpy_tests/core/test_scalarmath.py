@@ -859,7 +859,7 @@ def test_scalar_integer_operation_overflow(dtype, operation):
         operation(min, max)
 
 
-@pytest.mark.xfail(reason="pytorch does not warn on overflow")
+@pytest.mark.skip(reason="integer overflow UB: crashes pytorch under ASAN")
 @pytest.mark.parametrize("dtype", np.typecodes["Integer"])
 @pytest.mark.parametrize(
     "operation",
