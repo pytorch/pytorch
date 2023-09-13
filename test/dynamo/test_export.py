@@ -3182,10 +3182,10 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["L['pred'].__int__() == 1"]
+        true_guard_code = ["convert_to_symint(L['pred']) == 1"]
         false_guard_code = [
-            "Ne(L['pred'].__int__(), 1)",
-            "-9223372036854775808 <= L['pred'].__int__()",
+            "Ne(convert_to_symint(L['pred']), 1)",
+            "-9223372036854775808 <= convert_to_symint(L['pred'])",
         ]
         test_symbool_guards(
             f,
