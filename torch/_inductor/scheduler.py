@@ -1485,6 +1485,12 @@ class Scheduler:
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
 
+        if isinstance(node1, SchedulerNode) and isinstance(node2, SchedulerNode):
+            # If any buffer used by node2 is a mutation of node1, disable the fusion of node1 and node2
+            for key in node2._body.reads_name2expr.keys():
+                if key in node1.get_mutations():
+                    return False
+
         if node2.is_template():
             return False  # only epilogues
         if node1.is_template() and (
