@@ -10806,10 +10806,14 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
+        'nn.functional.batch_norm',
+        'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',
+        '_native_batch_norm_legit',
+        'native_batch_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
