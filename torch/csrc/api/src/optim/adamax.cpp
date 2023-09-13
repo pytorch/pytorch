@@ -20,8 +20,7 @@ bool operator==(const AdamaxOptions& lhs, const AdamaxOptions& rhs) {
   return (lhs.lr() == rhs.lr()) &&
       (std::get<0>(lhs.betas()) == std::get<0>(rhs.betas())) &&
       (std::get<1>(lhs.betas()) == std::get<1>(rhs.betas())) &&
-      (lhs.eps() == rhs.eps()) &&
-      (lhs.weight_decay() == rhs.weight_decay());
+      (lhs.eps() == rhs.eps()) && (lhs.weight_decay() == rhs.weight_decay());
 }
 
 void AdamaxOptions::serialize(torch::serialize::OutputArchive& archive) const {
@@ -52,7 +51,8 @@ bool operator==(const AdamaxParamState& lhs, const AdamaxParamState& rhs) {
       torch::equal(lhs.inf_norm(), rhs.inf_norm());
 }
 
-void AdamaxParamState::serialize(torch::serialize::OutputArchive& archive) const {
+void AdamaxParamState::serialize(
+    torch::serialize::OutputArchive& archive) const {
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(step);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(exp_avg);
   _TORCH_OPTIM_SERIALIZE_TORCH_ARG(inf_norm);
@@ -111,11 +111,12 @@ Tensor Adamax::step(LossClosure closure) {
 
       exp_avg.mul_(beta1).add_(grad, 1 - beta1);
       // inf_norm = max(b2 * inf_norm, abs(gt) + eps)
-      torch::max_out(inf_norm, inf_norm.mul(beta2), grad.abs().add(options.eps()));
+      torch::max_out(
+          inf_norm, inf_norm.mul(beta2), grad.abs().add(options.eps()));
 
       Tensor num = options.lr() * exp_avg;
       Tensor denom = inf_norm * bias_correction1;
-      
+
       p.addcdiv_(num, denom, -1);
     }
   }

@@ -17,7 +17,8 @@ class InputArchive;
 namespace torch {
 namespace optim {
 
-struct TORCH_API AdamaxOptions : public OptimizerCloneableOptions<AdamaxOptions> {
+struct TORCH_API AdamaxOptions
+    : public OptimizerCloneableOptions<AdamaxOptions> {
   AdamaxOptions(double lr = 1e-3);
   TORCH_ARG(double, lr) = 1e-3;
   typedef std::tuple<double, double> betas_t;

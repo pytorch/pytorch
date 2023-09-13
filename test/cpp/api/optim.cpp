@@ -275,6 +275,11 @@ TEST(OptimTest, XORConvergence_LBFGS) {
       LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
 }
 
+TEST(OptimTest, XORConvergence_Adamax) {
+  ASSERT_TRUE(
+      test_optimizer_xor<Adamax>(AdamaxOptions(0.1).weight_decay(1e-6)));
+}
+
 TEST(OptimTest, XORConvergence_Adagrad) {
   ASSERT_TRUE(test_optimizer_xor<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
@@ -312,6 +317,16 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_Adamax) {
+  check_exact_values<Adamax>(AdamaxOptions(1.0), expected_parameters::Adamax());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_AdamaxWithWeightDecay) {
+  check_exact_values<Adamax>(
+      AdamaxOptions(1.0).weight_decay(1e-2),
+      expected_parameters::Adamax_with_weight_decay());
 }
 
 TEST(OptimTest, XORConvergence_AdamW) {

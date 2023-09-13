@@ -26,6 +26,8 @@ OPTIMIZERS = {
     "Adam": lambda p: torch.optim.Adam(p, 1.0),
     "Adam_with_weight_decay": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-2),
     "Adam_with_weight_decay_and_amsgrad": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-6, amsgrad=True),
+    "Adamax": lambda p: torch.optim.Adamax(p, 1.0),
+    "Adamax_with_weight_decay": lambda p: torch.optim.Adamax(p, 1.0, weight_decay=1e-2),
     "AdamW": lambda p: torch.optim.AdamW(p, 1.0),
     "AdamW_without_weight_decay": lambda p: torch.optim.AdamW(p, 1.0, weight_decay=0),
     "AdamW_with_amsgrad": lambda p: torch.optim.AdamW(p, 1.0, amsgrad=True),
