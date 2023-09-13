@@ -1,15 +1,14 @@
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from .. import metrics
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
 from .triton import TritonKernel
-from .triton_utils import config_of, signature_to_meta, signature_of
-from typing import List, Any, Dict
+from .triton_utils import config_of, signature_of, signature_to_meta
 
 
 @dataclass
@@ -20,7 +19,7 @@ class PartitionState:
 
     def finalize(self):
         if self.cur_partition:
-            self.partitions.append(self.cur_partition) # type: ignore[arg-type]
+            self.partitions.append(self.cur_partition)  # type: ignore[arg-type]
 
 
 class ForeachKernel(Kernel):
@@ -44,7 +43,9 @@ class ForeachKernel(Kernel):
         assert len(subkernel_nodes) >= 1
 
         partition_state_1d = PartitionState([], [], 0)
-        yelem_to_partition_state_2d: Dict[List[int], PartitionState] = defaultdict(lambda: PartitionState([], [], 0))
+        yelem_to_partition_state_2d: Dict[List[int], PartitionState] = defaultdict(
+            lambda: PartitionState([], [], 0)
+        )
 
         for node in subkernel_nodes:
             fused_nodes = node.get_nodes()
