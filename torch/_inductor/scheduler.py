@@ -371,8 +371,8 @@ class BaseSchedulerNode:
         for use in self.users:
             if isinstance(use.node, OutputNode):
                 return False
-        if hasattr(self.node, "can_free"):
-            return self.node.can_free()
+        if hasattr(self.node, "can_free") and not self.node.can_free():
+            return False
         return True
 
     def codegen_originating_info(self, buffer, only_once=True):
