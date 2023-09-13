@@ -8,6 +8,7 @@ from .pt2e.qat_utils import (
 from .pt2e.utils import (
     _get_node_name_to_scope,
     _fuse_conv_bn_,
+    _disallow_eval_train,
 )
 from .pt2e.representation import reference_representation_rewrite
 from .fx.prepare import prepare as fx_prepare
@@ -72,6 +73,7 @@ def prepare_pt2e(
     quantizer.validate(model)
     model = prepare(model, node_name_to_scope, is_qat=False)
     model.meta.update(original_graph_meta)
+    model = _disallow_eval_train(model)
     return model
 
 def prepare_qat_pt2e(
@@ -88,6 +90,7 @@ def prepare_qat_pt2e(
     _fuse_conv_bn_qat(model)
     model = prepare(model, node_name_to_scope, is_qat=True)
     model.meta.update(original_graph_meta)
+    model = _disallow_eval_train(model)
     return model
 
 def convert_pt2e(
@@ -106,4 +109,5 @@ def convert_pt2e(
         model = reference_representation_rewrite(model)
 
     model.meta.update(original_graph_meta)
+    model = _disallow_eval_train(model)
     return model

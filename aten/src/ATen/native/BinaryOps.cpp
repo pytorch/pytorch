@@ -1061,18 +1061,8 @@ static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const
   // will hit the Python key before hitting the composite kernel.
   // A bit hacky, but ::redispatch() doesn't accept alias keys, so I'm manually using
   // AutogradCPU since I know that it gets a composite registration.
-  auto self_device = at::_ops::to_dtype_layout::redispatch(
-    c10::DispatchKeySet(c10::DispatchKey::AutogradCPU),
-    self,
-    /*dtype=*/c10::nullopt,
-    /*layout=*/c10::nullopt,
-    /*device=*/device_, false, false, false, c10::nullopt);
-  auto other_device = at::_ops::to_dtype_layout::redispatch(
-    c10::DispatchKeySet(c10::DispatchKey::AutogradCPU),
-    other,
-    /*dtype=*/c10::nullopt,
-    /*layout=*/c10::nullopt,
-    /*device=*/device_, false, false, false, c10::nullopt);
+  auto self_device = at::_ops::to_dtype_layout::redispatch(c10::DispatchKeySet(c10::DispatchKey::AutogradCPU), self,/*dtype=*/c10::nullopt, /*layout=*/c10::nullopt, /*device=*/device_, false, false, false, c10::nullopt);
+  auto other_device = at::_ops::to_dtype_layout::redispatch(c10::DispatchKeySet(c10::DispatchKey::AutogradCPU), other,/*dtype=*/c10::nullopt, /*layout=*/c10::nullopt, /*device=*/device_, false, false, false, c10::nullopt);
   auto meta_out = at::_ops::add_Tensor::redispatch(
       meta_dks, self_device, other_device, alpha);
 
