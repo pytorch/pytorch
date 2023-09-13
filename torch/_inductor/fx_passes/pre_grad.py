@@ -5,9 +5,6 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
-from torch.fx.experimental.efficient_conv_bn_eval import (
-    efficient_conv_bn_eval_graph_transform,
-)
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -33,18 +30,20 @@ normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
+    efficient_conv_bn_eval_pass,
 ]
 
 
 @init_once_fakemode
 def lazy_init():
-    from . import split_cat  # noqa: F401
+    from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
         from .fb import split_cat as split_cat_fb  # noqa: F401
@@ -66,7 +65,6 @@ def pre_grad_passes(gm, example_inputs):
     if config.pattern_matcher:
         lazy_init()
         gm = fuse_fx(gm, example_inputs)
-        efficient_conv_bn_eval_graph_transform(gm)
         group_batch_fusion_pre_grad_passes(gm.graph)
         for pattern_matcher_pass in pattern_matcher_passes:
             pattern_matcher_pass.apply(gm.graph)

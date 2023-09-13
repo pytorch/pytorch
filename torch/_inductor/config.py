@@ -48,6 +48,10 @@ pattern_matcher = True
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Optimize conv-bn if bn is in eval mode
+# It works for training/validation/inference
+efficient_conv_bn_eval_fx_passes = True
+
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
