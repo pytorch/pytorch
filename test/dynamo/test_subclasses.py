@@ -14,6 +14,7 @@ from torch._functorch.aot_autograd import to_fun
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+from torch.nested._internal.nested_tensor import jagged_from_list
 
 
 class MockSubclass(torch.Tensor):
@@ -435,6 +436,39 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
         self.assertEqual(lower_bound_str, expected_lower_bound)
         self.assertEqual(upper_bound_str, expected_upper_bound)
+
+
+class TestNestedTensor(torch._dynamo.test_case.TestCase):
+    def test_compile_pointwise_binary_recompiles(self):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+
+        def counter(gm, example_inputs):
+            compile_count[0] += 1
+            return gm
+
+        def fn(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
+        compile_count = [0]
+        torch._dynamo.reset()
+
+        nt1, offsets = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], offsets)
+        # TODO: make it explicitly error if dynamic=False
+        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
+        compiled_f(nt1, nt2)
+
+        self.assertEqual(compile_count[0], 1)
+
+        nt3, _ = jagged_from_list([a, b, c], None)
+
+        compiled_f(nt1, nt3)
+        self.assertEqual(compile_count[0], 2)
 
 
 if __name__ == "__main__":

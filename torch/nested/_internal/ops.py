@@ -100,9 +100,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
 
 def extract_kwargs(arg):
-    kwargs = {
-        "offsets": arg.offsets(),
-    }
+    kwargs = {"offsets": arg.offsets(), "raggedness_id": arg.raggedness_id}
     return kwargs
 
 
