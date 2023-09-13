@@ -7,7 +7,18 @@ import operator
 import re
 from collections import namedtuple
 from itertools import chain
-from typing import Any, Callable, ClassVar, Dict, List, NamedTuple, Optional, Set, Union
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 from sympy.printing.printer import Printer
@@ -791,6 +802,44 @@ class CSE:
         return var
 
 
+class IndirectAssertLine(DeferredLineBase):
+    def __init__(self, line, var, mask, size_map):
+        self.var = var
+        self.mask = mask
+        self.line = line
+        self.size_map = size_map
+
+    def __call__(self):
+        size, size_str = self.size_map[(self.var, self.mask)]
+
+        # We assert if we've not been able to prove the bound
+        assert_min = (self.var.bounds.lower >= 0) != sympy.true
+        assert_max = (self.var.bounds.upper < size) != sympy.true
+
+        # FooBar interview question
+        if not (assert_min or assert_max):
+            return None
+        elif assert_min and assert_max:
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
+            cond_print = f"0 <= {self.var} < {size_str}"
+        elif assert_min:
+            cond = f"0 <= {self.var}"
+            cond_print = cond
+        else:
+            assert assert_max
+            cond = f"{self.var} < {size_str}"
+            cond_print = cond
+
+        if self.mask:
+            cond = f"({cond}) | ~{self.mask}"
+        return self.line.format(cond=cond, cond_print=cond_print)
+
+    def _new_line(self, line):
+        return IndirectAssertLine(line, self.var, self.mask, self.size_map)
+
+
 class CodeGen:
     def __init__(self):
         super().__init__()
@@ -824,6 +873,8 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+        # Upper bounds for indirect_indexing and their str representation
+        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
 
     @contextlib.contextmanager
     def set_current_node(self, node):

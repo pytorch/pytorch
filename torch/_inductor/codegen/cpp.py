@@ -43,6 +43,7 @@ from .common import (
     DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
+    IndirectAssertLine,
     Kernel,
     KernelArgs,
     OpOverrides,
@@ -1209,8 +1210,38 @@ class CppKernel(Kernel):
         new_index = sympy_subs(index, replacement)
         return new_index
 
-    @staticmethod
-    def indirect_indexing(index_var, size, check=True):
+    def index_to_str(self, index: sympy.Expr) -> str:
+        """
+        Convert an index expr to a string that can be used in triton code.
+        e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
+        """
+        return cexpr(self.rename_indexing(index))
+
+    def indirect_indexing(self, index_var, size, check=True):
+        generate_assert = (
+            check or config.debug_index_asserts
+        ) and config.cpp.assert_indirect_indexing
+
+        if generate_assert:
+            # An assertion line may have been written already, if so just
+            # update the max size.
+            map_key = (index_var, None)
+            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
+            if existing_size is not None:
+                size = sympy.Min(size, existing_size)
+            else:
+                expr = ops.and_(
+                    ops.ge(index_var, "0"),
+                    ops.lt(index_var, self.rename_indexing(size)),
+                )
+                cond = self.cse.generate(self.compute, expr)
+                line = f'TORCH_CHECK({cond}, "index is out of bounds");'
+                self.compute.writeline(
+                    IndirectAssertLine(line, index_var, None, self.indirect_max_sizes)
+                )
+
+            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
+
         return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
@@ -2858,6 +2889,8 @@ class KernelGroup:
             code.writelines(["#include <ATen/record_function.h>"])
         kernel_decl_name = kernel_name if V.graph.cpp_wrapper else "kernel"
         code.writeline(codecache.cpp_prefix())
+
+        code.writelines(["#include <cassert>"])
 
         code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
