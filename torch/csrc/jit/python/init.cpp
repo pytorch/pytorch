@@ -1277,6 +1277,14 @@ void initJITBindings(PyObject* module) {
           "is_singleton_int",
           [](const c10::SymNode& node){
             return node->singleton_int().has_value();
+          })
+      .def(
+          "__hash__",
+          [](const c10::SymNode& node){
+            if (node->singleton_int().has_value()) {
+              return std::hash<int64_t>()(node->singleton_int().value());
+            }
+            return std::hash<void*>()(node.get());
           });
 
   // clang-format on
