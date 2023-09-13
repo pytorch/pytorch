@@ -675,11 +675,12 @@ class TensorVariable(VariableTracker):
             # have a source for the internal func, but not the partial. The real fix here is to
             # not always lift up to globals, but to use the lowest level scope possible to match the
             # func lifecycle.
-            src = fn_var.source if fn_var.source else tx.store_hook(name, fn)
             if not self.source:
+                src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=True)
                 # Intermediary
                 unimplemented("Intermediary tensors with registered hooks - NYI")
             else:
+                src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=False)
                 fn_var.source = src
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
@@ -700,7 +701,7 @@ class TensorVariable(VariableTracker):
             )
 
     def rename(self, tx, name):
-        self.proxy.node.rename(name)
+        self.proxy.node._rename(name)
         return super().rename(tx, name)
 
 
