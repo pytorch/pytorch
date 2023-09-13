@@ -2794,6 +2794,16 @@ def fn():
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_builtin_str_on_user_defined_function(self):
+        def another_fn():
+            pass
+
+        def fn():
+            return "another_fn" in str(another_fn)
+
+        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        self.assertTrue(opt_fn())
+
     def test_enum_no_graphbreaks(self):
         class Foo(enum.Enum):
             FOO = 0
