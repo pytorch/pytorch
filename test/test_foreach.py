@@ -213,6 +213,15 @@ class TestForeach(TestCase):
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
     @parametrize("is_fastpath", (True, False))
     def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
+
+        def clone(arg):
+            if isinstance(arg, (list, tuple)):
+                return [clone(a) for a in arg]
+            if torch.is_tensor(arg):
+                return arg.clone().detach().requires_grad_()
+            else:
+                return arg
+
         scalar_self_arg_test_complete = False
         for i, sample in enumerate(op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)):
             (rhs_arg,) = sample.args
@@ -220,11 +229,7 @@ class TestForeach(TestCase):
             alpha = kwargs.pop("alpha", None)
             _ = kwargs.pop("disable_fastpath") if is_fastpath else False
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
-            if (
-                and isinstance(rhs_arg, Number)
-                and not scalar_self_arg_test_complete
-                and not zero_size
-            ):
+            if isinstance(rhs_arg, Number) and not scalar_self_arg_test_complete:
                 scalar_self_arg_test_complete = True
                 self._binary_test(
                     dtype, wrapped_op, ref, [rhs_arg, sample.input], is_fastpath, False,
