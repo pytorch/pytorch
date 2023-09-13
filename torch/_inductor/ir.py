@@ -314,7 +314,12 @@ class IRNode:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
     def get_numel(self):
-        return sympy_product(self.get_size())
+        size = self.get_size()
+        for i in range(len(size)):
+            if isinstance(size[i], DynamicScalar):
+                # TODO(yf225): add comment
+                size[i] = 32
+        return sympy_product(size)
 
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
@@ -2161,7 +2166,7 @@ class Layout(IRNode):
         ), f"size={size}, stride={stride}"
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, (Expr, int)) for s in size)
+        assert all(isinstance(s, (DynamicScalar, Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -3752,6 +3757,7 @@ class DynamicScalar(ExternKernelAlloc):
         constant_args=(),
     ):
         super().__init__(layout, inputs, constant_args)
+        V.graph.sizevars.shape_env.dynamic_scalars.add(self.get_name())
 
     def should_allocate(self):
         return False

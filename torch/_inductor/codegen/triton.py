@@ -2544,7 +2544,7 @@ class TritonScheduling(BaseScheduling):
                     kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - use split ranges ?
-                    indexing_dtype_strength_reduction(node._body)
+                    # indexing_dtype_strength_reduction(node._body)
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     node.codegen(index_vars)
 

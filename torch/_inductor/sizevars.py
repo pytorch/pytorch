@@ -369,6 +369,18 @@ class SizeVarAllocator:
         while any(s.name.startswith("ps") for s in free_symbols):
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
+
+        free_symbols_list = list(free_symbols)
+        free_symbols_str = [str(s) for s in free_symbols_list]
+        dynamic_scalar_replace = {}
+        for s in self.shape_env.dynamic_scalars:
+            # TODO(yf225): comment
+            if s in free_symbols_str:
+                index = free_symbols_str.index(s)
+                dynamic_scalar_replace[free_symbols_list[index]] = sympy.Integer(32)
+        expr = sympy_subs(expr, dynamic_scalar_replace)
+        free_symbols = expr.free_symbols
+
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr) -> int:
@@ -376,6 +388,7 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
+            print(f"out: {out}")
             log.debug("failed on: %s", out)
             raise
 

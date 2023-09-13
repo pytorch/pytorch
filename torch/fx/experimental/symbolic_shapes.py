@@ -2128,6 +2128,7 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        self.dynamic_scalars: Set[str] = set()
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -3383,7 +3384,7 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(
-        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False, replace_unbacked_with_size_hint: bool = False, compute_hint: bool = False
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3392,7 +3393,18 @@ class ShapeEnv:
         unbacked SymInts (leaving regular hinted integers alone).
         """
         expr = self.simplify(expr)
+        symbols = list(expr.free_symbols)
 
+        symbols_strs = [str(s) for s in symbols]
+        dynamic_scalar_replace = {}
+        for ds in self.dynamic_scalars:
+            if ds in symbols_strs:
+                # TODO(yf225): add comment here
+                index = symbols_strs.index(ds)
+                dynamic_scalar_replace[symbols[index]] = 32
+        expr = safe_expand(expr.xreplace(dynamic_scalar_replace))
+
+        expr = self.simplify(expr)
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -3466,6 +3478,13 @@ class ShapeEnv:
         if out.is_singleton():
             return out.lower
 
+        if replace_unbacked_with_size_hint:
+            unbacked_replace = {}
+            for s in new_expr.free_symbols:
+                # TODO(yf225): add comment here
+                unbacked_replace[s] = 32
+            new_expr = safe_expand(new_expr.xreplace(unbacked_replace))
+
         return new_expr if unbacked_only else None
 
     @_lru_cache
@@ -3531,6 +3550,10 @@ class ShapeEnv:
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
+            if r is not None:
+                return r
+            # if unbacked symint exists, replace it with a reasonable size hint and evaluate again
+            r = self._maybe_evaluate_static(result_expr, unbacked_only=True, replace_unbacked_with_size_hint=True)
             if r is not None:
                 return r
             raise self._make_data_dependent_error(result_expr, expr)
@@ -3792,9 +3815,10 @@ class ShapeEnv:
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
-                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True, replace_unbacked_with_size_hint=True)
+                # new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                   raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
                 expr = new_expr
 
             self._check_frozen(expr, concrete_val)

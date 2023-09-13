@@ -572,11 +572,14 @@ def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRange
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
-            assert s.is_integer  # type: ignore[attr-defined]
-            if s.is_positive:  # type: ignore[attr-defined]
-                lower = 1
-            elif s.is_nonnegative:  # type: ignore[attr-defined]
-                lower = 0
+            assert s.is_integer or str(s) in context.fake_mode.shape_env.dynamic_scalars # type: ignore[attr-defined]
+            if s.is_integer:
+                if s.is_positive:  # type: ignore[attr-defined]
+                    lower = 1
+                elif s.is_nonnegative:  # type: ignore[attr-defined]
+                    lower = 0
+                else:
+                    lower = -math.inf  # type: ignore[assignment]
             else:
                 lower = -math.inf  # type: ignore[assignment]
             unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]

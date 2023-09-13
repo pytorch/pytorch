@@ -7051,18 +7051,11 @@ class CommonTemplate:
         self.assertTrue(called)
 
     def test_dynamic_scalar(self):
-        # def f(x, size_tensor):
-        #     size = size_tensor.tolist()
-        #     for elem in size:
-        #         torch.export.constrain_as_value(elem)
-        #     out = F.affine_grid(x, size)
-        #     return out
-
         def f(x):
             a, b = x.tolist()
             torch.export.constrain_as_size(a)
             torch.export.constrain_as_size(b)
-            return torch.cat([torch.randn(a), torch.randn(b)])
+            return torch.cat([torch.zeros(a, device="cuda"), torch.zeros(b, device="cuda")])
 
         with (
             torch._dynamo.config.patch(
@@ -7071,34 +7064,21 @@ class CommonTemplate:
                 capture_scalar_outputs=True,
             ),
         ):
-            # x = torch.empty((1, 2, 3), device=self.device)
-            # size_tensor = torch.tensor([1, 1, 4, 4], dtype=torch.int64)
-            x = torch.tensor([4, 5])
-            ref = f(x)
             compiled = torch.compile(f, fullgraph=True, dynamic=True)
-            actual = compiled(x)
-
-            code = run_and_get_triton_code(compiled, (x,))
-            print(f"code: {code}")
+            x = torch.tensor([1, 4])
+            code = run_and_get_triton_code(compiled, x)
             FileCheck() \
-                .check("buf0 = empty_strided(") \
-                .check("buf5 = empty_strided(") \
-                .check("triton_poi__0.run(arg0_1, buf0, buf5") \
-                .check("buf1 = empty_strided") \
-                .check("buf2 = empty_strided") \
-                .check_not("copy_(") \
-                .check("buf3_inputs = [buf0,arg0_1]") \
-                .check("buf3 = [buf1,buf2]") \
-                .check("buf3_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
-                    "output_tensors=buf3, input_tensors=buf3_inputs") \
-                .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
-                .check("_wait_tensor(buf1)") \
-                .check("buf4 = buf1") \
-                .check("buf6 = buf0; del buf0  # reuse") \
-                .check("_wait_tensor(buf2)") \
-                .check("buf7 = buf2") \
-                .check("return (buf4, buf5, buf6, buf7") \
+                .check("buf0 = arg0_1[0].item()") \
+                .check("buf1 = arg0_1[1].item()") \
+                .check("buf4 = empty_strided((buf0 + buf1, ), (1, ), device='cuda', dtype=torch.float32)") \
+                .check("buf2 = reinterpret_tensor(buf4, (math.floor(buf0), ), (1, ), 0)  # alias") \
+                .check("buf3 = reinterpret_tensor(buf4, (math.floor(buf1), ), (1, ), buf0)  # alias") \
                 .run(code)
+            print(f"code: {code}")
+
+            ref = f(x)
+            actual = compiled(x)
+            print(f"ref: {ref}, actual: {actual}")
             self.assertEqual(ref, actual)
 
 
