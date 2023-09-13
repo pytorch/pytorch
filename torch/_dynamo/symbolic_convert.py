@@ -1878,14 +1878,15 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
-    def store_hook(self, name, value):
+    def store_hook(self, name, value, lift):
         base = name
         assert callable(value), "Illegal construction - hook must be callable!"
         for i in itertools.count():
             if name not in self.output.global_scope:
                 src = GlobalSource(name)
-                self.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
-                self.output.install_global(name, value)
+                if lift:
+                    self.output.guards.add(src.make_guard(GuardBuilder.WEAKREF_ALIVE))
+                    self.output.install_global(name, weakref.ref(value))
                 break
             name = f"{base}_{i}"
 
