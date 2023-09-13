@@ -17,6 +17,7 @@ jobs:
   lintrunner:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
+      timeout: 120
       runner: linux.2xlarge
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
