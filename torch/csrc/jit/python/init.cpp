@@ -1277,15 +1277,6 @@ void initJITBindings(PyObject* module) {
           "is_singleton_int",
           [](const c10::SymNode& node){
             return node->singleton_int().has_value();
-          })
-      .def(
-          "__hash__",
-          [](const c10::SymNode& node){
-            // For now, we only support hashing singleton ints and only in
-            // Python.
-            auto ms = node->singleton_int();
-            TORCH_CHECK(ms.has_value(), "non-singleton-int SymNode cannot be hashed")
-            return *ms;
           });
 
   // clang-format on
