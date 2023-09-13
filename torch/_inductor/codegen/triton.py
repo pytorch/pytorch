@@ -2736,7 +2736,7 @@ class TritonScheduling(BaseScheduling):
                 )
                 >= 0
             ):
-                tilings.append(CandidateTiling(list(tiled_groups), score, dep.name))
+                tilings.append(CandidateTiling(tiled_groups, score, dep.name))
         return tilings
 
     @classmethod
@@ -2813,7 +2813,7 @@ class TritonScheduling(BaseScheduling):
 
 @dataclasses.dataclass
 class CandidateTiling:
-    tiling: List[sympy.Expr]
+    tiling: Tuple[sympy.Expr, sympy.Expr]
     score: int  # higher is better
     name: Optional[str] = None
 
