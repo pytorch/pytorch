@@ -258,6 +258,10 @@ def get_alias_info(func) -> SchemaInfo:
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
         torchgen_schema_str = str(func._schema)
+        assert torchgen_schema_str.startswith("aten::")
+        # remove the aten:: namespace, which is added by the torchscript parser,
+        # and torchgen doesn't know how to handle
+        torchgen_schema_str = torchgen_schema_str[6:]
         import re
         # the torchscript parser ends up converting int[2]=1 into int[2]=[1, 1],
         # which torchgen chokes on.
