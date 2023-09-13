@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._dynamo as torchdynamo
@@ -80,7 +80,6 @@ from torch.ao.quantization import (
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch._export import dynamic_dim
 
-import unittest
 
 class PT2EQuantizationTestCase(QuantizationTestCase):
     """
