@@ -10,6 +10,22 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.exc import CondOpArgsMismatchError
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
+from torch._subclasses.functional_tensor import FunctionalTensor
+
+# TODO: pull these helpers from AOTAutograd later
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
 
 
 def from_fun(x):
@@ -495,7 +511,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(4, 5)
         try:
-            example_input_func = to_fun(example_input)
+            example_input_func = torch._to_functional_tensor(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch"):
                 f(example_input_func)
@@ -533,7 +549,7 @@ class TestControlFlowTraced(TestCase):
 
         example_input = torch.ones(5, 5)
         try:
-            example_input_func = to_fun(example_input)
+            example_input_func = torch._to_functional_tensor(example_input)
             torch._enable_functionalization(reapply_views=False)
             with self.assertRaisesRegex(UnsupportedAliasMutationException, "One of torch.cond branch might be aliasing"):
                 f(example_input_func)
@@ -545,8 +561,10 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
+                    func_args = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
                     return func(*func_args, **func_kwargs)
                 finally:
                     torch._disable_functionalization()
@@ -575,9 +593,11 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
-                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
+                    func_args = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(torch._from_functional_tensor, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1014,7 +1034,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(torch._from_functional_tensor, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1078,7 +1098,7 @@ class TestControlFlowTraced(TestCase):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    return pytree.tree_map(from_fun, func(*args, **kwargs))
+                    return pytree.tree_map(torch._from_functional_tensor, func(*args, **kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
@@ -1427,9 +1447,11 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def wrapper(*args, **kwargs):
                 torch._enable_functionalization(reapply_views=False)
                 try:
-                    func_args = pytree.tree_map(to_fun, args)
-                    func_kwargs = pytree.tree_map(to_fun, kwargs)
-                    return pytree.tree_map(from_fun, func(*func_args, **func_kwargs))
+                    func_args = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, args)
+                    func_kwargs = pytree.tree_map(
+                        lambda x: torch._to_functional_tensor(x) if isinstance(x, torch.Tensor) else x, kwargs)
+                    return pytree.tree_map(torch._from_functional_tensor, func(*func_args, **func_kwargs))
                 finally:
                     torch._disable_functionalization()
             return wrapper
