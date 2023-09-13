@@ -43,10 +43,12 @@ struct InputMetadata {
   InputMetadata(
       const at::TensorOptions& options,
       MetadataShape input_shape,
-      bool is_tensor_subclass)
+      bool is_tensor_subclass,
+      bool is_nested)
       : options_{options},
         shape_{std::move(input_shape)},
         is_tensor_subclass_{is_tensor_subclass},
+        is_nested_{is_nested},
         was_default_constructed_{false} {
     auto device_ = options.device();
     stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
@@ -56,7 +58,8 @@ struct InputMetadata {
       : InputMetadata(
             t.options(),
             compute_variant_shape(t),
-            t.unsafeGetTensorImpl()->is_python_dispatch()) {}
+            t.unsafeGetTensorImpl()->is_python_dispatch(),
+            t.is_nested()) {}
 
   const at::TensorOptions options() const {
     return options_;
@@ -84,26 +87,33 @@ struct InputMetadata {
 
   at::Tensor zeros_like() const {
     TORCH_CHECK(
-        !is_nested_tensor(),
-        "Zeros is not currently supported for nested tensors.")
+        !is_nested_, "Zeros is not currently supported for nested tensors.")
     return at::zeros_symint(shape_as_dim_vector(), options_);
   }
 
-  bool is_same_shape(const at::Tensor& grad) const {
+  void check_nestedness_same(const at::Tensor& grad) const {
+    bool grad_is_subclass = grad.unsafeGetTensorImpl()->is_python_dispatch();
+    bool grad_is_nested = grad.is_nested();
+    bool grad_is_cpp_nested = grad_is_nested && !grad_is_subclass;
     TORCH_CHECK(
-        grad.is_nested() == is_nested_tensor(),
-        "Both grad and InputMetadata need to be either nested or non nested tensors.")
-    if (grad.is_nested()) {
-      return at::native::get_nested_sizes(grad).is_same_size(shape_as_tensor());
+        grad_is_cpp_nested == is_cpp_nested_tensor() &&
+            grad_is_nested == is_nested_,
+        "grad and the input wrt the gradient that is being computed for need to be "
+        "either both nested or both non-nested tensors. Also note that nested "
+        "tensors with different layouts do not compose currently.");
+  }
+
+  bool is_same_shape(const at::Tensor& grad) const {
+    check_nestedness_same(grad);
+    if (is_cpp_nested_tensor()) {
+      return grad._nested_tensor_size().is_same_size(shape_as_tensor());
     }
     return grad.sym_sizes().equals(shape_as_dim_vector());
   }
   bool is_expandable_to_shape(const at::Tensor& grad) const {
     // Currently NestedTensors are not expandable. If this support is added then
     // updates to reduce_grad will be needed
-    TORCH_CHECK(
-        grad.is_nested() == is_nested_tensor(),
-        "Both grad and InputMetadata need to be either nested or non nested tensors.")
+    check_nestedness_same(grad);
     return grad.is_nested()
         ? false
         : at::is_expandable_to(shape_as_dim_vector(), grad.sym_sizes());
@@ -113,7 +123,7 @@ struct InputMetadata {
     // Currently reduce_grad is only called if is_expandable_to_shape returns
     // true For nested tensors this always returns False, so this check
     // shouldn't fail
-    TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_tensor())
+    TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_)
     return at::sum_to(std::move(grad), shape_as_dim_vector());
   }
 
@@ -122,13 +132,13 @@ struct InputMetadata {
       const at::Tensor& grad) const {
     std::stringstream ss;
     ss << "invalid gradient at index " << index << " - got ";
-    if (grad.is_nested()) {
-      ss << at::native::get_nested_sizes(grad);
+    if (grad.is_nested() && !grad.unsafeGetTensorImpl()->is_python_dispatch()) {
+      ss << grad._nested_tensor_size();
     } else {
       ss << grad.sym_sizes();
     }
     ss << " but expected shape compatible with ";
-    if (is_nested_tensor()) {
+    if (is_cpp_nested_tensor()) {
       ss << shape_as_tensor();
     } else {
       ss << shape_as_dim_vector();
@@ -140,8 +150,14 @@ struct InputMetadata {
     return was_default_constructed_;
   }
 
+  bool is_cpp_nested_tensor() const {
+    bool ret = c10::holds_alternative<at::Tensor>(shape_);
+    TORCH_INTERNAL_ASSERT(ret == (is_nested_ && !is_tensor_subclass_))
+    return ret;
+  }
+
   bool is_nested_tensor() const {
-    return (c10::holds_alternative<at::Tensor>(shape_));
+    return is_nested_;
   }
 
   c10::SymIntArrayRef shape_as_dim_vector() const {
@@ -156,8 +172,9 @@ struct InputMetadata {
 
  private:
   MetadataShape compute_variant_shape(const at::Tensor& input) {
-    if (input.is_nested()) {
-      auto nested_size = at::native::get_nested_sizes(input);
+    if (input.is_nested() &&
+        !input.unsafeGetTensorImpl()->is_python_dispatch()) {
+      auto nested_size = input._nested_tensor_size();
       return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
     }
     return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};
@@ -171,6 +188,7 @@ struct InputMetadata {
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
   bool is_tensor_subclass_ = false;
+  bool is_nested_ = false;
   bool was_default_constructed_ = true;
 };
 } // namespace autograd
