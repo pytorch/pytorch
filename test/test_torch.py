@@ -3125,6 +3125,10 @@ else:
             dst._neg_view().copy_(src)
             self.assertEqual(dst, src.neg(), exact_dtype=False)
 
+            # issue: https://github.com/pytorch/pytorch/issues/106051
+            dst._neg_view().copy_(dst)
+            self.assertEqual(dst, src, exact_dtype=False)
+
         for dst_dtype, src_dtype in [
                 (torch.complex64, torch.complex64),
                 (torch.complex128, torch.complex64),
@@ -6050,6 +6054,30 @@ class TestTorch(TestCase):
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
 
+    def test_linspace_logspace(self):
+        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # The output of factory functions should not be part of any computational graph.
+        start = 0.0
+        end = 3.0
+
+        for step in [0, 1, 2]:
+            self.assertFalse(
+                torch.linspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.linspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.linspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
+            self.assertFalse(
+                torch.logspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.logspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.logspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
+
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
         # test args: tensor, int, sizes
@@ -8270,7 +8298,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     # FIXME: Port to a more appropriate test suite
     # Fails with inductor (and aot_eager) because functionalization replaces copy_ with copy,
     # which doesn't properly error on bad inputs.
-    @skipIfTorchInductor("FIXME")
     def test_copy_many_to_one(self):
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
@@ -8385,6 +8412,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                     self.assertIs(torch.int32, b.to(dtype=torch.int32).dtype)
                     self.assertEqual(b.device, b.to(dtype=torch.int32).device)
 
+    @skipIfTorchInductor("FIXME")
     def test_to(self):
         self._test_to_with_layout(torch.strided)
         is_cuda10_2_or_higher = (
