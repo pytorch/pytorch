@@ -37,6 +37,23 @@ from torch.utils._python_dispatch import (
 )
 
 
+# TODO: pull these helpers from AOTAutograd later
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
+
+
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
 # remove the wrapper call when it's ready.
 class MapWrapper(HigherOrderOperator):
@@ -80,7 +97,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     with suspend_functionalization(), unset_functional_temporarily():
         with disable_proxy_modes_tracing():
 
-            def from_fun(t):
+            def _from_fun(t):
                 if isinstance(t, torch.Tensor):
                     if t.dtype != torch.bool:
                         return torch.empty_strided(
@@ -95,18 +112,24 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                         maybe_unfunc_t = t
                         if isinstance(t, FunctionalTensor):
                             torch._sync(t)
-                            maybe_unfunc_t = torch._functorch.aot_autograd.from_fun(t)
+                            maybe_unfunc_t = from_fun(t)
+                        elif torch._is_functional_tensor(t):
+                            # need to handle both types of functionalization here:
+                            # these are the tensors that came from the user,
+                            # which could be either FunctionalTensorWrapper or FunctionalTensor
+                            torch._sync(t)
+                            maybe_unfunc_t = torch._from_functional_tensor(t)
                         return maybe_unfunc_t.clone()
                 return t
 
-            example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
+            example_xs = [_from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
 
             example_pos_args = [
-                from_fun(arg) if isinstance(arg, torch.Tensor) else arg
+                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in pos_args
             ]
             example_flat_out = pytree.tree_map(
-                from_fun, f(*example_xs, *example_pos_args)
+                _from_fun, f(*example_xs, *example_pos_args)
             )
             if any(
                 not isinstance(out, torch.Tensor)
@@ -117,7 +140,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     "Expect outputs of map only contains tensors or None. "
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
-            example_grad = [from_fun(out) for out in example_flat_out]
+            example_grad = [_from_fun(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
 
@@ -308,6 +331,9 @@ def _stack_pytree(pytrees):
             # therefore we need to deal with None output.
             stacked_out.append(None)
         else:
+            import pdb
+
+            pdb.set_trace()
             raise RuntimeError(f"Cannot stack {leaves}.")
     return pytree.tree_unflatten(stacked_out, out_spec)
 
@@ -347,8 +373,6 @@ def map_fake_tensor_mode(f, num_mapped, *args):
 
 @map_impl.py_impl(FunctionalTensorMode)
 def map_functional_tensor_mode(f, num_mapped, *args):
-    from torch._functorch.aot_autograd import from_fun, to_fun
-
     xs = args[:num_mapped]
     pos_args = args[num_mapped:]
     unwrapped_xs = pytree.tree_map_only(FunctionalTensor, from_fun, xs)

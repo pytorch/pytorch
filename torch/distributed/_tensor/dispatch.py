@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
 import operator
-from typing import cast, Dict, List, Sequence, Tuple
+from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
@@ -11,6 +11,8 @@ import torch.distributed._tensor.random as random
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
     OpInfo,
     OpSchema,
     OutputSharding,
@@ -125,7 +127,7 @@ def _operator_dispatch(
     flat_local_args: List[object] = []
     flat_kwargs_schema: List[object] = []
     flat_local_kwargs: List[object] = []
-    mesh = None
+    mesh: Optional[DeviceMesh] = None
 
     for arg in flat_args_list:
         if isinstance(arg, dtensor.DTensor):
@@ -168,10 +170,12 @@ def _operator_dispatch(
             flat_kwargs_schema.append(kwarg)
             flat_local_kwargs.append(kwarg)
 
+    assert mesh is not None, "found no DeviceMesh from dtensor args!"
+
     op_info = OpInfo(
-        op_call,
+        mesh,
         OpSchema(
-            op_call._schema,
+            op_call,
             tree_unflatten(flat_args_schema, args_spec),
             tree_unflatten(flat_kwargs_schema, kwargs_spec),
         ),
@@ -187,7 +191,7 @@ def _operator_dispatch(
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
 
-    if mesh is not None and mesh.get_coordinate() is None:
+    if mesh.get_coordinate() is None:
         # For a non-participating device, we do:
         #   1. if the return type is scalar, set the local result to None.
         #   The local results from all devices will then be all-gathered
@@ -198,7 +202,7 @@ def _operator_dispatch(
         #   2. if the return type is Tensor or List[Tensor], return empty
         #   tensor(s) with correct dtype.
         spec = output_sharding.output_spec
-        ret_list = op_info.schema.func_schema.returns
+        ret_list = op_info.schema.op._schema.returns
 
         if spec is None:
             # For a scalar return type, the non-participating device has None
@@ -250,7 +254,6 @@ def _operator_dispatch(
         # run local op computation with potentially modified args/kwargs
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
-        assert isinstance(mesh, DeviceMesh)
         if _is_random_op(op_call) and is_rng_supported_mesh(mesh):
             if not random._rng_tracker:
                 raise RuntimeError(
@@ -276,12 +279,12 @@ def _operator_dispatch(
             # perform reduce on the collection with AND op
             local_results = functools.reduce(operator.and_, obj_list, True)
 
-    if op_info.schema.is_inplace:
+    if _is_inplace_op(op_call):
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
         self._spec = cast(DTensorSpec, output_sharding.output_spec)
         return self, op_info.schema, output_sharding
-    elif op_info.schema.is_out_variant:
+    elif _is_out_variant_op(op_call):
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
         output_specs = (
             (output_sharding.output_spec,)
@@ -290,7 +293,7 @@ def _operator_dispatch(
         )
         out_dts = []
         spec_idx = 0
-        for arg in op_info.schema.func_schema.arguments:
+        for arg in op_call._schema.arguments:
             if arg.is_out:
                 out_dt = cast(dtensor.DTensor, kwargs[arg.name])
                 out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])
