@@ -486,7 +486,7 @@ class GraphModule(torch.nn.Module):
             f,
             torch.randn([3, 4]),
             [3, 3, 4, 5],
-            exp_graphs=[true_graph, true_graph, true_graph, false_graph, false_graph],
+            exp_graphs=[true_graph, true_graph, false_graph, false_graph],
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
                 [],
