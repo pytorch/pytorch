@@ -1323,6 +1323,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
+        log.debug("%s %s %s", func, args, kwargs)
 
         if func == torch.ops.prim.device.default:
             # NB: Don't use is_our_fake, just serve the fake information
@@ -1379,7 +1380,7 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
-            ), "f{func} should not have fake inputs without constants"
+            ), f"{func} should not have fake inputs without constants"
             const_args, const_kwargs = pytree.tree_map_only(
                 FakeTensor,
                 lambda t: t.constant if self.is_our_fake(t) else t,

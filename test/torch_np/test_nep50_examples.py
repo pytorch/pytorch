@@ -7,7 +7,8 @@ import itertools
 try:
     import numpy as _np
 
-    HAVE_NUMPY = True
+    v = _np.__version__.split(".")
+    HAVE_NUMPY = int(v[0]) >= 1 and int(v[1]) >= 24
 except ImportError:
     HAVE_NUMPY = False
 
@@ -203,3 +204,9 @@ def test_compare_ufuncs(name, scalar, array):
 
     finally:
         _np._set_promotion_state(state)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
