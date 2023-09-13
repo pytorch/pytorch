@@ -212,7 +212,7 @@ class TestForeach(TestCase):
 
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
     @parametrize("is_fastpath", (True, False))
-    def test_binary_op(self, device, dtype, op, is_fastpath):
+    def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
         scalar_self_arg_test_complete = False
         for i, sample in enumerate(op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)):
             (rhs_arg,) = sample.args
