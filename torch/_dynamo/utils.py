@@ -413,13 +413,15 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    # typing._Final covers almost all typing types:
+    # _Final catches most of typing classes:
     #   - Any
+    #   - Callable
     #   - Union
-    #   - Optional
-    #   - Dict
-    #   - List
-    return isinstance(value, typing._Final)
+    #   ...
+    #
+    # NB: we intentionally ignore classes that inherit from Generic, since they
+    # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    return isinstance(value, typing._Final) or value is typing.Generic
 
 
 def is_numpy_int_type(value):
