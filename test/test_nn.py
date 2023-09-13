@@ -12738,27 +12738,26 @@ class TestNNDeviceType(NNTestCase):
             expected_output = m(input)
 
             # add weight normalization
-            m = torch.nn.utils.parametrizations.weight_norm(m)
-            self.assertEqual(m.weight_v.size(), m.weight.size())
-            self.assertEqual(m.weight_g.size(), (5, 1))
+            m = torch.nn.utils.parametrizations.weight_norm(m, 'weight')
+            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(m.parametrizations.weight.original0.size(), (5, 1))
             self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
             # remove weight norm
-            m = torch.nn.utils.remove_weight_norm(m)
-            self.assertFalse(hasattr(m, 'weight_g'))
-            self.assertFalse(hasattr(m, 'weight_v'))
+            m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+            self.assertFalse(hasattr(m, 'parametrizations'))
             self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
             # test with dim=1
-            m = torch.nn.utils.parametrizations.weight_norm(m, dim=1)
-            self.assertEqual(m.weight_v.size(), m.weight.size())
-            self.assertEqual(m.weight_g.size(), (1, 4))
+            m = torch.nn.utils.parametrizations.weight_norm(m, 'weight', dim=1)
+            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(m.parametrizations.weight.original0.size(), (1, 4))
             self.assertEqual(m(input), expected_output, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
             # test with dim=None
             m = nn.Linear(4, 5, dtype=dtype, device=device)
             expected_output = m(input)
-            m = torch.nn.utils.parametrizations.weight_norm(m, dim=None)
+            m = torch.nn.utils.parametrizations.weight_norm(m, 'weight', dim=None)
             self.assertEqual(m(input), expected_output)
 
             with self.assertRaisesRegex(RuntimeError, 'register two weight_norm hooks'):
@@ -12769,11 +12768,11 @@ class TestNNDeviceType(NNTestCase):
         # to register the weight norm as this is often done before sending the Module to
         # CUDA.
         m = nn.Linear(4, 5, dtype=torch.float16, device=device)
-        m = torch.nn.utils.parametrizations.weight_norm(m)
+        m = torch.nn.utils.parametrizations.weight_norm(m, 'weight')
 
         # For bfloat16
         m = nn.Linear(4, 5, dtype=torch.bfloat16, device=device)
-        m = torch.nn.utils.parametrizations.weight_norm(m)
+        m = torch.nn.utils.parametrizations.weight_norm(m, 'weight')
 
 class TestFunctionalPickle(TestCase):
 
