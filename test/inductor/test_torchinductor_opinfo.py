@@ -267,7 +267,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "atanh": {f32},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
@@ -339,6 +338,7 @@ inductor_override_kwargs = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    "atanh": {"atol": 3e-5, "rtol": 4e-06},  # grad calculation deviates slightly
     ("addr", "cuda", f16): {"reference_in_float": True},
     ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
