@@ -45,6 +45,22 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# register custom graph optimizatin pass hook. so far, pre/post passes are
+# only applied before/after pattern_matcher in post_grad_passes.
+#
+# def my_custom_pre_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# def my_custom_post_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
+# torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+post_grad_custom_pre_pass = None
+post_grad_custom_post_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
