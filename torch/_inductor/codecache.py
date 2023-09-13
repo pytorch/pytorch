@@ -45,9 +45,6 @@ if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.select_algorithm import ChoiceCaller
 
-import concurrent.futures._base
-import concurrent.futures.process
-
 from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
@@ -1685,7 +1682,7 @@ class TritonFuture:
         self,
         kernel_name: str,
         source_code: str,
-        future: concurrent.futures.Future[Any],
+        future: Future[Any],
     ) -> None:
         self.kernel_name = kernel_name
         self.source_code = source_code
