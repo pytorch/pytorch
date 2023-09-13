@@ -241,9 +241,10 @@ class TestFP8MatmulCuda(TestCase):
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability(0)[0] != 8, "mixed dtypes MM only supported on SM 8.x")
-class TestMatmulMixedDtypesCuda(TestCase):
+class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
-    def test_fp16_int8_mm(self, dtype: torch.dtype, device: str = "cuda"):
+    @toleranceOverride({torch.float32: xtol(atol=0, rtol=1e-3)})
+    def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
         def preprocess_weights_for_mixed_gemm(inp):
             assert inp.dtype == torch.int8
             assert inp.dim() == 2
@@ -323,7 +324,7 @@ class TestMatmulMixedDtypesCuda(TestCase):
 
             return outp.view(inp.shape)
 
-        def run_test(batch_shape, m, n, k, dtype, device):
+        def run_test(batch_shape, m, n, k, add_bias, dtype, device):
             val_lo, val_hi = -1, 1
             valq_lo, valq_hi = -2, 2
             input = make_tensor(
@@ -337,23 +338,23 @@ class TestMatmulMixedDtypesCuda(TestCase):
             )
             bias = make_tensor(
                 (n,), low=val_lo, high=val_hi, dtype=input.dtype, device=device
-            )
+            ) if add_bias else None
 
             input_ref = input.reshape(-1, input.shape[-1])
             weight_ref = weight.to(input.dtype) * scale.expand(1, n)
-            bias_ref = bias.expand(1, n)
+            bias_ref = bias.expand(1, n) if add_bias else torch.zeros((1, n), dtype=input.dtype, device=device) ### FIXME! use linear and then pass bias as None in base add_bias set to False
             output_ref = torch.addmm(bias_ref, input_ref, weight_ref).reshape(
                 *input.shape[:-1], weight.shape[1]
             )
 
-            output = torch.ops.aten._fp16_uint8_mm(
+            output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 preprocess_weights_for_mixed_gemm(weight).view(torch.uint8),
                 scale,
                 bias,
             )
 
-            torch.testing.assert_close(output, output_ref, rtol=1e-3, atol=0)
+            torch.testing.assert_close(output, output_ref)
 
         batch_shapes = [[], [2], [2, 1]]
         shapes = [
@@ -367,12 +368,13 @@ class TestMatmulMixedDtypesCuda(TestCase):
             [8, 256, 384],
             [8, 384, 256],
         ]
-        for batch_shape, (m, n, k) in product(batch_shapes, shapes):
-            run_test(batch_shape, m, n, k, dtype, device)
+        for batch_shape, (m, n, k), add_bias in \
+            product(batch_shapes, shapes, (False, True)):
+            run_test(batch_shape, m, n, k, add_bias, dtype, device)
         
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestMatmulMixedDtypesCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
 
 if __name__ == '__main__':
     run_tests()

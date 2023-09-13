@@ -28,9 +28,9 @@ namespace at {
 namespace native {
 
 #ifndef USE_ROCM
-template<typename ElementInputA>
+template<typename ElementInputA, typename EpilogueTag>
 Tensor
-mixed_dtypes_mm_dispatch_dtype(
+mixed_dtypes_linear_dispatch_dtype_bias(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
     const Tensor& bias) {
   const int length_m = input.size(0);
@@ -65,12 +65,11 @@ mixed_dtypes_mm_dispatch_dtype(
 
   // Check for current CUTLASS limitations w.r.t. weight sizes.
   TORCH_CHECK(length_k % 64 == 0 && length_n % 64 == 0,
-              "mixed_dtypes_mm_dispatch_dtype: Number of rows/columns of the "
-              "weight matrix must be divisible by ", 64);
+              "mixed_dtypes_linear_dispatch_dtype_bias: Number of rows/columns "
+              "of the weight matrix must be divisible by ", 64);
 
   using ElementAccumulator = float;
 
-  using EpilogueTag = fastertransformer::EpilogueOpBias;
   using EpilogueOp = typename fastertransformer::Epilogue<
       ElementOutput,
       ElementsPerAccessC,
@@ -115,7 +114,7 @@ mixed_dtypes_mm_dispatch_dtype(
       {(ElementInputA*)input.data_ptr(), length_k},
       {(ElementInputB*)weight.data_ptr(), ldb},
       {(ElementInputA*)scale.data_ptr(), 0},
-      {(ElementInputA*)bias.data_ptr(), 0},
+      {(ElementInputA*)(bias.numel() == 0 ? nullptr : bias.data_ptr()), 0},
       {(ElementOutput*)output.data_ptr(), length_n},
       SplitKFactor,
       {ElementAccumulator(1.f), ElementAccumulator(0.f)});
@@ -150,30 +149,35 @@ mixed_dtypes_mm_dispatch_dtype(
 #endif
 
 Tensor
-_fp16_uint8_mm(const Tensor& input, const Tensor& weight, const Tensor& scale,
-               const Tensor& bias) {
+_mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
+                     const Tensor& scale,
+                     const c10::optional<Tensor>& bias_opt) {
 #ifndef USE_ROCM
+  const auto bias = bias_opt.has_value() ? *bias_opt : Tensor{};
+
   // For now, only CC 8.x devices are supported.
   const auto dprops = at::cuda::getCurrentDeviceProperties();
   const auto is_sm8x = dprops->major == 8;
   TORCH_CHECK(is_sm8x,
-              "_fp16_uint8_mm: Supported only on GPUs with compute capability "
-              "8.x");
+              "_mixed_dtypes_linear: Supported only on GPUs with compute "
+              "capability 8.x");
 
   // Validate datatypes of input tensors.
   TORCH_CHECK(input.dtype() == at::kHalf ||
               input.dtype() == at::kBFloat16,
-              "_fp16_uint8_mm: The input datatype ", input.dtype(),
+              "_mixed_dtypes_linear: The input datatype ", input.dtype(),
               " is not supported");
   TORCH_CHECK(weight.dtype() == at::kByte,
-              "_fp16_uint8_mm: The weight datatype ", weight.dtype(),
+              "_mixed_dtypes_linear: The weight datatype ", weight.dtype(),
               " is not supported");
   TORCH_CHECK(scale.dtype() == input.dtype(),
-              "_fp16_uint8_mm: Expected scale datatype ", input.dtype(),
+              "_mixed_dtypes_linear: Expected scale datatype ", input.dtype(),
               " but got", scale.dtype());
-  TORCH_CHECK(bias.dtype() == input.dtype(),
-              "_fp16_uint8_mm: Expected bias datatype ", input.dtype(),
-              " but got", bias.dtype());
+  if (bias.numel() != 0) {
+    TORCH_CHECK(bias.dtype() == input.dtype(),
+                "_mixed_dtypes_linear: Expected bias datatype ", input.dtype(),
+                " but got", bias.dtype());
+  }
 
   // Squash the batch dimensions of the input tensor with its
   // next-to-last dimensions.
@@ -182,64 +186,85 @@ _fp16_uint8_mm(const Tensor& input, const Tensor& weight, const Tensor& scale,
 
   // Validate layouts of input tensors.
   TORCH_CHECK(input_2d.layout() == Layout::Strided,
-              "_fp16_uint8_mm: Expected input argument to be strided, but got "
-              "layout ", input_2d.layout());
+              "_mixed_dtypes_linear: Expected input argument to be strided, "
+              "but got layout ", input_2d.layout());
   TORCH_CHECK(input_2d.dim() == 2,
-              "_fp16_uint8_mm: Expected input argument to be 2D tensor, got ",
-              input_2d.dim(), " dims");
+              "_mixed_dtypes_linear: Expected input argument to be 2D tensor, "
+              "got ", input_2d.dim(), " dims");
   const auto strides_input = input_2d.strides();
   TORCH_CHECK(strides_input[0] > 1 && strides_input[1] == 1,
-              "_fp16_uint8_mm: Invalid strides for input argument: row "
+              "_mixed_dtypes_linear: Invalid strides for input argument: row "
               "stride = ", strides_input[0], ", column stride = ",
               strides_input[1]);
   TORCH_CHECK(weight.layout() == Layout::Strided,
-              "_fp16_uint8_mm: Expected inpu argument to be strided, but got "
-              "layout ", weight.layout());
+              "_mixed_dtypes_linear: Expected inpu argument to be strided, but "
+              "got layout ", weight.layout());
   TORCH_CHECK(weight.dim() == 2,
-              "_fp16_uint8_mm: Expected weight argument to be 2D tensor, got ",
-              weight.dim(), " dims");
+              "_mixed_dtypes_linear: Expected weight argument to be 2D tensor, "
+              "got ", weight.dim(), " dims");
   const auto strides_weight = weight.strides();
   TORCH_CHECK(strides_weight[0] > 1 && strides_weight[1] == 1,
-              "_fp16_uint8_mm: Invalid strides for weight argument: row "
+              "_mixed_dtypes_linear: Invalid strides for weight argument: row "
               "stride = ", strides_weight[0], ", column stride = ",
               strides_weight[1]);
   TORCH_CHECK(scale.dim() == 1,
-              "_fp16_uint8_mm: Expected scale argument to be 1D tensor, got ",
-              scale.dim(), " dims");
-  TORCH_CHECK(bias.dim() == 1,
-              "_fp16_uint8_mm: Expected bias argument to be 1D tensor, got ",
-              bias.dim(), " dims");
+              "_mixed_dtypes_linear: Expected scale argument to be 1D tensor, "
+              "got ", scale.dim(), " dims");
+  if (bias.numel() != 0) {
+    TORCH_CHECK(bias.dim() == 1,
+                "_mixed_dtypes_linear: Expected bias argument to be 1D ",
+                "tensor, got ", bias.dim(), " dims");
+  }
 
   // Validate sizes of input tensors.
   TORCH_CHECK(input_2d.size(1) == weight.size(0),
-              "_fp16_uint8_mm: Expected input argument to have ",
+              "_mixed_dtypes_linear: Expected input argument to have ",
               weight.size(0), " columns, but got ", input_2d.size(1));
   TORCH_CHECK(scale.size(0) == weight.size(1),
-              "_fp16_uint8_mm: Expected scale argument to have ",
+              "_mixed_dtypes_linear: Expected scale argument to have ",
               weight.size(1), " elements, but got ", scale.size(0));
   if (bias.numel() != 0) {
       TORCH_CHECK(bias.size(0) == weight.size(1),
-                  "_fp16_uint8_mm: Expected bias argument to have ",
+                  "_mixed_dtypes_linear: Expected bias argument to have ",
                   weight.size(1), " elements, but got ", bias.size(0));
   }
-
 
   Tensor output;
   AT_DISPATCH_SWITCH(
       input.scalar_type(),
-      "_fp16_uint8_mm",
+      "_mixed_dtypes_linear",
       AT_DISPATCH_CASE(
           at::ScalarType::Half,
           [&]() {
-            output = mixed_dtypes_mm_dispatch_dtype<cutlass::half_t>(
-                input_2d, weight, scale, bias);
+            if (bias.numel() == 0) {
+              output = mixed_dtypes_linear_dispatch_dtype_bias<
+                          cutlass::half_t,
+                          fastertransformer::EpilogueOpNoBias>(
+                          input_2d, weight, scale, bias);
+            }
+            else {
+              output = mixed_dtypes_linear_dispatch_dtype_bias<
+                           cutlass::half_t,
+                           fastertransformer::EpilogueOpBias>(
+                           input_2d, weight, scale, bias);
+            }
             return;
           })
       AT_DISPATCH_CASE(
           at::ScalarType::BFloat16,
           [&]() {
-            output = mixed_dtypes_mm_dispatch_dtype<cutlass::bfloat16_t>(
-                input_2d, weight, scale, bias);
+            if (bias.numel() == 0) {
+              output = mixed_dtypes_linear_dispatch_dtype_bias<
+                          cutlass::bfloat16_t,
+                          fastertransformer::EpilogueOpNoBias>(
+                          input_2d, weight, scale, bias);
+            }
+            else {
+              output = mixed_dtypes_linear_dispatch_dtype_bias<
+                           cutlass::bfloat16_t,
+                           fastertransformer::EpilogueOpBias>(
+                           input_2d, weight, scale, bias);
+            }
             return;
           }));
 
@@ -247,7 +272,7 @@ _fp16_uint8_mm(const Tensor& input, const Tensor& weight, const Tensor& scale,
   output_sizes.back() = weight.size(1);
   return output.reshape(output_sizes);
 #else
-  AT_ERROR("_fp16_uint8_mm: ROCm doesn't support CUTLASS");
+  AT_ERROR("_mixed_dtypes_linear: ROCm doesn't support CUTLASS");
   return Tensor{};
 #endif
 }
