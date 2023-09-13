@@ -124,13 +124,6 @@ class TensorCheck {
     const auto& sizes = v.sym_sizes();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
-      if (known_size.has_value()) {
-        std::cout << "sizes[i]: " << sizes[i] << " known_size: " << *known_size
-                  << std::endl;
-      } else {
-        std::cout << "sizes[i]: " << sizes[i] << " known_size: None"
-                  << std::endl;
-      }
       if (known_size.has_value() && (known_size.value() != sizes[i])) {
         fail_reason << "size mismatch at index " << i << ". expected "
                     << known_size.value() << ", actual " << sizes[i];
