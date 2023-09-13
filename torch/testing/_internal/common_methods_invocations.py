@@ -8818,31 +8818,12 @@ foreach_unary_op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         supports_fwgrad_bwgrad=True,
-        skips=(
-            # note(crcrpar): excluding cdouble from dtypes above might be better.
-            # Guard for `error: "In-place abs is not supported for complex tensors."`
-            DecorateInfo(
-                unittest.expectedFailure,
-                'TestForeach',
-                'test_inplace_forward_mode_AD',
-                dtypes=(torch.complex128,),
-            ),
-        ),
     ),
     ForeachFuncInfo(
         'zero',
         foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         has_no_out_of_place=True,
-        skips=(
-            # note(crcrpar): excluding cdouble from dtypes above might be better.
-            # Guard for `error: "In-place abs is not supported for complex tensors."`
-            DecorateInfo(
-                unittest.skip("_foreach_zero is not implemented"),
-                'TestForeach',
-                'test_outplace_forward_mode_AD',
-            ),
-        ),
     ),
     ForeachFuncInfo(
         'sign',
@@ -8923,11 +8904,6 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
-        skips=(
-            # TODO: Memory leak https://github.com/pytorch/pytorch/issues/95237
-            DecorateInfo(unittest.skip("Memory leak https://github.com/pytorch/pytorch/issues/95237"),
-                         "TestForeach", "test_binary_op"),
-        ),
         supports_forward_ad=True,
         backward_requires_result=True,
     ),
