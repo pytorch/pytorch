@@ -931,6 +931,7 @@ def export(
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
@@ -1011,9 +1012,12 @@ def export(
 
     """
 
-    from torch._export import export
+    from torch._export import export, export_rc
 
-    return export(f, args, kwargs, constraints)
+    if constraints is not None:
+        return export(f, args, kwargs, constraints)
+    else:
+        return export_rc(f, args, kwargs, dynamic_shapes=dynamic_shapes)
 
 
 def save(

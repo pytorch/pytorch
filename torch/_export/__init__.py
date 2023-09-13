@@ -95,7 +95,7 @@ class _(int):
 TensorType = Tuple
 
 
-def export_(
+def export_rc(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
@@ -105,8 +105,7 @@ def export_(
     """
     API for different ways of exporting with dynamic shape specifications.
     1. Either pass dynamic shapes of inputs along with inputs in export call.
-    2. Or decorate exported function with expected dynamic shapes of inputs.
-    3. Or type arguments of exported function with expected dynamic shapes.
+    2. Or type arguments of exported function with expected dynamic shapes.
     """
     kwargs = kwargs if kwargs is not None else {}
 
@@ -123,7 +122,7 @@ def export_(
                 shape = get_args(dynamic_shapes)[0]
                 for arg in combined_args:
                     yield from typing_zip(arg, shape)
-        if isinstance(combined_args, dict):
+        elif isinstance(combined_args, dict):
             if isinstance(dynamic_shapes, Mapping):
                 for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
                     yield from typing_zip(arg, shape)
@@ -132,7 +131,8 @@ def export_(
                 shape = get_args(dynamic_shapes)[1]
                 for arg in combined_args.values():
                     yield from typing_zip(arg, shape)
-        else:
+        # TODO: other container types
+        elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
 
 
@@ -148,21 +148,18 @@ def export_(
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i))
-        else:
-            raise ValueError(
-                f"Unexpected shape {shape} for dynamic tensor. "
-                "Must be either a TensorType annotation or a Dict[int, Dim]."
-            )
 
     import inspect
     signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
     combined_args = signature.bind(*args, **kwargs).arguments
 
     if dynamic_shapes is None:
-        dynamic_shapes = {k: (parameter.annotation if parameter.annotation is not inspect.Parameter.empty else None) for k, parameter in signature.parameters.items()}
+        dynamic_shapes = {
+            k: parameter.annotation
+            for k, parameter in signature.parameters.items()
+        }
     for tensor, shape in typing_zip(combined_args, dynamic_shapes):
-        if shape is not None:
-            update_symbols(tensor, shape)
+        update_symbols(tensor, shape)
 
     constraints = []
     for dynamic_dims in symbols.values():
