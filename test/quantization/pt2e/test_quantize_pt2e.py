@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._dynamo as torchdynamo
