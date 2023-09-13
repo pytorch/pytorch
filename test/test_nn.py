@@ -5049,7 +5049,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    # test hardtanh backward froo large tensor
+    # test hardtanh backward for large tensor
     def test_hardtanh_backward(self):
         x = torch.randn(128, 10000, requires_grad=True)
         grad = torch.randn(128, 10000)
@@ -5062,7 +5062,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(x.grad, x_grad_ref)
 
     def test_batchnorm_nhwc_cpu(self):
-        def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last):
+        def helper(self, mod, size, dtype, mixed_dtype=False, format=torch.channels_last, precision=None):
             channels = size[1]
             input = torch.randn(size, dtype=dtype, device='cpu', requires_grad=True)
             input = input.contiguous(memory_format=format).to(dtype)
@@ -5090,20 +5090,25 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertTrue(out.is_contiguous(memory_format=format))
             self.assertTrue(ref_out.is_contiguous())
             self.assertEqual(out, ref_out)
-            self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
+            self.assertEqual(bn.weight.grad, ref_bn.weight.grad, atol=precision, rtol=precision)
             self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
         # test NC11 and N1HW; test mixed dtype
         for shape in [(4, 8, 10, 10), (4, 1, 9, 9), (4, 9, 1, 1)]:
-            helper(self, nn.BatchNorm2d, shape, torch.float, False, torch.channels_last)
-            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, False, torch.channels_last)
-            helper(self, nn.BatchNorm2d, shape, torch.bfloat16, True, torch.channels_last)
+            for dtype in [torch.float, torch.bfloat16, torch.float16]:
+                for mixed_dtype in [False, True]:
+                    if dtype == torch.float:
+                        mixed_dtype = False
+                    helper(self, nn.BatchNorm2d, shape, dtype, mixed_dtype, torch.channels_last)
 
+        precisons = {torch.float: 1e-4, torch.bfloat16: None, torch.float16: None}
         for shape in [(4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
-            helper(self, nn.BatchNorm3d, shape, torch.float, False, torch.channels_last_3d)
-            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, False, torch.channels_last_3d)
-            helper(self, nn.BatchNorm3d, shape, torch.bfloat16, True, torch.channels_last_3d)
+            for dtype in [torch.float, torch.bfloat16, torch.float16]:
+                for mixed_dtype in [False, True]:
+                    if dtype == torch.float:
+                        mixed_dtype = False
+                    helper(self, nn.BatchNorm3d, shape, dtype, mixed_dtype, torch.channels_last_3d, precisons[dtype])
 
     @parametrize_test(
         'bn_module',
@@ -5113,32 +5118,36 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ],
     )
     def test_batchnorm_non_contig_cpu(self, bn_module):
-        input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
-        input = input.permute(0, 2, 1, 3)
+        def helper(self, dtype):
+            input = torch.arange(6, dtype=torch.float).reshape(1, 3, 2, 1).cpu()
+            input = input.permute(0, 2, 1, 3)
 
-        bn = bn_module(2).cpu().float().eval()
-        bn.weight.data.uniform_()
-        bn.bias.data.uniform_()
+            bn = bn_module(2).cpu().float().eval()
+            bn.weight.data.uniform_()
+            bn.bias.data.uniform_()
 
-        ref_input = input.detach().clone().contiguous()
-        ref_bn = nn.BatchNorm2d(2).cpu().float().eval()
-        ref_bn.load_state_dict(bn.state_dict())
+            ref_input = input.detach().clone().contiguous()
+            ref_bn = nn.BatchNorm2d(2).cpu().float().eval()
+            ref_bn.load_state_dict(bn.state_dict())
 
-        out = bn(input)
-        ref_out = ref_bn(ref_input)
+            out = bn(input)
+            ref_out = ref_bn(ref_input)
 
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
 
-        input_bf = torch.arange(24, dtype=torch.bfloat16).reshape(1, 3, 2, 4)
-        input_bf = input_bf.permute(0, 2, 1, 3)
-        input_f = input_bf.float()
-        bn_mix = bn_module(2).float().eval()
-        ref_bn_f = deepcopy(bn_mix)
-        out_bf = bn_mix(input_bf)
-        ref_out_bf = ref_bn_f(input_f)
-        self.assertEqual(ref_out_bf, out_bf.float(), atol=0.05, rtol=0.05)
+            input_bf = torch.arange(24, dtype=dtype).reshape(1, 3, 2, 4)
+            input_bf = input_bf.permute(0, 2, 1, 3)
+            input_f = input_bf.float()
+            bn_mix = bn_module(2).float().eval()
+            ref_bn_f = deepcopy(bn_mix)
+            out_bf = bn_mix(input_bf)
+            ref_out_bf = ref_bn_f(input_f)
+            self.assertEqual(ref_out_bf, out_bf.float(), atol=0.05, rtol=0.05)
+
+        helper(self, torch.bfloat16)
+        helper(self, torch.float16)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
