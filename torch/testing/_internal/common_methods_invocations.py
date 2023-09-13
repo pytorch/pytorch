@@ -8702,7 +8702,7 @@ foreach_unary_op_db: List[OpInfo] = [
                     }
                 ),
                 'TestForeach',
-                'test_unary_op',
+                'test_parity',
                 device_type='cuda'
             ),
         ),
@@ -8717,7 +8717,7 @@ foreach_unary_op_db: List[OpInfo] = [
                     {torch.complex64: tol(atol=5e-03, rtol=1e-04)}
                 ),
                 'TestForeach',
-                'test_unary_op',
+                'test_parity',
                 device_type='cuda'
             ),
         ),
