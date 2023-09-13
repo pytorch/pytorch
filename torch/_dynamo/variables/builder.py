@@ -205,6 +205,10 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
+        *,
+        # Does not issue guards!
+        # This should only be used if you make sure the value you are ignoring guards for is
+        # already guarded somewhat indirectly.
         ignore_guards: bool = False,
     ):
         assert (
