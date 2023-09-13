@@ -59,7 +59,6 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
-from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
