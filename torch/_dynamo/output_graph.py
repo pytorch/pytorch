@@ -50,6 +50,7 @@ from .bytecode_transformation import (
     Instruction,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
 from .exc import (
@@ -266,26 +267,37 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-        # In export mode, we force the shape_env to strictly disallow any constraining
-        # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=ShapeEnv(
-                allow_scalar_outputs=config.capture_scalar_outputs,
-                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
-                co_fields=self.co_fields,
-            ),
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
-        self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.init_ambient_guards()
-
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
         # will get added to TrackedFakes, but TrackedFakes also contains
         # GraphArgs that got pruned, and things like Tensor attributes which
         # aren't explicit graph inputs.  Used by shape guard
         self.tracked_fakes: List[TrackedFake] = []
+
+        shape_env = ShapeEnv(
+            # Reference Cycle!
+            # Share a reference to the list of TrackedFake.
+            #
+            # ShapeEnv needs this in order to be able to reproduce the call
+            # to produce_guards at an arbitrary time point. That is because
+            # TrackedFake instances may have its metadata changed throughout
+            # the program execution.
+            tracked_fakes=self.tracked_fakes,
+            allow_scalar_outputs=config.capture_scalar_outputs,
+            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            co_fields=self.co_fields,
+        )
+
+        # In export mode, we force the shape_env to strictly disallow any constraining
+        # of the user marked dynamic dims
+        fake_mode = torch._subclasses.FakeTensorMode(
+            shape_env=shape_env,
+            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+            allow_non_fake_inputs=True if self.export else False,
+        )
+        self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.init_ambient_guards()
+
         # Map each tensor id to a list of sources. This is necessary because
         # tensor ids cannot be recovered from tracked fakes (in general).
         # We use this map to interpret (i.e., check for violations of) constraints,
@@ -1210,6 +1222,11 @@ class SubgraphTracer(fx.Tracer):
         self.lifted_freevars = collections.OrderedDict()
         self.prev_inst = None
 
+        self._cur_code = None
+        self._orig_gm_meta = None
+        self._orig_gm_lineno_map = None
+        self._orig_gm_firstlineno = None
+
     def create_proxy(
         self,
         kind,
@@ -1287,6 +1304,43 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
+        # update reference to original meta if we're tracing a new code object
+        if tx.f_code is not self._cur_code:
+            orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
+                "orig_graphmodule", None
+            )
+            if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                self._orig_gm_meta = [
+                    nd.meta for nd in orig_graphmodule_maybe.graph.nodes
+                ]
+                self._orig_gm_lineno_map = orig_graphmodule_maybe._lineno_map
+                self._orig_gm_firstlineno = (
+                    orig_graphmodule_maybe.forward.__code__.co_firstlineno
+                )
+            else:
+                self._orig_gm_meta = None
+                self._orig_gm_lineno_map = None
+                self._orig_gm_firstlineno = None
+
+        # preserve original meta if it is available
+        if (
+            self._orig_gm_meta
+            and self._orig_gm_lineno_map
+            and self._orig_gm_firstlineno
+        ):
+            lineno = tx.current_instruction.starts_line
+            node_idx = None
+            if lineno is not None:
+                node_idx = self._orig_gm_lineno_map.get(
+                    lineno - self._orig_gm_firstlineno, None
+                )
+            if node_idx is not None:
+                meta = self._orig_gm_meta[node_idx]
+                for key in ("nn_module_stack", "source_fn", "stack_trace"):
+                    if key in meta:
+                        rv.node.meta[key] = meta[key]
+                return rv
+
         nn_module_stack = tx.nn_module_stack
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
@@ -1359,6 +1413,11 @@ class SubgraphTracer(fx.Tracer):
     # Remove this if https://github.com/pytorch/pytorch/issues/99007 gets
     # fixed.
     def create_graph_input(self, name, type_expr=None, before=False, source=None):
+        log.debug(
+            "create_graph_input %s %s",
+            name,
+            source.name() if source is not None else "(none)",
+        )
         if source is None:
             assert (
                 self.parent is not None
