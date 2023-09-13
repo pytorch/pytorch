@@ -7,7 +7,6 @@ from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functiona
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import (
-    dispatch_functionalize,
     FunctionalTensor,
     FunctionalTensorMode,
     unset_functional_temporarily,
@@ -57,10 +56,9 @@ def export_tracepoint_functional_tensor_mode(*args, **kwargs):
     unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, args)
     unwrapped_kwargs = pytree.tree_map_only(FunctionalTensor, from_fun, kwargs)
 
-    functional_export_tracepoint = dispatch_functionalize(_export_tracepoint)
 
     with unset_functional_temporarily():
-        out = functional_export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
+        out = _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
         return pytree.tree_map_only(torch.Tensor, to_fun, out)
 
 
