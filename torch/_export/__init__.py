@@ -88,10 +88,11 @@ def dims(*names: str):
     return tuple(Dim(name) for name in names)
 
 
-_ = NewType("_", int)
+class _(int):
+    pass
 
 
-TensorType = types.new_class("TensorType", (Tuple,))
+TensorType = Tuple
 
 
 def export_(
@@ -110,6 +111,7 @@ def export_(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
+    from typing import get_origin, get_args
 
     def typing_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, tuple):
@@ -117,8 +119,8 @@ def export_(
                 for arg, shape in zip(combined_args, dynamic_shapes):
                     yield from typing_zip(arg, shape)
             else:
-                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ in (list, List), f"Unexpected {dynamic_shapes} matching tuple"
-                shape = dynamic_shapes.__args__[0]
+                assert get_origin(dynamic_shapes) is list, f"Unexpected {dynamic_shapes} matching tuple"
+                shape = get_args(dynamic_shapes)[0]
                 for arg in combined_args:
                     yield from typing_zip(arg, shape)
         if isinstance(combined_args, dict):
@@ -126,8 +128,8 @@ def export_(
                 for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
                     yield from typing_zip(arg, shape)
             else:
-                assert hasattr(dynamic_shapes, "__origin__") and dynamic_shapes.__origin__ in (dict, Dict), f"Unexpected {dynamic_shapes} matching dict"
-                shape = dynamic_shapes.__args__[1]
+                assert get_origin(dynamic_shapes) is dict, f"Unexpected {dynamic_shapes} matching dict"
+                shape = get_args(dynamic_shapes)[1]
                 for arg in combined_args.values():
                     yield from typing_zip(arg, shape)
         else:
@@ -138,8 +140,8 @@ def export_(
     symbols = defaultdict(list)
 
     def update_symbols(tensor, shape):
-        if hasattr(shape, "__origin__") and shape.__origin__ is TensorType:
-            for i, dim in enumerate(shape.__args__):
+        if get_origin(shape) is tuple:
+            for i, dim in enumerate(get_args(shape)):
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i))
         elif isinstance(shape, dict):
