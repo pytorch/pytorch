@@ -43,7 +43,6 @@ from .common import (
     DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
-    IndirectAssertLine,
     Kernel,
     KernelArgs,
     OpOverrides,
@@ -1187,7 +1186,6 @@ class CppKernel(Kernel):
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
         self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
-        self._load_mask = None
 
     @contextlib.contextmanager
     def masked(self, mask):
@@ -1216,33 +1214,6 @@ class CppKernel(Kernel):
         e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
         """
         return cexpr(self.rename_indexing(index))
-
-    def indirect_indexing(self, index_var, size, check=True):
-        generate_assert = (
-            check or config.debug_index_asserts
-        ) and config.cpp.assert_indirect_indexing
-
-        if generate_assert:
-            # An assertion line may have been written already, if so just
-            # update the max size.
-            map_key = (index_var, None)
-            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
-            if existing_size is not None:
-                size = sympy.Min(size, existing_size)
-            else:
-                expr = ops.and_(
-                    ops.ge(index_var, "0"),
-                    ops.lt(index_var, self.rename_indexing(size)),
-                )
-                cond = self.cse.generate(self.compute, expr)
-                line = f'TORCH_CHECK({cond}, "index is out of bounds");'
-                self.compute.writeline(
-                    IndirectAssertLine(line, index_var, None, self.indirect_max_sizes)
-                )
-
-            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-
-        return sympy_symbol(str(index_var))
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1434,6 +1405,10 @@ class CppKernel(Kernel):
     def codegen_loops(self, code, worksharing):
         loop_nest = LoopNestWithSplit.build(self)
         self.codegen_loops_impl(loop_nest, code, worksharing)
+
+    @property
+    def assert_function(self):
+        return "TORCH_CHECK"
 
     def decide_parallel_depth(self, ranges, threads):
         seq = self.size_hint()

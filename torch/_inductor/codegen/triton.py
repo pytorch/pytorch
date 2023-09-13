@@ -44,7 +44,6 @@ from .common import (
     free_symbol_startswith,
     IndentedBuffer,
     index_prevent_reordering,
-    IndirectAssertLine,
     Kernel,
     OpOverrides,
     PythonPrinter,
@@ -769,7 +768,6 @@ class TritonKernel(Kernel):
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
-        self._load_mask = None
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1189,40 +1187,13 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def indirect_indexing(self, var, size, check=True):
-        generate_assert = (
-            (check or config.debug_index_asserts)
-            and config.triton.assert_indirect_indexing
-            and torch.version.hip is None
-        )
-        if generate_assert:
-            mask_vars = set(var.mask_vars)
-            if self._load_mask:
-                mask_vars.add(self._load_mask)
+    @property
+    def generate_assert(self):
+        return torch.version.hip is None and super().generate_assert
 
-            mask = ""
-            if mask_vars:
-                mask = (
-                    f"{list(mask_vars)[0]}"
-                    if len(mask_vars) == 1
-                    else f"({' & '.join(str(v) for v in mask_vars)})"
-                )
-
-            # An assertion line may have been written already, if so just
-            # update the max size.
-            map_key = (var, mask)
-            existing_size, _ = self.indirect_max_sizes.get(map_key, (None, None))
-            if existing_size is not None:
-                size = sympy.Min(size, existing_size)
-            else:
-                line = 'tl.device_assert({cond}, "index out of bounds: {cond_print}")'
-                self.compute.writeline(
-                    IndirectAssertLine(line, var, mask, self.indirect_max_sizes)
-                )
-
-            self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-
-        return sympy_symbol(str(var))
+    @property
+    def assert_function(self):
+        return "tl.device_assert"
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)

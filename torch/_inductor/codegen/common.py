@@ -27,7 +27,7 @@ import torch
 import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import metrics
+from .. import config, metrics
 from ..utils import (
     DeferredLineBase,
     free_symbol_startswith,
@@ -35,6 +35,7 @@ from ..utils import (
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
+    sympy_symbol,
     unique,
 )
 from ..virtualized import ops, OpsValue, V
@@ -803,10 +804,11 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, var, mask, size_map):
+    def __init__(self, line, assert_fn, var, mask, size_map):
         self.var = var
         self.mask = mask
         self.line = line
+        self.assert_fn = assert_fn
         self.size_map = size_map
 
     def __call__(self):
@@ -834,10 +836,14 @@ class IndirectAssertLine(DeferredLineBase):
 
         if self.mask:
             cond = f"({cond}) | ~{self.mask}"
-        return self.line.format(cond=cond, cond_print=cond_print)
+        return self.line.format(
+            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
+        )
 
     def _new_line(self, line):
-        return IndirectAssertLine(line, self.var, self.mask, self.size_map)
+        return IndirectAssertLine(
+            line, self.assert_fn, self.var, self.mask, self.size_map
+        )
 
 
 class CodeGen:
@@ -870,6 +876,7 @@ class Kernel(CodeGen):
         self.cse = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
+        self._load_mask = None
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
@@ -995,7 +1002,45 @@ class Kernel(CodeGen):
 
                     new_var.update_on_args("index_wrap", (var,), {})
                     var = new_var
-                return self.indirect_indexing(var, size, check)  # type: ignore[attr-defined]
+
+                if check and self.generate_assert:
+                    mask = ""
+                    if hasattr(var, "mask_vars"):
+                        mask_vars = set(var.mask_vars)
+                        if self._load_mask:
+                            mask_vars.add(self._load_mask)
+
+                        if mask_vars:
+                            mask = (
+                                f"{list(mask_vars)[0]}"
+                                if len(mask_vars) == 1
+                                else f"({' & '.join(str(v) for v in mask_vars)})"
+                            )
+
+                    # An assertion line may have been written already, if so just
+                    # update the max size.
+                    map_key = (var, mask)
+                    existing_size, _ = self.indirect_max_sizes.get(
+                        map_key, (None, None)
+                    )
+                    if existing_size is not None:
+                        size = sympy.Min(size, existing_size)
+                    else:
+                        line = (
+                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
+                        )
+                        self.compute.writeline(
+                            IndirectAssertLine(
+                                line,
+                                self.assert_function,  # type: ignore[attr-defined]
+                                var,
+                                mask,
+                                self.indirect_max_sizes,
+                            )
+                        )
+
+                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))  # type: ignore[attr-defined]
+                return sympy_symbol(str(var))
 
             @staticmethod
             def load(name: str, index: sympy.Expr):
@@ -1073,6 +1118,10 @@ class Kernel(CodeGen):
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
+
+    @property
+    def generate_assert(self):
+        return config.debug_index_asserts and config.assert_indirect_indexing
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions

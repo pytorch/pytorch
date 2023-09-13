@@ -165,6 +165,9 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
+# assert that indirect indexing does not read / write out of bounds
+assert_indirect_indexing = True
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
@@ -306,9 +309,6 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
-
 
 # config specific to codegen/triton.py
 class triton:
@@ -352,9 +352,6 @@ class triton:
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
-
-    # assert that indirect indexing does not read / write out of bounds
-    assert_indirect_indexing = True
 
     # should we give different names to kernels
     # Note: This is orthogonal to descriptive_names - this is deciding whether

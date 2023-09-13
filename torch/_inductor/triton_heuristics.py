@@ -179,7 +179,7 @@ class CachingAutotuner(KernelInterface):
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = (
-            config.triton.assert_indirect_indexing and torch.version.hip is None
+            config.assert_indirect_indexing and torch.version.hip is None
         )
 
         # Setting device_type="hip" required on ROCm to pass down to triton

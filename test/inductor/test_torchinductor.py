@@ -794,13 +794,14 @@ class CommonTemplate:
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
                     code = run_and_get_cpp_code(fn_opt, *inps)
-                    lines = code.split('\n')
+                    lines = code.split("\n")
                     found = False
-                    for i, line in enumerate(lines):
-                        if '>= 0' in line and i + 2 < len(lines):
-                            # check if the next two lines are a less than
-                            # comparison followed by an 'and' operation
-                            found |= '<' in lines[i + 1] and '&' in lines[i + 2]
+                    for line in lines:
+                        # Line will look something like this:
+                        # TORCH_CHECK((0 <= tmp5) & (tmp5 < ks1), error_msg)
+                        if "0 <=" in line:
+                            pos = line.find("<=")
+                            found |= "&" in line and "<" in line[pos + 2 :]
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:
@@ -843,7 +844,7 @@ class CommonTemplate:
             return a[b]
 
         # It has wrapping but no assert
-        test(pos_and_neg, (a,), has_assert=False, has_wrapping=(self.device == 'cuda'))
+        test(pos_and_neg, (a,), has_assert=False, has_wrapping=(self.device == "cuda"))
 
         # We currently don't do constant propagation with float constants
         def flip_with_index(a):
