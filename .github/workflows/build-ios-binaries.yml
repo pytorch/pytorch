@@ -40,7 +40,6 @@ jobs:
   ios-build-test:
     name: ios-build-test
     uses: ./.github/workflows/_ios-build-test.yml
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
     with:
       build-environment: ios-build-test
       sync-tag: ios-build-test
