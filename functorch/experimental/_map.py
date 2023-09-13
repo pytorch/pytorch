@@ -331,9 +331,6 @@ def _stack_pytree(pytrees):
             # therefore we need to deal with None output.
             stacked_out.append(None)
         else:
-            import pdb
-
-            pdb.set_trace()
             raise RuntimeError(f"Cannot stack {leaves}.")
     return pytree.tree_unflatten(stacked_out, out_spec)
 
@@ -373,17 +370,12 @@ def map_fake_tensor_mode(f, num_mapped, *args):
 
 @map_impl.py_impl(FunctionalTensorMode)
 def map_functional_tensor_mode(f, num_mapped, *args):
-    xs = args[:num_mapped]
-    pos_args = args[num_mapped:]
-    unwrapped_xs = pytree.tree_map_only(FunctionalTensor, from_fun, xs)
-    unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, pos_args)
+    unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, args)
 
     functional_map_fn = dispatch_functionalize(f)
 
     with unset_functional_temporarily():
-        map_return = map_impl(
-            functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args
-        )
+        map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_args)
         return pytree.tree_map_only(torch.Tensor, to_fun, map_return)
 
 
