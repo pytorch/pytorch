@@ -660,7 +660,7 @@ class TensorVariable(VariableTracker):
             )
 
     def rename(self, tx, name):
-        self.proxy.node.rename(name)
+        self.proxy.node._rename(name)
         return super().rename(tx, name)
 
 
