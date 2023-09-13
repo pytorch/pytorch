@@ -256,6 +256,7 @@ def _share_state_and_init_handle_attrs(
         # Currently, it is needed since root_state of composable APIs doesn't have DeviceMesh passed in yet.
         if hasattr(root_state, "_device_mesh"):
             fsdp_state._device_mesh = root_state._device_mesh
+            fsdp_state._enable_extension = root_state._enable_extension
     for attr_name, attr_values in attr_name_to_values.items():
         if len(attr_values) != 1:
             raise ValueError(
