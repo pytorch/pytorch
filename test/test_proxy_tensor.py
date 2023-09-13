@@ -516,10 +516,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -530,10 +527,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
