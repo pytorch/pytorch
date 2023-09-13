@@ -66,3 +66,9 @@ class TestInherit:
         # previously caused RecursionError!?
         with pytest.raises(TypeError):
             B1(1.0, 2.0)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
