@@ -534,29 +534,22 @@ class Function(_SingleLevelFunction):
 
     @classmethod
     def apply(cls, *args, **kwargs):
-        def bind_default_args(func, is_def_ctx, *args, **kwargs):
-            arguments: List[Any]
-
-            arguments = list(args)
-            # Used to bind to ctx
-            if is_def_ctx:
-                arguments.insert(0, None)
-
+        def bind_default_args(func, *args, **kwargs):
             signature = inspect.signature(func)
-            bound_args = signature.bind(*arguments, **kwargs)
+            bound_args = signature.bind(*args, **kwargs)
             bound_args.apply_defaults()
 
-            return bound_args.args[1:] if is_def_ctx else bound_args.args
+            return bound_args.args
 
-        is_def_ctx = cls.setup_context == _SingleLevelFunction.setup_context
-
+        is_setup_ctx_defined = cls.setup_context != _SingleLevelFunction.setup_context
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
-            args = bind_default_args(cls.forward, is_def_ctx, *args, **kwargs)
+            if is_setup_ctx_defined:
+                args = bind_default_args(cls.forward, *args, **kwargs)
             return super().apply(*args, **kwargs)  # type: ignore[misc]
 
-        if is_def_ctx:
+        if not is_setup_ctx_defined:
             raise RuntimeError(
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
