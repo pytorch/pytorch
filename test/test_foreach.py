@@ -221,7 +221,6 @@ class TestForeach(TestCase):
             _ = kwargs.pop("disable_fastpath") if is_fastpath else False
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             if (
-                op.supports_scalar_self_arg
                 and isinstance(rhs_arg, Number)
                 and not scalar_self_arg_test_complete
                 and not zero_size
