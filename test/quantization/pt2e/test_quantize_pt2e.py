@@ -77,9 +77,14 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
 from torch._export import dynamic_dim
+import unittest
 
 
+# TODO: Move to common utils or use existing quant utils to fetch model instances
+# currently there is some dynamo error (torch._dynamo.exc.Unsupported: cache_size_limit reached)
+# when we move this to another file
 class TestHelperModules:
     class Conv2dPropAnnotaton(torch.nn.Module):
         def __init__(self):
@@ -2516,6 +2521,23 @@ class TestPT2ERepresentation(QuantizationTestCase):
             quantizer,
             ref_node_occurrence={},
             non_ref_node_occurrence={},
+        )
+
+    @unittest.skip("will fix later")
+    def test_representation_adaptive_avg_pool2d(self):
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(operator_config)
+        m_eager = TestHelperModules.ConvWithAdaptiveAvgPool2d().eval()
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+
+        self._test_representation(
+            m_eager,
+            example_inputs,
+            quantizer,
+            ref_node_occurrence={},
+            non_ref_node_occurrence={}
         )
 
     def test_qdq_per_channel(self):
