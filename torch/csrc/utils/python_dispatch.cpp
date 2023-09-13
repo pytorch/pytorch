@@ -747,6 +747,11 @@ void initDispatchBindings(PyObject* module) {
         c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
   });
 
+  m.def("_get_constant_bool_symnode", [](int64_t data) {
+    return c10::SymNode(
+        c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("PROXY", TorchDispatchModeKey::PROXY)
