@@ -42,6 +42,14 @@ class SchemaCheckMode(TorchDispatchMode):
         print(*self.ops, sep=",")
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def bitwise_equal(lhs, rhs):
+            if lhs.is_quantized:
+                # TODO: This is only OK if can't have NaN quantized; idk if
+                # this is actually true
+                return torch.equal(lhs, rhs)
+            else:
+                return torch.allclose(lhs, rhs, equal_nan=True)
+
         def has_mutated(before, after, md):
             are_tensors = type(before) == torch.Tensor and type(after) == torch.Tensor
             if (
@@ -51,7 +59,7 @@ class SchemaCheckMode(TorchDispatchMode):
             ):
                 return not (
                     before.size() == after.size()
-                    and torch.allclose(before, after, equal_nan=True)
+                    and bitwise_equal(before, after)
                     and md[0] == after.stride()
                     and md[1] == after._typed_storage()._cdata
                 )
