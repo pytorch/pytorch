@@ -346,7 +346,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         ):
-            dynamic_only = op.name in ("NumpyNMSCustomOp", "NumpyNonzeroCustomOp")
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
             operator_compile_check(
@@ -354,7 +353,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
                 args,
                 kwargs,
                 supports_autograd=op.supports_autograd,
-                dynamic_only=dynamic_only,
                 fullgraph=False,  # Dynamo graph breaks on CustomOp today
             )
 
@@ -1463,10 +1461,9 @@ class TestCustomOp(CustomOpTestCaseBase):
             return torch.ops._torch_testing.numpy_nonzero(x)
 
         x = torch.randn(5, 5)
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.DynamicOutputShapeException
-        ):
-            make_fx(f, tracing_mode="fake")(x)
+        # We've updated to attempt to use unbacked symints even for fake
+        # tracing
+        make_fx(f, tracing_mode="fake")(x)
 
     def test_symints(self):
         def f(x):

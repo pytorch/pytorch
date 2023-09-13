@@ -4,7 +4,6 @@ import functools
 import json
 import os
 import tempfile
-import unittest
 
 import torch
 
@@ -40,7 +39,7 @@ def safe_autograd_registration_check(op, args, kwargs):
 
 def safe_fake_check(op, args, kwargs):
     args, kwargs = deepcopy_tensors((args, kwargs))
-    return fake_check(op, args, kwargs, dynamic_only=False)
+    return fake_check(op, args, kwargs)
 
 
 def safe_aot_autograd_check(op, args, kwargs, dynamic):
@@ -120,10 +119,6 @@ def generate_opcheck_tests(
         failures_dict_path: See ``validate_failures_dict_structure`` for more details
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
-    if not issubclass(testcase, unittest.TestCase):
-        raise ValueError(
-            f"Expected testcase to be subclass of unittest.TestCase, got {type(testcase)}"
-        )
     test_methods = [
         m
         for m in dir(testcase)
@@ -139,6 +134,7 @@ def generate_opcheck_tests(
         method = getattr(testcase, attr)
         new_method_name = prefix + "__" + attr
 
+        @functools.wraps(method)
         def new_method(*args, **kwargs):
             with OpCheckMode(
                 namespaces,
