@@ -8,6 +8,9 @@ try:
 except ModuleNotFoundError:
     np = None
 
+import itertools
+import weakref
+
 import sympy
 
 import torch._numpy as tnp
@@ -21,7 +24,7 @@ from .. import config, variables
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, GlobalSource
 from ..utils import (
     fqn,
     get_custom_getattr,
@@ -659,8 +662,6 @@ class TensorVariable(VariableTracker):
             else:
                 fn = fn_var.fn
                 name = fn_var.fn.__name__
-
-            self.as_proxy().node.meta["example_value"].register_hook(fn)
 
             handle_variable = variables.user_defined.RemovableHandleVariable(
                 mutable_local=variables.base.MutableLocal(),
