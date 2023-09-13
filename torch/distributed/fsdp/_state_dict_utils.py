@@ -607,9 +607,12 @@ def _sharded_pre_load_state_dict_hook(
         try:
             param = state_dict.pop(fqn_from_global_root)
         except KeyError:
-            logger.warning(f"Did not find param with FQN {fqn_from_global_root}, skipping it. The weight will not be filled if you expect it to be.")
-            continue  # TODO: only don't crash for strict=False
-
+            logger.warning(
+                f"Did not find param with FQN {fqn_from_global_root}, skipping it. "
+                "The weight will not be filled if you expect it to be."
+            )
+            continue  # TODO: Improve unittesting for state_dict finetuning
+            # cases: https://github.com/pytorch/pytorch/issues/109134
 
         if not fsdp_state._state_dict_config._use_dtensor:
             # All-gather the param (ShardedTensor)

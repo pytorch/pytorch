@@ -88,9 +88,3 @@ class TestArrayFromScalar:
     @pytest.mark.parametrize("t2", cfloat_types + [None])
     def test_complex(self, t1, t2):
         return self._do_test(t1, t2)
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
