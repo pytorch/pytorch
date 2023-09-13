@@ -4726,7 +4726,7 @@
   autogen: repeat.out
   tags: core
 
-- func: repeat_interleave.Tensor(Tensor repeats, *, int? output_size=None) -> Tensor
+- func: repeat_interleave.Tensor(Tensor repeats, *, SymInt? output_size=None) -> Tensor
   variants: function
   dispatch:
     CPU: repeat_interleave_cpu
@@ -4735,10 +4735,12 @@
   tags: dynamic_output_shape
   autogen: repeat_interleave.Tensor_out
 
-- func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, int? output_size=None) -> Tensor
+- func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: repeat_interleave_symint
 
-- func: repeat_interleave.self_int(Tensor self, SymInt repeats, int? dim=None, *, int? output_size=None) -> Tensor
+- func: repeat_interleave.self_int(Tensor self, SymInt repeats, int? dim=None, *, SymInt? output_size=None) -> Tensor
   variants: function, method
   dispatch:
     CompositeImplicitAutograd: repeat_interleave_symint
