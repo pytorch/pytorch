@@ -282,6 +282,9 @@ numpy_default_float = "float64"
 numpy_default_complex = "complex128"
 numpy_default_int = "int64"
 
+# use numpy's PRNG if True, pytorch otherwise
+use_numpy_random_stream = False
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
