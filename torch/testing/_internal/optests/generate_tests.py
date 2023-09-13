@@ -1,8 +1,9 @@
 import datetime
+import difflib
 import functools
+import json
 import os
 import tempfile
-import unittest
 
 import torch
 
@@ -38,7 +39,7 @@ def safe_autograd_registration_check(op, args, kwargs):
 
 def safe_fake_check(op, args, kwargs):
     args, kwargs = deepcopy_tensors((args, kwargs))
-    return fake_check(op, args, kwargs, dynamic_only=False)
+    return fake_check(op, args, kwargs)
 
 
 def safe_aot_autograd_check(op, args, kwargs, dynamic):
@@ -76,11 +77,12 @@ ALL_TEST_UTILS = {
     ),
 }
 
+GDOC = "https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
+
 
 def generate_opcheck_tests(
     testcase,
     namespaces,
-    failures_dict,
     failures_dict_path,
     additional_decorators,
     test_utils,
@@ -114,26 +116,25 @@ def generate_opcheck_tests(
         testcase: The testcase we will modify and generate additional tests for.
         namespaces: We will only intercept calls to custom operators with these
                     namespaces.
-        failures_dict: See ``validate_failures_dict`` for more details
-        failures_dict_path: The path to your failures dict. We will mention it in errors.
-        additional_decorators: Pass us some decorators
+        failures_dict_path: See ``validate_failures_dict_structure`` for more details
         test_utils: a list of test_utils to generate. Example: ["test_schema", "test_faketensor"]
     """
-    if not issubclass(testcase, unittest.TestCase):
-        raise ValueError(
-            f"Expected testcase to be subclass of unittest.TestCase, got {type(testcase)}"
-        )
     test_methods = [
         m
         for m in dir(testcase)
         if m.startswith("test_") and callable(getattr(testcase, m))
     ]
-    validate_failures_dict(failures_dict, test_utils, testcase)
+    failures_dict = FailuresDict.load(
+        failures_dict_path, create_file=should_update_failures_dict()
+    )
+    validate_failures_dict_structure(failures_dict, test_utils, testcase)
+    validate_failures_dict_formatting(failures_dict_path)
 
     def construct_method(attr, prefix, tester):
         method = getattr(testcase, attr)
         new_method_name = prefix + "__" + attr
 
+        @functools.wraps(method)
         def new_method(*args, **kwargs):
             with OpCheckMode(
                 namespaces,
@@ -149,17 +150,25 @@ def generate_opcheck_tests(
         if pytestmark := new_method.__dict__.get("pytestmark"):
             import pytest
 
-            new_pytestmark = []
+            # check if we need to simplify the parametrize marks
+            # NB: you need to add this mark to your pytest.ini
+            opcheck_only_one = False
             for mark in pytestmark:
-                if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
-                    argnames, argvalues = mark.args
-                    assert not mark.kwargs, "NYI"
-                    new_pytestmark.append(
-                        pytest.mark.parametrize(argnames, (next(iter(argvalues)),))
-                    )
-                else:
-                    new_pytestmark.append(mark)
-            new_method.__dict__["pytestmark"] = new_pytestmark
+                if isinstance(mark, pytest.Mark) and mark.name == "opcheck_only_one":
+                    opcheck_only_one = True
+
+            if opcheck_only_one:
+                new_pytestmark = []
+                for mark in pytestmark:
+                    if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
+                        argnames, argvalues = mark.args
+                        assert not mark.kwargs, "NYI"
+                        new_pytestmark.append(
+                            pytest.mark.parametrize(argnames, (next(iter(argvalues)),))
+                        )
+                    else:
+                        new_pytestmark.append(mark)
+                new_method.__dict__["pytestmark"] = new_pytestmark
 
         if new_method_name in additional_decorators:
             for dec in additional_decorators[new_method_name]:
@@ -182,7 +191,30 @@ def generate_opcheck_tests(
 TEST_OPTIONS = ("xfail", "skip", "success")
 
 
-def validate_failures_dict(failure_dict, test_utils, testcase):
+def validate_failures_dict_formatting(failures_dict_path):
+    with open(failures_dict_path) as fp:
+        actual = fp.read()
+    failures_dict = FailuresDict.load(failures_dict_path)
+    expected = failures_dict._save(to_str=True)
+    if actual == expected:
+        return
+    if should_update_failures_dict():
+        failures_dict = FailuresDict.load(failures_dict_path)
+        failures_dict.save()
+        return
+    expected = expected.splitlines(1)
+    actual = actual.splitlines(1)
+    diff = difflib.unified_diff(expected, actual)
+    diff = "".join(diff)
+    raise RuntimeError(
+        f"\n{diff}\n\nExpected the failures dict to be formatted "
+        f"a certain way. Please see the above diff; you can correct "
+        f"this either manually or by re-running the test with "
+        f"PYTORCH_OPCHECK_ACCEPT=1"
+    )
+
+
+def validate_failures_dict_structure(failure_dict, test_utils, testcase):
     """Validates the failures dict.
 
     The failure dict looks something like the following.
@@ -193,30 +225,37 @@ def validate_failures_dict(failure_dict, test_utils, testcase):
 
     {
         "fbgemm::split_lengths": {
-            "test_schema__test_split_lengths": "xfail",
-            "test_schema__test_split_lengths_empty": "skip",
-        }
+            "test_schema__test_split_lengths": {
+                "comment": "you can put whatever you want into the comment section",
+                "status": "xfail",
+            }
+            "test_schema__test_split_lengths_empty": {
+                "comment": "",
+                "status": "skip",
+            },
+        },
         "fbgemm::gather_lengths": {
-            "test_schema__test_gather_lengths": "xfail",
-        }
+            "test_schema__test_gather_lengths": {
+                "comment": "",
+                "status": "skip",
+            },
+        },
     }
 
-    We require that all keys are sorted in alphabetical order. This makes
-    it easier for us to codemod the failures_dict.
     """
+    failure_dict = failure_dict.data
     qualnames = list(failure_dict.keys())
-    if qualnames != sorted(qualnames):
-        raise RuntimeError("The failures dict must be sorted in alphabetical order")
-    for qualname, test_to_option in failure_dict.items():
+    for test_to_option in failure_dict.values():
         test_names = list(test_to_option.keys())
-        if test_names != sorted(test_names):
-            raise RuntimeError(
-                f"failures_dict['{qualname}']'s keys must be sorted in alphabetical order"
-            )
-        for test_name, test_option in test_to_option.items():
+        for test_name, test_dict in test_to_option.items():
+            if set(test_dict.keys()) != set({"comment", "status"}):
+                raise RuntimeError(
+                    "in failures_dict, expected sub-dict to have keys 'comment' and 'status'"
+                )
+            test_option = test_dict["status"]
             if test_option not in TEST_OPTIONS:
                 raise RuntimeError(
-                    f"In failures_dict, got value={test_option} but it needs to be in {TEST_OPTIONS}"
+                    f"In failures_dict, got status={test_option} but it needs to be in {TEST_OPTIONS}"
                 )
             if not any(test_name.startswith(test) for test in test_utils):
                 raise RuntimeError(
@@ -234,6 +273,11 @@ def validate_failures_dict(failure_dict, test_utils, testcase):
                     f"{base_test_name} does not exist on the TestCase. "
                     f"Maybe you need to change the test name?"
                 )
+
+
+def should_update_failures_dict():
+    key = "PYTORCH_OPCHECK_ACCEPT"
+    return key in os.environ and os.environ[key] == "1"
 
 
 class OpCheckMode(TorchFunctionMode):
@@ -272,22 +316,29 @@ class OpCheckMode(TorchFunctionMode):
     def maybe_raise_errors_on_exit(self):
         # Check expected failures first
         for qualname in self.seen_ops_to_errors.keys():
-            option = retrieve(self.failures_dict, qualname, self.test_name)
+            option = self.failures_dict.get_status(qualname, self.test_name)
             if len(self.seen_ops_to_errors[qualname]) == 0:
-                if option == "xfail":
-                    raise OpCheckError(
-                        f"generate_opcheck_tests: Unexpected success for operator "
-                        f"{qualname} on test {self.test_name}. This may mean that "
-                        f"you have fixed this test failure. Please remove the "
-                        f"expected failure in the failure dict at "
-                        f"{self.failures_dict_path}."
-                        f"For more details, see "
-                        f"https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit"
+                if should_update_failures_dict():
+                    self.failures_dict.set_status(
+                        qualname, self.test_name, "success", comment=""
                     )
+                else:
+                    if option == "xfail":
+                        raise OpCheckError(
+                            f"generate_opcheck_tests: Unexpected success for operator "
+                            f"{qualname} on test {self.test_name}. This may mean that "
+                            f"you have fixed this test failure. Please rerun the test with "
+                            f"PYTORCH_OPCHECK_ACCEPT=1 to automatically update the test runner "
+                            f"or manually remove the "
+                            f"expected failure in the failure dict at "
+                            f"{self.failures_dict_path}"
+                            f"For more details, see "
+                            f"{GDOC}"
+                        )
                 continue
         failed_ops = []
         for qualname in self.seen_ops_to_errors.keys():
-            option = retrieve(self.failures_dict, qualname, self.test_name)
+            option = self.failures_dict.get_status(qualname, self.test_name)
             if option != "success":
                 continue
             if len(self.seen_ops_to_errors[qualname]) == 0:
@@ -295,6 +346,12 @@ class OpCheckMode(TorchFunctionMode):
             failed_ops.append(qualname)
         if not failed_ops:
             return
+
+        if should_update_failures_dict():
+            for op in failed_ops:
+                self.failures_dict.set_status(op, self.test_name, "xfail")
+            return
+
         # Raise from the first error but also report about all of them to make
         # recording xfails easier.
         ex, op, args, kwargs = self.seen_ops_to_errors[failed_ops[0]][0]
@@ -311,7 +368,7 @@ class OpCheckMode(TorchFunctionMode):
             f"operators are not implemented correctly and may lead to silently "
             f"incorrect behavior. Set PYTORCH_OPCHECK_PRINT_REPRO=1 for a standalone repro, "
             f"or please see "
-            f"https://docs.google.com/document/d/1Pj5HRZvdOq3xpFpbEjUZp2hBovhy7Wnxw14m6lF2154/edit "
+            f"{GDOC} "
             f"for more recommendations. "
             f"{repro_command}"
         ) from ex
@@ -319,6 +376,8 @@ class OpCheckMode(TorchFunctionMode):
     def __exit__(self, *args, **kwargs):
         try:
             self.maybe_raise_errors_on_exit()
+            if should_update_failures_dict():
+                self.failures_dict.save()
         finally:
             result = super().__exit__(*args, **kwargs)
         return result
@@ -359,7 +418,7 @@ class OpCheckMode(TorchFunctionMode):
         # Only call test_util(op, *args, **kwargs) if this succeeds.
         result = func(*args, **kwargs)
 
-        option = retrieve(self.failures_dict, qualname, self.test_name)
+        option = self.failures_dict.get_status(qualname, self.test_name)
         if option == "success" or option == "xfail":
             # Surpress all errors during execution. Raise them during __exit__.
             try:
@@ -508,10 +567,67 @@ def resolve_unique_overload_or_throw(op: torch._ops.OpOverloadPacket):
     return getattr(op, overload_name)
 
 
-def retrieve(failures_dict, qualname, test_name):
-    if qualname not in failures_dict:
-        return "success"
-    dct = failures_dict[qualname]
-    if test_name not in dct:
-        return "success"
-    return dct[test_name]
+DUMP_OPTIONS = {"indent": 2, "sort_keys": True}
+
+
+class FailuresDict:
+    def __init__(self, path, data):
+        self.path = path
+        self.data = data
+
+    @staticmethod
+    def load(path, *, create_file=False):
+        if create_file and not os.path.exists(path):
+            result = FailuresDict(path, {})
+            FailuresDict.save()
+            return result
+        with open(path) as fp:
+            dct = json.load(fp)
+        assert "data" in dct
+        assert "_version" in dct and dct["_version"] == 1
+        return FailuresDict(path, dct["data"])
+
+    def _save(self, to_str=False):
+        to_dump = {
+            "_description": (
+                f"This is a dict containing failures for tests autogenerated by "
+                f"generate_opcheck_tests. "
+                f"For more details, please see {GDOC}"
+            ),
+            "data": self.data,
+            "_version": 1,
+        }
+        # json.dumps doesn't end with a newline. Let's add one because files
+        # should end in newlines.
+        serialized = json.dumps(to_dump, **DUMP_OPTIONS) + "\n"
+        if to_str:
+            return serialized
+        with open(self.path, "w") as fp:
+            fp.write(serialized)
+        return None
+
+    def save(self):
+        return self._save()
+
+    def get_status(self, qualname, test_name):
+        if qualname not in self.data:
+            return "success"
+        dct = self.data[qualname]
+        if test_name not in dct:
+            return "success"
+        return dct[test_name]["status"]
+
+    def set_status(self, qualname, test_name, status, *, comment=None):
+        if qualname not in self.data:
+            self.data[qualname] = {}
+        dct = self.data[qualname]
+        if test_name not in dct:
+            dct[test_name] = {"status": None, "comment": ""}
+
+        if status == "success":
+            # The default status is "success".
+            del dct[test_name]
+        else:
+            dct[test_name]["status"] = status
+            if comment is not None:
+                dct[test_name]["comment"] = comment

@@ -430,3 +430,9 @@ class TestArrayConversion:
         # previously this would infer dtypes from arrays, unlike every single
         # other numpy function
         assert_raises(TypeError, asfarray, np.array([1, 2, 3]), dtype=np.array(1.0))
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
