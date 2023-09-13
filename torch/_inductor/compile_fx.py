@@ -515,12 +515,12 @@ def fx_codegen_and_compile(
     # on node.meta["val"]. if in the future we rely on these being
     # correct we will need to fix.
 
-    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
-    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
@@ -531,7 +531,7 @@ def fx_codegen_and_compile(
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
         )
-        with V.set_graph_handler(graph):  # type: ignore[call-arg]
+        with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             context = torch._guards.TracingContext.get()
             if context is not None and context.output_strides is not None:
@@ -548,6 +548,9 @@ def fx_codegen_and_compile(
                     else:
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
+
+            if V.aot_compilation is True:
+                return compiled_fn
 
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
@@ -822,16 +825,13 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-_in_aot_compilation = BoxedBool(False)
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
 ):
-    config_patches = (
+    config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
@@ -846,7 +846,7 @@ def compile_fx_aot(
         }
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
-    with mock.patch.object(_in_aot_compilation, "value", True):
+    with V.set_aot_compilation(True):
         return compile_fx(
             model_,
             example_inputs_,
@@ -925,7 +925,7 @@ def fw_compiler_freezing(
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
     # that drops constant-ified params
-    if _in_aot_compilation:
+    if V.aot_compilation is True:
         return optimized_function
 
     def wrapper(args):
@@ -1136,6 +1136,10 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
+
+    if config.from_export and V.aot_compilation is True:
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+            return inference_compiler(model_, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context

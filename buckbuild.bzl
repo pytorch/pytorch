@@ -186,9 +186,7 @@ def third_party(name):
 
 def get_pt_compiler_flags():
     return select({
-        "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accommodate for eigen
-        ],
+        "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
 
