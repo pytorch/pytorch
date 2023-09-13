@@ -57,7 +57,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.1
         if: ${{ !contains(matrix.runner, 'gcp.a100') }}
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
@@ -66,25 +66,25 @@ jobs:
               docker exec -it $(docker container ps --format '{{.ID}}') bash
 
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.1
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@release/2.1
         with:
           docker-image-name: ${{ inputs.docker-image }}
 
       - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@release/2.1
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@release/2.1
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
       - name: Lock NVIDIA A100 40GB Frequency
@@ -292,7 +292,7 @@ jobs:
           path: ./**/core.[1-9]*
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.1
         if: always()
 
       # NB: We are currently having an intermittent GPU-related issue on G5 runners with

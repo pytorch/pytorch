@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Run BC Lint Action
-        uses: pytorch/test-infra/.github/actions/bc-lint@main
+        uses: pytorch/test-infra/.github/actions/bc-lint@release/2.1
         with:
           repo: ${{ github.event.pull_request.head.repo.full_name }}
           base_sha: ${{ github.event.pull_request.base.sha }}

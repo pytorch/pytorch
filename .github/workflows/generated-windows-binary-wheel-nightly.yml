@@ -92,7 +92,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -208,7 +207,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -268,7 +266,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_8-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -331,7 +329,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -448,7 +445,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -509,7 +505,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_8-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -572,7 +568,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -689,7 +684,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -750,7 +744,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -812,7 +806,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -928,7 +921,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -988,7 +980,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_9-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1051,7 +1043,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1168,7 +1159,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1229,7 +1219,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_9-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1292,7 +1282,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1409,7 +1398,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1470,7 +1458,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1532,7 +1520,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1648,7 +1635,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1708,7 +1694,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1771,7 +1757,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1888,7 +1873,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -1949,7 +1933,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2012,7 +1996,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2129,7 +2112,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2190,7 +2172,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2252,7 +2234,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2368,7 +2349,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2428,7 +2408,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cuda11_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2491,7 +2471,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2608,7 +2587,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2669,7 +2647,7 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cuda12_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2732,7 +2710,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2849,7 +2826,6 @@ jobs:
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
           quiet-checkout: true
@@ -2910,5 +2886,5 @@ jobs:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       aws-pytorch-uploader-access-key-id: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
       aws-pytorch-uploader-secret-access-key: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml

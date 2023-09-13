@@ -90,17 +90,17 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       if [[ "\${TORCH_CONDA_BUILD_FOLDER}" == "pytorch-nightly" ]]; then
               PYTORCH_CHANNEL="pytorch-nightly"
       fi
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "\${PYTORCH_CHANNEL}" "pytorch-cuda=\${cu_ver}"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch-test "pytorch-cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "$(uname -m)" == aarch64 ]]; then
     # Using "extra-index-url" until all needed aarch64 dependencies are
-    # added to "https://download.pytorch.org/whl/nightly/"
-    pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
+    # added to "https://download.pytorch.org/whl/test/"
+    pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/test/${DESIRED_CUDA}"
   else
-    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
+    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/test/${DESIRED_CUDA}"
   fi
   retry pip install -q numpy protobuf typing-extensions
 fi
