@@ -8,8 +8,6 @@ try:
 except ModuleNotFoundError:
     np = None
 
-import itertools
-import weakref
 
 import sympy
 
@@ -24,7 +22,7 @@ from .. import config, variables
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource, GlobalSource
+from ..source import AttrSource
 from ..utils import (
     fqn,
     get_custom_getattr,
