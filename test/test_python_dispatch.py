@@ -18,6 +18,7 @@ from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 from torch._custom_op.functional import register_functional_op
 import torch.utils._pytree as pytree
+from torch._C import DispatchKeySet, DispatchKey
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_methods_invocations import op_db
@@ -1032,6 +1033,29 @@ def forward(self, x_a_1, x_b_1, y_1):
         x = SubTensorSuccess(3)
         x_copy = deepcopy(x)
         self.assertIs(type(x_copy), type(x))
+
+    def test_wrapper_subclass_extra_dispatch_keys(self) -> None:
+        class ExtraKeysTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                # NB: only the non-kwarg overload of _make_wrapper_subclass supports
+                #     extra dispatch keys. We probably want to unify the two APIs
+                #     in the future.
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(), elem.stride(), elem.storage_offset(),
+                    torch.contiguous_format,
+                    elem.dtype, elem.layout,
+                    elem.device, False, False, None, False, False,
+                    DispatchKeySet(DispatchKey.NestedTensor))
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                pass
+
+        x = ExtraKeysTensor(torch.randn(3))
+        self.assertTrue(torch._C._dispatch_keys(x).has(DispatchKey.NestedTensor))
+        self.assertFalse(torch._C._dispatch_keys(x).has(DispatchKey.AutogradNestedTensor))
 
     def test_index_put_where_only_index_is_subclass(self) -> None:
         called_funcs = []

@@ -987,7 +987,16 @@ def error_inputs_uniform(op, device, **kwargs):
 
 def error_inputs_linspace(op, device, **kwargs):
     yield ErrorInput(SampleInput(0, args=(3, -1)), error_type=RuntimeError, error_regex='number of steps must be non-negative')
-    yield ErrorInput(SampleInput(0, args=(3, 1.)), error_type=TypeError, error_regex='must be int, not float')
+    yield ErrorInput(
+        SampleInput(0, args=(3, 1.)),
+        error_type=TypeError,
+        error_regex="received an invalid combination of arguments - got \\(int, int, float",
+    )
+    yield ErrorInput(
+        SampleInput(torch.tensor([1, 1], device=device), args=(torch.tensor([3, 3], device=device), 1)),
+        error_type=RuntimeError,
+        error_regex="only supports 0-dimensional start and end tensors"
+    )
 
 
 def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
@@ -1000,6 +1009,30 @@ def sample_inputs_linspace(op, device, dtype, requires_grad, **kwargs):
         if dtype == torch.uint8 and (end < 0 or start < 0):
             continue
         yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
+
+    yield SampleInput(1, args=(3, 1))
+
+
+def sample_inputs_linspace_tensor_overload(op, device, dtype, requires_grad, **kwargs):
+    ends = (-3, 0, 1, 4, 50)
+    starts = (-2., 0, 4.3, 50)
+    nsteps = (0, 1, 50)
+    is_start_end_tensors = ((True, True), (True, False), (False, True))
+    make_arg = partial(torch.tensor, device=device, requires_grad=False)
+
+    # Extra case to replicate off-by-one issue on CUDA
+    cases = list(product(starts, ends, nsteps, is_start_end_tensors)) + [(0, 7, 50, (True, True))]
+    for start, end, nstep, (is_start_tensor, is_end_tensor) in cases:
+        if dtype == torch.uint8 and (end < 0 or start < 0):
+            continue
+
+        tensor_options = {"dtype": dtype, "device": device}
+        if is_start_tensor:
+            start = make_arg(start, dtype=torch.float32 if isinstance(start, float) else torch.int64)
+        if is_end_tensor:
+            end = make_arg(end, dtype=torch.float32 if isinstance(end, float) else torch.int64)
+
+        yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
 
     yield SampleInput(1, args=(3, 1))
 
@@ -1019,6 +1052,35 @@ def sample_inputs_logspace(op, device, dtype, requires_grad, **kwargs):
             yield SampleInput(start, args=(end, nstep), kwargs={"dtype": dtype, "device": device})
         else:
             yield SampleInput(start, args=(end, nstep, base), kwargs={"dtype": dtype, "device": device})
+
+    yield SampleInput(1, args=(3, 1, 2.))
+
+
+def sample_inputs_logspace_tensor_overload(op, device, dtype, requires_grad, **kwargs):
+    ends = (-3, 0, 1.2, 2, 4)
+    starts = (-2., 0, 1, 2, 4.3)
+    nsteps = (0, 1, 2, 4)
+    bases = (2., 1.1) if dtype in (torch.int8, torch.uint8) else (None, 2., 3., 1.1, 5.)
+    is_start_end_tensors = ((True, True), (True, False), (False, True))
+    make_arg = partial(torch.tensor, device=device)
+    for start, end, nstep, base, (is_start_tensor, is_end_tensor) in product(starts, ends, nsteps, bases, is_start_end_tensors):
+        if dtype == torch.uint8 and end < 0 or start < 0:
+            continue
+        if nstep == 1 and isinstance(start, float) and not (dtype.is_complex or dtype.is_floating_point):
+            # https://github.com/pytorch/pytorch/issues/82242
+            continue
+
+        tensor_options = {"dtype": dtype, "device": device}
+
+        if (is_start_tensor):
+            start = make_arg(start, dtype=torch.float32 if isinstance(start, float) else torch.int64)
+        if (is_end_tensor):
+            end = make_arg(end, dtype=torch.float32 if isinstance(end, float) else torch.int64)
+
+        if base is None:
+            yield SampleInput(start, args=(end, nstep), kwargs=tensor_options)
+        else:
+            yield SampleInput(start, args=(end, nstep, base), kwargs=tensor_options)
 
     yield SampleInput(1, args=(3, 1, 2.))
 
@@ -8675,6 +8737,18 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                    }
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'tanh',
@@ -8682,6 +8756,16 @@ foreach_unary_op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         backward_requires_result=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride(
+                    {torch.complex64: tol(atol=5e-03, rtol=1e-04)}
+                ),
+                'TestForeach',
+                'test_unary_op',
+                device_type='cuda'
+            ),
+        ),
     ),
     ForeachFuncInfo(
         'sin',
@@ -10606,7 +10690,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('cross',
            dtypes=all_types_and_complex_and(torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_cross,
            supports_fwgrad_bwgrad=True,
            supports_out=True,
@@ -11277,11 +11361,41 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_linspace,
            skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
+               # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
+               # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
+               # CUDA driver allocated memory was 1254555648 and is now 1242955776.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.cfloat,), device_type="cuda"),
+           )),
+    OpInfo('linspace',
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           is_factory_function=True,
+           supports_out=True,
+           supports_autograd=False,
+           error_inputs_func=error_inputs_linspace,
+           sample_inputs_func=sample_inputs_linspace_tensor_overload,
+           variant_test_name="tensor_overload",
+           skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # TypeError: 'int' object is not subscriptable
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
 
                # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
@@ -11304,11 +11418,47 @@ op_db: List[OpInfo] = [
            error_inputs_func=error_inputs_linspace,
            sample_inputs_func=sample_inputs_logspace,
            skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+
+               # Off-by-one issue when casting floats to ints
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+               # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
+               # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
+               # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
+               # CUDA driver allocated memory was 1254555648 and is now 1242955776.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
+                            dtypes=(torch.cfloat,), device_type="cuda"),
+           )),
+    OpInfo('logspace',
+           dtypes=all_types_and_complex_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+           is_factory_function=True,
+           supports_out=True,
+           supports_autograd=False,
+           error_inputs_func=error_inputs_linspace,
+           sample_inputs_func=sample_inputs_logspace_tensor_overload,
+           variant_test_name="tensor_overload",
+           skips=(
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # TypeError: 'int' object is not subscriptable
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                # Same failure as arange: cannot find linspace in captured graph
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
 
@@ -12622,8 +12772,7 @@ op_db: List[OpInfo] = [
            aten_name='group_norm',
            aliases=('group_norm',),
            ref=reference_group_norm,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13093,7 +13242,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
                # Pre-existing condition; Needs to be fixed
@@ -13118,7 +13267,7 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -13135,8 +13284,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=False,
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_max_pool,
            skips=(
                # We've defined a custom op here, and we don't handle the case where we receive an out kwarg
@@ -13158,7 +13306,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypes=all_types_and(torch.bfloat16),
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13684,12 +13832,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}), 'TestUnaryUfuncs',),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                          'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=6e-04, rtol=1e-05),
+                                            torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
+                         'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128), active_if=(IS_MACOS)),
@@ -13698,6 +13846,11 @@ op_db: List[OpInfo] = [
                          dtypes=(torch.complex64, torch.complex128), device_type='cpu',
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
+        # tan(j * pi/2 * odd_number) is nan which also make tanhshrink nan.
+        reference_numerics_filter=NumericsFilter(
+            condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
+                                 if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+            safe_val=0)
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',
@@ -14778,6 +14931,10 @@ op_db: List[OpInfo] = [
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   decorators=(DecorateInfo(
+                               toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                               'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                               device_type='cuda'),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -14809,7 +14966,11 @@ op_db: List[OpInfo] = [
                    ref=np.tanh,
                    aten_backward_name='tanh_backward',
                    aliases=('nn.functional.tanh',),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),
+                               DecorateInfo(
+                                   toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                                   'TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                   device_type='cuda'),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -18967,6 +19128,35 @@ python_ref_db = [
         ),
     ),
     PythonRefInfo(
+        "_refs.linspace",
+        torch_opinfo_name="linspace",
+        torch_opinfo_variant_name="tensor_overload",
+        skips=(
+            # TypeError: 'int' object is not subscriptable
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+
+            # cpu implementation is wrong on some integral types
+            # https://github.com/pytorch/pytorch/issues/81996
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64), device_type="cpu"),
+
+            # cuda implementation is off-by-one on some inputs due to precision issues
+            # https://github.com/pytorch/pytorch/issues/82230
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.logspace",
         torch_opinfo_name="logspace",
         skips=(
@@ -18988,9 +19178,39 @@ python_ref_db = [
         ),
     ),
     PythonRefInfo(
+        "_refs.logspace",
+        torch_opinfo_name="logspace",
+        torch_opinfo_variant_name="tensor_overload",
+        skips=(
+            # TypeError: 'int' object is not subscriptable
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+
+            # Off-by-one issue when casting floats to ints
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="cuda"),
+        ),
+    ),
+    PythonRefInfo(
         "_refs.meshgrid",
         torch_opinfo_name="meshgrid",
         torch_opinfo_variant_name="variadic_tensors",
+    ),
+    PythonRefInfo(
+        "_refs.take_along_dim",
+        torch_opinfo_name="take_along_dim",
+        skips=(
+            DecorateInfo(unittest.expectedFailure,
+                         'TestCommon',
+                         'test_python_ref'),
+        ),
     ),
     PythonRefInfo(
         "_refs.to",
@@ -19667,6 +19887,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tan",
         torch_opinfo_name="tan",
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+        ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -19690,6 +19915,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.tanh",
         torch_opinfo_name="tanh",
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-04, rtol=2e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
+        ],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_extremal',
@@ -19963,15 +20193,12 @@ python_ref_db = [
                          'test_reference_numerics_normal',
                          device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02)}),
-                'TestUnaryUfuncs',),
+                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1.6e-02),
+                                   torch.complex64: tol(atol=6e-04, rtol=1e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cuda'),
         ],
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
-            DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_small",
-                         dtypes=(torch.complex64, torch.complex128),
-                         active_if=(IS_MACOS)),
             DecorateInfo(unittest.skip("Fails on some jobs works on others!"),
                          'TestUnaryUfuncs', "test_reference_numerics_large",
                          dtypes=(torch.complex64, torch.complex128),
@@ -21527,6 +21754,10 @@ python_ref_db = [
             ),
         ],
     ),
+    PythonRefInfo(
+        "_refs.view_as_complex",
+        torch_opinfo_name="view_as_complex",
+    ),
 ]
 python_ref_db += opinfo.definitions.python_ref_db
 
@@ -21535,7 +21766,7 @@ ops_and_refs = op_db + python_ref_db
 unary_ufuncs = [op for op in ops_and_refs if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo)]
 binary_ufuncs_and_refs = tuple(op for op in ops_and_refs if isinstance(op, BinaryUfuncInfo))
-spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
+spectral_funcs = [op for op in ops_and_refs if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) and op.supports_sparse]
