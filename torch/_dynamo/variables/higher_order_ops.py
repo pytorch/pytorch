@@ -1,7 +1,7 @@
 import contextlib
-from functools import partial
 import itertools
 import logging
+from functools import partial
 
 from typing import Dict, List, Optional
 
@@ -845,7 +845,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         batch_input_args_transform = [identity for _ in batch_input_args]
         for i, a in enumerate(batch_input_args):
             if isinstance(a, ConstDictVariable):
-                batch_input_args_transform[i] = partial(ConstDictVariable, user_cls=a.user_cls)
+                batch_input_args_transform[i] = partial(
+                    ConstDictVariable, user_cls=a.user_cls
+                )
                 batch_input_args[i] = a.items
 
         flat_args, arg_spec = torch.utils._pytree.tree_flatten(batch_input_args)
@@ -869,7 +871,9 @@ class FunctorchVmapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             else:
                 flat_unbatched_input_args.append(arg)
 
-        unbatched_input_args = torch.utils._pytree.tree_unflatten(flat_unbatched_input_args, arg_spec)
+        unbatched_input_args = torch.utils._pytree.tree_unflatten(
+            flat_unbatched_input_args, arg_spec
+        )
         for i, a in enumerate(unbatched_input_args):
             unbatched_input_args[i] = batch_input_args_transform[i](a)
 

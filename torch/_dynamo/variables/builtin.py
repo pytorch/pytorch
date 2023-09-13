@@ -1061,7 +1061,7 @@ class BuiltinVariable(VariableTracker):
             TorchVariable,
             UserFunctionVariable,
         )
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
@@ -1090,6 +1090,27 @@ class BuiltinVariable(VariableTracker):
         else:
             source = None
 
+        if name == "__bases__":
+            try:
+                value = obj.as_python_constant()
+                if isinstance(value, type):
+                    bases = value.__bases__
+                    if source is not None:
+                        tuple_args = [
+                            VariableBuilder(tx, GetItemSource(source, i))(b)
+                            for i, b in enumerate(bases)
+                        ]
+                    elif len(bases) == 1 and (
+                        bases[0] is object or bases[0] is torch._C._TensorBase
+                    ):
+                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
+                    else:
+                        unimplemented(f"unexpected sourceless type bases: {bases}")
+
+                    return variables.TupleVariable(tuple_args, **options)
+            except NotImplementedError:
+                pass
+
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
         elif isinstance(obj, variables.TensorVariable) and name == "grad":
@@ -1107,21 +1128,6 @@ class BuiltinVariable(VariableTracker):
                 unimplemented("tensor grad")
             else:
                 unimplemented("tensor grad")
-        elif name == "__bases__":
-            value = obj.as_python_constant()
-            if isinstance(value, type):
-                bases = value.__bases__
-                if source is None:
-                    assert len(bases) == 1 and (
-                        bases[0] is object or bases[0] is torch._C._TensorBase
-                    ), f"{value.__name__}.bases: {bases}"
-                    tuple_args = [BuiltinVariable(bases[0])]
-                else:
-                    tuple_args = [
-                        VariableBuilder(tx, GetItemSource(source, i))(b)
-                        for i, b in enumerate(bases)
-                    ]
-                return variables.TupleVariable(tuple_args, **options)
         elif isinstance(
             obj,
             (
