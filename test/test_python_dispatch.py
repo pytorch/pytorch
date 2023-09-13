@@ -2169,18 +2169,6 @@ def forward(self, x_1):
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
-    def test_wrapper_subclass_zero_tensor(self) -> None:
-        def f(x):
-            y = torch.ops.aten._efficientzerotensor([])
-            out = x + y
-            return out
-        x1 = torch.ones(4)
-        x2 = x1.clone().detach()
-        x = TwoTensor(x1, x2)
-        out = f(x)
-        out_ref = f(x1)
-        self.assertEqual(out.a, out_ref)
-
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         x = torch.randn(2, requires_grad=True)
