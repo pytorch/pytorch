@@ -1,25 +1,21 @@
+import copy
+from typing import Any, Dict, Tuple
+
+import torch
+from torch._export import capture_pre_autograd_graph
+from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantizer import Quantizer
+from torch.ao.quantization.quantizer.xnnpack_quantizer import (
+    get_symmetric_quantization_config,
+    XNNPACKQuantizer,
+)
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
     skipIfNoQNNPACK,
     TestHelperModules,
 )
-from torch._export import capture_pre_autograd_graph
-import torch
-import copy
-from typing import Tuple, Any, Dict
-from torch.ao.quantization.quantizer import (
-    Quantizer,
-)
-from torch.ao.quantization.quantizer.xnnpack_quantizer import (
-    XNNPACKQuantizer,
-    get_symmetric_quantization_config,
-)
-from torch.ao.quantization.quantize_pt2e import (
-    prepare_pt2e,
-    convert_pt2e,
-)
-from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
 
 
 @skipIfNoQNNPACK
@@ -54,9 +50,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
         # Calibrate
         model_copy(*example_inputs)
         model_copy = convert_pt2e(model_copy, use_reference_representation=False)
-        self.checkGraphModuleNodes(model_copy, expected_node_occurrence=non_ref_node_occurrence)
+        self.checkGraphModuleNodes(
+            model_copy, expected_node_occurrence=non_ref_node_occurrence
+        )
         pt2e_quant_output_copy = model_copy(*example_inputs)
-
 
         output_tol = None
         if fixed_output_tol is not None:
@@ -64,7 +61,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
         else:
             idx = 0
             for n in model_copy.graph.nodes:
-                if n.target == torch.ops.quantized_decomposed.quantize_per_tensor.default:
+                if (
+                    n.target
+                    == torch.ops.quantized_decomposed.quantize_per_tensor.default
+                ):
                     idx += 1
                     if idx == output_scale_idx:
                         output_tol = n.args[1]
@@ -72,7 +72,8 @@ class TestPT2ERepresentation(QuantizationTestCase):
 
         # make sure the result is off by one at most in the quantized integer representation
         self.assertTrue(
-            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output)) <= (2 * output_tol + 1e-5)
+            torch.max(torch.abs(pt2e_quant_output_copy - pt2e_quant_output))
+            <= (2 * output_tol + 1e-5)
         )
 
     def test_static_linear(self):
@@ -94,7 +95,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence={},
-            non_ref_node_occurrence={}
+            non_ref_node_occurrence={},
         )
 
     def test_dynamic_linear(self):
@@ -107,7 +108,9 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 return self.linear(x)
 
         quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False, is_dynamic=True)
+        operator_config = get_symmetric_quantization_config(
+            is_per_channel=False, is_dynamic=True
+        )
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 5),)
 
@@ -139,7 +142,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence={},
-            non_ref_node_occurrence={}
+            non_ref_node_occurrence={},
         )
 
     def test_add(self):
@@ -155,14 +158,17 @@ class TestPT2ERepresentation(QuantizationTestCase):
         quantizer.set_global(quantization_config)
         m_eager = M().eval()
 
-        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        example_inputs = (
+            torch.randn(1, 3, 3, 3),
+            torch.randn(1, 3, 3, 3),
+        )
 
         self._test_representation(
             M().eval(),
             example_inputs,
             quantizer,
             ref_node_occurrence={},
-            non_ref_node_occurrence={}
+            non_ref_node_occurrence={},
         )
 
     def test_add_relu(self):
@@ -179,7 +185,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
         operator_config = get_symmetric_quantization_config(is_per_channel=True)
         quantizer.set_global(operator_config)
 
-        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        example_inputs = (
+            torch.randn(1, 3, 3, 3),
+            torch.randn(1, 3, 3, 3),
+        )
         ref_node_occurrence = {
             ns.call_function(out_dtype): 2,
         }
@@ -189,7 +198,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence=ref_node_occurrence,
-            non_ref_node_occurrence={}
+            non_ref_node_occurrence={},
         )
 
     def test_maxpool2d(self):
@@ -205,12 +214,12 @@ class TestPT2ERepresentation(QuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence={},
-            non_ref_node_occurrence={}
+            non_ref_node_occurrence={},
         )
 
     def test_qdq_per_channel(self):
-        """Test representation for quantize_per_channel and dequantize_per_channel op
-        """
+        """Test representation for quantize_per_channel and dequantize_per_channel op"""
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -259,8 +268,8 @@ class TestPT2ERepresentation(QuantizationTestCase):
             )
 
     def test_qdq(self):
-        """Test representation for quantize and dequantize op
-        """
+        """Test representation for quantize and dequantize op"""
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -273,14 +282,13 @@ class TestPT2ERepresentation(QuantizationTestCase):
         quantizer.set_global(quantization_config)
         m_eager = M().eval()
 
-        example_inputs = (torch.randn(1, 3, 3, 3), torch.randn(1, 3, 3, 3),)
+        example_inputs = (
+            torch.randn(1, 3, 3, 3),
+            torch.randn(1, 3, 3, 3),
+        )
         ref_node_occurrence = {
-            ns.call_function(
-                torch.ops.quantized_decomposed.quantize_per_tensor
-            ): 0,
-            ns.call_function(
-                torch.ops.quantized_decomposed.dequantize_per_tensor
-            ): 0,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 0,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 0,
         }
         non_ref_node_occurrence = {
             ns.call_function(
@@ -295,5 +303,5 @@ class TestPT2ERepresentation(QuantizationTestCase):
             example_inputs,
             quantizer,
             ref_node_occurrence,
-            non_ref_node_occurrence
+            non_ref_node_occurrence,
         )
