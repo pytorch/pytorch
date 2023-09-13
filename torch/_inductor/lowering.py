@@ -502,8 +502,10 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
     if x.get_dtype() == dtype:
         return clone(x) if copy else x
 
+    src_dtype = x.get_dtype()
+
     def _to_dtype(x):
-        return ops.to_dtype(x, dtype)
+        return ops.to_dtype(x, dtype, src_dtype=src_dtype)
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
@@ -1486,23 +1488,12 @@ def _warn_complex_not_supported():
     )
 
 
-@functools.lru_cache(None)
-def _warn_float8_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
-    )
-
-
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
-        return True
-    # FP8 Tensors are currently not supported
-    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
-        _warn_float8_not_supported()
         return True
     return False
 

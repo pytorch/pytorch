@@ -830,7 +830,14 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
-_float_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
+_float_dtypes = (
+    torch.float16,
+    torch.bfloat16,
+    torch.float32,
+    torch.float64,
+    torch.float8_e4m3fn,
+    torch.float8_e5m2,
+)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
 

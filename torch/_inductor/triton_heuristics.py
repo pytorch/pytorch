@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import json
 import logging
+import math
 import operator
 import os
 import os.path
@@ -46,6 +47,9 @@ else:
     get_cuda_stream = None
     KernelInterface = object
     triton = None
+
+
+_NUM_THREADS_PER_WARP = 32
 
 
 class HeuristicType(Enum):
@@ -667,7 +671,13 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
 
 
 def triton_config(
-    size_hints, x, y=None, z=None, num_stages=1, num_elements_per_warp=256
+    size_hints,
+    x,
+    y=None,
+    z=None,
+    num_stages=1,
+    num_elements_per_warp=256,
+    min_elements_per_thread=1,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -680,6 +690,9 @@ def triton_config(
     we'll launch 512 (elem) / 128 (elem/warp) = 4 warps. Note that it's
     just a suggestion, and sometimes other adjustment heuristics will
     override the num_elements_per_warp.
+
+    min_elements_per_thread controls the minimum number of elements
+    processed by each thread. It's always enforced.
     """
     # Ideally we want to read this from some device config
 
@@ -722,11 +735,6 @@ def triton_config(
     ):
         z *= 2
 
-    cfg = {"XBLOCK": x}
-    if y:
-        cfg["YBLOCK"] = y
-    if z:
-        cfg["ZBLOCK"] = z
     num_warps = next_power_of_2(
         min(max(conditional_product(x, y, z) // num_elements_per_warp, 1), 8)
     )
@@ -740,6 +748,19 @@ def triton_config(
     xnumel = size_hints[0]
     ynumel = size_hints[1] if y else None
     znumel = size_hints[2] if z else None
+
+    # Increase x to satisfy min_elements_per_thread requirements.
+    block_size = max(
+        conditional_product(x, y, z),
+        min_elements_per_thread * _NUM_THREADS_PER_WARP * num_warps,
+    )
+    x *= math.ceil(block_size / conditional_product(x, y, z))
+
+    cfg = {"XBLOCK": x}
+    if y:
+        cfg["YBLOCK"] = y
+    if z:
+        cfg["ZBLOCK"] = z
     check_config(cfg, xnumel=xnumel, ynumel=ynumel, znumel=znumel)
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -803,7 +824,9 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def pointwise(size_hints, meta, tile_hint=None, filename=None):
+def pointwise(
+    size_hints, meta, tile_hint=None, filename=None, min_elements_per_thread=1
+):
     """
     Construct @triton.heuristics() based on size_hints.
     """
@@ -820,7 +843,11 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         ):
             return cached_autotune(
                 size_hints,
-                [triton_config(size_hints, bs)],
+                [
+                    triton_config(
+                        size_hints, bs, min_elements_per_thread=min_elements_per_thread
+                    )
+                ],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
@@ -829,8 +856,18 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
             return cached_autotune(
                 size_hints,
                 [
-                    triton_config(size_hints, bs, num_elements_per_warp=256),
-                    triton_config(size_hints, bs // 2, num_elements_per_warp=64),
+                    triton_config(
+                        size_hints,
+                        bs,
+                        num_elements_per_warp=256,
+                        min_elements_per_thread=min_elements_per_thread,
+                    ),
+                    triton_config(
+                        size_hints,
+                        bs // 2,
+                        num_elements_per_warp=64,
+                        min_elements_per_thread=min_elements_per_thread,
+                    ),
                     *hinted_configs,
                 ],
                 meta=meta,
@@ -843,7 +880,14 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         ):
             return cached_autotune(
                 size_hints,
-                [triton_config(size_hints, 32, 32)],
+                [
+                    triton_config(
+                        size_hints,
+                        32,
+                        32,
+                        min_elements_per_thread=min_elements_per_thread,
+                    )
+                ],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
@@ -851,12 +895,24 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         return cached_autotune(
             size_hints,
             [
-                triton_config(size_hints, 32, 32),
-                triton_config(size_hints, 64, 64),  # ~8% better for fp16
-                triton_config(size_hints, 256, 16),
-                triton_config(size_hints, 16, 256),
-                triton_config(size_hints, bs, 1),
-                triton_config(size_hints, 1, bs),
+                triton_config(
+                    size_hints, 32, 32, min_elements_per_thread=min_elements_per_thread
+                ),
+                triton_config(
+                    size_hints, 64, 64, min_elements_per_thread=min_elements_per_thread
+                ),  # ~8% better for fp16
+                triton_config(
+                    size_hints, 256, 16, min_elements_per_thread=min_elements_per_thread
+                ),
+                triton_config(
+                    size_hints, 16, 256, min_elements_per_thread=min_elements_per_thread
+                ),
+                triton_config(
+                    size_hints, bs, 1, min_elements_per_thread=min_elements_per_thread
+                ),
+                triton_config(
+                    size_hints, 1, bs, min_elements_per_thread=min_elements_per_thread
+                ),
                 *hinted_configs,
             ],
             meta=meta,
@@ -867,7 +923,15 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         if disable_pointwise_autotuning():
             return cached_autotune(
                 size_hints,
-                [triton_config(size_hints, 16, 16, 16)],
+                [
+                    triton_config(
+                        size_hints,
+                        16,
+                        16,
+                        16,
+                        min_elements_per_thread=min_elements_per_thread,
+                    )
+                ],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
@@ -875,13 +939,55 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
         return cached_autotune(
             size_hints,
             [
-                triton_config(size_hints, 16, 16, 16),
-                triton_config(size_hints, 64, 8, 8),
-                triton_config(size_hints, 8, 64, 8),
-                triton_config(size_hints, 8, 8, 64),
-                triton_config(size_hints, bs, 1, 1),
-                triton_config(size_hints, 1, bs, 1),
-                triton_config(size_hints, 1, 1, bs),
+                triton_config(
+                    size_hints,
+                    16,
+                    16,
+                    16,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
+                triton_config(
+                    size_hints,
+                    64,
+                    8,
+                    8,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
+                triton_config(
+                    size_hints,
+                    8,
+                    64,
+                    8,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
+                triton_config(
+                    size_hints,
+                    8,
+                    8,
+                    64,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
+                triton_config(
+                    size_hints,
+                    bs,
+                    1,
+                    1,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
+                triton_config(
+                    size_hints,
+                    1,
+                    bs,
+                    1,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
+                triton_config(
+                    size_hints,
+                    1,
+                    1,
+                    bs,
+                    min_elements_per_thread=min_elements_per_thread,
+                ),
                 *hinted_configs,
             ],
             meta=meta,
