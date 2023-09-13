@@ -124,11 +124,19 @@ jobs:
 
       - name: Build PyTorch mobile runtime
         shell: bash
+        # TODO: DEBUG
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
         run: |
           set -eux
           # shellcheck disable=SC1091
           export TCLLIBPATH="/usr/local/lib"
           ${CONDA_RUN} scripts/build_ios.sh
+
+          ${CONDA_RUN} pip install awscli
+          # TODO: DEBUG
+          ${CONDA_RUN} aws s3 ls "s3://ossci-ios"
 
       - name: Build TestApp
         if: matrix.ios_platform == 'SIMULATOR'
