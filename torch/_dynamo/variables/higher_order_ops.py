@@ -42,12 +42,12 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
 
 
 @contextlib.contextmanager
-def dynamo_enable_grad(tx, enable=True):
+def dynamo_enable_grad(tx):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, enable)
+        GradModeVariable.create(tx, True)
         yield
     finally:
         GradModeVariable.create(tx, org_value)
@@ -66,8 +66,13 @@ def are_tensors(var):
 def validate_args_and_maybe_create_graph_inputs(
     sub_args, tracer, tx, manually_set_subgraph_inputs
 ):
-    from . import AutogradFunctionContextVariable, ConstantVariable, TensorVariable
-    from .builder import wrap_fx_proxy
+    from . import (
+        AutogradFunctionContextVariable,
+        ConstantVariable,
+        SymNodeVariable,
+        TensorVariable,
+    )
+    from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
     assert tracer.parent is not None
 
@@ -92,6 +97,17 @@ def validate_args_and_maybe_create_graph_inputs(
                 example_value = a.as_proxy().node.meta["example_value"]
                 new_arg = wrap_fx_proxy(
                     tx=tx, proxy=new_proxy, example_value=example_value
+                )
+            else:
+                new_arg = a
+        elif isinstance(a, SymNodeVariable):
+            if manually_set_subgraph_inputs:
+                new_proxy = tracer.create_graph_input(str(a.sym_num.node.expr))
+                new_arg = wrap_fx_proxy_cls(
+                    target_cls=SymNodeVariable,
+                    tx=tx,
+                    proxy=new_proxy,
+                    example_value=a.sym_num,
                 )
             else:
                 new_arg = a
@@ -120,7 +136,7 @@ def speculate_subgraph(
     description,
     *,
     always_restore=False,
-    enable_grad=None,
+    enable_grad=False,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
     # If manually_set_subgraph_inputs=True, then we manually add
     # the `sub_args` to `subgraph`, if False then we rely
@@ -151,9 +167,7 @@ def speculate_subgraph(
             )
 
             autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad)
-                if enable_grad is not None
-                else contextlib.nullcontext()
+                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
 
             if restore_side_effects:
@@ -962,13 +976,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         checkpoint = tx.copy_graphstate()
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
-        # In eager-mode PyTorch, if we only compute first-order gradients,
-        # then the grad_mode is False during the backward pass.
-        # torch.compile assumes that we only compute first-order gradients,
-        # so we want to speculate the backward pass with the grad mode disabled.
-        enable_grad = (
-            False if self.value.__name__ == "trampoline_autograd_bwd" else None
-        )
 
         # TODO: Support kwargs
         (
@@ -988,7 +995,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
-            enable_grad=enable_grad,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
