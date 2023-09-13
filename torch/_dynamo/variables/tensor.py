@@ -677,8 +677,9 @@ class TensorVariable(VariableTracker):
                 # Intermediary
                 unimplemented("Intermediary tensors with registered hooks - NYI")
             else:
-                src = fn_var.source if fn_var.source else tx.store_hook(name, fn, lift=False)
-                fn_var.source = src
+                assert (
+                    fn_var.source
+                ), "Unreachable - See unimplemented for lambdas above"
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
 
