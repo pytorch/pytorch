@@ -84,10 +84,13 @@ class DispatchKey(Enum):
     Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
+    NestedTensor = auto()
 
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
+    Conjugate = auto()
+    Negative = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()
