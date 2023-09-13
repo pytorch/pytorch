@@ -198,7 +198,12 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
-def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target: str):
+def _copy_attr(
+    from_module: torch.nn.Module,
+    to_module: torch.nn.Module,
+    target: str,
+    opcode: str = "call_module",
+):
     *prefix, field = target.split(".")
     for item in prefix:
         f = getattr(from_module, item)
@@ -221,6 +226,8 @@ def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target:
     if isinstance(orig, torch.Tensor) and not isinstance(orig, torch.nn.Parameter):
         to_module.register_buffer(field, orig)
     else:
+        if hasattr(to_module, field) and opcode != "call_module":
+            return
         setattr(to_module, field, orig)
 
 
@@ -386,7 +393,7 @@ class GraphModule(torch.nn.Module):
             for node in graph.nodes:
                 if node.op in ["get_attr", "call_module"]:
                     assert isinstance(node.target, str)
-                    _copy_attr(root, self, node.target)
+                    _copy_attr(root, self, node.target, node.op)
         elif isinstance(root, dict):
             targets_to_copy = []
             for node in graph.nodes:
