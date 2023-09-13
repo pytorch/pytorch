@@ -219,9 +219,8 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
-    "uniform": {f16},
     "view_as_complex": {f16},
-    "pca_lowrank": {f64},
+    "pca_lowrank": {f32, f64},
     "svd_lowrank": {f32, f64},
 }
 
