@@ -72,6 +72,64 @@ def check_inplace_broadcast(self_shape, *args_shape):
     )
 
 
+@register_meta([aten.linspace, aten.logspace])
+@out_wrapper()
+def meta_linspace_logspace(
+    start,
+    end,
+    steps,
+    base=None,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+    requires_grad=False,
+):
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+
+    if any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            torch._check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
+
+    # steps does not participate in the computation of the dtype
+    torch._check_type(
+        isinstance(steps, IntLike),
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
+    )
+    assert isinstance(steps, IntLike)  # for mypy
+    torch._check(steps >= 0, lambda: "number of steps must be non-negative")
+
+    return torch.empty(
+        (steps,),  # type: ignore[arg-type]
+        dtype=dtype,
+        layout=layout,
+        device="meta",
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
 @register_meta([aten.take.default, aten.take.out])
 @out_wrapper()
 def meta_take(self, index):
@@ -2642,11 +2700,6 @@ def meta_complex(real, imag):
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
-@register_meta(aten.view.dtype)
-def view_dtype(self, dtype):
-    return utils.clone_preserve_strides(self).to(dtype)
-
-
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
@@ -2891,6 +2944,7 @@ def meta__foreach_binop__list(self, other, alpha=1):
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
         aten._foreach_div_.Scalar,
+        aten._foreach_maximum_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):

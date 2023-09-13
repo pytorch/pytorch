@@ -969,6 +969,20 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    # https://github.com/pytorch/pytorch/issues/108195
+    def test_symbolic_repeat_interleave(self):
+        def f(y, x):
+            return y.repeat_interleave(x, dim=1)
+
+        y = torch.tensor([[1, 2], [3, 4]])
+        x = torch.tensor([2, 3])
+        r = str(make_fx(f, tracing_mode="symbolic")(y, x).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, y_1, x_1):
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
+    index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
+    return index_select""")
+
     def test_adv_index_batch(self):
         def f(src_tokens):
             bsz, src_len = src_tokens.size()[:2]
@@ -1053,6 +1067,25 @@ def forward(self, a_1):
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return empty"""  # noqa: B950
+        )
+
+
+    def test_setitem_symint(self):
+        # from moco
+        # https://github.com/pytorch/pytorch/issues/101939
+        def f(x):
+            x[0] = x.size(0)
+            return x
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size = None
+    select = torch.ops.aten.select.int(x_1, 0, 0)
+    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
+    return x_1"""  # noqa: B950
         )
 
     def test_dynamic_pointwise_scalar(self):
@@ -1534,8 +1567,6 @@ make_fx_failures = {
 fake_tensor_failures = {
     # FakeTensor fallback doesn't work
     xfail('_segment_reduce', 'lengths'),
-    # cannot do these as they rely on tensor data
-    xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
@@ -1570,7 +1601,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition

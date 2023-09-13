@@ -2524,6 +2524,22 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
     return samples
 
 
+def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+    samples = [
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="hidden_size must be greater than zero"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(10, 10, 0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=ValueError,
+            error_regex="num_layers must be greater than zero"
+        ),
+    ]
+    return samples
 
 def module_error_inputs_torch_nn_Pad1d(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3131,13 +3147,16 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.GroupNorm,
                module_inputs_func=module_inputs_torch_nn_GroupNorm,
-               dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=False),
+               dtypes=get_all_fp_dtypes(include_bfloat16=True, include_half=True),
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64, torch.bfloat16]),
                    # Tracking at https://github.com/pytorch/pytorch/issues/98089
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                                'TestModule', 'test_memory_format', device_type='cpu'),
                    # No channels_last support for GroupNorm currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cuda'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='mps'),
                    DecorateInfo(unittest.skip("Skipped!"), "TestModule", "test_grad",
                                 active_if=TEST_WITH_ROCM, device_type='cuda'),)
                ),
@@ -3438,6 +3457,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.RNN,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=True),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators
@@ -3445,12 +3465,14 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.GRU,
                train_and_eval_differ=True,
                module_inputs_func=partial(module_inputs_torch_nn_RNN_GRU, is_rnn=False),
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.LSTM,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_LSTM,
+               module_error_inputs_func=module_error_inputs_torch_nn_RNN_GRU,
                skips=(
                    # LSTM with projections is not currently supported with MPS
                    DecorateInfo(skipMPS),),

@@ -146,6 +146,39 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   return std::make_tuple(output, inverse_indices, counts);
 }
 
+// check whether the element on index i is `unique`,
+// in the sorted sequence, the 1st element is always true.
+//
+// NaN is propagated to the rail in a sorted sequence,
+// consider a sorted sequence of
+//   {1.0, 1.0, 2.0, 2.0, NaN, NaN, NaN}
+//
+// a. `equal_nan` == true will give:
+//   {T,   F,   T,   F,   T,   F,   F  }
+//
+// b. `equal_nan` == false will give:
+//   {T,   F,   T,   F,   T,   T,   T  }
+//
+template <typename scalar_t, bool equal_nan>
+struct IsUnique {};
+
+template <typename scalar_t>
+struct IsUnique<scalar_t, false> {
+  inline bool operator() (scalar_t* data_ptr, int64_t i) {
+    if (i == 0) { return true; }
+    return data_ptr[i] != data_ptr[i - 1];
+  }
+};
+
+template <typename scalar_t>
+struct IsUnique<scalar_t, true> {
+  inline bool operator() (scalar_t* data_ptr, int64_t i) {
+    if (i == 0) { return true; }
+    return (data_ptr[i] != data_ptr[i - 1])
+        && !(_isnan(data_ptr[i]) && _isnan(data_ptr[i - 1]));
+  }
+};
+
 // NB: Unique implementation using sort
 //
 // The whole algo is taken from NumPy at numpy/lib/arraysetops.py
@@ -159,12 +192,12 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
 // This kernel also implements a `equal_nan` flag which has same
 // function as NumPy's unique. Currently this is always disabled.
 //
-template <typename scalar_t>
+template <typename scalar_t, typename CompareOp>
 std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     const Tensor& self,
     const bool return_inverse,
     const bool return_counts,
-    const bool equal_nan = false) {
+    CompareOp is_unique) {
   const Tensor& input = self.contiguous();
 
   int64_t numel = input.numel();
@@ -193,52 +226,17 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
   scalar_t* input_sorted_data = input_sorted.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();
 
-  // `mask` keeps track of whether it is the first unique
-  // in the sorted input sequence
-  Tensor mask = at::empty({numel}, self.options().dtype(kBool));
-  auto mask_acc = mask.accessor<bool, 1>();
-
   int num_threads = at::get_num_threads();
   std::vector<int64_t> unique_count_thread(num_threads, 0);
   std::vector<int64_t> offset_thread(num_threads, 0);
 
-  // the first element is always true
-  mask_acc[0] = true;
-
-  // we can parallel on [1, numel) but we need to make sure it has
-  // the same parallel scope with the next loop
   const int64_t grain_size = at::internal::GRAIN_SIZE;
-  at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
-    if (begin == 0) { begin += 1; }
-    for (const auto i : c10::irange(begin, end)) {
-      mask_acc[i] = input_sorted_data[i] != input_sorted_data[i - 1];
-    }
-  });
-
-  // handle equal the NaN's
-  bool last_element_isnan = _isnan<scalar_t>(input_sorted_data[numel - 1]);
-  if (input.is_floating_point() && equal_nan && last_element_isnan) {
-    auto is_nan = [](const scalar_t& val){ return _isnan<scalar_t>(val); };
-    auto firstnan = std::find_if(input_sorted_data, input_sorted_data + numel, is_nan);
-    int64_t firstnan_index = std::distance(input_sorted_data, firstnan);
-
-    mask_acc[firstnan_index] = true;
-    // in case we have more than 1 NaN in the sequence,
-    // mask the first one as true and the rest as false
-    if (firstnan_index + 1 < numel) {
-      at::parallel_for(firstnan_index + 1, numel, grain_size, [&](int64_t begin, int64_t end) {
-        for (const auto i : c10::irange(begin, end)) {
-          mask_acc[i] = false;
-        }
-      });
-    }
-  }
 
   // calculate unique count from each thread
   at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
     for (const auto i : c10::irange(begin, end)) {
-      if (mask_acc[i]) {
+      if (is_unique(input_sorted_data, i)) {
         unique_count_thread[tid]++;
       }
     }
@@ -277,7 +275,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
     int64_t offset = offset_thread[tid];
 
     for (const auto i : c10::irange(begin, end)) {
-      if (mask_acc[i]) {
+      if (is_unique(input_sorted_data, i)) {
         output_data[offset] = input_sorted_data[i];
         if (return_counts) {
           unique_index_data[offset] = i;
@@ -483,8 +481,9 @@ std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
     Tensor output, inverse;
-    if (sorted && self.scalar_type() != kBool) {
-      std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(self, return_inverse, false);
+    if (sorted) {
+      std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(
+          self, return_inverse, false, IsUnique<scalar_t, /* equal_nan */ false>());
     } else {
       std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(self, sorted, return_inverse, false);
     }
@@ -495,8 +494,9 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
 std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
-    if (sorted && self.scalar_type() != kBool) {
-      return unique_cpu_sorted_template<scalar_t>(self, return_inverse, return_counts);
+    if (sorted) {
+      return unique_cpu_sorted_template<scalar_t>(
+          self, return_inverse, return_counts, IsUnique<scalar_t, /* equal_nan */ false>());
     } else {
       return unique_cpu_template<scalar_t>(self, sorted, return_inverse, return_counts);
     }

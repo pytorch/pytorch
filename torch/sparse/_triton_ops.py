@@ -82,7 +82,7 @@ def check_blocksize(f_name, blocksize):
 
 
 def make_triton_contiguous(t):
-    if t.stride(-2) > 1 and t.stride(-1) > 1:
+    if (t.stride(-2) > 1 or t.dtype is torch.float32) and t.stride(-1) > 1:
         return t.contiguous()
     else:
         return t
@@ -172,7 +172,8 @@ def prepare_inputs(bsr, *dense_tensors):
     # Compute broadcasted batch dimension
     batch_dims_broadcasted = torch.broadcast_shapes(values.shape[:-3], *(t.shape[:-2] for t in tensors))
 
-    # Broadcast batch dimensions and squash
+    # Broadcast batch dimensions and squash.
+    # The result can be either a view or a copy.
     def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
         return t.broadcast_to(batch_dims + invariant_dims).flatten(
             0, len(batch_dims) - 1
@@ -214,7 +215,9 @@ def tile_to_blocksize(t, blocksize):
         n // blocksize[1],
         blocksize[1],
     ]
-    return t.reshape(new_shape).transpose(-3, -2)
+    # using .view instead of .reshape to ensure that the result is
+    # indeed a view:
+    return t.view(new_shape).transpose(-3, -2)
 
 
 if _has_triton():
@@ -331,7 +334,7 @@ if _has_triton():
                     mask=mask_k[:, None], other=0.0
                 )
 
-                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32)
+                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
 
             if IS_BETA_ZERO:
                 acc_block *= alpha
@@ -459,7 +462,7 @@ if _has_triton():
             dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
 
             # do block mm
-            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32)
+            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride

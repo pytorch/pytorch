@@ -61,6 +61,7 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo_utils import DYNAMO_FORCE_INLINE
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
@@ -90,6 +91,13 @@ def tabulate(rows, headers):
         return "\n".join(
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
+
+
+def should_force_inline(func):
+    from .variables.functions import NestedUserFunctionVariable, UserFunctionVariable
+
+    assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
+    return func.get_code() in DYNAMO_FORCE_INLINE
 
 
 def dynamo_profiled(func):
@@ -409,7 +417,13 @@ def is_typing(value):
         return isinstance(value, typing._GenericAlias)
     else:
         return isinstance(
-            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+            # `_SpecialForm`` is the parent class of `Optional`
+            value,
+            (
+                typing._SpecialGenericAlias,
+                typing._UnionGenericAlias,
+                typing._SpecialForm,
+            ),
         )
 
 
@@ -1397,6 +1411,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise an AssertionError.
     """
     op = node.op
+
     try:
         if op == "call_function":
             return node.target(*args, **kwargs)
@@ -1410,6 +1425,12 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
+    except NotImplementedError as e:
+        # NB: mimic how wrap_fake_exception does it
+        from .exc import unimplemented
+
+        raise unimplemented(f"running {op} {node.target}(*{args}, **{kwargs})") from e
+
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
         raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
