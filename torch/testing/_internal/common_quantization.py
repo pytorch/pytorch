@@ -2432,7 +2432,6 @@ class SparseNNModel(nn.Module):
 
         return out
 
-# TODO: Move to common utils or use existing quant utils to fetch model instances
 class TestHelperModules:
     class Conv2dPropAnnotaton(torch.nn.Module):
         def __init__(self):
