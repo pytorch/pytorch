@@ -225,6 +225,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
     "sage",  # does not work with fp32
     # Huggingface
+    "GPT2ForSequenceClassification",  # Accuracy https://github.com/pytorch/pytorch/issues/109019
     "MBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94793
     "PLBartForConditionalGeneration",  # Accuracy https://github.com/pytorch/pytorch/issues/94794
     # TIMM
