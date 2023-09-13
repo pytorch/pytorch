@@ -298,10 +298,6 @@ jobs:
         run: |
           set -eux
 
-          echo "DEBUG"
-          echo ${{ github.event_name }}
-          echo ${{ (github.event.ref }}
-
           for ARCH in "arm64" "x86_64"; do
             TMP_DIR="${RUNNER_TEMP}/${ARCH}"
             mkdir -p "${TMP_DIR}"
@@ -421,7 +417,7 @@ jobs:
 
       - name: Set DRY_RUN
         # TODO: uncomment me
-        # if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        # if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
