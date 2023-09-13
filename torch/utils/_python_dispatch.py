@@ -267,6 +267,8 @@ def get_alias_info(func) -> SchemaInfo:
         # which torchgen chokes on.
         torchgen_schema_str = re.sub(r'=\[[0, ]+\]', '=0', torchgen_schema_str)
         torchgen_schema_str = re.sub(r'=\[[1, ]+\]', '=1', torchgen_schema_str)
+        # for aten::rot90
+        torchgen_schema_str = torchgen_schema_str.replace("=[0, 1]", "=[0,1]")
         torchgen_schema = torchgen.model.FunctionSchema.parse(torchgen_schema_str)
         arg_schemas = [AliasInfo(
             alias_set=set() if a.annotation is None else set(a.annotation.alias_set),
