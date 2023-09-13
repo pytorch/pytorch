@@ -2269,7 +2269,7 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    return ir.DynamicScalar()
+    return ir.DynamicScalar.create(data)
 
 
 def _full(fill_value, device, dtype, size):

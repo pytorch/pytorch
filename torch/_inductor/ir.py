@@ -3741,17 +3741,53 @@ class DeviceCopy(ExternKernelOut):
             )
 
 
-class DynamicScalar(IRNode):
+class DynamicScalar(ExternKernelAlloc):
     """
     The result of a call to aten._local_scalar_dense.
-
-    This is not yet implemented.  The one model (so far) that calls this
-    (fastNLP_Bert) does not actually use the result.  So we expect this
-    node to get dead code eliminated.
     """
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
 
-    def get_reads(self):
-        return ()
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        # Prevents dead code elimination
+        return True
+
+    def can_free(self):
+        # Prevents buffer freeing, since:
+        # 1. there is no need to free a Python scalar value
+        # 2. the Python scalar value might be reused later
+        return False
+
+    def codegen(self, wrapper):
+        wrapper.writeline(f"{self.get_name()} = {self.inputs[0].get_name()}[{self.inputs[0].get_layout().offset}].item()")
+
+    @classmethod
+    def create(cls, x: "TensorBox"):
+        return DynamicScalar(
+            layout=AliasedLayout(x),
+            inputs=[x],
+        )
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].get_name()]
+
+    def codegen_reference(self):
+        traceback.print_stack()
+        return self.get_name()
+
+    def __str__(self):
+        return self.get_name()
+
+    __repr__ = __str__
 
 
 @dataclasses.dataclass
@@ -6275,22 +6311,8 @@ class AllToAllSingle(OutOfPlaceCollectiveKernel):
     def codegen_input(self, wrapper, output_name, input_names):
         wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
 
-    def codegen_unbacked_symint_to_value(self, wrapper, s):
-        if V.graph.sizevars.shape_env.is_unbacked_symint(s):
-            var_range = V.graph.sizevars.shape_env.var_to_range[s.node.expr]
-            assert var_range.lower == var_range.upper
-            wrapper.writeline(f"{s.node.expr} = {var_range.lower}")
-
     def codegen_collective(self, wrapper, output_name, input_names):
         tag, ranks, group_size = self.constant_args
-
-        # if self.output_split_sizes is not None:
-        #     for s in self.output_split_sizes:
-        #         self.codegen_unbacked_symint_to_value(wrapper, s)
-
-        # if self.input_split_sizes is not None:
-        #     for s in self.input_split_sizes:
-        #         self.codegen_unbacked_symint_to_value(wrapper, s)
 
         wrapper.writeline(
             f"{output_name} = fun_col_impl._all_to_all_single("
