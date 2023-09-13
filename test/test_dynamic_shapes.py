@@ -717,23 +717,38 @@ class TestSymNumberMagicMethods(TestCase):
 
     def test_symnode_hashing(self):
         j1 = torch._C._get_singleton_int(1)
+        j2 = torch._C._get_singleton_int(1)
+        j3 = torch._C._get_singleton_int(2)
         b = j1 == j1
+        c = j2 == j2
         self.assertIsInstance(b, torch.SymBool)
         shape_env = ShapeEnv()
         s1 = create_symint(shape_env, 2)
-
-        # Singleton SymInt are hashable
-        hash(j1)
 
         # non-singleton SymInt are unhashable
         with self.assertRaisesRegex(TypeError, "unhashable"):
             hash(s1)
 
-        # SymBool and SymNode are hashable because they do not implement __eq__
-        hash(b)
+        # SymNode is hashable because it does not implement __eq__
         hash(s1.node)
-        hash(j1.node)
-        hash(b.node)
+        # They don't necessarily hash to the same values though
+        # (This test would fail if there's a hash collision)
+        self.assertNotEqual(hash(b.node), hash(c.node))
+        self.assertNotEqual(hash(j1.node), hash(j2.node))
+
+        # Constant and Singleton SymInt/SymBool are hashable and have
+        # the same hash if they have the same value.
+        self.assertTrue(j1 == j2)
+        self.assertEqual(hash(j1), hash(j2))
+        self.assertTrue(b == c)
+        self.assertEqual(hash(b), hash(c))
+        # SymBool and bool have the same hash if they have the same value
+        self.assertTrue(b == True)
+        self.assertEqual(hash(b), hash(True))
+
+        self.assertFalse(j1 == j3)
+        # (This test would fail if there's a hash collision)
+        self.assertNotEqual(hash(j1), hash(j3))
 
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_singleton_int(1)
