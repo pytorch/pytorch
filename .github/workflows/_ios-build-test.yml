@@ -3,10 +3,15 @@ name: ios-build-test
 on:
   workflow_call:
     inputs:
+      trigger-event:
+        type: string
+        default: ""
+        description: |
+          The trigger event from the caller that determines whether or not to upload
       build-environment:
         required: true
         type: string
-        description: Top-level label for what's being built/tested.
+        description: Top-level label for what is being built/tested.
       sync-tag:
         required: false
         type: string
@@ -262,7 +267,7 @@ jobs:
     runs-on: macos-12
     needs: build
     # NB: Only upload release build, if we need it, we could also turn on nightly here
-    environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
+    environment: ${{ ((inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'ios-upload' || '' }}
     steps:
       - uses: actions/checkout@v3
 
@@ -292,6 +297,10 @@ jobs:
         shell: bash
         run: |
           set -eux
+
+          echo "DEBUG"
+          echo ${{ github.event_name }}
+          echo ${{ (github.event.ref }}
 
           for ARCH in "arm64" "x86_64"; do
             TMP_DIR="${RUNNER_TEMP}/${ARCH}"
@@ -412,7 +421,7 @@ jobs:
 
       - name: Set DRY_RUN
         # TODO: uncomment me
-        # if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        # if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
@@ -449,7 +458,7 @@ jobs:
           # We need to set this secret to upload to cocoapods. However, we might want
           # to NOT set this for PROD release so that we can upload the artifacts manually
           COCOAPODS_TRUNK_TOKEN: ${{ secrets.COCOAPODS_TRUNK_TOKEN || '' }}
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
+        if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && github.event.ref == 'refs/heads/nightly' && env.COCOAPODS_TRUNK_TOKEN != '' }}
         shell: bash
         working-directory: ${{ runner.temp }}/arm64
         run: |
