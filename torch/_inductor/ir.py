@@ -3741,17 +3741,47 @@ class DeviceCopy(ExternKernelOut):
             )
 
 
-class DynamicScalar(IRNode):
+class DynamicScalar(ExternKernelAlloc):
     """
     The result of a call to aten._local_scalar_dense.
-
-    This is not yet implemented.  The one model (so far) that calls this
-    (fastNLP_Bert) does not actually use the result.  So we expect this
-    node to get dead code eliminated.
     """
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
 
-    def get_reads(self):
-        return ()
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        # Prevents dead code elimination, because the Python scalar value might be reused later
+        return True
+
+    def can_free(self):
+        # Prevents buffer freeing, because the Python scalar value might be reused later
+        return False
+
+    def codegen(self, wrapper):
+        wrapper.writeline(f"{self.get_name()} = {self.inputs[0].get_name()}[{self.inputs[0].get_layout().offset}].item()")
+
+    @classmethod
+    def create(cls, x: "TensorBox"):
+        return DynamicScalar(
+            layout=AliasedLayout(x),
+            inputs=[x],
+        )
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].get_name()]
+
+    def __str__(self):
+        return self.get_name()
+
+    __repr__ = __str__
 
 
 @dataclasses.dataclass
