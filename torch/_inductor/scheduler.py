@@ -1078,6 +1078,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.create_foreach_nodes()
         self.topological_sort_schedule()
+        self.has_speedup_by_fusion = dict()
         self.fuse_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -1382,6 +1383,9 @@ class Scheduler:
 
         from triton.compiler.errors import CompilationError
 
+        if (node1, node2) in self.has_speedup_by_fusion:
+            return self.has_speedup_by_fusion[(node1, node2)]
+
         try:
             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
@@ -1389,6 +1393,7 @@ class Scheduler:
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
+                self.has_speedup_by_fusion[(node1, node2)] = True
                 return True  # allow fusion
             else:
                 raise
@@ -1421,6 +1426,7 @@ class Scheduler:
                     "slow_down_ratio": ms_fused / (ms1 + ms2),
                 }
             )
+        self.has_speedup_by_fusion[(node1, node2)] = ms_fused < ms1 + ms2
         return ms_fused < ms1 + ms2
 
     def fuse_nodes_once(self):
