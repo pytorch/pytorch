@@ -446,7 +446,10 @@ class GuardBuilder(GuardBuilderBase):
         return self.ID_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
+        # Only guard if the builtin is defined
+        # locally.
+        if guard.is_local():
+            return self.ID_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
