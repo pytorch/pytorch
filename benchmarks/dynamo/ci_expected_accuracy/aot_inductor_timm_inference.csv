@@ -55,7 +55,7 @@ tf_efficientnet_b0,pass,0
 tf_mixnet_l,pass,0
 tinynet_a,pass,0
 tnt_s_patch16_224,pass,0
-twins_pcpvt_base,fail_to_run,0
+twins_pcpvt_base,pass,0
 visformer_small,pass,0
 vit_base_patch16_224,pass,0
 volo_d1_224,pass,0

@@ -15,7 +15,7 @@ cm3leon_generate,fail_to_run,0
 dcgan,pass,0
 densenet121,pass,0
 detectron2_fcos_r_50_fpn,fail_to_run,0
-dlrm,pass,0
+dlrm,fail_to_run,0
 doctr_det_predictor,fail_to_run,0
 doctr_reco_predictor,fail_to_run,0
 drq,fail_to_run,0
@@ -36,7 +36,7 @@ hf_Whisper,pass,0
 lennard_jones,fail_to_run,0
 llama,fail_to_run,0
 maml_omniglot,fail_to_run,0
-mnasnet1_0,fail_to_run,0
+mnasnet1_0,pass,0
 mobilenet_v2,pass,0
 mobilenet_v3_large,pass,0
 moco,fail_to_run,0
