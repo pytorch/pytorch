@@ -2798,7 +2798,7 @@ class TritonScheduling(BaseScheduling):
         )
         ms = load_cache()
         if ms is not None:
-            return ms
+            return ms, mod.__file__
 
         args = mod.get_args()
         call = mod.call
@@ -2812,7 +2812,7 @@ class TritonScheduling(BaseScheduling):
             ms,
         )
         store_cache()
-        return ms
+        return ms, mod.__file__
 
 
 @dataclasses.dataclass

@@ -12,6 +12,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor.metrics import get_metric_table
 
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
@@ -1382,9 +1383,9 @@ class Scheduler:
         from triton.compiler.errors import CompilationError
 
         try:
-            ms1 = self.benchmark_fused_nodes(node_list_1)
-            ms2 = self.benchmark_fused_nodes(node_list_2)
-            ms_fused = self.benchmark_fused_nodes(node_list_fused)
+            ms1, path1 = self.benchmark_fused_nodes(node_list_1)
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
+            ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
@@ -1408,6 +1409,18 @@ class Scheduler:
                     red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
                 )
 
+        if ms_fused >= ms1 + ms2:
+            get_metric_table("slow_fusion").add_row(
+                lambda: {
+                    "kernel1_path": path1,
+                    "kernel1_latency": ms1,
+                    "kernel2_path": path2,
+                    "kernel2_latency": ms2,
+                    "fused_kernel_path": path_fused,
+                    "fused_kernel_latency": ms_fused,
+                    "slow_down_ratio": ms_fused / (ms1 + ms2),
+                }
+            )
         return ms_fused < ms1 + ms2
 
     def fuse_nodes_once(self):

@@ -143,6 +143,7 @@ aggressive_fusion = False
 # Useful for debugging fusion.
 debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
+enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64

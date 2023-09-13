@@ -40,7 +40,7 @@ from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
-from torch._inductor import config as inductor_config
+from torch._inductor import config as inductor_config, metrics
 from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -3517,6 +3517,7 @@ def run(runner, args, original_dir=None):
                 ],
             )
     else:
+        metrics.purge_old_log_files()
         if output_filename and os.path.exists(output_filename):
             os.unlink(output_filename)
         if original_dir:
