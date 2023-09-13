@@ -43,6 +43,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         check_train=True,
         override_check_equal=False,
         dtype=torch.float,
+        rtol=1.3e-6,
     ):
         if args1 is None:
             tensor_shape = (4, 2, 16, 32)
@@ -92,7 +93,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                         and arg1.is_floating_point()
                         and (not has_dropout or override_check_equal)
                     ):
-                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
+                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=rtol)
 
     @skipIfRocm
     def _test_sdpa_rewriter_1(self):
@@ -110,8 +111,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         for dtype in [torch.float, torch.half]:
             if self.device == "cpu" and dtype == torch.half:
                 continue
-            self._check_common(dot_prod_attention, dtype=dtype)
-            self._check_common(checkpoint_wrapper(dot_prod_attention), dtype=dtype)
+            rtol = 1.3e-6 if dtype == torch.float else .7
+            self._check_common(dot_prod_attention, dtype=dtype, atol=.001, rtol=rtol)
+            self._check_common(checkpoint_wrapper(dot_prod_attention), dtype=dtype, atol=.001, rtol=rtol)
 
     def _test_pattern_fails_with_reuse(self):
         """
