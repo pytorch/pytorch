@@ -6,7 +6,6 @@ import logging
 import sys
 import warnings
 
-from functools import wraps
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Sequence, Union
 from unittest import mock
 
@@ -49,14 +48,7 @@ if config.is_fbcode():
 else:
     # no-op decorator
     def time_and_log(attr: str):
-        def wrap(old_func):
-            @wraps(old_func)
-            def newFunction(*args, **kwargs):
-                return old_func(*args, **kwargs)
-
-            return newFunction
-
-        return wrap
+        return dynamo_utils.identity
 
 
 log = logging.getLogger(__name__)
@@ -443,26 +435,10 @@ def compile_fx_inner(
 
                 compiled_graph.current_callable = compiled_artifact
 
-            if len(set(compiled_graph.device_types)) > 1:
-                perf_hint_log.warning("skipping cudagraphs due to multiple devices")
-            elif set(compiled_graph.device_types) == {"cuda"}:
-                if has_mutation:
-                    perf_hint_log.warning("skipping cudagraphs due to input mutation")
-                elif complex_memory_overlap_inputs:
-                    perf_hint_log.warning(
-                        "skipping cudagraphs due to complex input striding"
-                    )
-                elif (
-                    len(compiled_graph.device_idxs) > 1
-                    and config.triton.cudagraph_trees
-                ):
-                    perf_hint_log.warning(
-                        "skipping cudagraphs due to multiple device indexes"
-                    )
-                else:
-                    perf_hint_log.warning("skipping cudagraphs for unknown reason")
-            else:
-                perf_hint_log.warning("skipping cudagraphs for unknown reason")
+            if "cuda" in compiled_graph.device_types:
+                perf_hint_log.warning(
+                    "skipping cudagraphs due to %s", cudagraph_fail_reasons
+                )
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
@@ -572,6 +548,9 @@ def fx_codegen_and_compile(
                     else:
                         context.output_strides.append(None)
             compiled_fn = graph.compile_to_fn()
+
+            if V.aot_compilation is True:
+                return compiled_fn
 
             if graph.disable_cudagraphs:
                 BoxedBool.disable(cudagraphs)
@@ -846,9 +825,6 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-_in_aot_compilation = BoxedBool(False)
-
-
 def compile_fx_aot(
     model_: torch.fx.GraphModule,
     example_inputs_: List[torch.Tensor],
@@ -861,16 +837,16 @@ def compile_fx_aot(
         else {**config_patches, "cpp_wrapper": True}
     )
     if (
-        "aot_inductor_output_path" not in config_patches
-        and not config.aot_inductor_output_path
+        "aot_inductor.output_path" not in config_patches
+        and not config.aot_inductor.output_path
     ):
         config_patches = {
             **config_patches,
-            "aot_inductor_output_path": code_hash(model_.code),
+            "aot_inductor.output_path": code_hash(model_.code),
         }
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
-    with mock.patch.object(_in_aot_compilation, "value", True):
+    with V.set_aot_compilation(True):
         return compile_fx(
             model_,
             example_inputs_,
@@ -949,7 +925,7 @@ def fw_compiler_freezing(
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
     # that drops constant-ified params
-    if _in_aot_compilation:
+    if V.aot_compilation is True:
         return optimized_function
 
     def wrapper(args):
@@ -1064,7 +1040,8 @@ def compile_fx(
             num_model_outputs = len(model_outputs)
 
             context = torch._guards.TracingContext.get()
-            if context is not None and context.fw_metadata:
+            # See Note [User Outputs in the inductor graph]
+            if context is not None and context.fw_metadata and not is_inference:
                 original_output_start_index = context.fw_metadata.num_mutated_inputs
             else:
                 original_output_start_index = 0
@@ -1081,6 +1058,7 @@ def compile_fx(
 
             assert num_orig_model_outputs <= num_model_outputs
 
+            # Note [User Outputs in the inductor graph]
             # We makes the following assumption
             # For inference
             #   len(orig_model_outputs) == len(model_outputs)
@@ -1093,13 +1071,14 @@ def compile_fx(
             # module's output.
             # To make things safe, we'll use original_output_start_index field
             # set by AOTAutograd to decide where the original module outputs start.
+            orig_output_end_idx = original_output_start_index + num_orig_model_outputs
+            # Sanity chec: we are about to splice out the "user" outputs from the full set
+            # of "graph" outputs. Make sure we're within bounds.
+            assert orig_output_end_idx <= num_model_outputs
 
             user_visible_outputs = {
                 n.name
-                for n in model_outputs[
-                    original_output_start_index : original_output_start_index
-                    + num_orig_model_outputs
-                ]
+                for n in model_outputs[original_output_start_index:orig_output_end_idx]
                 if isinstance(n, torch.fx.Node)
             }
 
@@ -1157,6 +1136,10 @@ def compile_fx(
     tracing_context = (
         torch._guards.TracingContext.get() or torch._guards.TracingContext(fake_mode)
     )
+
+    if config.from_export and V.aot_compilation is True:
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+            return inference_compiler(model_, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(  # type: ignore[call-arg]
         tracing_context

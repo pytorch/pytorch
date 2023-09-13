@@ -1,3 +1,6 @@
+import operator
+import types
+
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.fx import (
@@ -5,7 +8,6 @@ from torch.fx import (
     Node,
 )
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
 
@@ -13,6 +15,7 @@ from torch.utils._pytree import LeafSpec
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
 
 from torch.ao.quantization.quantizer import QuantizationAnnotation
+
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
@@ -34,15 +37,19 @@ _DEQUANTIZE_OPS = [
 ]
 
 
-def _is_connected(next_node: torch.fx.Node, target: torch.fx.Node) -> bool:
-    if target.op == "output":
-        return False
-    if next_node == target:
-        return True
-    for n in next_node.users.keys():
-        if _is_connected(n, target):
-            return True
-    return False
+def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
+    """
+    Assuming dest is one of the ops inserted by quant workflow, this function
+    finds if source and dest are connected. Assumption is that only quant workflow
+    inserted ops exist between source and dest
+    """
+    quant_workflow_ops = _QUANTIZE_OPS + _DEQUANTIZE_OPS
+    quant_workflow_ops.append(torch.ops.quantized_decomposed.choose_qparams.tensor)
+    while dest.target in quant_workflow_ops:
+        if not isinstance(dest.args[0], torch.fx.Node):
+            raise ValueError(f"expected arg[0] of quant workflow ops to be a node but found {dest.args[0]}")
+        dest = dest.args[0]
+    return (dest == source)
 
 
 def _find_q_dq_node_for_user(
@@ -426,3 +433,20 @@ def _replace_literals_with_existing_placeholders(
         new_args = tuple(new_args)
         node.args = new_args
     return gm
+
+# TODO: Handle this in export itself and don't wrap the model in another GraphModule
+# in prepare and convert
+def _disallow_eval_train(model: GraphModule):
+    """
+    Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
+    This is useful for exported models, where these methods don't actually behave as expected.
+    """
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
+
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
+    model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]
+    return model
