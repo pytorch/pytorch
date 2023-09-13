@@ -596,7 +596,7 @@ class RemovableHandleVariable(VariableTracker):
     def __init__(
         self,
         mutable_local=None,
-        idx = None,
+        idx=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -608,7 +608,6 @@ class RemovableHandleVariable(VariableTracker):
             tx.output.side_effects.remove_hook(self.idx)
             return variables.ConstantVariable(None)
         super().call_method(tx, method_name, args, kwargs)
-
 
     # This reconstruct is actually pretty unique - it does not construct the object from scratch.
     # Handles always come from a register_hook call on a tensor, and so, rerunning that for the codegen of a

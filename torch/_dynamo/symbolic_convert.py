@@ -1878,33 +1878,6 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if name not in self.output.global_scope:
             self.output.install_global(name, weakref.ref(value))
 
-    def store_hook(self, name, value, lift):
-        base = name
-        assert callable(value), "Illegal construction - hook must be callable!"
-        for i in itertools.count():
-            if name not in self.output.global_scope:
-                src = GlobalSource(name)
-                if lift:
-                    self.output.guards.add(src.make_guard(GuardBuilder.WEAKREF_ALIVE))
-                    self.output.install_global(name, weakref.ref(value))
-                break
-            name = f"{base}_{i}"
-
-        return src
-
-    def store_handle(self, name, value):
-        assert isinstance(
-            value, torch.utils.hooks.RemovableHandle
-        ), "Handle must be a torch hook handle"
-        base = name
-        for i in itertools.count():
-            if name not in self.output.global_scope:
-                self.output.install_global(name, value)
-                break
-            name = f"{base}_{i}"
-
-        return name
-
     @property
     def fake_mode(self):
         return self._fake_mode
