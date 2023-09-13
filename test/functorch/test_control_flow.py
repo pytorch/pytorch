@@ -1225,6 +1225,9 @@ class TestControlFlowTraced(TestCase):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
+        # The symbols in make_fx's shape_env should not be speciliazed.
+        self.assertEqual(len(gm.shape_env.guards), 0)
+
         exp_code = """\
 def forward(self, x_1):
     sym_size = torch.ops.aten.sym_size(x_1, 0)
@@ -1236,9 +1239,12 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
     return conditional
 """
         self._expected_inline_normalized(gm.code, exp_code)
+
+        # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
         self.assertEqual(gm(x), true_fn(x))
         self.assertEqual(foo(x), true_fn(x))
+
 
     def _check_closure_correctly_lifted(self, f, *, args, exp_res, exp_arg_num):
         assert isinstance(args, (tuple, list))
