@@ -2465,7 +2465,7 @@ def reference_unbind(t, dim):
     """A numpy implementation of torch.unbind"""
     return tuple(s.squeeze(dim) for s in np.split(t, t.shape[dim], dim))
 
-def sample_inputs_gather(op_info, device, dtype, requires_grad, include_0d=True, **kwargs):
+def sample_inputs_gather(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=None, high=None)
     yield SampleInput(
         make_arg((M, S)),
@@ -2481,15 +2481,14 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad, include_0d=True,
         0,
         torch.tensor([], dtype=torch.uint8, device=device))
     # 0D tensor case
-    if include_0d:
-        yield SampleInput(
-            make_arg(()),
-            0,
-            torch.tensor([0], dtype=torch.int64, device=device))
-        yield SampleInput(
-            make_arg(()),
-            0,
-            torch.tensor(0, dtype=torch.int64, device=device))
+    yield SampleInput(
+        make_arg(()),
+        0,
+        torch.tensor([0], dtype=torch.int64, device=device))
+    yield SampleInput(
+        make_arg(()),
+        0,
+        torch.tensor(0, dtype=torch.int64, device=device))
 
 def _fill_indices(idx, dim, dim_size, elems_per_row, m, n, o):
     for i in range(1 if dim == 0 else m):
