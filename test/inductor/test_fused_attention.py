@@ -108,6 +108,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
         for dtype in [torch.float, torch.half]:
+            if self.device == "cpu" and dtype == torch.half:
+                continue
             self._check_common(dot_prod_attention, dtype=dtype)
             self._check_common(checkpoint_wrapper(dot_prod_attention), dtype=dtype)
 

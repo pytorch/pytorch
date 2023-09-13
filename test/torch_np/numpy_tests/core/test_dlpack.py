@@ -124,3 +124,9 @@ class TestDLPack:
         a = np.arange(4)
         t = torch.from_dlpack(a)
         assert_array_equal(np.asarray(t), a)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
