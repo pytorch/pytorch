@@ -1,28 +1,30 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import logging
 import os
 import queue
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor
+from ctypes import byref, c_size_t, c_void_p
 from multiprocessing.process import BaseProcess
 from multiprocessing.queues import Queue
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
 from torch._inductor import ir
-from torch._inductor.codecache import PyCodeCache
+from torch._inductor.codecache import CUDACodeCache, DLLWrapper, PyCodeCache
 
 if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench
+from .utils import do_bench_using_profiling
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -352,24 +354,116 @@ class BenchmarkRequest:
     can be done inside the same process since they usually don't cause crash.
     """
 
-    module_path: str  # the path of the module defining the triton kernel
-    module_cache_key: str
-    kernel_name: str  # the kernel name defined in the module
-    grid: List[int]
-    extra_args: Dict[str, Any]
-    num_stages: int
-    num_warps: int
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Dict[str, Any],
+    ):
+        # the kernel name defined in the module
+        self.kernel_name = kernel_name
 
-    input_tensors: Union[TensorMeta, List[TensorMeta]]
-    output_tensor: Union[TensorMeta, List[TensorMeta]]
+        if isinstance(input_tensor_meta, TensorMeta):
+            input_tensor_meta = [input_tensor_meta]
+        self.input_tensor_meta = input_tensor_meta
+
+        if isinstance(output_tensor_meta, (tuple, list)):
+            assert len(output_tensor_meta) == 1
+            output_tensor_meta = output_tensor_meta[0]
+        self.output_tensor_meta = output_tensor_meta
+
+        self.extra_args = extra_args
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+    ) -> Callable[[], None]:
+        raise NotImplementedError()
+
+    def cleanup_run_fn(self) -> None:
+        pass
 
     def benchmark(
-        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
         debug = log.isEnabledFor(logging.DEBUG)
         if debug:
             start_ts = time.time()
 
+        # create args and out tensor
+        if output_tensor is None:
+            assert len(input_tensors) == 0
+            input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
+            output_tensor = self.output_tensor_meta.to_tensor()
+
+        if debug:
+            create_tensor_elapse = time.time() - start_ts
+            start_ts = time.time()
+
+        fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+
+        if debug:
+            load_elapse = time.time() - start_ts
+            start_ts = time.time()
+
+        out = do_bench_using_profiling(fn)
+        torch.cuda.synchronize()  # shake out any CUDA errors
+
+        if debug:
+            bench_elapse = time.time() - start_ts
+            log.debug(
+                "InChildProcess %s: load %f, create tensor %f, bench %f",
+                str(self),
+                load_elapse,
+                create_tensor_elapse,
+                bench_elapse,
+            )
+        self.cleanup_run_fn()
+        return out
+
+
+class TestBenchmarkRequest(BenchmarkRequest):
+    """
+    Supports unit testing. Defined in this file so that the TuningProcess
+    sub-process knows how to unpickle these objects.
+    """
+
+    def __init__(self, value: Optional[float] = None) -> None:
+        self.value = value
+
+    def benchmark(
+        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
+    ) -> float:
+        if self.value is None:
+            raise Exception("Failed to run")
+        return self.value
+
+
+class TritonBenchmarkRequest(BenchmarkRequest):
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Dict[str, Any],
+        module_path: str,  # the path of the module defining the triton kernel
+        module_cache_key: str,
+        grid: List[int],
+        num_stages: int,
+        num_warps: int,
+    ):
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.module_path = module_path
+        self.module_cache_key = module_cache_key
+        self.grid = grid
+        self.num_stages = num_stages
+        self.num_warps = num_warps
+
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+    ) -> Callable[[], None]:
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         log.debug(
             "benchmark module key: %s, path: %s",
@@ -377,49 +471,99 @@ class BenchmarkRequest:
             self.module_path,
         )
 
-        run = getattr(mod, self.kernel_name).run
+        run_method = getattr(mod, self.kernel_name).run
 
-        if debug:
-            load_elapse = time.time() - start_ts
-            start_ts = time.time()
+        return functools.partial(
+            run_method,
+            *input_tensors,
+            output_tensor,
+            *self.extra_args,
+            grid=self.grid,
+            num_stages=self.num_stages,
+            num_warps=self.num_warps,
+            stream=torch.cuda.current_stream().cuda_stream,
+        )
 
-        # create args and out tensor
-        if output_tensor is None:
-            assert len(input_tensors) == 0
-            if isinstance(self.input_tensors, List):
-                input_tensors = tuple(x.to_tensor() for x in self.input_tensors)
-            if isinstance(self.input_tensors, TensorMeta):
-                input_tensors = tuple(self.input_tensors.to_tensor())
-            assert isinstance(self.output_tensor, TensorMeta)
-            output_tensor = self.output_tensor.to_tensor()
+    def __str__(self) -> str:
+        return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
-        if debug:
-            create_tensor_elapse = time.time() - start_ts
-            start_ts = time.time()
 
-        def worker() -> float:
-            return run(
-                *input_tensors,
-                output_tensor,
-                *self.extra_args,
-                grid=self.grid,
-                num_stages=self.num_stages,
-                num_warps=self.num_warps,
-            )
+class CUDABenchmarkRequest(BenchmarkRequest):
+    def __init__(
+        self,
+        kernel_name: str,
+        input_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
+        extra_args: Dict[str, Any],
+        source_code: str,
+    ):
+        super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
+        self.source_code = source_code
+        self.workspace_size: int = 0
+        self.workspace: Optional[torch.Tensor] = None
+        self.DLL: Optional[DLLWrapper] = None
+        self.hash_key: str = ""
+        self.source_file: str = ""
+        self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
 
-        out = do_bench(worker)
-        torch.cuda.synchronize()  # shake out any CUDA errors
+    def make_run_fn(
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+    ) -> Callable[[], None]:
+        self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+            self.source_code, "so"
+        )
+        args = [
+            c_void_p(tensor.data_ptr())
+            for tensor in list(input_tensors) + [output_tensor]
+        ]
+        log.debug(
+            "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
+            self.kernel_name,
+            self.source_file,
+            self.hash_key,
+            self.DLL,
+            args,
+            self.extra_args,
+        )
+        run_method = getattr(self.DLL, self.kernel_name)
+        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 
-        if debug:
-            bench_elapse = time.time() - start_ts
-            log.debug(
-                "InChildProcess %s: load %f, create tensor %f, bench %f",
-                self.module_cache_key,
-                load_elapse,
-                create_tensor_elapse,
-                bench_elapse,
-            )
-        return out
+        # Retrieve workspace_size and initialize workspace.
+        c_workspace_size = c_size_t()
+        run_method(
+            *args,  # input ptrs and output ptrs
+            *self.extra_args,
+            byref(
+                c_workspace_size
+            ),  # set workspace size ptr to retrieve workspace size
+            None,  # null workspace ptr
+            stream_ptr,
+        )
+        self.workspace_size = c_workspace_size.value
+        # TODO: Support non-zero workspace_size.
+        assert self.workspace_size == 0, (
+            "Things need to be fixed to support non-zero workspace_size: "
+            "1) max autotune cache needs to store workspace size; "
+            "2) memory allocation needs to allocate / deallocate workspace correctly; "
+        )
+
+        # Generate partial function.
+        return functools.partial(
+            run_method,
+            *args,
+            *self.extra_args,
+            None,  # null workspace size ptr
+            None,  # set workspace ptr, TODO: update it to a real ptr if workspace_size > 0
+            stream_ptr,
+        )
+
+    def cleanup_run_fn(self) -> None:
+        if self.DLL is not None:
+            self.DLL.close()
+        self.workspace = None
+
+    def __str__(self) -> str:
+        return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 
 def benchmark_in_sub_process(
