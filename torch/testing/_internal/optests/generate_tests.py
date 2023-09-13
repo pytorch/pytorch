@@ -163,11 +163,14 @@ def generate_opcheck_tests(
                     if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
                         argnames, argvalues = mark.args
                         assert not mark.kwargs, "NYI"
-                        new_pytestmark.append(
-                            pytest.mark.parametrize(argnames, (next(iter(argvalues)),))
-                        )
-                    else:
-                        new_pytestmark.append(mark)
+                        # Special case for device, we want to run on all
+                        # devices
+                        if argnames != "device":
+                            new_pytestmark.append(
+                                pytest.mark.parametrize(argnames, (next(iter(argvalues)),))
+                            )
+                            continue
+                    new_pytestmark.append(mark)
                 new_method.__dict__["pytestmark"] = new_pytestmark
 
         if new_method_name in additional_decorators:
