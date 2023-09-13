@@ -443,8 +443,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        if guard.is_local():
-            return self.ID_MATCH(guard)
+        return self.ID_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)

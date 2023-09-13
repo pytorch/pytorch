@@ -816,6 +816,10 @@ class MockModule(torch.nn.Module):
         return self.inner_fn(tensor.shape, (1, 2, 3))
 
 
+def some_global_fn(x):
+    return torch.sin(x) + 20
+
+
 class ReproTests(torch._dynamo.test_case.TestCase):
     def test_do_paste_mask(self):
         torch._dynamo.utils.counters.clear()
@@ -3457,6 +3461,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         counter = CompileCounter()
         compiled_fn = torch._dynamo.optimize(counter)(fn)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
+
+    def test_global_fn_guards(self):
+        global some_global_fn
+        org_func = some_global_fn
+        try:
+
+            def foo(x, y):
+                return some_global_fn(x) + y
+
+            x = torch.ones(1)
+            y = torch.ones(1)
+
+            expected = foo(x, y)
+            opt_foo = torch.compile(foo, fullgraph=True, backend="aot_eager")
+            actual = opt_foo(x, y)
+            self.assertEqual(actual, expected)
+
+            def updated_global_fn(x):
+                return torch.exp(x)
+
+            some_global_fn = updated_global_fn
+
+            expected = foo(x, y)
+            actual = opt_foo(x, y)
+            self.assertEqual(actual, expected)
+        finally:
+            some_global_fn = org_func
 
 
 if __name__ == "__main__":
