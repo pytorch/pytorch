@@ -124,7 +124,6 @@ void Adadelta::save(serialize::OutputArchive& archive) const {
 
 void Adadelta::load(serialize::InputArchive& archive) {
   serialize(*this, archive);
-  std::cout << "gel";
 }
 } // namespace optim
 } // namespace torch
