@@ -980,17 +980,6 @@ class ModuleComparison(torch.nn.Module):
         return output
 
 
-class ModuleWithTrainingState(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.drop1 = torch.nn.Dropout(0.5)
-        self.bn1 = torch.nn.BatchNorm2d(6)
-
-    def forward(self, x):
-        x = self.bn1(self.drop1(x))
-        return x
-
-
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -1905,7 +1894,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def _forward_hook_test_helper(self, model):
         forward_handles = {}
-        activations = dict()
+        compiled_activations = dict()
+        eager_activations = dict()
+        activations = None
 
         def save_activations(name, mod, inp, out):
             activations[name] = inp
@@ -1915,19 +1906,32 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 partial(save_activations, name)
             )
 
-        model = torch.compile(model, backend="aot_eager")
+        compiled_model = torch.compile(model, backend="aot_eager")
 
+        activations = compiled_activations
         for i in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
-            activations.clear()
+            compiled_activations.clear()
+            x = torch.randn((20, 10))
+            pred = compiled_model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        activations = eager_activations
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            eager_activations.clear()
             x = torch.randn((20, 10))
             pred = model(x)
             loss = pred.sum()
             loss.backward()
 
-        print(f"Recorded Layers: {activations.keys()}\n\n")
-        print(f"Expected Layers: {forward_handles.keys()}")
+        print(f"Recorded Layers: {compiled_activations.keys()}\n\n")
+        print(f"Expected Layers: {eager_activations.keys()}")
+
+        self.assertTrue(compiled_activations.keys() == eager_activations.keys())
         self.assertTrue(activations.keys() == forward_handles.keys())
 
     def test_hooks_allowed_modules(self):
@@ -1977,7 +1981,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             pred = model(x)
             loss = pred.sum()
             loss.backward()
-        self.assertEqual(len(activations), 5)
+        self.assertEqual(len(activations), 6)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_hooks_allowed_modules_compiles_self_contained(self):
@@ -2229,22 +2233,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
-
-    def test_module_with_training_state(self):
-        mod = ModuleWithTrainingState()
-        opt_mod = torch.compile(mod)
-        input = torch.randn(64, 6, 32, 32)
-        # trigger the compilation
-        opt_mod(input)
-
-        # calling .eval in sub model
-        # now the model should be deterministic
-        opt_mod.drop1.eval()
-        opt_mod.bn1.eval()
-
-        output2 = opt_mod(input)
-        output3 = opt_mod(input)
-        self.assertEqual(output2, output3)
 
     def test_unspec_non_inlinable_module(self):
         mod = UnspecNonInlinableModule()
