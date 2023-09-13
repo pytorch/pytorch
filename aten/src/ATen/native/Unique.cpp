@@ -149,7 +149,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
 // check whether the element on index i is `unique`,
 // in the sorted sequence, the 1st element is always true.
 //
-// NaN is propagated to the rail in a sorted sequence,
+// NaN is propagated to the rear in a sorted sequence,
 // consider a sorted sequence of
 //   {1.0, 1.0, 2.0, 2.0, NaN, NaN, NaN}
 //
