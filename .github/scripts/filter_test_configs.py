@@ -410,17 +410,16 @@ def process_jobs(
             if target_job in (TEST_JOB_NAME, BUILD_AND_TEST_JOB_NAME):
                 target_cfg = m.group("cfg")
 
-                # NB: There can be multiple unstable configurations, i.e. inductor, inductor_huggingface
-                test_matrix = _filter_jobs(
+                return _filter_jobs(
                     test_matrix=test_matrix,
                     issue_type=issue_type,
                     target_cfg=target_cfg,
                 )
-        else:
-            warnings.warn(
-                f"Found a matching {issue_type.value} issue {target_url} for {workflow} / {job_name}, "
-                + f"but the name {target_job_cfg} is invalid"
-            )
+
+        warnings.warn(
+            f"Found a matching {issue_type.value} issue {target_url} for {workflow} / {job_name}, "
+            + f"but the name {target_job_cfg} is invalid"
+        )
 
     # Found no matching target, return the same input test matrix
     return test_matrix
