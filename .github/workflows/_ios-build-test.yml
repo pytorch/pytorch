@@ -411,7 +411,8 @@ jobs:
           path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
 
       - name: Set DRY_RUN
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
+        # TODO: uncomment me
+        # if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || (startsWith(github.event.ref, 'refs/tags/v'))) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
