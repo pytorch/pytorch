@@ -7050,6 +7050,57 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    def test_dynamic_scalar(self):
+        # def f(x, size_tensor):
+        #     size = size_tensor.tolist()
+        #     for elem in size:
+        #         torch.export.constrain_as_value(elem)
+        #     out = F.affine_grid(x, size)
+        #     return out
+
+        def f(x):
+            a, b = x.tolist()
+            torch.export.constrain_as_size(a)
+            torch.export.constrain_as_size(b)
+            return torch.cat([torch.randn(a), torch.randn(b)])
+
+        with (
+            torch._dynamo.config.patch(
+                dynamic_shapes=True,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+            ),
+        ):
+            # x = torch.empty((1, 2, 3), device=self.device)
+            # size_tensor = torch.tensor([1, 1, 4, 4], dtype=torch.int64)
+            x = torch.tensor([4, 5])
+            ref = f(x)
+            compiled = torch.compile(f, fullgraph=True, dynamic=True)
+            actual = compiled(x)
+
+            code = run_and_get_triton_code(compiled, (x,))
+            print(f"code: {code}")
+            FileCheck() \
+                .check("buf0 = empty_strided(") \
+                .check("buf5 = empty_strided(") \
+                .check("triton_poi__0.run(arg0_1, buf0, buf5") \
+                .check("buf1 = empty_strided") \
+                .check("buf2 = empty_strided") \
+                .check_not("copy_(") \
+                .check("buf3_inputs = [buf0,arg0_1]") \
+                .check("buf3 = [buf1,buf2]") \
+                .check("buf3_work = fun_col_impl._all_gather_into_tensor_coalesced_fallback("
+                    "output_tensors=buf3, input_tensors=buf3_inputs") \
+                .check("fun_col_impl._register_tensor_work(buf3, buf3_work)") \
+                .check("_wait_tensor(buf1)") \
+                .check("buf4 = buf1") \
+                .check("buf6 = buf0; del buf0  # reuse") \
+                .check("_wait_tensor(buf2)") \
+                .check("buf7 = buf2") \
+                .check("return (buf4, buf5, buf6, buf7") \
+                .run(code)
+            self.assertEqual(ref, actual)
+
 
 @dataclasses.dataclass
 class TestFailure:
