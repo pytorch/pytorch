@@ -1253,9 +1253,32 @@ void initJITBindings(PyObject* module) {
       .def(
           "__str__",
           [](c10::SymNode a) { return a->str(); })
-      .def("__repr__", [](c10::SymNode a) {
-        return a->str();
-      });
+      .def(
+          "__repr__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "is_constant",
+          [](const c10::SymNode& node){
+            return (
+              node->constant_int().has_value()
+              || node->constant_bool().has_value()
+            );
+          })
+      .def(
+          "is_symbolic",
+          [](const c10::SymNode& node){
+            return (
+                !node->singleton_int().has_value()
+                && !node->constant_bool().has_value()
+                && !node->constant_int().has_value()
+            );
+          })
+      .def(
+          "is_singleton_int",
+          [](const c10::SymNode& node){
+            return node->singleton_int().has_value();
+          });
+
   // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)

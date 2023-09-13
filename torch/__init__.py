@@ -382,7 +382,7 @@ class SymBool:
         raise AssertionError("type stub not overridden")
 
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.

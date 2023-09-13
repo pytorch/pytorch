@@ -1002,6 +1002,19 @@ class SymNode:
     def bool_(self):
         return self.guard_bool("", 0)
 
+    def is_symbolic(self):
+        return True
+
+    def is_singleton_int(self):
+        return False
+
+    def is_constant(self):
+        return False
+
+def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
+    if isinstance(val, (int, float, bool)):
+        return False
+    return val.node.is_symbolic()
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -1476,16 +1489,47 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
+    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+        if isinstance(x, (int, float, bool)):
+            return x
+        if isinstance(x, SymBool):
+            return x.node.guard_bool("", 0)
+        raise AssertionError("expect to be called with constant SymBools")
+
+    def is_constant(x):
+        if isinstance(x, (int, float, bool)):
+            return True
+        if isinstance(x, (SymInt, SymFloat, SymBool)):
+            return x.node.is_constant()
+        return False
+
+    # Before performing the operation, check if any operands are constant.
+    # If so, extract out the constant values first. If `self` itself is a
+    # constant, then "redispatch" by calling back into the operator. Sometimes
+    # this means that operations involving SymBool return plain bools.
+    # Alternatively, we could also rewrap into constant Symbool (i.e. by
+    # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
+    # today for no particular reason.
     def unary_magic_impl(self):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
         return wrap_node(getattr(self.node, method_attr)(other_node))
 
     def rbinary_magic_impl(self, other):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
