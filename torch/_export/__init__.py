@@ -143,11 +143,11 @@ def export_rc(
         if get_origin(shape) is tuple:
             for i, dim in enumerate(get_args(shape)):
                 if isinstance(dim, _Dim):
-                    symbols[dim.__name__].append(dynamic_dim(tensor, i))
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
         elif isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
-                    symbols[dim.__name__].append(dynamic_dim(tensor, i))
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
 
     import inspect
     signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
@@ -173,7 +173,7 @@ def export_rc(
     return export(f, args, kwargs, constraints=constraints)
 
 
-def dynamic_dim(t: torch.Tensor, index: int):
+def dynamic_dim(t: torch.Tensor, index: int, debug_name: str = None):
     if not isinstance(t, torch.Tensor):
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
@@ -200,6 +200,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
         StrictMinMaxConstraint(
             vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
         ),
+        debug_name=debug_name,
     )
 
 

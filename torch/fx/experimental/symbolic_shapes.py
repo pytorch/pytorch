@@ -2068,6 +2068,7 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        self.source_name_to_debug_name: Dict[str, str] = {}
         # Maps symbolic ints to their min/max range for runtime checks.
         # This is because we assume a graph generated with N=2 is general enough
         # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
@@ -2596,6 +2597,10 @@ class ShapeEnv:
 
         return r
 
+    def debug_name(self, source):
+        src_name = source.name()
+        return self.source_name_to_debug_name.get(src_name, src_name)
+
     def render_range_for_constraint_violation(self, source, c):
         if isinstance(c, StrictMinMaxConstraint):
             lower, upper = c.vr.lower, c.vr.upper
@@ -2604,13 +2609,13 @@ class ShapeEnv:
                 lower = None
             if upper >= default.upper:
                 upper = None
-            c_render = f"{source.name()} in the specified range"
+            c_render = f"{self.debug_name(source)} = {source.name()} in the specified range"
             if lower is not None and upper is not None:
-                c_render += f" {lower} <= {source.name()} <= {upper}"
+                c_render += f" {lower} <= {self.debug_name(source)} <= {upper}"
             elif lower is None and upper is not None:
-                c_render += f" {source.name()} <= {upper}"
+                c_render += f" {self.debug_name(source)} <= {upper}"
             elif lower is not None and upper is None:
-                c_render += f" {lower} <= {source.name()}"
+                c_render += f" {lower} <= {self.debug_name(source)}"
             return c_render
         return c.render(source)
 
@@ -2732,7 +2737,7 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
-        symbol_to_constraints = collections.defaultdict(list)
+        symbol_to_constraints = collections.defaultdict(set)
         constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
 
         def record_constraint_violation(warn_only, msg, hint=None):
@@ -2784,7 +2789,7 @@ class ShapeEnv:
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
-                        symbol_to_constraints[s].append(constraint)
+                        symbol_to_constraints[s].add(constraint)
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(NegateSource(source))
                 else:
@@ -2813,7 +2818,7 @@ class ShapeEnv:
                         var_with_range = self.render_range_for_constraint_violation(source, constraint)
                         msg = (
                             f"Not all values of {var_with_range} are valid because "
-                            f"{source.name()} was inferred to be equal to "
+                            f"{self.debug_name(source)} was inferred to be equal to "
                         )
                         record_constraint_violation(
                             constraint.warn_only,
@@ -2837,7 +2842,7 @@ class ShapeEnv:
                     var_with_range = self.render_range_for_constraint_violation(source, constraint)
                     msg = (
                         f"Not all values of {var_with_range} are valid because "
-                        f"{source.name()} was inferred to be a constant ({val}). "
+                        f"{self.debug_name(source)} was inferred to be a constant ({val}). "
                         "For more information about why it is constant, "
                         "run with TORCH_LOGS=dynamic."
                     )
@@ -2920,8 +2925,10 @@ class ShapeEnv:
                     not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
                 ):
                     msg = (
-                        f"The specified set of equalities {equalities_inputs.render()} "
-                        f"is not sufficient; please also specify {source_ref(source)} == {sexpr}."
+                        f"The values of {self.debug_name(source)} = {source.name()} and "
+                        f"{self.debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name()} "
+                        "must always be equal. For more information about this inference, "
+                        "run with TORCH_LOGS=dynamic."
                     )
                     record_constraint_violation(equalities_inputs.warn_only, msg)
                 # NB: Not necessary to report constraint violations here:

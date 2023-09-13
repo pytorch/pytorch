@@ -381,7 +381,10 @@ class TestExport(TestCase):
         inputs = (torch.randn(10, 2, 3),)
         kwinputs = {"y": torch.randn(10, 3, 4)}
         batch = Dim("batch")
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Constraints violated!"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Constraints violated!\n.*batch was inferred to be a constant",
+        ):
             export(foo, inputs, kwinputs, dynamic_shapes={"x": {0: batch}})
 
         # type arguments of exported function with expected dynamic shapes [mixed]
@@ -450,7 +453,10 @@ class TestExport(TestCase):
             return torch.matmul(x, y)
 
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Constraints violated!"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Constraints violated!\n.*K2.*and.*K1.*must always be equal",
+        ):
             export(foo, inputs)
 
         # type arguments of exported function with expected dynamic shapes [specialized, error]
@@ -460,7 +466,10 @@ class TestExport(TestCase):
             return torch.matmul(x, y)
 
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Constraints violated!"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Constraints violated!\n.*K1 was inferred to be a constant",
+        ):
             export(foo, inputs)
 
         # type arguments of exported function with expected dynamic shapes [bound, error]
@@ -473,7 +482,10 @@ class TestExport(TestCase):
                 return x + y
 
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Constraints violated!"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            "Constraints violated!\n.*Not all values of batch.*satisfy the generated guard",
+        ):
             export(foo, inputs)
 
         # type arguments of exported function with expected dynamic shapes [missing annot]

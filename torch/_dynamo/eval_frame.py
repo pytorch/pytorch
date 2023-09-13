@@ -1159,7 +1159,9 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
+            msg = ""
+            if not shape_env.source_name_to_debug_name:
+                msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
             if forced_specializations:
                 msg = (
