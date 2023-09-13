@@ -820,9 +820,3 @@ class TestBlock:
 
         assert block(b_c).flags["C_CONTIGUOUS"]
         assert block(b_f).flags["F_CONTIGUOUS"]
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()
