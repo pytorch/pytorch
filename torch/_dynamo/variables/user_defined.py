@@ -596,6 +596,7 @@ class RemovableHandleVariable(VariableTracker):
     def __init__(
         self,
         mutable_local=None,
+        # index of the registration in the side_effects owned register_hook/handle list, used during removal.
         idx=None,
         **kwargs,
     ):

@@ -80,7 +80,7 @@ class SideEffects:
         self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
-        self.tensor_hooks = tensor_hooks or []
+        self.tensor_hooks = tensor_hooks or {}
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -381,8 +381,8 @@ class SideEffects:
             )
 
     def register_hook(self, tensor, hook, handle):
-        idx = len(self.tensor_hooks)
-        self.tensor_hooks.append((tensor, hook, handle))
+        idx = len(self.tensor_hooks.keys())
+        self.tensor_hooks[idx] = (tensor, hook, handle)
         assert not handle.idx
         handle.idx = idx
 
@@ -394,7 +394,7 @@ class SideEffects:
             tensor,
             hook,
             handle,
-        ) in self.tensor_hooks:
+        ) in self.tensor_hooks.values():
             # Note: [On tensor.register_hook]
             #
             # register_hook on a tensor, AKA backward hooks, have slightly nuanced differences in how they are implemented
