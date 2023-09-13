@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 from torch.distributed._tensor import DTensor, mesh_resources, Replicate, Shard
-from torch.distributed._tensor.device_mesh import init_device_mesh
+from torch.distributed._tensor.device_mesh import init_device_mesh, DeviceMesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
