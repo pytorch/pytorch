@@ -1187,9 +1187,8 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    @property
-    def generate_assert(self):
-        return torch.version.hip is None and super().generate_assert
+    def generate_assert(self, check):
+        return torch.version.hip is None and super().generate_assert(check)
 
     @property
     def assert_function(self):

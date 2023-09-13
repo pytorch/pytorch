@@ -1003,7 +1003,7 @@ class Kernel(CodeGen):
                     new_var.update_on_args("index_wrap", (var,), {})
                     var = new_var
 
-                if check and self.generate_assert:
+                if self.generate_assert(check):
                     mask = ""
                     if hasattr(var, "mask_vars"):
                         mask_vars = set(var.mask_vars)
@@ -1119,9 +1119,8 @@ class Kernel(CodeGen):
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
-    @property
-    def generate_assert(self):
-        return config.debug_index_asserts and config.assert_indirect_indexing
+    def generate_assert(self, check):
+        return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions

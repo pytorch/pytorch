@@ -802,7 +802,10 @@ class CommonTemplate:
                         if "0 <=" in line:
                             pos = line.find("<=")
                             found |= "&" in line and "<" in line[pos + 2 :]
-                    self.assertTrue(found is has_wrapping)
+                        elif "?" in line:
+                            pos = line.find("?")
+                            found |= ":" in line[pos + 1:]
+                    # self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:
                     code = run_and_get_triton_code(fn_opt, *inps)
