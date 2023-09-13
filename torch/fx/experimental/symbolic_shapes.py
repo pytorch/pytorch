@@ -1508,7 +1508,7 @@ def _make_user_magic(method, user_type):
             return x.node.is_constant()
         return False
 
-    # Before performing the operation, check if any operands are constant.
+    # Before and after performing the operation, check if any operands are constant.
     # If so, extract out the constant values first. If `self` itself is a
     # constant, then "redispatch" by calling back into the operator. Sometimes
     # this means that operations involving SymBool return plain bools.
@@ -1528,7 +1528,8 @@ def _make_user_magic(method, user_type):
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        return wrap_node(getattr(self.node, method_attr)(other_node))
+        ret = wrap_node(getattr(self.node, method_attr)(other_node))
+        return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
         if is_constant(self):
@@ -1538,7 +1539,8 @@ def _make_user_magic(method, user_type):
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        return wrap_node(getattr(other_node, method_attr)(self.node))
+        ret = wrap_node(getattr(other_node, method_attr)(self.node))
+        return get_constant(ret) if is_constant(ret) else ret
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
