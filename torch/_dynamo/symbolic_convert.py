@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
+from torch._dynamo.utils import should_force_inline
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
@@ -33,7 +34,12 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_constant
-from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
+from .bytecode_analysis import (
+    get_indexof,
+    JUMP_OPNAMES,
+    livevars_analysis,
+    propagate_line_nums,
+)
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -43,6 +49,7 @@ from .bytecode_transformation import (
     is_generator,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
@@ -105,7 +112,11 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -2033,16 +2044,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
             self.init_local_index_guards_hack()
 
-            # Additionally, we need to add guards for self, if it is a NNModule. The
-            # outer invocation of Module.__call__ is a use of "self" that's not seen
-            # by the tracer. Practically, this is useful for catching modifications
-            # to the module's hooks that would otherwise be missed.
-            if "self" in self.symbolic_locals:
-                val = self.symbolic_locals["self"]
-                if isinstance(val, NNModuleVariable):
-                    local_guards = VariableTracker.propagate(val)["guards"]
-                    self.output.guards.update(local_guards)
-
             self._freevars_ids = dict()
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
@@ -2151,6 +2152,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(null_idxes),
         )
 
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", None
+        )
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)[
+                "orig_graphmodule"
+            ] = orig_graphmodule_maybe
+
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
@@ -2164,8 +2175,20 @@ class InstructionTranslator(InstructionTranslatorBase):
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
+    def symbolic_locals_contain_module_class(self):
+        for v in self.symbolic_locals.values():
+            if isinstance(v, UserDefinedClassVariable) and issubclass(
+                v.as_python_constant(), torch.nn.Module
+            ):
+                return True
+        return False
+
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if (
+            self.output.count_calls() == 0
+            and not self.symbolic_locals_contain_module_class()
+            and not self.export
+        ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
@@ -2194,6 +2217,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
+        if should_force_inline(func):
+            return True
+
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2217,13 +2243,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(func.fn, "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_fwd,
-                produce_trampoline_autograd_apply,
-                produce_trampoline_autograd_bwd,
-            ]:
+            if (
+                hasattr(func, "fn")
+                and hasattr(func.fn, "_origin")
+                and func.fn._origin
+                in [
+                    produce_trampoline_autograd_fwd,
+                    produce_trampoline_autograd_apply,
+                    produce_trampoline_autograd_bwd,
+                ]
+            ):
                 # Known sound
                 return
+
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
@@ -2282,6 +2314,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
 
+        # Detect inline GraphModule calls in order to propgate node metadata,
+        # by checking if the first argument (self) is a variable tracking a GraphModule.
+        if args and isinstance(args[0], NNModuleVariable):
+            module = parent.output.get_submodule(args[0].module_key)
+            if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = module
+
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -2338,6 +2381,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
+        instructions = cleaned_instructions(code)
+        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},
@@ -2345,7 +2390,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
-            instructions=cleaned_instructions(code),
+            instructions=instructions,
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,
