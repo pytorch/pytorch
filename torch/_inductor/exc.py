@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import textwrap
@@ -12,7 +14,7 @@ if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
 else:
 
-    def _record_missing_op(target):
+    def _record_missing_op(target):  # type: ignore[misc]
         pass
 
 
@@ -50,7 +52,7 @@ class MissingOperatorWithDecomp(OperatorIssue):
 
 
 class LoweringException(OperatorIssue):
-    def __init__(self, exc, target, args, kwargs):
+    def __init__(self, exc: Exception, target, args, kwargs):
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
@@ -66,7 +68,7 @@ class InvalidCxxCompiler(RuntimeError):
 
 
 class CppCompileError(RuntimeError):
-    def __init__(self, cmd, output):
+    def __init__(self, cmd: list[str], output: str):
         if isinstance(output, bytes):
             output = output.decode("utf-8")
 
