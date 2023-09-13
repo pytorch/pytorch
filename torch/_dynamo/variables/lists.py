@@ -839,6 +839,7 @@ class SetVariable(VariableTracker):
     # Note - this is only used for producing a set
     def _as_set_element(self, tx, vt):
         from .base import VariableTracker
+        from .functions import MethodWrapperVariable
         from .tensor import TensorVariable
 
         assert isinstance(vt, VariableTracker)
@@ -847,6 +848,8 @@ class SetVariable(VariableTracker):
             tensor_node = vt.as_proxy().node
             return SetVariable.SetElement(vt, tensor_node)
         if isinstance(vt, ConstantVariable):
+            return SetVariable.SetElement(vt, vt.value)
+        if isinstance(vt, MethodWrapperVariable):
             return SetVariable.SetElement(vt, vt.value)
 
         unimplemented(f"Sets with {type(vt)} NYI")

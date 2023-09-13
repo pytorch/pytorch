@@ -92,6 +92,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    MethodWrapperVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -1670,6 +1671,13 @@ class SourcelessBuilder:
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
+        elif isinstance(value, set):
+            return SetVariable(
+                tx, [self(tx, x) for x in value], mutable_local=MutableLocal()
+            )
+        elif str(type(value)) == "<class 'method-wrapper'>":
+            # Needed for wrapping the output of torch.overrides.get_default_nowrap_functions
+            return MethodWrapperVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

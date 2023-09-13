@@ -2200,7 +2200,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if func.get_name() == "patched_init":
             unimplemented("Patched init cannot be inlined.")
 
-        if func.get_name() == "__torch_function__":
+        try:
+            func_value = func.get_function()
+        except NotImplementedError:
+            func_value = None
+
+        if (
+            func.get_name() == "__torch_function__"
+            or func_value is torch._tensor._convert
+        ):
             return
 
         try:

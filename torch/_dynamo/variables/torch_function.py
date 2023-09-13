@@ -7,6 +7,21 @@ from .constant import ConstantVariable
 from .lists import TupleVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
+# [Note: __torch_function__] This feature is partially supported with many rough edges (contact mlazos with issues):
+# The following is not supported:
+# - triggering __torch_function__ on tensor subclass attribute access
+# - graph breaking on mutating guardable tensor properties within a __torch_function__ context, this can cause
+# excessive recompiles in certain degenerate cases
+# - Matching the exact eager behavior of *ignoring* __torch_function__ objects in non-tensor argument positions of Torch API calls
+
+# The following is supported:
+# - static method impls of __torch_function__ on custom objects; this will trigger on torch API calls with the object as
+# any argument
+# - triggering __torch_function__ on torch API calls with tensor subclass arguments
+# - matches the dispatch ordering behavior of eager __torch_function__ with subclass/object argumnents in any argument position
+
+# To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
+
 
 def is_torch_function_user_object(obj):
     return hasattr(obj, "__torch_function__") and hasattr(
@@ -107,6 +122,9 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
     def subclass_type_var(self):
         return UserDefinedClassVariable(self.subclass_type)
+
+    def var_getattr(self):
+        raise unimplemented("NYI: getattr on __torch_function__ tensor subclass")
 
     def call_method(
         self,

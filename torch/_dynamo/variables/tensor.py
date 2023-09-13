@@ -469,6 +469,21 @@ class TensorVariable(VariableTracker):
         elif name == "get_device" and isinstance(self.device, torch.device):
             index = self.device.index if self.device.type != "cpu" else -1
             constant_result = ConstantVariable(index, **options)
+        elif (
+            name == "as_subclass"
+            and len(args) == 2
+            and isintance(args[1], UserDefinedClassVariable)
+        ):
+            from .torch_function import TensorWithTFOverrideVariable
+
+            # [Note: __torch_function__] coerce this tensor variable into a TensorWithTFOverrideVariable
+            # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
+            # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
+            # It is up to the user whether this is correct behavior or not.
+            py_cls = args[1].as_python_constant()
+            return TensorWithTFOverrideVariable.create(
+                tx, self, py_cls.__torch_function__, py_cls
+            )
         else:
             constant_result = None
 

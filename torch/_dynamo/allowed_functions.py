@@ -117,6 +117,7 @@ def _disallowed_function_ids():
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
         torch.Tensor.__init__,
+        torch._tensor._convert,
     ]
     if torch.distributed.is_available():
         from torch.distributed import _functional_collectives

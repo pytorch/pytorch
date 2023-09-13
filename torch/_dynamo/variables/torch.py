@@ -37,6 +37,7 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
+from .functions import UserFunctionVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
 from .torch_function import can_dispatch_torch_function, dispatch_torch_function
@@ -226,6 +227,13 @@ class TorchVariable(VariableTracker):
         unspec_python_args = check_unspec_python_args(args, kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
 
+        if self.value is torch.overrides.get_default_nowrap_functions:
+            # handle this here since we don't properly trace LRU cache
+            from .builder import SourcelessBuilder
+
+            return SourcelessBuilder()(
+                tx, torch.overrides.get_default_nowrap_functions()
+            ).add_options(options)
         if self.value is torch._functorch.vmap.vmap_impl:
             return TorchHigherOrderOperatorVariable.make(
                 self.value,
