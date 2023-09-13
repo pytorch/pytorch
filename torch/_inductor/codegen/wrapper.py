@@ -1521,7 +1521,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.declare}{name} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"{self.codegen_device(device)}"
+            f"at::TensorOptions({self.codegen_device(device)})"
             f".dtype({self.codegen_dtype(dtype)})){self.ending}"
         )
 
