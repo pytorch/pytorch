@@ -85,3 +85,7 @@ class CppCompileError(RuntimeError):
             .strip()
             .format(cmd=" ".join(cmd), output=output)
         )
+
+
+class CUDACompileError(CppCompileError):
+    pass
