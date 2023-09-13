@@ -19,6 +19,11 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+    secrets:
+      AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID:
+        required: false
+      AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY:
+        required: false
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
