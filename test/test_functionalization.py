@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO, IS_WINDOWS,
     xfail_inherited_tests
 )
-from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode, dispatch_functionalize
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map, tree_map_only, tree_flatten
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -1542,6 +1542,35 @@ def forward(self, x_1):
     add = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
     return add""")
 
+    def test_python_functionalization_zero_tensor(self):
+        def f(x):
+            y = torch.ops.aten._efficientzerotensor([4])
+            return x * y
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        self.assertEqual(out_ref, out_test)
+
+    def test_python_functionalization_conj(self):
+        def f(x):
+            y = x.conj()
+            return torch.view_as_real(y.resolve_conj())
+
+        x = torch.randn(4, dtype=torch.complex64)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        self.assertEqual(out_ref, out_test)
+
+    def test_python_functionalization_neg(self):
+        def f(x):
+            y = x._neg_view()
+            z = y.resolve_neg()
+            return z + 1
+
+        x = torch.randn(4)
+        out_ref = f(x)
+        out_test = dispatch_functionalize(f)(x)
+        self.assertEqual(out_ref, out_test)
 
 
 
