@@ -18,7 +18,7 @@ from torch._subclasses.fake_tensor import (
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
-from torch.testing._internal.common_cuda import SM80OrLater, PLATFORM_SUPPORTS_FUSED_SDPA
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
@@ -782,16 +782,11 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
-        data_dependent_outputs = {
-            'NumpyNMSCustomOp',
-            'NumpyNonzeroCustomOp',
-        }
-
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
+            optests.fake_check(op, args, kwargs)
 
 
 class FakeTensorConverterTest(TestCase):
@@ -1011,7 +1006,7 @@ class FakeTensorOperatorInvariants(TestCase):
             self.assertEqual(ref.size(), meta_out.size())
 
     @skipIfRocm
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     def test_flash_attention(self):
         class Repro(torch.nn.Module):
             def __init__(self):
