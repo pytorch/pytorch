@@ -377,7 +377,7 @@ inductor_override_kwargs = {
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
     # grad calculation below fails for both the aten and the compiled implementation.
-    "linalg.eig": {"check_gradient": False}
+    "linalg.eig": {"check_gradient": False},
 }
 
 
