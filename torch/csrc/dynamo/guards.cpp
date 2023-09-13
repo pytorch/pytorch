@@ -661,7 +661,12 @@ class PythonLambdaGuard : public LeafGuard {
 };
 
 /**
- * Base class representing how to access the
+ * Base class representing how to access the child value from the py::object
+ * given to the parent check function.
+ *
+ * These will have one to one mapping with Source objects in Dynamo. Source
+ * provides a way to access the underlying object using its name() function.
+ * GuardAccessor is basically its C++ tree equivalent.
  */
 class GuardAccessor {
  public:
@@ -670,7 +675,7 @@ class GuardAccessor {
 };
 
 /**
- *
+ * Represents __getattr__ acccessor.
  */
 class AttrGuardAccessor : public GuardAccessor {
  public:
@@ -690,241 +695,254 @@ class AttrGuardAccessor : public GuardAccessor {
   py::str _attr_name;
 };
 
-class ItemGuardAccessor : public GuardAccessor {
- public:
-  ItemGuardAccessor(py::str name) {
-    _attr_name = name;
-  }
-
-  bool equals(py::str name) const {
-    return _attr_name.equal(name);
-  }
-
-  py::object access(py::object obj) const override {
-    // There is no py::getitem helper.
-    return py::getattr(obj, "__getitem__")(_attr_name);
-  }
-
- private:
-  py::str _attr_name;
-};
-
-class PythonLambdaGuardAccessor : public GuardAccessor {
- public:
-  PythonLambdaGuardAccessor(py::function accessor_fn) {
-    _accessor_fn = accessor_fn;
-  }
-
-  bool equals(py::function accessor_fn) const {
-    return _accessor_fn.equal(accessor_fn);
-  }
-
-  py::object access(py::object obj) const override {
-    return _accessor_fn(obj);
-  }
-
- private:
-  py::function _accessor_fn;
-};
-
-class GuardManager;
-typedef std::pair<std::unique_ptr<GuardAccessor>, std::unique_ptr<GuardManager>>
-    ChildGuardType;
-
 /**
- * GuardManger encapsulates all the guards related to a particular py::object.
- * It is a tree structure and consists of
- * 1) Leaf guards - Guards that are run on the user given object
- * 2) Child guards - Guards that run on the values accessed by Accessors on the
- * py::object.
- *
- * Lets look at an example to understand how it works.
- * class Pair:
- *     int x = 1;
- *     int y = 2;
- *
- * At compile time
- * >> guard_mananger = GuardManger()
- * >> guard_mananger.x.add_lambda_guard(
- *        lambda x: isinstance(x, Pair),
- *        lambda x: f"expected Pair, found {type(x)}"
- *    )
- * >> guard_mananger.x.add_lambda_guard(lambda x: x == 1, lambda x: f"found {x},
- * expected 1")
- * >> guard_mananger.y.add_lambda_guard(lambda x: x == 2, lambda x: f"found {x},
- * expected 2")
- *
- * At runtime
- * >> guard_mananger.check(Pair())
- *
- * At compile time we build the tree structure. When we do `guard_manager.x`, it
- * creates an AttrGuardAccessorNode, initializes a child guard manager with this
- * accessor node, and adds it as a child. When we do
- * `guard_manager.x.add_lambda_guard`, we call add_lambda_guard on the newly
- * created guard manager and register a new leaf guard on it.
- *
- * At runtime, the accessor node has an important function of providing a way to
- * access the value for the child guard. In the above example, guard_manager.x
- * adds an AttrGuardAccessorNode with attr_name x. When check functino is
- * called, parent GuardManager calls getattr(value, "x") on its value passed to
- * the check function to call the check function of the child guard manager.
- *
- * Sorting the guards based on failure count - An optimization for runtime here
- * is to reshuffle the order of child guards depending on the failure count.
- * This ensures that we run the guards that are more prone to fail statistically
- * first. This can improve the cache lookup time when we have multiple cache
- * entries.
+ * Represents __getitem__ acccessor.
  */
-class GuardManager {
- public:
-  GuardManager() = default;
-  GuardManager(const GuardManager& m) = delete;
-  GuardManager& operator=(const GuardManager&) = delete;
+class AttrGuardAccessor : public GuardAccessor {
+  class ItemGuardAccessor : public GuardAccessor {
+   public:
+    ItemGuardAccessor(py::str name) {
+      _attr_name = name;
+    }
 
-  // GuardManager is the owner of the leaf_guards
-  void add_leaf_guard(std::unique_ptr<LeafGuard> leaf_guard) {
-    _leaf_guards.push_back(std::move(leaf_guard));
-  }
+    bool equals(py::str name) const {
+      return _attr_name.equal(name);
+    }
+
+    py::object access(py::object obj) const override {
+      // There is no py::getitem helper.
+      return py::getattr(obj, "__getitem__")(_attr_name);
+    }
+
+   private:
+    py::str _attr_name;
+  };
 
   /**
-   * Adds a new guard manager with appropriate Accessor. If the accessor is
-   * already present, we just return the guard manager.
+   * Similar to PythonLambdaLeafGuard, this class is a way to allow developers
+   * to supply accessor as a python function. This way, we can gradually move
+   * accessors for different sources in C++.
    */
-  template <typename GuardAccessorT>
-  GuardManager* get_child_manager(py::object accessor_key) {
-    // accessor_key type depends on the GuardAccessorT
-    // for AttrGuardAccessor - py::str name
-    // for ItemGuardAccessor - py::str name
-    // for PythonLambdaGuardAccessor - py::function lambda
-    for (auto& child_accessor_and_manager : _child_managers) {
-      GuardAccessor* child_accessor = child_accessor_and_manager.first.get();
+  class PythonLambdaGuardAccessor : public GuardAccessor {
+   public:
+    PythonLambdaGuardAccessor(py::function accessor_fn) {
+      _accessor_fn = accessor_fn;
+    }
 
-      // Find the child accessor matching the new GuardAccessorT
-      auto maybe_attr_accessor = dynamic_cast<GuardAccessorT*>(child_accessor);
-      if (maybe_attr_accessor != nullptr) {
-        if (maybe_attr_accessor->equals(accessor_key)) {
-          auto& child_mananger = child_accessor_and_manager.second;
-          return child_mananger.get();
+    bool equals(py::function accessor_fn) const {
+      return _accessor_fn.equal(accessor_fn);
+    }
+
+    py::object access(py::object obj) const override {
+      return _accessor_fn(obj);
+    }
+
+   private:
+    py::function _accessor_fn;
+  };
+
+  class GuardManager;
+  typedef std::
+      pair<std::unique_ptr<GuardAccessor>, std::unique_ptr<GuardManager>>
+          ChildGuardType;
+
+  /**
+   * GuardManger encapsulates all the guards related to a particular py::object.
+   * It is a tree structure and consists of
+   * 1) Leaf guards - Guards that are run on the user given object
+   * 2) Child guards - Guards that run on the values accessed by Accessors on
+   * the py::object.
+   *
+   * Lets look at an example to understand how it works.
+   * class Pair:
+   *     int x = 1;
+   *     int y = 2;
+   *
+   * At compile time
+   * >> guard_mananger = GuardManger()
+   * >> guard_mananger.x.add_lambda_guard(
+   *        lambda x: isinstance(x, Pair),
+   *        lambda x: f"expected Pair, found {type(x)}"
+   *    )
+   * >> guard_mananger.x.add_lambda_guard(lambda x: x == 1, lambda x: f"found
+   * {x}, expected 1")
+   * >> guard_mananger.y.add_lambda_guard(lambda x: x == 2, lambda x: f"found
+   * {x}, expected 2")
+   *
+   * At runtime
+   * >> guard_mananger.check(Pair())
+   *
+   * At compile time we build the tree structure. When we do `guard_manager.x`,
+   * it creates an AttrGuardAccessorNode, initializes a child guard manager with
+   * this accessor node, and adds it as a child. When we do
+   * `guard_manager.x.add_lambda_guard`, we call add_lambda_guard on the newly
+   * created guard manager and register a new leaf guard on it.
+   *
+   * At runtime, the accessor node has an important function of providing a way
+   * to access the value for the child guard. In the above example,
+   * guard_manager.x adds an AttrGuardAccessorNode with attr_name x. When check
+   * functino is called, parent GuardManager calls getattr(value, "x") on its
+   * value passed to the check function to call the check function of the child
+   * guard manager.
+   *
+   * Sorting the guards based on failure count - An optimization for runtime
+   * here is to reshuffle the order of child guards depending on the failure
+   * count. This ensures that we run the guards that are more prone to fail
+   * statistically first. This can improve the cache lookup time when we have
+   * multiple cache entries.
+   */
+  class GuardManager {
+   public:
+    GuardManager() = default;
+    GuardManager(const GuardManager& m) = delete;
+    GuardManager& operator=(const GuardManager&) = delete;
+
+    // GuardManager is the owner of the leaf_guards
+    void add_leaf_guard(std::unique_ptr<LeafGuard> leaf_guard) {
+      _leaf_guards.push_back(std::move(leaf_guard));
+    }
+
+    /**
+     * Adds a new guard manager with appropriate Accessor. If the accessor is
+     * already present, we just return the guard manager.
+     */
+    template <typename GuardAccessorT>
+    GuardManager* get_child_manager(py::object accessor_key) {
+      // accessor_key type depends on the GuardAccessorT
+      // for AttrGuardAccessor - py::str name
+      // for ItemGuardAccessor - py::str name
+      // for PythonLambdaGuardAccessor - py::function lambda
+      for (auto& child_accessor_and_manager : _child_managers) {
+        GuardAccessor* child_accessor = child_accessor_and_manager.first.get();
+
+        // Find the child accessor matching the new GuardAccessorT
+        auto maybe_attr_accessor =
+            dynamic_cast<GuardAccessorT*>(child_accessor);
+        if (maybe_attr_accessor != nullptr) {
+          if (maybe_attr_accessor->equals(accessor_key)) {
+            auto& child_mananger = child_accessor_and_manager.second;
+            return child_mananger.get();
+          }
         }
       }
+
+      // Construct a new child manager
+      std::unique_ptr<GuardAccessorT> accessor =
+          std::make_unique<GuardAccessorT>(accessor_key);
+      std::unique_ptr<GuardManager> mananger = std::make_unique<GuardManager>();
+      auto child_accessor_and_manager =
+          std::make_pair(std::move(accessor), std::move(mananger));
+      _child_managers.emplace_back(std::move(child_accessor_and_manager));
+      return _child_managers.back().second.get();
     }
 
-    // Construct a new child manager
-    std::unique_ptr<GuardAccessorT> accessor =
-        std::make_unique<GuardAccessorT>(accessor_key);
-    std::unique_ptr<GuardManager> mananger = std::make_unique<GuardManager>();
-    auto child_accessor_and_manager =
-        std::make_pair(std::move(accessor), std::move(mananger));
-    _child_managers.emplace_back(std::move(child_accessor_and_manager));
-    return _child_managers.back().second.get();
-  }
-
-  bool check(py::object value) {
-    return check_with_debug_info(value).first;
-  }
-
-  std::pair<bool, GuardDebugInfo> check_with_debug_info(py::object value) {
-    const std::pair<bool, GuardDebugInfo> result_pair = run_guards(value);
-    if (result_pair.first == false) {
-      _fail_count += 1;
+    bool check(py::object value) {
+      return check_with_debug_info(value).first;
     }
-    return result_pair;
-  }
 
-  std::pair<bool, GuardDebugInfo> run_guards(py::object value) {
-    int debug_num_guards_executed = 0;
-    bool result = true;
-    for (const auto& guard : _leaf_guards) {
-      const std::pair<bool, GuardDebugInfo>& tmp =
-          guard->check_with_debug_info(value);
-      result &= tmp.first;
-      debug_num_guards_executed++;
-      // TODO (janimesh): Does this check adds overhead?
-      if (result == false) {
+    std::pair<bool, GuardDebugInfo> check_with_debug_info(py::object value) {
+      const std::pair<bool, GuardDebugInfo> result_pair = run_guards(value);
+      if (result_pair.first == false) {
+        _fail_count += 1;
+      }
+      return result_pair;
+    }
+
+    std::pair<bool, GuardDebugInfo> run_guards(py::object value) {
+      int debug_num_guards_executed = 0;
+      bool result = true;
+      for (const auto& guard : _leaf_guards) {
+        const std::pair<bool, GuardDebugInfo>& tmp =
+            guard->check_with_debug_info(value);
+        result &= tmp.first;
+        debug_num_guards_executed++;
+        // TODO (janimesh): Does this check adds overhead?
+        if (result == false) {
+          auto& debug_info = tmp.second;
+          return std::make_pair(
+              result,
+              GuardDebugInfo(
+                  debug_num_guards_executed, debug_info.failure_reason));
+        }
+      }
+
+      std::string reason = "";
+      for (const auto& child_accessor_and_manager : _child_managers) {
+        auto& accessor = child_accessor_and_manager.first;
+        auto& manager = child_accessor_and_manager.second;
+        const std::pair<bool, GuardDebugInfo>& tmp =
+            manager->check_with_debug_info(accessor->access(value));
+        result &= tmp.first;
         auto& debug_info = tmp.second;
-        return std::make_pair(
-            result,
-            GuardDebugInfo(
-                debug_num_guards_executed, debug_info.failure_reason));
+        debug_num_guards_executed += debug_info.num_guards_executed;
+        if (result == false) {
+          reason = debug_info.failure_reason;
+          ;
+          break;
+        }
       }
-    }
 
-    std::string reason = "";
-    for (const auto& child_accessor_and_manager : _child_managers) {
-      auto& accessor = child_accessor_and_manager.first;
-      auto& manager = child_accessor_and_manager.second;
-      const std::pair<bool, GuardDebugInfo>& tmp =
-          manager->check_with_debug_info(accessor->access(value));
-      result &= tmp.first;
-      auto& debug_info = tmp.second;
-      debug_num_guards_executed += debug_info.num_guards_executed;
       if (result == false) {
-        reason = debug_info.failure_reason;
-        ;
-        break;
+        // Inplace sort the child guards by fail count. This moves the guard
+        // with higher fail count earlier in the queue, and enables fail fast
+        // for the next check_with_debug_info.
+
+        // An alternate implementation was to use priority queue directly on
+        // _child_managers, but it was rejected because of the complexity of
+        // popping and creating a new pq on each run_guards. Moreover, this sort
+        // is happening on the unhappy path when check_with_debug_info guard
+        // fails. So, its probably ok.
+        std::sort(
+            _child_managers.begin(),
+            _child_managers.end(),
+            [](const ChildGuardType& a, const ChildGuardType& b) {
+              return a.second->fail_count() >= b.second->fail_count();
+            });
       }
+      return std::make_pair(
+          result, GuardDebugInfo(debug_num_guards_executed, reason));
     }
 
-    if (result == false) {
-      // Inplace sort the child guards by fail count. This moves the guard with
-      // higher fail count earlier in the queue, and enables fail fast for the
-      // next check_with_debug_info.
-
-      // An alternate implementation was to use priority queue directly on
-      // _child_managers, but it was rejected because of the complexity of
-      // popping and creating a new pq on each run_guards. Moreover, this sort
-      // is happening on the unhappy path when check_with_debug_info guard
-      // fails. So, its probably ok.
-      std::sort(
-          _child_managers.begin(),
-          _child_managers.end(),
-          [](const ChildGuardType& a, const ChildGuardType& b) {
-            return a.second->fail_count() >= b.second->fail_count();
-          });
+    int fail_count() const {
+      return _fail_count;
     }
-    return std::make_pair(
-        result, GuardDebugInfo(debug_num_guards_executed, reason));
-  }
 
-  int fail_count() const {
-    return _fail_count;
-  }
-
-  std::vector<std::pair<GuardAccessor*, GuardManager*>> get_child_managers()
-      const {
-    std::vector<std::pair<GuardAccessor*, GuardManager*>> ret;
-    for (const auto& child_accessor_and_manager : _child_managers) {
-      const auto& accessor = child_accessor_and_manager.first;
-      const auto& manager = child_accessor_and_manager.second;
-      ret.emplace_back(std::make_pair(accessor.get(), manager.get()));
+    std::vector<std::pair<GuardAccessor*, GuardManager*>> get_child_managers()
+        const {
+      std::vector<std::pair<GuardAccessor*, GuardManager*>> ret;
+      for (const auto& child_accessor_and_manager : _child_managers) {
+        const auto& accessor = child_accessor_and_manager.first;
+        const auto& manager = child_accessor_and_manager.second;
+        ret.emplace_back(std::make_pair(accessor.get(), manager.get()));
+      }
+      return ret;
     }
-    return ret;
-  }
 
-  std::vector<LeafGuard*> get_leaf_guards() const {
-    std::vector<LeafGuard*> ret;
-    for (const auto& guard : _leaf_guards) {
-      ret.push_back(guard.get());
+    std::vector<LeafGuard*> get_leaf_guards() const {
+      std::vector<LeafGuard*> ret;
+      for (const auto& guard : _leaf_guards) {
+        ret.push_back(guard.get());
+      }
+      return ret;
     }
-    return ret;
-  }
 
- private:
-  // Leaf guards are the terminal guards on this object, e.g, type check on a
-  // list. These guards have to be run before any children are run
-  std::vector<std::unique_ptr<LeafGuard>> _leaf_guards;
+   private:
+    // Leaf guards are the terminal guards on this object, e.g, type check on a
+    // list. These guards have to be run before any children are run
+    std::vector<std::unique_ptr<LeafGuard>> _leaf_guards;
 
-  // Child guards managers - its a pair of accessor and guard manager
-  std::vector<ChildGuardType> _child_managers;
+    // Child guards managers - its a pair of accessor and guard manager
+    std::vector<ChildGuardType> _child_managers;
 
-  // Keeps a count of how many times this guard manager check function returns
-  // False. This is used for sorting optimization.
-  int _fail_count{0};
-};
+    // Keeps a count of how many times this guard manager check function returns
+    // False. This is used for sorting optimization.
+    int _fail_count{0};
+  };
 
 } // namespace
 
-PyObject* torch_c_dynamo_guards_init() {
+PyObject*
+torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
   TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
