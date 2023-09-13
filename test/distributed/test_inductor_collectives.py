@@ -23,7 +23,7 @@ from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch._inductor.utils import has_triton, run_and_get_triton_code
 import torch._dynamo.logging
 
-def _to_list_with_constrain_as_size(tensor):
+def _tolist_with_constrain_as_size(tensor):
     lst = tensor.tolist()
     for elem in lst:
         torch.export.constrain_as_size(elem)
@@ -227,8 +227,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor(self):
         def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
-            input_split_sizes = _to_list_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _to_list_with_constrain_as_size(output_split_sizes_tensor)
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
+            output_split_sizes = _tolist_with_constrain_as_size(output_split_sizes_tensor)
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes,
@@ -284,7 +284,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_output_split_sizes_none(self):
         def example(inp, input_split_sizes_tensor, *, tag, ranks, group_size):
-            input_split_sizes = _to_list_with_constrain_as_size(input_split_sizes_tensor)
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 None,
@@ -327,7 +327,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_all_to_all_single_inductor_input_split_sizes_none(self):
         def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
-            output_split_sizes = _to_list_with_constrain_as_size(output_split_sizes_tensor)
+            output_split_sizes = _tolist_with_constrain_as_size(output_split_sizes_tensor)
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes,

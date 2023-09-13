@@ -545,10 +545,9 @@ def _traceable_collectives_source(fn):
     from torch.distributed._functional_collectives import (
         all_gather_tensor_inplace,
         reduce_scatter_tensor_inplace,
-        all_to_all_single,
     )
 
-    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace, all_to_all_single}
+    valid_values = {all_gather_tensor_inplace, reduce_scatter_tensor_inplace}
     assert fn in valid_values
     inner_name = fn.__name__
     path_source = AttrSource(
@@ -556,36 +555,6 @@ def _traceable_collectives_source(fn):
         member="_functional_collectives",
     )
     return AttrSource(path_source, inner_name)
-
-
-class AllToAllSingleFunctionalCollectiveVariable(UserFunctionVariable):
-    def __init__(self, fn, *, orig_fn, orig_source, **kwargs):
-        # orig_fn lets us implement any fn-specific args/kwargs restrictions inside call_function
-        self.orig_fn = orig_fn
-        self.orig_source = orig_source
-
-        # remapped_fn gets stuffed in self.fn and used in super().call_function
-        super().__init__(fn, **kwargs)
-
-    @staticmethod
-    def can_rewrite(variable):
-        return (
-            inspect.isfunction(variable) and variable == torch.distributed._functional_collectives.all_to_all_single
-        )
-
-    @staticmethod
-    def rewrite(fn):
-        # TODO(yf225): what's right way to say "just return original"?
-        new_fn = torch.distributed._functional_collectives.all_to_all_single
-        return new_fn, _traceable_collectives_source(new_fn)
-
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        print(f"args: {args}")
-        print(f"kwargs: {kwargs}")
-        return super().call_function(tx, args, kwargs)
-
 
 
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):

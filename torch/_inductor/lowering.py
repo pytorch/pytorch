@@ -4824,25 +4824,10 @@ try:
         )
         return list(map(TensorBox.create, result))
 
-    # def replace_specialized_zero_or_one_with_unbacked_symint(sizes_list):
-    #     ret = []
-    #     for elem in sizes_list:
-    #         if elem in [0, 1]:
-    #             elem_symint = V.graph.sizevars.shape_env.create_unbacked_symint()
-    #             constrain_range(elem_symint, min=elem, max=elem)
-    #             ret.append(elem_symint)
-    #         else:
-    #             ret.append(elem)
-    #     return ret
-
     @register_lowering(c10d_functional.all_to_all_single)
     def all_to_all_single(
         self, output_split_sizes, input_split_sizes, tag, ranks, group_size
     ):
-        # if output_split_sizes is not None:
-        #     output_split_sizes = replace_specialized_zero_or_one_with_unbacked_symint(output_split_sizes)
-        # if input_split_sizes is not None:
-        #     input_split_sizes = replace_specialized_zero_or_one_with_unbacked_symint(input_split_sizes)
         return TensorBox.create(
             ir.AllToAllSingle.create(
                 self,
