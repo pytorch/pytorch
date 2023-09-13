@@ -59,10 +59,11 @@ void _verify_chunk_result(
     const std::vector<Tensor>& chunks) {
   ASSERT_EQ(expected_chunk_sizes.size(), chunks.size());
   int n = 0;
-  for (int i = 0; i < chunks.size(); i++) {
-    ASSERT_EQ(expected_chunk_sizes[i], chunks[i].size(0));
-    for (int j = 0; j < chunks[i].size(0); j++)
-      ASSERT_EQ(n++, chunks[i].slice(0, j, j+1).item());
+  for (const auto i : c10::irange(chunks.size())) {
+    ASSERT_EQ(chunks[i].size(0), expected_chunk_sizes[i]);
+    for (int j = 0; j < chunks[i].size(0); j++) {
+      ASSERT_EQ(chunks[i].slice(0, j, j+1).item().to<int>(), n++);
+    }
   }
 }
 

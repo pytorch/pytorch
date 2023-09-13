@@ -2111,7 +2111,7 @@ class ShapePropagator : public PropertyPropBase {
       node->output()->setType(ten->withSizes(sizes));
       return true;
     } else if (node->matches(
-                   "aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
+                   "aten::chunk(Tensor self, int chunks, int dim, bool redistribute, bool drop_remainder) -> Tensor[]",
                    /*const_inputs=*/{attr::chunks, attr::dim})) {
       auto input_type = tensor_types.at(0);
       auto sizes = input_type->sizes().concrete_sizes().value();

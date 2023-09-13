@@ -66,7 +66,7 @@ static void CanonicalizeOps(Block* block) {
         }
       }
     } else if (it->matches(
-                   "aten::chunk(Tensor self, int chunks, int dim) -> Tensor[]",
+                   "aten::chunk(Tensor self, int chunks, int dim, bool redistribute, bool drop_remainder) -> Tensor[]",
                    /*const_inputs=*/{attr::chunks, attr::dim})) {
       // Replace aten::chunk (which returns a list) with ConstantChunk with the
       // outputs unpacked.
