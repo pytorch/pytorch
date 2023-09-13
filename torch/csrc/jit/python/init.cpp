@@ -1259,19 +1259,12 @@ void initJITBindings(PyObject* module) {
       .def(
           "is_constant",
           [](const c10::SymNode& node){
-            return (
-              node->constant_int().has_value()
-              || node->constant_bool().has_value()
-            );
+            return node->is_constant();
           })
       .def(
           "is_symbolic",
           [](const c10::SymNode& node) {
-            return (
-                !node->singleton_int().has_value()
-                && !node->constant_bool().has_value()
-                && !node->constant_int().has_value()
-            );
+            return node->is_symbolic();
           })
       .def(
           "singleton_int",
@@ -1281,6 +1274,7 @@ void initJITBindings(PyObject* module) {
 
   // clang-format on
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<CompleteArgumentSpec>(m, "CompleteArgumentSpec")
       .def("__repr__", [](CompleteArgumentSpec& self) {
         std::ostringstream s;

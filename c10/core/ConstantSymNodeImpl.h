@@ -75,6 +75,12 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
       return c10::nullopt;
     }
   }
+  bool is_constant() override {
+    return true;
+  }
+  bool is_symbolic() override {
+    return false;
+  }
 
  private:
   c10::variant<int64_t, bool> value_;
