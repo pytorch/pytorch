@@ -3248,7 +3248,7 @@
   dispatch:
     CUDA: _sparse_semi_structured_linear
 
-- func: _mixed_dtypes_linear(Tensor self, Tensor mat2, Tensor scale, Tensor? bias=None) -> Tensor
+- func: _mixed_dtypes_linear(Tensor input, Tensor weight, Tensor scale, *, Tensor? bias=None, str? activation=None) -> Tensor
   dispatch:
     CUDA: _mixed_dtypes_linear
 

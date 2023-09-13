@@ -30,7 +30,7 @@ namespace native {
 #ifndef USE_ROCM
 template<typename ElementInputA, typename EpilogueTag>
 Tensor
-mixed_dtypes_linear_dispatch_dtype_bias(
+mixed_dtypes_linear_dispatch_dtype(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
     const Tensor& bias) {
   const int length_m = input.size(0);
@@ -65,8 +65,8 @@ mixed_dtypes_linear_dispatch_dtype_bias(
 
   // Check for current CUTLASS limitations w.r.t. weight sizes.
   TORCH_CHECK(length_k % 64 == 0 && length_n % 64 == 0,
-              "mixed_dtypes_linear_dispatch_dtype_bias: Number of rows/columns "
-              "of the weight matrix must be divisible by ", 64);
+              "mixed_dtypes_linear_dispatch_dtype: Number of rows/columns of "
+              "the weight matrix must be divisible by ", 64);
 
   using ElementAccumulator = float;
 
@@ -146,14 +146,51 @@ mixed_dtypes_linear_dispatch_dtype_bias(
 
   return output;
 }
+
+template<typename ElementInputA>
+Tensor
+mixed_dtypes_linear_dispatch_bias_activation_dtype(
+    const Tensor& input, const Tensor& weight, const Tensor& scale,
+    const Tensor& bias, const c10::string_view& activation) {
+    if (bias.numel() == 0) {
+      if (activation == "none") {
+        return mixed_dtypes_linear_dispatch_dtype<
+          ElementInputA,
+          fastertransformer::EpilogueOpNoBias>(input, weight, scale, bias);
+      }
+      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation_dtype: Activation "
+               "\"", activation, "\" is not supported");
+      return Tensor{};
+    }
+    else {
+      if (activation == "none") {
+        return mixed_dtypes_linear_dispatch_dtype<
+            ElementInputA,
+            fastertransformer::EpilogueOpBias>(input, weight, scale, bias);
+      } else if (activation == "relu") {
+        return mixed_dtypes_linear_dispatch_dtype<
+            ElementInputA,
+            fastertransformer::EpilogueOpBiasReLU>(input, weight, scale, bias);
+      } else if (activation == "silu") {
+        return mixed_dtypes_linear_dispatch_dtype<
+            ElementInputA,
+            fastertransformer::EpilogueOpBiasSilu>(input, weight, scale, bias);
+      }
+      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation_dtype: Activation "
+               "\"", activation, "\" is not supported");
+      return Tensor{};
+    }
+}
 #endif
 
 Tensor
 _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
-                     const c10::optional<Tensor>& bias_opt) {
+                     const c10::optional<Tensor>& bias_opt,
+                     const c10::optional<c10::string_view> activation_opt) {
 #ifndef USE_ROCM
   const auto bias = bias_opt.has_value() ? *bias_opt : Tensor{};
+  const auto activation = activation_opt.has_value() ? *activation_opt : "none";
 
   // For now, only CC 8.x devices are supported.
   const auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -236,35 +273,19 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
       AT_DISPATCH_CASE(
           at::ScalarType::Half,
           [&]() {
-            if (bias.numel() == 0) {
-              output = mixed_dtypes_linear_dispatch_dtype_bias<
-                          cutlass::half_t,
-                          fastertransformer::EpilogueOpNoBias>(
-                          input_2d, weight, scale, bias);
-            }
-            else {
-              output = mixed_dtypes_linear_dispatch_dtype_bias<
-                           cutlass::half_t,
-                           fastertransformer::EpilogueOpBias>(
-                           input_2d, weight, scale, bias);
-            }
+            output =
+                mixed_dtypes_linear_dispatch_bias_activation_dtype<
+                    cutlass::half_t>(
+                    input_2d, weight, scale, bias, activation);
             return;
           })
       AT_DISPATCH_CASE(
           at::ScalarType::BFloat16,
           [&]() {
-            if (bias.numel() == 0) {
-              output = mixed_dtypes_linear_dispatch_dtype_bias<
-                          cutlass::bfloat16_t,
-                          fastertransformer::EpilogueOpNoBias>(
-                          input_2d, weight, scale, bias);
-            }
-            else {
-              output = mixed_dtypes_linear_dispatch_dtype_bias<
-                           cutlass::bfloat16_t,
-                           fastertransformer::EpilogueOpBias>(
-                           input_2d, weight, scale, bias);
-            }
+            output =
+                mixed_dtypes_linear_dispatch_bias_activation_dtype<
+                    cutlass::bfloat16_t>(
+                    input_2d, weight, scale, bias, activation);
             return;
           }));
 

@@ -351,7 +351,7 @@ class TestMixedDtypesLinearCuda(TestCase):
                 input,
                 preprocess_weights_for_mixed_gemm(weight).view(torch.uint8),
                 scale,
-                bias,
+                bias=bias,
             )
 
             torch.testing.assert_close(output, output_ref)
