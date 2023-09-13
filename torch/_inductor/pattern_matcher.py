@@ -12,6 +12,7 @@ import torch
 import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch.fx import Node
@@ -357,17 +358,35 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext):
-        if (
-            not self._match_fns(node)
-            or len(node.args) != len(self.args)
-            or len(node.kwargs) != len(self.kwargs)
-        ):
+        if not self._match_fns(node) or len(node.args) != len(self.args):
             return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
 
         if not self._match_users(node, ctx):
             return FailedMatch(f"multiple_users {node}")
 
-        node_items, node_spec = self.flatten(node.args, node.kwargs)
+        _args = node.args
+        _kwargs = node.kwargs
+        if len(_kwargs) < len(self.kwargs):
+            from torch.fx.operator_schemas import normalize_function
+
+            normalized_args_and_kwargs = normalize_function(
+                node.target, node.args, node.kwargs
+            )
+
+            if normalized_args_and_kwargs is None:
+                return FailedMatch(f"function_mismatch: node={node}, pattern={self}")
+            else:
+                _args, _kwargs = normalized_args_and_kwargs
+                if len(_args) == len(self.args) and len(_kwargs) >= len(self.kwargs):
+                    _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+                else:
+                    return FailedMatch(
+                        f"function_mismatch: node={node}, pattern={self}"
+                    )
+        else:
+            _kwargs = {i: _kwargs[i] for i in _kwargs if i in self.kwargs}
+
+        node_items, node_spec = self.flatten(_args, _kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
             return FailedMatch(f"args_structure {node_spec} {self_spec}")
@@ -1100,7 +1119,9 @@ def fx_to_pattern(
 @torch.no_grad()
 def inference_graph(fn, args):
     """Build a normalized inference graph, for use with fx_to_pattern"""
-    gm = make_fx(fn, select_decomp_table())(*args)
+    # TODO - look into using aot autograd, asserting no mutating ops here
+    with enable_python_dispatcher():
+        gm = make_fx(fn, select_decomp_table())(*args)
     gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm
