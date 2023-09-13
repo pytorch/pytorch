@@ -584,7 +584,7 @@ template <typename T>
 static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
-    py::object obj) {
+    const py::object& obj) {
   c10::optional<PyObject*> mb_obj =
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
@@ -594,20 +594,12 @@ static c10::ArrayRef<T> get_set_cached_attr(
       std::string(base_attr_name) + std::string("_issmallvector");
 
   bool is_buffer_allocated = false;
-  bool is_smallvector = false;
   int64_t curr_size = -1;
   if (PyObject_HasAttrString(mb_obj.value(), buffer_len_attr_name.c_str())) {
     auto buffer_pyobj =
         py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str());
     curr_size = py::cast<int64_t>(buffer_pyobj);
     is_buffer_allocated = true;
-    TORCH_INTERNAL_ASSERT(PyObject_HasAttrString(
-        mb_obj.value(), buffer_issmallvector_attr_name.c_str()));
-    (PyObject_HasAttrString(
-        mb_obj.value(), buffer_issmallvector_attr_name.c_str()));
-    auto issmallvector_pyobj =
-        py::handle(mb_obj.value()).attr(buffer_issmallvector_attr_name.c_str());
-    is_smallvector = py::cast<bool>(issmallvector_pyobj);
   }
 
   int64_t new_size = py::len(obj);
@@ -627,26 +619,10 @@ static c10::ArrayRef<T> get_set_cached_attr(
   bool needs_resize = false;
   // We need to resize if:
   // (1) we haven't allocated our buffer at all yet
-  // (2) our buffer is size 5 (smallvector optimization), but our new size is >
-  // 5 (3) our buffer is no longer size 5 (because at some point previously we
-  // saw a size > 5),
-  //     and our new size is different from the current buffer size
-  needs_resize = !is_buffer_allocated ||
-      ((!is_smallvector || new_size > 5) && curr_size != new_size);
+  // (2) our new size is != our old size
+  needs_resize = !is_buffer_allocated || curr_size != new_size;
   if (needs_resize) {
-    auto set_to_smallvector = false;
-    // If our current buffer is not the right size (eithr because we haven't
-    // allocated it yet, or there was a metadata mutation that changed the
-    // number of dims of the tensor), allocate a fresh buffer. Note that this
-    // will trash the previous buffer if there already was one, invalidating any
-    // existing SymIntArrayRef's from an old .sym_size() call.
-    auto new_buffer_size = new_size;
-    if (!is_buffer_allocated && new_size <= 5) {
-      // This is the smallvector optimization
-      new_buffer_size = 5;
-      set_to_smallvector = true;
-    }
-    T* ptr = new T[new_buffer_size];
+    T* ptr = new T[new_size];
     auto capsule =
         py::capsule(ptr, [](void* p) { delete[] reinterpret_cast<T*>(p); });
     int64_t idx = 0;
@@ -657,10 +633,6 @@ static c10::ArrayRef<T> get_set_cached_attr(
     set_tensor_attr_with_capsule(tensor, capsule, base_attr_name);
     // Set the len buffer
     py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str()) = new_size;
-    // Set whether or not the buffer is now using the smallvector optimization
-    // (sized to 5)
-    py::handle(mb_obj.value()).attr(buffer_issmallvector_attr_name.c_str()) =
-        set_to_smallvector;
   } else {
     auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
     void* buffer_pycapsule =
