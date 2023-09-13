@@ -234,7 +234,8 @@ static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
         per_tensor_dynamic_dims.emplace_back();
         continue;
       }
-      std::vector<std::optional<c10::SymInt>> vec = pyListToVecOptInt(mb_py_list);
+      std::vector<std::optional<c10::SymInt>> vec =
+          pyListToVecOptInt(mb_py_list);
       per_tensor_dynamic_dims.push_back(std::move(vec));
     }
   }

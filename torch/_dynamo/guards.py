@@ -1050,7 +1050,9 @@ class CheckFunctionManager:
                     self.output_graph.tensor_weakref_to_sizes_strides[WeakIdRef(t)][
                         "stride"
                     ]
-                ) if not t.is_nested else None
+                )
+                if not t.is_nested
+                else None
                 for t in tensor_check_examples
             ]
 
