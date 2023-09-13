@@ -159,6 +159,9 @@ class TritonOverrides(OpOverrides):
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
+            # fp8 data type conversions has min_elements_per_thread requirements.
+            # Refer to Triton implementations here:
+            # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
             fp8_dtypes = {
                 torch.float8_e4m3fn,
                 torch.float8_e5m2,
@@ -181,8 +184,11 @@ class TritonOverrides(OpOverrides):
 
         if src_dtype is not None:
             # Both dtype and src_dtype are set. This is used by torch to(dtype=dtype).
-            V.kernel.min_elements_per_thread = _get_min_elements_per_thread(
-                src_dtype, dtype
+            # It takes the maximum min_elements_per_thread if there are multiple fp8 conversions
+            # in the same kernel.
+            V.kernel.min_elements_per_thread = max(
+                _get_min_elements_per_thread(src_dtype, dtype),
+                V.kernel.min_elements_per_thread,
             )
 
         if dtype == torch.bool:
