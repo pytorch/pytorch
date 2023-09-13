@@ -181,6 +181,12 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual c10::optional<int64_t> maybe_as_int() {
     return c10::nullopt;
   }
+  virtual bool is_constant() {
+    return false;
+  }
+  virtual bool is_symbolic() {
+    return true;
+  }
   std::ostream& operator<<(std::ostream& os) {
     os << str();
     return os;
