@@ -3396,7 +3396,7 @@ class ShapeEnv:
 
         dynamic_scalar_replace = {}
         for s in expr.free_symbols:
-            if str(s) in self.shape_env.dynamic_scalars:
+            if str(s) in self.dynamic_scalars:
                 dynamic_scalar_replace[s] = sympy.Integer(32)
         expr = safe_expand(expr.xreplace(dynamic_scalar_replace))
 

@@ -373,6 +373,7 @@ class SizeVarAllocator:
         dynamic_scalar_replace = {}
         for s in free_symbols:
             if str(s) in self.shape_env.dynamic_scalars:
+                # TODO(yf225): comment
                 dynamic_scalar_replace[s] = sympy.Integer(32)
         expr = sympy_subs(expr, dynamic_scalar_replace)
         free_symbols = expr.free_symbols
