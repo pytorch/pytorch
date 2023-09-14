@@ -687,12 +687,20 @@ class GuardAccessor {
     return _guard_manager;
   }
 
+  bool matches_key(const py::object key) const {
+    return _accessor_key.equal(key);
+  }
+
   virtual ~GuardAccessor() = default;
   virtual py::object access(py::object obj) const = 0;
 
  private:
   // Guard manager corresponding to the retrieved value from the GuardAccessor.
   std::unique_ptr<GuardManager> _guard_manager;
+ protected:
+  // accessor key could be py::str for getattr, getitem or py::function for
+  // lambda accessor.
+  py::object _accessor_key;
 };
 
 /**
@@ -701,19 +709,12 @@ class GuardAccessor {
 class AttrGuardAccessor : public GuardAccessor {
  public:
   AttrGuardAccessor(py::str name) {
-    _attr_name = name;
-  }
-
-  bool equals(py::str name) const {
-    return _attr_name.equal(name);
+    _accessor_key = name;
   }
 
   py::object access(py::object obj) const override {
-    return py::getattr(obj, _attr_name);
+    return py::getattr(obj, _accessor_key);
   }
-
- private:
-  py::str _attr_name;
 };
 
 /**
@@ -722,20 +723,13 @@ class AttrGuardAccessor : public GuardAccessor {
 class ItemGuardAccessor : public GuardAccessor {
  public:
   ItemGuardAccessor(py::str name) {
-    _attr_name = name;
-  }
-
-  bool equals(py::str name) const {
-    return _attr_name.equal(name);
+    _accessor_key = name;
   }
 
   py::object access(py::object obj) const override {
     // There is no py::getitem helper.
-    return py::getattr(obj, "__getitem__")(_attr_name);
+    return py::getattr(obj, "__getitem__")(_accessor_key);
   }
-
- private:
-  py::str _attr_name;
 };
 
 /**
@@ -746,19 +740,12 @@ class ItemGuardAccessor : public GuardAccessor {
 class PythonLambdaGuardAccessor : public GuardAccessor {
  public:
   PythonLambdaGuardAccessor(py::function accessor_fn) {
-    _accessor_fn = accessor_fn;
-  }
-
-  bool equals(py::function accessor_fn) const {
-    return _accessor_fn.equal(accessor_fn);
+    _accessor_key = accessor_fn;
   }
 
   py::object access(py::object obj) const override {
-    return _accessor_fn(obj);
+    return _accessor_key(obj);
   }
-
- private:
-  py::function _accessor_fn;
 };
 
 /**
@@ -827,22 +814,16 @@ class GuardManager {
     // for AttrGuardAccessor - py::str name
     // for ItemGuardAccessor - py::str name
     // for PythonLambdaGuardAccessor - py::function lambda
-    for (auto& uptr_accessor : _accessors) {
-      GuardAccessor* accessor = uptr_accessor.get();
 
-      // Find the child accessor matching the new GuardAccessorT
-      auto maybe_attr_accessor = dynamic_cast<GuardAccessorT*>(accessor);
-      if (maybe_attr_accessor != nullptr) {
-        if (maybe_attr_accessor->equals(accessor_key)) {
-          return maybe_attr_accessor->get_guard_manager().get();
-        }
+    // Return the manager if the guard accessor exists
+    for (const auto& accessor : _accessors) {
+      if (accessor->matches_key(accessor_key)) {
+        return accessor->get_guard_manager().get();
       }
     }
 
-    // Construct a new accessor
-    std::unique_ptr<GuardAccessorT> new_accessor =
-        std::make_unique<GuardAccessorT>(accessor_key);
-    _accessors.emplace_back(std::move(new_accessor));
+    // Construct a new guard accessor
+    _accessors.emplace_back(std::make_unique<GuardAccessorT>(accessor_key));
     return _accessors.back()->get_guard_manager().get();
   }
 
@@ -880,6 +861,7 @@ class GuardManager {
 
     // Iterate over accessors
     std::string reason = "";
+    bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
       auto& manager = accessor->get_guard_manager();
       const std::pair<bool, GuardDebugInfo>& tmp =
@@ -891,9 +873,13 @@ class GuardManager {
         reason = debug_info.failure_reason;
         break;
       }
+      failed_on_first = false;
     }
 
-    if (result == false) {
+    // failed_on_first is just an optimization to avoid sorting if we are
+    // failing on the first accessor itself. This is helpful when we have
+    // already sorted the guards once, and dont need to sort again.
+    if (result == false and failed_on_first == false) {
       // Inplace sort the child guards by fail count. This moves the guard with
       // higher fail count earlier in the queue, and enables fail fast for the
       // next check_with_debug_info.
