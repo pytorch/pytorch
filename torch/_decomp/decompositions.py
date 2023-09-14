@@ -1298,6 +1298,28 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
+@register_decomposition([aten.div.Tensor_mode])
+@out_wrapper()
+@pw_cast_for_opmath
+def div(a: TensorLike, b: TensorLike, *, rounding_mode: Optional[str] = None):
+    if rounding_mode is None:
+        return torch.div(a, b)
+    elif rounding_mode == "trunc":
+        return torch.trunc(torch.div(a, b))
+    elif rounding_mode == "floor":
+        return torch.floor(torch.div(a, b))
+    else:
+        msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
+        raise ValueError(msg)
+
+
+@register_decomposition(aten.trunc)
+@out_wrapper()
+@pw_cast_for_opmath
+def trunc(a: Tensor):
+    return torch.where(a > 0, torch.floor(a), torch.ceil(a))
+
+
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
