@@ -92,10 +92,9 @@ void PythonEngine::thread_init(
   // runtime is finalizing
   if (!Py_IsInitialized()) {
     no_gil.disarm();
-    // TODO: call disarm rather than leak gil_scoped_acquired once
-    // PyThreadState_Clear can safely be called from finalize NOTE: deploy.cpp
-    // calls `PyInterpreterState_Delete` to destruct PyThreadState, so avoid
-    // use-after-free here.
+    // TODO: call disarm once PyThreadState_Clear can safely be called from
+    // finalize NOTE: deploy.cpp calls `PyInterpreterState_Delete` to destruct
+    // PyThreadState, so avoid use-after-free here.
     auto ptr = gil.release();
     operator delete(ptr);
   }
