@@ -200,6 +200,7 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
     def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -235,6 +236,7 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
     def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -304,6 +306,7 @@ class TestDoBench(TestCase):
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
+    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
     def test_max_autotune_cutlass_backend_addmm(
         self, dynamic, max_autotune_gemm_backends
     ):
