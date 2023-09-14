@@ -86,9 +86,8 @@ try:
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EOps  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
+    from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
     from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXModels  # noqa: F401
 except ImportError as e:
     # In FBCode we separate PT2 out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_pt2e`

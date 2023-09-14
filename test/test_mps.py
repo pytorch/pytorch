@@ -12,6 +12,7 @@ import tempfile
 import os
 import copy
 import gc
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -84,6 +85,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'aminmax': [torch.float32],
         'polar': [torch.float32],
+        '_embedding_bag_dense_backward': [torch.float16, torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -666,6 +668,7 @@ def mps_ops_modifier(ops):
         'linalg.pinv': None,
         'linalg.pinvhermitian': None,
         'nonzero_static': None,
+        '_embedding_bag_dense_backward': None,
 
         # MPS: input sizes must be divisible by output sizes
         'nn.functional.adaptive_avg_pool1d': None,
@@ -9760,6 +9763,15 @@ class TestAdvancedIndexing(TestCaseMPS):
         x = torch.randn(10, requires_grad=True)
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
+
+    def test_nonzero_multi_threading(self):
+        # Test that MPS does not crash if nonzero called concurrently
+        # See https://github.com/pytorch/pytorch/issues/100285
+        x = torch.rand(3, 3, device="mps")
+        t1 = threading.Thread(target=torch.nonzero, args=(x,))
+        t2 = threading.Thread(target=torch.nonzero, args=(x,))
+        t1.start()
+        t2.start()
 
     def test_masked_select(self):
         x = torch.randn(3, 4)
