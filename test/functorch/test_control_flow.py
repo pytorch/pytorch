@@ -1240,6 +1240,7 @@ eq = true_graph_0 = false_graph_0 = x_1 = None
 """
         self._expected_inline_normalized(gm.code, exp_code)
 
+
         # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
         self.assertEqual(gm(x), true_fn(x))
