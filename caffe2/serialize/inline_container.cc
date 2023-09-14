@@ -29,6 +29,35 @@ namespace caffe2 {
 namespace serialize {
 constexpr c10::string_view kDebugPklSuffix(".debug_pkl");
 
+struct MzZipReaderIterWrapper {
+  MzZipReaderIterWrapper(mz_zip_reader_extract_iter_state* iter) : impl(iter) {}
+  mz_zip_reader_extract_iter_state* impl;
+};
+
+ChunkRecordIterator::ChunkRecordIterator(
+    size_t recordSize,
+    size_t chunkSize,
+    std::unique_ptr<MzZipReaderIterWrapper> iter)
+    : recordSize_(recordSize),
+      chunkSize_(chunkSize),
+      offset_(0),
+      iter_(std::move(iter)) {}
+
+ChunkRecordIterator::~ChunkRecordIterator() {
+  mz_zip_reader_extract_iter_free(iter_->impl);
+}
+
+size_t ChunkRecordIterator::next(void* buf){
+  size_t want_size = std::min(chunkSize_, recordSize_ - offset_);
+  if (want_size == 0) {
+    return 0;
+  }
+  size_t read_size = mz_zip_reader_extract_iter_read(iter_->impl, buf, want_size);
+  TORCH_CHECK(read_size > 0, "Read bytes should be larger than 0");
+  offset_ += read_size;
+  return read_size;
+}
+
 size_t istream_read_func(void* pOpaque, mz_uint64 file_ofs, void* pBuf, size_t n) {
   auto self = static_cast<PyTorchStreamReader*>(pOpaque);
   return self->read(file_ofs, static_cast<char*>(pBuf), n);
@@ -362,32 +391,39 @@ size_t PyTorchStreamReader::getRecord(
       n);
   valid("retrieving file meta-data for ", name.c_str());
 
-  mz_zip_reader_extract_iter_state* iter =
-      mz_zip_reader_extract_iter_new(ar_.get(), key, 0);
-  TORCH_CHECK(
-      iter != nullptr,
-      "Failed to create zip reader iter: ",
-      mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
   std::vector<uint8_t> buffer;
   if (buf == nullptr) {
     buffer.resize(chunk_size);
     buf = buffer.data();
   }
-  for (size_t offset = 0; offset < stat.m_uncomp_size; offset += chunk_size) {
-    size_t want_size =
-        std::min(chunk_size, (size_t)stat.m_uncomp_size - offset);
-    size_t read_size =
-        mz_zip_reader_extract_iter_read(iter, buf, want_size);
-    TORCH_CHECK(
-        read_size == want_size,
-        "Failed to advance zip reader iter: ",
-        mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
-    memcpy_func((char*)dst + offset, buf, read_size);
+
+  auto chunkIterator =
+      createChunkReaderIter(name, (size_t)stat.m_uncomp_size, chunk_size);
+  while (auto readSize = chunkIterator.next(buf)) {
+    memcpy_func((char*)dst + chunkIterator.offset_ - readSize, buf, readSize);
   }
   valid("reading file ", name.c_str());
-  mz_zip_reader_extract_iter_free(iter);
 
   return stat.m_uncomp_size;
+}
+
+ChunkRecordIterator PyTorchStreamReader::createChunkReaderIter(
+    const std::string& name,
+    const size_t recordSize,
+    const size_t chunkSize) {
+  // Create zip reader iterator
+  size_t key = getRecordID(name);
+  mz_zip_reader_extract_iter_state* zipReaderIter =
+      mz_zip_reader_extract_iter_new(ar_.get(), key, 0);
+  TORCH_CHECK(
+      zipReaderIter != nullptr,
+      "Failed to create zip reader iter: ",
+      mz_zip_get_error_string(mz_zip_get_last_error(ar_.get())));
+
+  return ChunkRecordIterator(
+      recordSize,
+      chunkSize,
+      std::make_unique<MzZipReaderIterWrapper>(zipReaderIter));
 }
 
 static int64_t read_le_16(uint8_t* buf) {
@@ -411,6 +447,11 @@ size_t PyTorchStreamReader::getRecordOffset(const std::string& name) {
   return stat.m_local_header_ofs + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_len + extra_len;
 }
 
+size_t PyTorchStreamReader::getRecordSize(const std::string& name) {
+  mz_zip_archive_file_stat stat;
+  mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
+  return stat.m_uncomp_size;
+}
 
 PyTorchStreamReader::~PyTorchStreamReader() {
   mz_zip_clear_last_error(ar_.get());

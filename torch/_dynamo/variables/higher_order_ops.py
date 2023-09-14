@@ -1,4 +1,5 @@
 import contextlib
+import functools
 import itertools
 import logging
 
@@ -41,13 +42,28 @@ def safe_or_raise_always_restore(tx, graph_checkpoint, checkpoint, f, sub_args):
         tx.restore_graphstate(checkpoint)
 
 
+def raise_hard_error_if_graph_break(reason):
+    def deco(fn):
+        @functools.wraps(fn)
+        def graph_break_as_hard_error(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Unsupported as e:
+                msg = " Scroll up to find out what causes the graph break."
+                raise UncapturedHigherOrderOpError(reason + msg) from e
+
+        return graph_break_as_hard_error
+
+    return deco
+
+
 @contextlib.contextmanager
-def dynamo_enable_grad(tx, enable=True):
+def dynamo_enable_grad(tx):
     from . import GradModeVariable
 
     org_value = torch.is_grad_enabled()
     try:
-        GradModeVariable.create(tx, enable)
+        GradModeVariable.create(tx, True)
         yield
     finally:
         GradModeVariable.create(tx, org_value)
@@ -136,7 +152,7 @@ def speculate_subgraph(
     description,
     *,
     always_restore=False,
-    enable_grad=None,
+    enable_grad=False,
     # NOTE [Temporary argument `manually_set_subgraph_inputs`]
     # If manually_set_subgraph_inputs=True, then we manually add
     # the `sub_args` to `subgraph`, if False then we rely
@@ -167,9 +183,7 @@ def speculate_subgraph(
             )
 
             autograd_ctx = (
-                dynamo_enable_grad(tx, enable_grad)
-                if enable_grad is not None
-                else contextlib.nullcontext()
+                dynamo_enable_grad(tx) if enable_grad else contextlib.nullcontext()
             )
 
             if restore_side_effects:
@@ -322,6 +336,9 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
 
 class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @raise_hard_error_if_graph_break(
+        reason="Cond doesn't work unless it is captured completely with torch.compile."
+    )
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
@@ -337,13 +354,13 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # TODO(voz): Support fake tensor dispatch for recursive
         # ops - see torch/dispatch/_dispatcher.py
         if len(args) != 4:
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
         if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
                 f"with original python type {str(args[0].python_type())}.",
@@ -352,14 +369,14 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # operands
         if not isinstance(args[3], (ListVariable, TupleVariable)):
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         operands = args[3].unpack_var_sequence(tx)
         if not all(
             isinstance(operand, (TensorVariable, torch.Tensor)) for operand in operands
         ):
-            raise UncapturedHigherOrderOpError(
+            unimplemented(
                 "Expected a tuple of tensors but got {actual_args}".format(  # noqa: UP032
                     actual_args=[
                         str(operand.python_type())
@@ -403,25 +420,19 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         def speculate_branch(branch):
             # NB: 0 is predicate
             ix = 1 if branch else 2
-            try:
-                # TODO: Support kwargs
-                ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
-                    tx,
-                    args[ix],
-                    operands,
-                    {},
-                    graph_checkpoint,
-                    checkpoint,
-                    "cond",
-                )
-            # Reraise because we want to suggest workarounds
-            except Unsupported as e:
-                raise UncapturedHigherOrderOpError(
-                    "Cond doesn't work unless it is captured completely with torch.compile"
-                ) from e
+            # TODO: Support kwargs
+            ret_val, ret_graph, ret_lifted_freevars = speculate_subgraph(
+                tx,
+                args[ix],
+                operands,
+                {},
+                graph_checkpoint,
+                checkpoint,
+                "cond",
+            )
 
             if not isinstance(ret_val, TensorVariable):
-                raise UncapturedHigherOrderOpError(
+                unimplemented(
                     "Expected branch to return a single tensor",
                 )
             return ret_val, ret_graph, ret_lifted_freevars
@@ -978,13 +989,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
         checkpoint = tx.copy_graphstate()
         pre_guards = tx.output.guards
         graph_checkpoint = tx.output.graph
-        # In eager-mode PyTorch, if we only compute first-order gradients,
-        # then the grad_mode is False during the backward pass.
-        # torch.compile assumes that we only compute first-order gradients,
-        # so we want to speculate the backward pass with the grad mode disabled.
-        enable_grad = (
-            False if self.value.__name__ == "trampoline_autograd_bwd" else None
-        )
 
         # TODO: Support kwargs
         (
@@ -1004,7 +1008,6 @@ class AutogradFunctionMethodHigherOrderVariable(TorchHigherOrderOperatorVariable
             # Backwards should never, ever be stored!
             always_restore=always_restore,
             restore_side_effects=False,
-            enable_grad=enable_grad,
         )
         post_guards = tx.output.guards
         if body_lifted_freevars:
