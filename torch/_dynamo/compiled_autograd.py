@@ -245,7 +245,7 @@ def inner_trace(*args, fn, reenter):
 
 @_invoke_in_backward_op.py_impl(FakeTensorMode)
 def inner_fake(*args, fn, reenter):
-    return fn(*args)
+    raise RuntimeError("This op should never be invoked here")
 
 
 @_invoke_in_backward_op.py_impl(DispatchKey.CompositeExplicitAutograd)
