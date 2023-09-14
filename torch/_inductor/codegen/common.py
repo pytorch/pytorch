@@ -1004,18 +1004,7 @@ class Kernel(CodeGen):
                     var = new_var
 
                 if self.generate_assert(check):
-                    mask = ""
-                    if hasattr(var, "mask_vars"):
-                        mask_vars = set(var.mask_vars)
-                        if self._load_mask:
-                            mask_vars.add(self._load_mask)
-
-                        if mask_vars:
-                            mask = (
-                                f"{list(mask_vars)[0]}"
-                                if len(mask_vars) == 1
-                                else f"({' & '.join(str(v) for v in mask_vars)})"
-                            )
+                    mask = self.load_mask(var)
 
                     # An assertion line may have been written already, if so just
                     # update the max size.
@@ -1121,6 +1110,10 @@ class Kernel(CodeGen):
 
     def generate_assert(self, check):
         return (check or config.debug_index_asserts) and config.assert_indirect_indexing
+
+    def load_mask(self, var):
+        # only the triton kernel requires mask
+        return ""
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions

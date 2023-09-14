@@ -796,16 +796,13 @@ class CommonTemplate:
                     code = run_and_get_cpp_code(fn_opt, *inps)
                     lines = code.split("\n")
                     found = False
-                    for line in lines:
-                        # Line will look something like this:
-                        # TORCH_CHECK((0 <= tmp5) & (tmp5 < ks1), error_msg)
-                        if "0 <=" in line:
-                            pos = line.find("<=")
-                            found |= "&" in line and "<" in line[pos + 2 :]
-                        elif "?" in line:
-                            pos = line.find("?")
-                            found |= ":" in line[pos + 1:]
-                    # self.assertTrue(found is has_wrapping)
+                    if "Vectorize" not in code:
+                        for line in lines:
+                            # match ternary operator
+                            if "?" in line:
+                                pos = line.find("?")
+                                found |= ":" in line[pos + 1 :]
+                    self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:
                     code = run_and_get_triton_code(fn_opt, *inps)

@@ -1190,6 +1190,21 @@ class TritonKernel(Kernel):
     def generate_assert(self, check):
         return torch.version.hip is None and super().generate_assert(check)
 
+    def load_mask(self, var):
+        mask = ""
+        mask_vars = set(var.mask_vars)
+        if self._load_mask:
+            mask_vars.add(self._load_mask)
+
+        if mask_vars:
+            mask = (
+                f"{list(mask_vars)[0]}"
+                if len(mask_vars) == 1
+                else f"({' & '.join(str(v) for v in mask_vars)})"
+            )
+        return mask
+
+
     @property
     def assert_function(self):
         return "tl.device_assert"
