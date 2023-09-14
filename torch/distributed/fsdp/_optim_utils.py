@@ -1517,8 +1517,7 @@ def _allgather_orig_param_states(
                     local_buffers.append(empty_func(padding_len))
             else:
                 if buffers[buffer_idx] is not None:
-                    assert buffers[buffer_idx] is not None  # typing purpose
-                    local_buffers.append(buffers[buffer_idx])
+                    local_buffers.append(cast(torch.Tensor, buffers[buffer_idx]))
                 buffer_idx += 1
             pos += numel
 

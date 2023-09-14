@@ -5,7 +5,6 @@ import re
 import sys
 import warnings
 
-# from numpy.core._multiarray_tests import array_indexing  # numpy implements this in C
 from itertools import product
 
 import pytest
@@ -1169,9 +1168,3 @@ class TestMultipleEllipsisError:
         assert_raises(IndexError, lambda: a[..., ...])
         assert_raises(IndexError, a.__getitem__, ((Ellipsis,) * 2,))
         assert_raises(IndexError, a.__getitem__, ((Ellipsis,) * 3,))
-
-
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
-    run_tests()

@@ -10,7 +10,7 @@ basic_gnn_gcn,pass,6
 basic_gnn_gin,pass,0
 basic_gnn_sage,pass,0
 clip,pass,0
-cm3leon_generate,pass,6
+cm3leon_generate,pass,5
 dcgan,pass,0
 dlrm,pass,0
 doctr_det_predictor,pass,2
