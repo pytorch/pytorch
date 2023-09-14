@@ -328,7 +328,7 @@ class TestMixedDtypesLinearCuda(TestCase):
 
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
-                quantized_weight_reorder_for_mixed_dtypes_linear(weight.T).view(
+                quantized_weight_reorder_for_mixed_dtypes_linear(weight).view(
                     torch.uint8
                 ),
                 scale,

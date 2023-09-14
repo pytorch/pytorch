@@ -1,22 +1,26 @@
 import torch
 
 
-# Transpose the input, and then reorder its elements according to
-# underlying requirements of CUTLASS library, so that it could be used
-# for CUTLASS-based mixed datatypes linear operation.
-def quantized_weight_reorder_for_mixed_dtypes_linear(inp):
-    assert inp.dim() == 2
-    assert inp.dtype == torch.int8
-    assert inp.device.type == "cuda"
+# Transpose the weight matrix, and then reorder its elements according
+# to underlying requirements of CUTLASS library, so that it could be
+# used for CUTLASS-based mixed datatypes linear operation.
+def quantized_weight_reorder_for_mixed_dtypes_linear(weight):
+    assert weight.dim() == 2
+    assert weight.dtype == torch.int8
+    assert weight.device.type == "cuda"
 
-    device = inp.device
+    device = weight.device
 
-    nrows, ncols = inp.shape
+    # for the linear operator, weight matrix would be transposed first
+    # here
+
+    ncols, nrows = weight.shape  # because input would be transposed
+    # above
     assert nrows % 64 == 0
     assert ncols % 64 == 0
 
     # subbyte_transpose
-    tmp = inp.T
+    # not needed as input would be transposed above
 
     # permute_B_rows_for_mixed_gemm
     # (permute cols actually, as transpose is applied first here)
@@ -24,12 +28,12 @@ def quantized_weight_reorder_for_mixed_dtypes_linear(inp):
         torch.tensor(
             [0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15],
             device=device,
-        ).expand(nrows // 16, 16)
+        )
         + (torch.arange(0, nrows // 16, device=device).reshape(-1, 1) * 16).expand(
             nrows // 16, 16
         )
     ).view(-1)
-    outp = tmp.index_copy(1, cols_permuted, tmp)
+    outp = weight.index_copy(1, cols_permuted, weight)
 
     # interleave_column_major_tensor
     magic0 = 2
@@ -62,7 +66,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear(inp):
     tmp = outp.view(-1).view(torch.int32)
     outp = torch.zeros_like(tmp)
     outp.scatter_(0, outp_offsets, tmp)
-    outp = outp.view(inp.dtype).view(inp.shape)
+    outp = outp.view(weight.dtype).view(nrows, ncols)
 
     # add_bias_and_interleave_quantized_tensor_inplace
     tmp = outp.view(-1)
@@ -74,4 +78,4 @@ def quantized_weight_reorder_for_mixed_dtypes_linear(inp):
     outp[3::4] = tmp[3::4]
     outp = (outp.to(torch.int) + 128).to(tmp.dtype)
 
-    return outp.view(inp.shape)
+    return outp.view(nrows, ncols)
