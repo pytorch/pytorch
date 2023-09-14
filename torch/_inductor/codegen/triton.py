@@ -2682,7 +2682,6 @@ class TritonScheduling(BaseScheduling):
                     reduction_hint_val,
                     mutations,
                     index_dtype,
-                    _,
                 ) = self.get_kernel_args(node_schedule, numel, rnumel)
 
                 subkernel = kernel.create_sub_kernel(
