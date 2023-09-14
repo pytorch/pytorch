@@ -1931,14 +1931,18 @@ class DimConstraints:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
 
     def forced_specializations(self):
-        return "\n".join([
-            (
-                f"\t{self._dcp.symbol_to_source[s][0].name()}, which was marked dynamic, "
-                f"must be specialized to {val}."
-            )
+        def debug_name(src):
+            name = src.name()
+            if self._dcp.source_name_to_debug_name:
+                return f"{self._dcp.source_name_to_debug_name[name]} = {name}"
+            else:
+                return name
+
+        return {
+            debug_name(self._dcp.symbol_to_source[s][0]): val
             for s, val in self._substitutions.items()
             if s in self._marked_dynamic
-        ])
+        }
 
     def remove_redundant_dynamic_results(self):
         candidates_for_removal = []
@@ -1962,7 +1966,12 @@ class DimConstraints:
                 dynamic_results.add(dc)
         self._dynamic_results = dynamic_results
 
-    def prettify_results(self, original_signature: inspect.Signature, constraint_violation_error):
+    def prettify_results(
+        self,
+        original_signature: inspect.Signature,
+        constraint_violation_error=None,
+        forced_specializations=None,
+    ):
         if self._dcp.source_name_to_debug_name:
             def transform(s):
                 for k, v in self._dcp.source_name_to_debug_name.items():
@@ -2007,17 +2016,27 @@ class DimConstraints:
                     assert op == "=="
                     results[left]["eq"] = right
 
+            buf = ""
+            debug_names = set()
+            if forced_specializations:
+                debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
+                buf += (
+                    f"Specializations unexpectedly required ({'n'.join(debug_names)})! "
+                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                )
+                for s, val in forced_specializations.items():
+                    buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
+
             dims = []
             others = []
-            debug_names = None
             match = None
             if constraint_violation_error:
                 match = re.search(r"Constraints violated \((.*)\)", constraint_violation_error.args[0])
             if match is not None:
-                debug_names = match.expand(r'\1').split(', ')
+                debug_names.update(match.expand(r'\1').split(', '))
 
             for k, c in results.items():
-                if debug_names is not None and k not in debug_names:
+                if k not in debug_names:
                     continue
                 if "eq" in c:
                     other = c["eq"]
@@ -2039,7 +2058,10 @@ class DimConstraints:
                     else:
                         dims.append(f"{k} = Dim('{k}')")
 
-            return "\nSuggested fixes:\n  " + "\n  ".join(dims + others) + "\n"
+            buf += "\nSuggested fixes:\n  "
+            buf += "\n  ".join(dims + others)
+
+            return buf
 
         # Note: Model inputs are wrapped as LocalSource in dynamo.
         # LocalSource.name() wraps the name with L[""]. We use regular
@@ -2095,6 +2117,13 @@ class DimConstraints:
                     buf += f"\n{indent}{result_fn(result)}"
 
         buf = ""
+        if forced_specializations:
+            buf += (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+            )
+            for s, val in forced_specializations.items():
+                buf += f"  - {s}, which was marked dynamic, must be specialized to {val}.\n"
         indent = 4 * " "
         if self._static_results:
             grouped_static_results = group(self._static_results, args_index)
@@ -3113,10 +3142,7 @@ class ShapeEnv:
                     if constraint_violated:
                         def hint(s):
                             sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(s)
-                            return (
-                                f"{sexpr}. For more information about this inference, "
-                                "run with TORCH_LOGS=dynamic."
-                            )
+                            return f"{sexpr}."
 
                         var_with_range = self.render_range_for_constraint_violation(source, constraint)
                         msg = (
@@ -3146,9 +3172,7 @@ class ShapeEnv:
                     var_with_range = self.render_range_for_constraint_violation(source, constraint)
                     msg = (
                         f"Not all values of {var_with_range} are valid because "
-                        f"{self.debug_name(source)} was inferred to be a constant ({val}). "
-                        "For more information about why it is constant, "
-                        "run with TORCH_LOGS=dynamic."
+                        f"{self.debug_name(source)} was inferred to be a constant ({val})."
                     )
                     record_constraint_violation(constraint.warn_only, self.debug_name(source), msg)
 
@@ -3232,8 +3256,7 @@ class ShapeEnv:
                     msg = (
                         f"The values of {self.debug_name(source)} = {source.name()} and "
                         f"{self.debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name()} "
-                        "must always be equal. For more information about this inference, "
-                        "run with TORCH_LOGS=dynamic."
+                        "must always be equal."
                     )
                     record_constraint_violation(equalities_inputs.warn_only, self.debug_name(source), msg)
                 # NB: Not necessary to report constraint violations here:
@@ -3273,9 +3296,7 @@ class ShapeEnv:
                             var_with_range = self.render_range_for_constraint_violation(source, c)
                             msg = (
                                 f"Not all values of {var_with_range} "
-                                f"satisfy the generated guard {guard_expr}. "
-                                "For more information about why this guard was generated, "
-                                "run with TORCH_LOGS=dynamic."
+                                f"satisfy the generated guard {guard_expr}."
                             )
                             record_constraint_violation(c.warn_only, self.debug_name(source), msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
@@ -3349,13 +3370,17 @@ class ShapeEnv:
                     msg = f"  {len(warn_msgs) + 1}. {msg()}"
                     warn_msgs.append(msg)
                 else:
-                    msg = f"  {len(error_msgs) + 1}. {msg()}"
+                    msg = f"  - {msg()}"
                     error_msgs.append(msg)
                     debug_names.add(debug_name)
             if len(error_msgs) > 0:
                 debug_names = ', '.join(debug_names)
                 err = '\n'.join(error_msgs)
-                raise ConstraintViolationError(f"Constraints violated ({debug_names})!\n{err}")
+                raise ConstraintViolationError(
+                    f"Constraints violated ({debug_names})! "
+                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    f"{err}"
+                )
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 

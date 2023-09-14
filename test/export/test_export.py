@@ -491,7 +491,7 @@ class TestExport(TestCase):
         batch, M, K, N = dims("batch", "M", "K", "N")
 
         def foo(x: TensorType[batch, M, K], y: TensorType[batch, K, N]):
-            if x.shape[0] < 16:
+            if x.shape[0] < 16 and y.shape[1] % 3 == 0:
                 return torch.matmul(x, y)
             else:
                 return x + y
@@ -502,8 +502,11 @@ class TestExport(TestCase):
             (
                 "Constraints violated \\(batch\\)!(.*\n)*.*"
                 "Not all values of batch.*satisfy the generated guard(.*\n)*.*"
+                "Specializations unexpectedly required \\(K\\)!(.*\n)*.*"
+                "K.*specialized.*because the guards generated for it are too complex(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "batch = Dim\\('batch', max=15\\)"
+                "batch = Dim\\('batch', max=15\\)(.*\n)*.*"
+                "K = _  # 3"
             ),
         ):
             export(foo, inputs)
