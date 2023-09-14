@@ -36,7 +36,9 @@ def export_tracepoint_dispatch_mode(*args, **kwargs):
 
 @_export_tracepoint.py_impl(FakeTensorMode)
 def export_tracepoint_fake_tensor_mode(*args, **kwargs):
-    return args
+    mode = args[0]
+    with mode:
+        return args[1:]
 
 
 @_export_tracepoint.py_impl(DispatchKey.Functionalize)

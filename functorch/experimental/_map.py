@@ -315,8 +315,9 @@ def map_proxy_torch_dispatch_mode(mode, f, num_mapped, *args):
 
 
 @map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(f, num_mapped, *args):
-    return map_dense(f, num_mapped, *args)
+def map_fake_tensor_mode(mode, f, num_mapped, *args):
+    with mode:
+        return map_dense(f, num_mapped, *args)
 
 
 @map_impl.py_impl(DispatchKey.Functionalize)

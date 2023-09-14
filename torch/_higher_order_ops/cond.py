@@ -284,10 +284,11 @@ def inner(mode, pred, true_fn, false_fn, operands):
 
 
 @cond_op.py_impl(FakeTensorMode)
-def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
-    true_outs = true_fn(*operands)
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
+    with mode:
+        true_outs = true_fn(*operands)
+        flat_true_outs, _ = pytree.tree_flatten(true_outs)
+        flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 

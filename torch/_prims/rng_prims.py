@@ -188,14 +188,15 @@ def register_run_and_save_rng_state_op():
         return impl(op, *args, **kwargs)
 
     @run_and_save_rng_state.py_impl(FakeTensorMode)
-    def impl_fake_tensor_mode(op, *args, **kwargs):
+    def impl_fake_tensor_mode(mode, op, *args, **kwargs):
         # Check device to call the right impl
-        return impl_backend_select(op, *args, **kwargs)
+        with mode:
+            return impl_backend_select(op, *args, **kwargs)
 
     @run_and_save_rng_state.py_impl(ProxyTorchDispatchMode)
     def impl_proxy_dispatch_mode(mode, op, *args, **kwargs):
         if mode.enable_tracing:
-            out = impl_fake_tensor_mode(op, *args, **kwargs)
+            out = impl_backend_select(op, *args, **kwargs)
             proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (op, *args))
             proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
             out_proxy = mode.tracer.create_proxy(
@@ -262,10 +263,11 @@ def register_run_with_rng_state_op():
         return impl(rng_state, op, *args, **kwargs)
 
     @run_with_rng_state.py_impl(FakeTensorMode)
-    def impl_fake_tensor_mode(rng_state, op, *args, **kwargs):
+    def impl_fake_tensor_mode(mode, rng_state, op, *args, **kwargs):
         # Skip setting the set_rng_state as it does not work well with fake tensors.
         # And it does not matter for the fake tensor mode.
-        return op(*args, **kwargs)
+        with mode:
+            return op(*args, **kwargs)
 
     return run_with_rng_state
 
