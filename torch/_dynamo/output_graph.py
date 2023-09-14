@@ -1335,9 +1335,11 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
-                for key in ("nn_module_stack", "source_fn", "stack_trace"):
-                    if key in meta:
-                        rv.node.meta[key] = meta[key]
+                if "stack_trace" in meta:
+                    rv.node.meta["stack_trace"] = meta["stack_trace"]
+                if "nn_module_stack" in meta and "source_fn" in meta:
+                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
+                    rv.node.meta["source_fn"] = meta["source_fn"]
 
         if "nn_module_stack" not in rv.node.meta:
             nn_module_stack = tx.nn_module_stack
