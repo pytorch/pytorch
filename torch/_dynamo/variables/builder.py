@@ -1521,7 +1521,6 @@ def _automatic_dynamic(e, tx, name, static_shapes):
     dim2name = {}
 
     def update_dim2constraint(dim, constraint_range, debug_name):
-
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
@@ -1529,7 +1528,10 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                 vr=constraint_range.vr & dim2constraint[dim].vr,
                 warn_only=False,
             )
-            dim2name[dim] = debug_name
+            if dim2name[dim] is not None:
+                assert debug_name is None or debug_name == dim2name[dim]
+            else:
+                dim2name[dim] = debug_name
         else:
             dim2constraint[dim] = constraint_range
             dim2name[dim] = debug_name

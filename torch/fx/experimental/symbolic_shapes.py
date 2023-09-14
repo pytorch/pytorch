@@ -1593,11 +1593,14 @@ class DynamicDimConstraintPrinter(StrPrinter):
 
     We use this to suggest code for specifying dynamic dim constraints.
     """
-    def __init__(self, symbol_to_source):
+    def __init__(self, symbol_to_source, source_name_to_debug_name):
         super().__init__()
         self.symbol_to_source = symbol_to_source
+        self.source_name_to_debug_name = source_name_to_debug_name
 
     def print_source(self, source) -> str:
+        if self.source_name_to_debug_name:
+            return source.name()
         return f"dynamic_dim({source.base.name()}, {source.idx})"
 
     def _print_Symbol(self, expr) -> str:
@@ -1619,7 +1622,7 @@ class DimConstraints:
     Solutions are "static" values or simplified "dynamic" constraints.
     """
 
-    def __init__(self, symbol_to_source, var_to_val, marked_dynamic):
+    def __init__(self, symbol_to_source, var_to_val, marked_dynamic, source_name_to_debug_name):
         # We try to solve systems of inequalities with 1 free variable.
         self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
@@ -1653,7 +1656,7 @@ class DimConstraints:
         self._dynamic_results: Set[str] = set()
 
         # printer for solutions
-        self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
+        self._dcp = DynamicDimConstraintPrinter(symbol_to_source, source_name_to_debug_name)
 
         # inconsistencies found on substituting with concrete values / static solutions
         self._inconsistencies: List[str] = []
@@ -1911,7 +1914,6 @@ class DimConstraints:
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
 
-
     def forced_specializations(self):
         return "\n".join([
             (
@@ -1945,6 +1947,75 @@ class DimConstraints:
         self._dynamic_results = dynamic_results
 
     def prettify_results(self, original_signature: inspect.Signature):
+        if self._dcp.source_name_to_debug_name:
+            def transform(s):
+                for k, v in self._dcp.source_name_to_debug_name.items():
+                    s = s.replace(k, v)
+                return s
+
+            results = defaultdict(dict)
+            for s in self._static_results.union(self._dynamic_results):
+                t = transform(s)
+                if t == s:
+                    continue
+                left, op, right = t.split(" ")
+                if op == "==" and left == right:
+                    continue
+                if left.isdigit():
+                    left = int(left)
+                    if op == "<=":
+                        results[right]["min"] = left
+                    elif op == "<":
+                        results[right]["min"] = left + 1
+                    elif op == ">=":
+                        results[right]["max"] = left
+                    elif op == ">":
+                        results[right]["max"] = left - 1
+                    else:
+                        assert op == "=="
+                        results[right]["eq"] = left
+                elif right.isdigit():
+                    right = int(right)
+                    if op == "<=":
+                        results[left]["max"] = right
+                    elif op == "<":
+                        results[left]["max"] = right - 1
+                    elif op == ">=":
+                        results[left]["min"] = right
+                    elif op == ">":
+                        results[left]["min"] = right + 1
+                    else:
+                        assert op == "=="
+                        results[left]["eq"] = right
+                else:
+                    assert op == "=="
+                    results[left]["eq"] = right
+
+            dims = []
+            others = []
+            for k, c in results.items():
+                if "eq" in c:
+                    other = c["eq"]
+                    if isinstance(other, int):
+                        others.append(f"{k} = _  # {other}")
+                    else:
+                        others.append(f"{k} = {other}")
+                else:
+                    min_ = c.get("min", None)
+                    if min_ == 2:
+                        min_ = None
+                    max_ = c.get("max", None)
+                    if min_ is not None and max_ is not None:
+                        dims.append(f"{k} = Dim('{k}', min={min_}, max={max_})")
+                    elif min_ is not None:
+                        dims.append(f"{k} = Dim('{k}', min={min_})")
+                    elif max_ is not None:
+                        dims.append(f"{k} = Dim('{k}', max={max_})")
+                    else:
+                        others.append(f"{k} = Dim('{k}')")
+
+            return "\nConsider defining dimensions as follows:\n  " + "\n  ".join(dims + others) + "\n"
+
         # Note: Model inputs are wrapped as LocalSource in dynamo.
         # LocalSource.name() wraps the name with L[""]. We use regular
         # expression to do the replacement to avoid traversing up
@@ -2885,6 +2956,7 @@ class ShapeEnv:
             symbol_to_source,
             self.var_to_val,
             set(symbol_to_constraints.keys()),
+            self.source_name_to_debug_name,
         )
 
         if not _simplified:
