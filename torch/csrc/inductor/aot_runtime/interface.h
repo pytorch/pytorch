@@ -18,11 +18,11 @@ enum class AOTInductorError : int {
   Failure = 1,
 };
 
-#define AOT_INDUCTOR_ERROR_CHECK(call)                                    \
-  if ((call) != AOTInductorError::Success) {                              \
-    throw std::runtime_error(                                             \
-        std::string(#call " API call failed at ") + __FILE__ + ", line" + \
-        std::to_string(__LINE__));                                        \
+#define AOT_INDUCTOR_ERROR_CHECK(call)                                     \
+  if ((call) != AOTInductorError::Success) {                               \
+    throw std::runtime_error(                                              \
+        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
+        std::to_string(__LINE__));                                         \
   }
 
 // The shape representation passed through the C interfaces.
@@ -54,7 +54,8 @@ extern "C" {
 AOTInductorError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
-    bool is_cpu = false);
+    bool is_cpu = false,
+    const char* cubin_dir = nullptr);
 
 // Deletes the AOTInductor model container.
 AOTInductorError AOTInductorModelContainerDelete(
