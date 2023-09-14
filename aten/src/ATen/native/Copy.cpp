@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
@@ -194,7 +195,13 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   // Copies into meta self are OK and just ignored (similar to inplace)
   if (self.is_meta()) {
-    // TODO: need to see if there is extra error checking needed
+    auto shape = infer_size_symdimvector(self.sym_sizes(), src.sym_sizes());
+    TORCH_CHECK(
+        self.sym_sizes().equals(shape),
+        "output with shape ",
+        self.sym_sizes(),
+        " doesn't match the broadcast shape ",
+        shape);
     return self;
   }
 
@@ -246,7 +253,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
       self.storage_offset() == src.storage_offset() &&
       self.strides().equals(src.strides()) &&
       self.sizes().equals(src.sizes()) &&
-      self.scalar_type() == src.scalar_type()
+      self.scalar_type() == src.scalar_type() &&
+      self.is_conj() == src.is_conj() &&
+      self.is_neg() == src.is_neg()
     );
   if (is_same_data) {
     return self;

@@ -69,8 +69,8 @@ else:
 
 _DEFAULT_OPSET_VERSION: Final[int] = 18
 """The default ONNX opset version the exporter will use if one is not specified explicitly
-through ``ExportOptions``. This should NEVER be accessed outside of this module! Users
-should reference ``ExportOptions.opset_version``."""
+through :class:`ExportOptions`. This should NEVER be accessed outside of this module! Users
+should reference :attr:`ExportOptions.opset_version`."""
 
 _PYTORCH_GITHUB_ISSUES_URL = "https://github.com/pytorch/pytorch/issues"
 """The URL to the PyTorch GitHub issues page."""
@@ -89,15 +89,15 @@ class ONNXFakeContext:
     """A dataclass used to store context for model export using FakeTensor.
 
     This dataclass stores the FakeTensorMode instance used to convert
-    real tensors and model parameters into fake tensors. This ``fake_mode`` is
-    reused internally during tracing of a ``torch.nn.Module`` into a FX ``GraphModule``.
+    real tensors and model parameters into fake tensors. This :attr:`ONNXFakeContext.fake_mode` is
+    reused internally during tracing of a :class:`torch.nn.Module` into a FX :class:`GraphModule`.
     """
 
     fake_mode: fake_tensor.FakeTensorMode
     """The fake tensor mode used for tracing model using fake tensors and parameters."""
 
     state_dict_paths: Optional[Tuple[Union[str, io.BytesIO]]] = None
-    """List of paths of files that contain the model `state_dict`"""
+    """List of paths of files that contain the model :meth:`state_dict`"""
 
 
 class OnnxRegistry:
@@ -271,18 +271,29 @@ class OnnxRegistry:
 
 
 class ExportOptions:
-    """Options to influence the TorchDynamo ONNX exporter."""
+    """Options to influence the TorchDynamo ONNX exporter.
+
+    Attributes:
+        dynamic_shapes: Shape information hint for input/output tensors.
+            When ``None``, the exporter determines the most compatible setting.
+            When ``True``, all input shapes are considered dynamic.
+            When ``False``, all input shapes are considered static.
+        op_level_debug: Whether to export the model with op-level debug information
+        diagnostic_options: The diagnostic options for the exporter.
+        fake_context: The fake context used for symbolic tracing.
+        onnx_registry: The ONNX registry used to register ATen operators to ONNX functions.
+    """
 
     dynamic_shapes: Optional[bool] = None
     """Shape information hint for input/output tensors.
 
     - ``None``: the exporter determines the most compatible setting.
     - ``True``: all input shapes are considered dynamic.
-    - ``False``: all input shapes are considered static."""
+    - ``False``: all input shapes are considered static.
+    """
 
     op_level_debug: Optional[bool] = None
-    """Whether to export the model with op-level debug information by evaluating
-    ops through ONNX Runtime."""
+    """When True export the model with op-level debug running ops through ONNX Runtime."""
 
     diagnostic_options: DiagnosticOptions
     """The diagnostic options for the exporter."""
@@ -291,8 +302,7 @@ class ExportOptions:
     """The fake context used for symbolic tracing."""
 
     onnx_registry: Optional[OnnxRegistry] = None
-    """The ONNX registry used to register ATen operators to ONNX functions. Defaults to
-    opset18."""
+    """The ONNX registry used to register ATen operators to ONNX functions."""
 
     @_beartype.beartype
     def __init__(
@@ -312,8 +322,8 @@ class ExportOptions:
 
 
 class ResolvedExportOptions(ExportOptions):
-    """Consolidates `ExportOptions` with default values.
-    All unspecified options from `ExportOptions` are assigned a default value.
+    """Consolidates :class:`ExportOptions` with default values.
+    All unspecified options from :class:`ExportOptions` are assigned a default value.
     This is an internal class and its API may be changed at any time without notice.
     """
 
@@ -412,12 +422,12 @@ class ResolvedExportOptions(ExportOptions):
 def enable_fake_mode():
     """Enable fake mode for the duration of the context.
 
-    Internally it instantiates a `FakeTensorMode` context manager that converts
-    user input and model parameters into `FakeTensor`.
+    Internally it instantiates a :class:`torch._subclasses.fake_tensor.FakeTensorMode` context manager
+    that converts user input and model parameters into :class:`torch._subclasses.fake_tensor.FakeTensor`.
 
-    A [FakeTensor](https://github.com/pytorch/pytorch/blob/main/torch/_subclasses/fake_tensor.py#L870)
-    is a `torch.Tensor` with the ability to run PyTorch code without having to
-    actually do computation through tensors allocated on a `meta` device. Because
+    A :class:`torch._subclasses.fake_tensor.FakeTensor`
+    is a :class:`torch.Tensor` with the ability to run PyTorch code without having to
+    actually do computation through tensors allocated on a ``meta`` device. Because
     there is no actual data being allocated on the device, this API allows for
     exporting large models without the actual memory footprint needed for executing it.
 
@@ -425,8 +435,8 @@ def enable_fake_mode():
     are too large to fit into memory.
 
     Returns:
-        A `ONNXFakeContext` object that must be passed to `torch.onnx.dynamo_export`
-        through the `ExportOptions.fake_context` argument.
+        A :class:`ONNXFakeContext` object that must be passed to :func:`dynamo_export`
+        through the :attr:`ExportOptions.fake_context` argument.
 
     Example::
 
@@ -499,7 +509,7 @@ class ExportOutputSerializer(Protocol):
 
         Example:
 
-            A simple serializer that writes the exported ``onnx.ModelProto`` in Protobuf
+            A simple serializer that writes the exported :py:obj:`onnx.ModelProto` in Protobuf
             format to ``destination``:
 
             ::
@@ -544,6 +554,36 @@ class ProtobufExportOutputSerializer:
         destination.write(export_output.model_proto.SerializeToString())
 
 
+class LargeProtobufExportOutputSerializer:
+    """Serializes ONNX graph as Protobuf.
+
+    Fallback to serializing as Protobuf with external data for models larger than 2GB.
+    """
+
+    _destination_path: Final[str]
+
+    def __init__(self, destination_path: str):
+        self._destination_path = destination_path
+
+    @_beartype.beartype
+    def serialize(
+        self, export_output: ExportOutput, destination: io.BufferedIOBase
+    ) -> None:
+        """`destination` is ignored. The model is saved to `self._destination_path` instead."""
+        import onnx
+
+        try:
+            onnx.save_model(export_output.model_proto, self._destination_path)  # type: ignore[attr-defined]
+        except ValueError:
+            # ValueError: Message onnx.ModelProto exceeds maximum protobuf size of 2GB
+            # Fallback to serializing the model with external data.
+            onnx.save_model(  # type: ignore[attr-defined]
+                export_output.model_proto,
+                self._destination_path,
+                save_as_external_data=True,
+            )
+
+
 class ExportOutput:
     """An in-memory representation of a PyTorch model that has been exported to ONNX."""
 
@@ -574,7 +614,7 @@ class ExportOutput:
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
-        """The exported ONNX model as an ``onnx.ModelProto``."""
+        """The exported ONNX model as an :py:obj:`onnx.ModelProto`."""
 
         if self._export_exception is not None:
             raise self._export_exception
@@ -716,15 +756,18 @@ class ExportOutput:
                 will be created to store the each initializer of the ONNX model in a separate file. For example, if the
                 destination is "/path/model.onnx", the initializers will be saved in "/path/model_initializers/" folder.
             model_state_dict: The state_dict of the PyTorch model containing all weights on it.
-                It can be either a dict as returned by `model.state_dict()`, or a string with a file name.
-                Required when ``enable_fake_mode`` is used but real initializers are needed on the ONNX graph.
+                It can be either a dict as returned by :meth:`model.state_dict`, or a string with a file name.
+                Required when :func:`enable_fake_mode` is used but real initializers are needed on the ONNX graph.
                 It can be either a string with the path to a checkpoint or a dictionary with the actual model state.
 
             serializer: The serializer to use. If not specified, the model will be serialized as Protobuf.
         """
 
         if serializer is None:
-            serializer = ProtobufExportOutputSerializer()
+            if isinstance(destination, str):
+                serializer = LargeProtobufExportOutputSerializer(destination)
+            else:
+                serializer = ProtobufExportOutputSerializer()
 
         # Add initializers when symbolic tracing is enabled
         _model_state_dict_files: List[Union[str, io.BytesIO]] = []
@@ -759,7 +802,7 @@ class ExportOutput:
         if _model_state_dict_files:
             if not isinstance(destination, str):
                 raise RuntimeError(
-                    "`destination` must be a string with a path when model_state_dict is specified."
+                    "`destination` must be a string with a path when `model_state_dict` is specified."
                 )
             destination_path, destination_filename = os.path.split(destination)
             onnx_model_location = destination_filename
@@ -779,7 +822,13 @@ class ExportOutput:
                 with open(destination, "wb") as f:
                     serializer.serialize(self, f)
             else:
-                serializer.serialize(self, destination)
+                try:
+                    serializer.serialize(self, destination)
+                except ValueError:
+                    raise ValueError(
+                        "'destination' should be provided as a path-like string when saving a model larger than 2GB. "
+                        "External tensor data will be saved alongside the model on disk."
+                    )
 
     @_beartype.beartype
     def save_diagnostics(self, destination: str) -> None:
@@ -806,10 +855,10 @@ class ExportOutput:
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Self:
         """
-        Creates an instance of ``ExportOutput`` when the export process encounters a failure.
+        Creates an instance of :class:`ExportOutput` when the export process encounters a failure.
 
         In case of a failed export, this method is used to encapsulate the exception
-        and associated diagnostic context within an ``ExportOutput`` instance for
+        and associated diagnostic context within an :class:`ExportOutput` instance for
         easier handling and debugging.
 
         Args:
@@ -817,7 +866,7 @@ class ExportOutput:
             diagnostic_context: The context associated with diagnostics during export.
 
         Returns:
-            An instance of ``ExportOutput`` representing the failed export output.
+            An instance of :class:`ExportOutput` representing the failed export output.
         """
         # Defer `import onnx` out of `import torch` path
         # https://github.com/pytorch/pytorch/issues/103764
@@ -878,7 +927,7 @@ class Exporter:
         self.model_args = model_args
         self.model_kwargs = model_kwargs
 
-        # TODO:Retire FXSymbolicTracer
+        # TODO: Retire FXSymbolicTracer
         # NOTE: FXSymbolicTracer would fail in this assert, as it does not use `enable_fake_mode`
         from torch.onnx._internal.fx import fx_symbolic_graph_extractor
 
@@ -915,10 +964,23 @@ class Exporter:
                 op_level_debug=self.options.op_level_debug,
             )
 
+            # NOTE: Filter out the initializers with fake tensors when it's fake_mode exporting.
+            # Otherwise, the ONNX exporter will fail: RuntimeError: basic_string::_M_construct null
+            # not valid.
+            # Concrete data is expected to be filled for those initializers later during `ExportOutput.save`.
+            if self.options.fake_context is not None:
+                initializers_with_real_tensors: Dict[str, torch.Tensor] = {}
+                for (
+                    initializer_name,
+                    initializer,
+                ) in onnxscript_graph.initializers.items():
+                    if not isinstance(initializer, torch._subclasses.FakeTensor):
+                        initializers_with_real_tensors[initializer_name] = initializer
+                onnxscript_graph.initializers = initializers_with_real_tensors
+
             # Export TorchScript graph to ONNX ModelProto.
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
-                include_initializers=self.options.fake_context is None,
             )
 
             return torch.onnx.ExportOutput(
@@ -932,6 +994,7 @@ class Exporter:
     def _assert_fake_tensor_mode(self):
         """Asserts that the model and its input do not contain fake tensors."""
 
+        # Case 1: Model with fake inputs/weights and without enabling fake mode
         has_any_fake_tensor = pytree.tree_any(
             lambda x: isinstance(x, torch._subclasses.FakeTensor),
             (self.model_args, self.model_kwargs),
@@ -948,6 +1011,7 @@ class Exporter:
             raise RuntimeError(
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
+        # Case 2: Model with non fake inputs/weights and enabled fake mode
         has_any_non_fake_tensors = pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor)
             and not isinstance(x, torch._subclasses.FakeTensor),
@@ -980,7 +1044,7 @@ class OnnxExporterError(RuntimeError):
     """Raised when an ONNX exporter error occurs.
 
     This exception is thrown when there's an error during the ONNX export process.
-    It encapsulates the `ExportOutput` object generated until the failure, allowing
+    It encapsulates the :class:`ExportOutput` object generated until the failure, allowing
     access to the partial export results and associated metadata.
     """
 
@@ -1059,19 +1123,59 @@ def dynamo_export(
     Returns:
         An in-memory representation of the exported ONNX model.
 
-    Example:
+    **Example 1 - Simplest export**
     ::
 
-        import torch.onnx
-        torch.onnx.dynamo_export(
-            my_nn_module,
-            torch.randn(2, 2, 2), # positional input 1
-            torch.randn(2, 2, 2), # positional input 2
-            my_nn_module_attribute="hello", # keyword input
-            export_options=ExportOptions(
-                dynamic_shapes=True,
-            )
-        ).save("my_model.onnx")
+        class MyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+            def forward(self, x, bias=None):
+                out = self.linear(x)
+                out = out + bias
+                return out
+        model = MyModel()
+        kwargs = {"bias": 3.}
+        args = (torch.randn(2, 2, 2),)
+        export_output = torch.onnx.dynamo_export(
+            model,
+            *args,
+            **kwargs).save("my_simple_model.onnx")
+
+    **Example 2 - Exporting with dynamic shapes**
+    ::
+
+        # The previous model can be exported with dynamic shapes
+        export_options = torch.onnx.ExportOptions(dynamic_shapes=True)
+        export_output = torch.onnx.dynamo_export(
+            model,
+            *args,
+            **kwargs,
+            export_options=export_options)
+        export_output.save("my_dynamic_model.onnx")
+
+
+    By printing input dynamic dimensions we can see the input shape is no longer (2,2,2)
+    ::
+
+        >>> print(export_output.model_proto.graph.input[0])
+        name: "arg0"
+        type {
+          tensor_type {
+            elem_type: 1
+            shape {
+              dim {
+                dim_param: "arg0_dim_0"
+              }
+              dim {
+                dim_param: "arg0_dim_1"
+              }
+              dim {
+                dim_param: "arg0_dim_2"
+              }
+            }
+          }
+        }
     """
 
     resolved_export_options = (
@@ -1093,10 +1197,10 @@ def dynamo_export(
         sarif_report_path = _DEFAULT_FAILED_EXPORT_SARIF_LOG_PATH
         resolved_export_options.diagnostic_context.dump(sarif_report_path)
         message = (
-            "Failed to export the model to ONNX. Generating SARIF report at {sarif_report_path}. "
+            f"Failed to export the model to ONNX. Generating SARIF report at '{sarif_report_path}'. "
             "SARIF is a standard format for the output of static analysis tools. "
-            "SARIF log can be loaded in VS Code SARIF viewer extension, "
-            "or SARIF web viewer(https://microsoft.github.io/sarif-web-component/)."
+            "SARIF logs can be loaded in VS Code SARIF viewer extension, "
+            "or SARIF web viewer (https://microsoft.github.io/sarif-web-component/). "
             f"Please report a bug on PyTorch Github: {_PYTORCH_GITHUB_ISSUES_URL}"
         )
         raise OnnxExporterError(
