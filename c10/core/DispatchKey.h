@@ -357,7 +357,8 @@ enum class DispatchKey : uint16_t {
   AutocastXPU,
   AutocastIPU,
   AutocastHPU,
-  AutocastXLA,  // AutocastXLA is used for XLA:TPU and XLA:GPU
+  // AutocastXLA is used for XLA:TPU and XLA:GPU
+  AutocastXLA,
   AutocastCUDA,
   AutocastPrivateUse1,
 
