@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import unittest
 from typing import Any, Dict, Tuple
 
 import torch
@@ -212,23 +211,6 @@ class TestPT2ERepresentation(QuantizationTestCase):
         m_eager = TestHelperModules.ConvMaxPool2d().eval()
 
         example_inputs = (torch.randn(1, 2, 2, 2),)
-
-        self._test_representation(
-            m_eager,
-            example_inputs,
-            quantizer,
-            ref_node_occurrence={},
-            non_ref_node_occurrence={},
-        )
-
-    @unittest.skip("will fix later")
-    def test_representation_adaptive_avg_pool2d(self):
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=True)
-        quantizer.set_global(operator_config)
-        m_eager = TestHelperModules.ConvWithAdaptiveAvgPool2d().eval()
-
-        example_inputs = (torch.randn(1, 3, 3, 3),)
 
         self._test_representation(
             m_eager,
