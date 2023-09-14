@@ -133,9 +133,9 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         custom_op_count = count_op(upgraded_ep.graph, "aten::div__Scalar_mode_0_3")
         self.assertEqual(custom_op_count, 0)
 
-        # div__Scalar_mode_0_3 decomposes into div.Tensor.
-        decomposed_op_count = count_op(upgraded_ep.graph, "aten::div.Tensor_mode")
-        self.assertEqual(decomposed_op_count, 1)
+        # div.Tensor_mode is also decomposed
+        div_tensor_mode_count = count_op(upgraded_ep.graph, "aten::div.Tensor_mode")
+        self.assertEqual(div_tensor_mode_count, 0)
 
 
 if __name__ == '__main__':
