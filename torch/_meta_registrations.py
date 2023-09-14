@@ -4810,12 +4810,10 @@ def meta__scaled_dot_product_flash(
 
     max_seqlen_batch_k = key.size(2)
     if device_hint(query) == "cpu":
-        Nnz_q = batch_size * max_seqlen_batch_q
-        query_t = query.transpose(1, 2)
-        query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
-        attention = torch.empty_like(query_reshaped, device=query.device)
-        attention = attention.view(
-            batch_size, max_seqlen_batch_q, num_heads, head_dim
+        attention = torch.empty(
+            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
+            dtype=query.dtype,
+            device=query.device,
         ).transpose(1, 2)
         logsumexp = torch.empty(
             (
@@ -4845,12 +4843,6 @@ def meta__scaled_dot_product_flash(
         (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
         device=query.device,
-    )
-    cumulative_sequence_length_q = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
-    )
-    cumulative_sequence_length_k = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
     )
 
     if return_debug_mask:
