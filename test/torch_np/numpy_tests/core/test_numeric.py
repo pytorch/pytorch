@@ -9,7 +9,6 @@ import warnings
 import pytest
 
 import torch._numpy as np
-from numpy.core import umath
 from torch._numpy.random import rand, randint, randn
 from torch._numpy.testing import (
     assert_,
@@ -599,22 +598,6 @@ class TestSeterr:
         finally:
             np.seterrobj(olderrobj)
             del self.called
-
-    def test_errobj_noerrmask(self):
-        # errmask = 0 has a special code path for the default
-        olderrobj = np.geterrobj()
-        try:
-            # set errobj to something non default
-            np.seterrobj([umath.UFUNC_BUFSIZE_DEFAULT, umath.ERR_DEFAULT + 1, None])
-            # call a ufunc
-            np.isnan(np.array([6]))
-            # same with the default, lots of times to get rid of possible
-            # pre-existing stack in the code
-            for i in range(10000):
-                np.seterrobj([umath.UFUNC_BUFSIZE_DEFAULT, umath.ERR_DEFAULT, None])
-            np.isnan(np.array([6]))
-        finally:
-            np.seterrobj(olderrobj)
 
 
 @pytest.mark.xfail(reason="TODO")
@@ -2983,3 +2966,9 @@ class TestTensordot:
             arr_0d, arr_0d, ([], [])
         )  # contracting no axes is well defined
         assert_array_equal(ret, arr_0d)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

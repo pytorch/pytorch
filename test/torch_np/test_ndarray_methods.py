@@ -578,3 +578,9 @@ def test_extra_methods(name):
     a = np.ones(3)
     with pytest.raises(AttributeError):
         getattr(a, name)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
