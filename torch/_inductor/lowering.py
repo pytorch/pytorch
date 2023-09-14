@@ -499,10 +499,9 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
 
 def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
-    if x.get_dtype() == dtype:
-        return clone(x) if copy else x
-
     src_dtype = x.get_dtype()
+    if src_dtype == dtype:
+        return clone(x) if copy else x
 
     def _to_dtype(x):
         return ops.to_dtype(x, dtype, src_dtype=src_dtype)

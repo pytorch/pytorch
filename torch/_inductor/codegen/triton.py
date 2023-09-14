@@ -159,6 +159,10 @@ class TritonOverrides(OpOverrides):
         def _get_min_elements_per_thread(
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
+            if src_dtype == dst_dtype:
+                # No data type conversion is needed. No requirements on min_elements_per_thread.
+                return 0
+
             # fp8 data type conversions has min_elements_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
@@ -172,10 +176,6 @@ class TritonOverrides(OpOverrides):
                 and dst_dtype in fp8_dtypes
                 and src_dtype != dst_dtype
             ), "Conversions between float8_e5m2 and float8_e4m3fn is not supported!"
-            # src_dtype == dst_dtype case is already handled at lowering time.
-            assert (
-                src_dtype != dst_dtype
-            ), f"{src_dtype=} shouldn't be equal to {dst_dtype=}"
             if src_dtype == torch.float8_e5m2 or dst_dtype == torch.float8_e5m2:
                 return 4
             if src_dtype == torch.float8_e4m3fn or dst_dtype == torch.float8_e4m3fn:
