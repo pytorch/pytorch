@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import dataclasses
 import dis
 import functools
 import inspect
@@ -13,8 +12,6 @@ import threading
 import traceback
 import types
 import warnings
-import weakref
-from collections import namedtuple
 from enum import Enum
 from os.path import dirname, join
 from typing import (
@@ -37,6 +34,7 @@ import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
+from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -61,6 +59,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
+from .code_context import code_context
 from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
@@ -77,11 +76,7 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    StrictMinMaxConstraint,
-)
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
 
 
 # See https://github.com/python/typing/pull/240
@@ -100,15 +95,26 @@ DONT_WRAP_FILES = {
 }
 
 
-CacheEntry = namedtuple("CacheEntry", "check_fn, code")
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
-def _debug_get_cache_entry_list(code: types.CodeType) -> List[CacheEntry]:
+def _debug_get_cache_entry_list(
+    code: Union[types.CodeType, Callable[..., Any]]
+) -> List[CacheEntry]:  # type: ignore[valid-type]
     """
-    Given a code object, retrieve the cache entries stored in this code.
+    Given a code object or a callable object, retrieve the cache entries
+     stored in this code.
     """
-    cache_list = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
-    return list(map(CacheEntry._make, cache_list))
+    if callable(code):
+        code = code.__code__
+    cache_head = torch._C._dynamo.eval_frame._debug_get_cache_entry_list(code)
+    cache_list = []
+    while cache_head is not None:
+        cache_list.append(cache_head)
+        cache_head = cache_head.next
+    return cache_list
 
 
 class OptimizedModule(torch.nn.Module):
@@ -275,6 +281,14 @@ class _TorchDynamoContext:
             return self.compiler_config
 
         fn = innermost_fn(fn)
+
+        # add context containing GraphModule to any GraphModule forward functions
+        if isinstance(fn, torch.fx.GraphModule):
+            # Assume that the underlying node metadata of `fn`,
+            # a GraphModule instance, accurately represents
+            # all instances of type(fn).
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
@@ -483,9 +497,11 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
                         backend_compile_fn=callback._torchdynamo_orig_callable,
                     )
-                    hijacked_callback = convert_frame.convert_frame(
+                    assert hasattr(
+                        callback, "_clone_with_backend"
+                    ), "DDPOptimizer only supports callback fns that know how to clone themselves."
+                    hijacked_callback = callback._clone_with_backend(
                         ddp_optimizer.compile_fn,
-                        hooks=hooks,
                     )
                     return hijacked_callback(frame, cache_entry, hooks, frame_state)
 
@@ -704,108 +720,6 @@ def explain(f, *extra_args, **extra_kwargs):
         return inner
 
 
-@dataclasses.dataclass
-class ConstraintTarget:
-    """
-    This represents input tensor dimensions.  Don't create this
-    class directly; instead, use :func:`torch._export.dynamic_dim`.
-    """
-
-    w_tensor: weakref.ReferenceType[torch.Tensor]
-    # TODO: We don't need t_id; we can get it off of w_tensor
-    t_id: int
-    dim: int
-
-
-@dataclasses.dataclass
-class Constraint(ConstraintTarget):
-    """
-    This represents constraints on input tensor dimensions, e.g., requiring
-    them to be fully polymorphic or within some range.  Don't create this
-    class directly; instead, use :func:`torch._export.dynamic_dim`.
-    """
-
-    # NOTE(avik): In the future, this could be Union[StrictMinMaxConstraint, <other kinds>]
-    constraint_range: StrictMinMaxConstraint
-    # Represent that `constraint_range` is shared with another ConstraintTarget, which
-    # typically arises because of a specified equality with another dynamic dimension.
-    shared: Optional[ConstraintTarget] = None
-
-    def _clone_with_range(self, lower=2, upper=sympy.oo):
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
-            warn_only=False,
-        )
-        return Constraint(
-            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared
-        )
-
-    def __ge__(self, lower):
-        return self._clone_with_range(lower=lower)
-
-    def __gt__(self, lower):
-        return self._clone_with_range(lower=lower + 1)
-
-    def __le__(self, upper):
-        return self._clone_with_range(upper=upper)
-
-    def __lt__(self, upper):
-        return self._clone_with_range(upper=upper - 1)
-
-    def __bool__(self):
-        # NOTE(avik): We do not support compound expressions like a <= x <= b.
-        # This is because Python implicitly desugars them into bool(a <= x) and bool(x <= b),
-        # and moreover, enforces that any overload of __bool__ must return True or False.
-        # FWIW, sympy also raises TypeError in this case.
-        raise TypeError(
-            "Cannot determine truth value of Constraint. "
-            "If you are trying to combine Constraints with logical connectives, "
-            "you can specify them separately instead."
-        )
-
-    @property
-    def serializable_spec(self):
-        # We need a serialization compatible format of the constraint so that it
-        # can be savedin the graph module w/o breaking the module serialization.
-        # The saved constraints will be used directly for the post-exporting pass
-        # that converts constraints to runtime assertion. The saved constraints
-        # will not be saved in the serialized module.
-        # TODO: A better way is needed. Currently we use 't_id' to map the constraint,
-        # which is not reliable
-        return {
-            "t_id": self.t_id,
-            "dim": self.dim,
-            "min": self.constraint_range.vr.lower,
-            "max": self.constraint_range.vr.upper,
-            "shared": (
-                None
-                if self.shared is None
-                else {
-                    "t_id": self.shared.t_id,
-                    "dim": self.shared.dim,
-                }
-            ),
-        }
-
-    def __eq__(self, other):
-        if not isinstance(other, Constraint):
-            raise TypeError(
-                "A dynamic dim can be specified equal only to another dynamic dim. "
-                f"Equality with {type(other)} is not supported."
-            )
-        constraint_range = StrictMinMaxConstraint(
-            vr=self.constraint_range.vr & other.constraint_range.vr,
-            warn_only=False,
-        )
-        return Constraint(
-            self.w_tensor,
-            self.t_id,
-            self.dim,
-            constraint_range,
-            shared=ConstraintTarget(other.w_tensor, other.t_id, other.dim),
-        )
-
-
 class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
     def __init__(
         self,
@@ -921,45 +835,56 @@ def rewrite_signature(
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    def produce_matching(source_args, candidate_args, loc):
+    def produce_matching(sources, candidates):
+        source_types = " or ".join(
+            [
+                desc + " (" + ", ".join([str(type(arg)) for arg in args]) + ")"
+                for desc, args in sources.items()
+            ]
+        )
+        source_args = [arg for args in sources.values() for arg in args]
         matched_elements_positions = []
         dict_of_source_args = dict()
-        for i in range(0, len(source_args)):
-            element_id = id(source_args[i])
-            dict_of_source_args[element_id] = i
+        for i, arg in enumerate(source_args):
+            dict_of_source_args[id(arg)] = i
 
-        for i in range(0, len(candidate_args)):
-            arg = candidate_args[i]
-            # 1-element tensor arg can be unspec int/float
-            if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
-                if id(arg) in dict_of_source_args:
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
-                elif id(arg.item()) in dict_of_source_args:
-                    matched_elements_positions.append(
-                        dict_of_source_args[id(arg.item())]
-                    )
+        for candidate_desc, candidate_args in candidates.items():
+            for i, arg in enumerate(candidate_args):
+                # 1-element tensor arg can be unspec int/float
+                if isinstance(arg, torch.Tensor) and torch.numel(arg) == 1:
+                    if id(arg) in dict_of_source_args:
+                        matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    elif id(arg.item()) in dict_of_source_args:
+                        matched_elements_positions.append(
+                            dict_of_source_args[id(arg.item())]
+                        )
+                    else:
+                        raise AssertionError(
+                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                        )
                 else:
-                    raise AssertionError(
-                        f"Dynamo {loc} is not consistent with traced {loc}"
-                    )
-            else:
-                assert (
-                    id(arg) in dict_of_source_args
-                ), f"Dynamo {loc} is a strict subset of traced {loc}"
-                matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    if id(arg) not in dict_of_source_args:
+                        raise AssertionError(
+                            f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
+                        )
+                    matched_elements_positions.append(dict_of_source_args[id(arg)])
 
         return matched_elements_positions
 
     matched_input_elements_positions = produce_matching(
-        flat_args, graph_captured_input, "input"
+        sources={"original args": flat_args},
+        candidates={"graph-captured input": graph_captured_input},
     )
 
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
-    flat_both = list(graph_captured_output) + flat_args
     matched_output_elements_positions = produce_matching(
-        flat_both, flat_results_traced, "output"
+        sources={
+            "graph-captured outputs": list(graph_captured_output),
+            "original args": flat_args,
+        },
+        candidates={"traced result": flat_results_traced},
     )
 
     new_graph = FlattenInputOutputSignature(
@@ -1242,6 +1167,7 @@ def export(
             and not skipfiles.check(inspect.getsourcefile(call_to_inspect))
         ):
             dim_constraints.solve()
+            dim_constraints.remove_redundant_dynamic_results()
             msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
             if forced_specializations:
