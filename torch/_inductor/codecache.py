@@ -270,11 +270,13 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    for choice in choices:
-                        timings[choice] = benchmark(choice)
-                        local_cache.setdefault(name, {})
-                        local_cache[name].setdefault(inputs, {})
-                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                    timings = benchmark(choices)
+                    assert all(choice in timings for choice in choices)
+
+                    local_cache.setdefault(name, {})
+                    local_cache[name].setdefault(inputs, {})
+                    for choice, timing in timings.items():
+                        local_cache[name][inputs][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -794,6 +796,17 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
+                # This is a special treatment for Meta internal cuda-12 where all libs
+                # are in lib/cuda-12 and lib/cuda-12/stubs
+                for i, path in enumerate(lpaths):
+                    if path.startswith(os.environ["CUDA_HOME"]) and not os.path.exists(
+                        f"{path}/libcudart_static.a"
+                    ):
+                        for root, dirs, files in os.walk(path):
+                            if "libcudart_static.a" in files:
+                                lpaths[i] = os.path.join(path, root)
+                                lpaths.append(os.path.join(lpaths[i], "stubs"))
+                                break
         macros = vec_isa.build_macro()
         if macros:
             if config.is_fbcode() and vec_isa != invalid_vec_isa:
@@ -880,9 +893,14 @@ def get_include_and_linking_paths(
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
 
+    static_link_libs = []
+    if aot_mode and config.is_fbcode():
+        # For Meta internal cuda-12, it is recommended to static link cudart
+        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+
     ipaths = " ".join(["-I" + p for p in ipaths])
     lpaths = " ".join(["-L" + p for p in lpaths])
-    libs = " ".join(["-l" + p for p in libs])
+    libs = " ".join(static_link_libs + ["-l" + p for p in libs])
     return ipaths, lpaths, libs, macros
 
 
