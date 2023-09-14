@@ -1286,10 +1286,6 @@ def method_to_operator(method):
         op = getattr(operator, method_attr)
     return op
 
-def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
-    int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
-    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
-
 SYMPY_INTERP = {
     'Eq': operator.eq,
     'Ne': operator.ne,
@@ -1305,7 +1301,6 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
-    'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
@@ -2728,10 +2723,7 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         # 'positive' is None for unspecified symbols, since we can't
         # assume that it will be neither positive nor negative.
-
-        # We don't want to specialize zero one val for unspecified symbol
-        # so that we can always get a new symbol despite val.
-        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, do_not_specialize_zero_one=True)
+        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
 
     @record_shapeenv_event()
     def create_symbol(
@@ -2741,13 +2733,7 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
-        do_not_specialize_zero_one: bool = False,
     ) -> "sympy.Expr":
-        if do_not_specialize_zero_one:
-            specialize_zero_one = False
-        else:
-            specialize_zero_one = self.specialize_zero_one
-
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
@@ -2767,7 +2753,7 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if val in (0, 1) and specialize_zero_one:
+        if val in (0, 1) and self.specialize_zero_one:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol

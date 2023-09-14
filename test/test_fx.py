@@ -331,6 +331,7 @@ class TestFX(JitTestCase):
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
     @skipIfNoDynamoSupport
+    @unittest.expectedFailure
     def test_control_flow_tracing(self):
         def true(x, y):
             return x + y
@@ -341,7 +342,7 @@ class TestFX(JitTestCase):
         def f(x, y):
             x = control_flow.cond(x[0] == 0, true, false, [x, y])
 
-        with self.assertRaisesRegex(RuntimeError, r"Expected pred to be bool or tensor, but got Proxy\(eq\)"):
+        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace HigherOrderOperators"):
             _ = symbolic_trace(f)
 
     def test_disallow_override(self):
