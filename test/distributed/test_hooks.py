@@ -117,19 +117,23 @@ class CollectiveHooks:
         self.assertEqual(2, len(starts))
         self.assertEqual(2, len(ends))
 
-        self.assertEqual(default_pg_name, starts[0].pg_name)
-        self.assertEqual(self.backend_name, starts[0].backend)
-        self.assertGreaterEqual(starts[0].sequence_number, 0)
-        self.assertGreaterEqual(starts[0].timestamp, 0)
-        self.assertEqual("ALLGATHER", starts[0].operation)
 
-        self.assertEqual(default_pg_name, ends[0].pg_name)
-        self.assertEqual(self.backend_name, ends[0].backend)
+        def check_op(idx, coll_name):
+            self.assertEqual(default_pg_name, starts[idx].pg_name)
+            self.assertEqual(self.backend_name, starts[idx].backend)
+            self.assertGreaterEqual(starts[idx].sequence_number, 0)
+            self.assertGreaterEqual(starts[idx].timestamp, 0)
+            self.assertEqual(coll_name, starts[idx].operation)
 
-        self.assertEqual(starts[0].sequence_number, ends[0].sequence_number)
-        self.assertLessEqual(starts[0].timestamp, ends[0].timestamp)
-        self.assertEqual("ALLGATHER", ends[0].operation)
+            self.assertEqual(default_pg_name, ends[idx].pg_name)
+            self.assertEqual(self.backend_name, ends[idx].backend)
 
+            self.assertEqual(starts[idx].sequence_number, ends[idx].sequence_number)
+            self.assertLessEqual(starts[idx].timestamp, ends[idx].timestamp)
+            self.assertEqual(coll_name, ends[idx].operation)
+
+        check_op(0, "ALLGATHER")
+        check_op(1, "ALLREDUCE")
 
 class GlooHooks(MultiProcessTestCase, CollectiveHooks):
     def setUp(self) -> None:
