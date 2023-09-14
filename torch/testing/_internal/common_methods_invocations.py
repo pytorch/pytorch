@@ -6282,6 +6282,12 @@ def skips_mvlgamma(skip_redundant=False):
         DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                      'test_reference_numerics_small',
                      dtypes=(torch.int8,)),
+        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
     )
     if skip_redundant:
         # Redundant tests
