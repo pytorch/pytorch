@@ -159,10 +159,8 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
+    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": False})
     def test_conv_bn_folding(self):
-        original_config = inductor_config.efficient_conv_bn_eval_fx_passes
-        inductor_config.efficient_conv_bn_eval_fx_passes = False
-
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):
             class ConvOp(nn.Module):
@@ -229,7 +227,6 @@ class BinaryFoldingTemplate(TestCase):
                 module,
                 expect_success=True,
             )
-        inductor_config.efficient_conv_bn_eval_fx_passes = original_config
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
