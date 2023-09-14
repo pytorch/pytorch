@@ -1411,7 +1411,7 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, el_type):
                 return False
         return True
-    elif origin_type is Union:  # also handles Optional
+    elif origin_type is Union or issubclass(origin_type, BuiltinUnionType):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
         inner_types = get_args(target_type)

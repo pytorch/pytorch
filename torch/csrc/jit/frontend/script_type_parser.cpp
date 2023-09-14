@@ -233,8 +233,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
-  std::cout << "\n parseTypeFromExpr" << "\n";
-  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind()) << "\n";
+  std::cout << "\n parseTypeFromExpr"
+            << "\n";
+  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind())
+            << "\n";
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text().str(), expr.range())) {
@@ -262,21 +264,43 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
  * <KIND> |
  */
 
+void _flatten_union(const Expr& node, std::vector<Expr>* result) {
+  // flatten possibly nested union expressions like (int | (float | str))
+  // into a flat list of expressions like [int, float, str]
+  if (node.kind() == '|') {
+    auto as_binop = BinOp(node);
+    _flatten_union(as_binop.lhs(), result);
+    _flatten_union(as_binop.rhs(), result);
+  } else {
+    result->push_back(node);
+  }
+}
+
+std::vector<Expr> flatten_union(const Expr& node) {
+  std::vector<Expr> result;
+  _flatten_union(node, &result);
+  return result;
+}
+
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
-  std::cout << "\n\nparseTypeFromExprImpl" << "\n";
-  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind()) << "\n";
+//  std::cout << "\n\nparseTypeFromExprImpl"
+//            << "\n";
+//  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind())
+//            << "\n";
   if (expr.kind() == '|') {
     // transform to equivalent union
     auto binop = BinOp(expr);
-    std::vector<Expr> operands;
-    // create subscript node for Union[lhs, rhs]
+    // NOTE: in order to support unions with more than 2 operands, we need to
+    // recursively flatten the tree of | expressions.
+    auto members = flatten_union(expr);
+
     auto synthesised_union = Subscript::create(
         expr.range(),
         Var::create(expr.range(), Ident::create(expr.range(), "Union")),
-        List<Expr>::create(expr.range(), {binop.lhs(), binop.rhs()})
-    );
-//    std::cout << "\n <EXPR> synthesised_union:" << synthesised_union << " <KIND> " << kindToString(synthesised_union.kind()) << "\n";
-    return parseTypeFromExprImpl(synthesised_union);
+        List<Expr>::create(expr.range(), members));
+    //    std::cout << "\n <EXPR> synthesised_union:" << synthesised_union << "
+    //    <KIND> " << kindToString(synthesised_union.kind()) << "\n";
+    return parseTypeFromExpr(synthesised_union);
   }
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);

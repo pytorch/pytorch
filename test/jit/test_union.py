@@ -9,7 +9,6 @@ from torch.testing import FileCheck
 from enum import Enum
 from textwrap import dedent
 from typing import Dict, List, Optional, Tuple, Union
-import unittest
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

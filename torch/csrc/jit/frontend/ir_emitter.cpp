@@ -1060,6 +1060,9 @@ struct to_ir {
             actual_return,
             /*allow_conversions=*/true);
       }
+      std::cout << "original stmt: " << actual_return->type()->repr_str() << std::endl;
+    std::cout << "actual_returnA: " << actual_return->type()->repr_str() << std::endl;
+    std::cout << "declared_return_type: " << declared_return_type->repr_str() << std::endl;
       if (!actual_return->type()->isSubtypeOf(*declared_return_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
