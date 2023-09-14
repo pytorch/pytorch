@@ -179,10 +179,6 @@ def _annotate_linear(
         act_node = node.args[0]
         weight_node = node.args[1]
         bias_node = None
-        if len(node.args) < 2:
-            raise ValueError(
-                f"aten.linear nodes less than 2 args which are: {node.args}"
-            )
         if len(node.args) > 2:
             bias_node = node.args[2]
 
@@ -192,6 +188,10 @@ def _annotate_linear(
                 act_node,
                 input_act_qspec,
             )
+            if _is_annotated([weight_node]):
+                raise RuntimeError(
+                    f"{weight_node} is already annotated for linear {node}"
+                )
             _annotate_input_qspec_map(
                 node,
                 weight_node,
