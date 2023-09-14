@@ -25,6 +25,8 @@ from typing import (  # noqa: F401
     Final,
     ForwardRef,
     Generic,
+    get_args,  # new in 3.8
+    get_origin,  # new in 3.8
     List,
     Optional,
     Tuple,
@@ -44,6 +46,11 @@ from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
+if sys.version_info >= (3, 10):
+    from types import UnionType as BuiltinUnionType
+else:
+    BuiltinUnionType = ()
 
 LockType: Type
 try:
@@ -78,8 +85,8 @@ class SourceLoader:
 
 loader = SourceLoader()
 
-
 IS_PY39_PLUS = sys.version_info >= (3, 9)
+IS_PY310_PLUS = sys.version_info >= (3, 10)
 
 
 def createResolutionCallbackFromEnv(lookup_base):
@@ -987,7 +994,7 @@ def is_tuple(ann) -> bool:
     if not hasattr(ann, "__module__"):
         return False
 
-    ann_origin = getattr(ann, "__origin__", None)
+    ann_origin = get_origin(ann)
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is tuple:
         return True
     return ann.__module__ == "typing" and (ann_origin is Tuple or ann_origin is tuple)
@@ -1000,7 +1007,7 @@ def is_list(ann) -> bool:
     if not hasattr(ann, "__module__"):
         return False
 
-    ann_origin = getattr(ann, "__origin__", None)
+    ann_origin = get_origin(ann)
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is list:
         return True
     return ann.__module__ == "typing" and (ann_origin is List or ann_origin is list)
@@ -1013,7 +1020,7 @@ def is_dict(ann) -> bool:
     if not hasattr(ann, "__module__"):
         return False
 
-    ann_origin = getattr(ann, "__origin__", None)
+    ann_origin = get_origin(ann)
     if IS_PY39_PLUS and ann.__module__ == "builtins" and ann_origin is dict:
         return True
     return ann.__module__ == "typing" and (ann_origin is Dict or ann_origin is dict)
@@ -1023,10 +1030,10 @@ def is_union(ann):
     if ann is Union:
         raise_error_container_parameter_missing("Union")
 
-    return (
+    return isinstance(ann, BuiltinUnionType) or (
         hasattr(ann, "__module__")
         and ann.__module__ == "typing"
-        and (getattr(ann, "__origin__", None) is Union)
+        and (get_origin(ann) is Union)
     )
 
 
@@ -1038,11 +1045,11 @@ def is_optional(ann):
         return (
             hasattr(ann, "__module__")
             and ann.__module__ == "typing"
-            and (getattr(ann, "__origin__", None) is Optional)
+            and (get_origin(ann) is Optional)
         )
 
     def is_union_as_optional(ann):
-        ann_args = ann.__args__
+        ann_args = get_args(ann)
         return len(ann_args) == 2 and (None in ann_args or type(None) in ann_args)
 
     return is_optional_as_optional(ann) or (is_union(ann) and is_union_as_optional(ann))
@@ -1055,13 +1062,13 @@ def is_future(ann) -> bool:
             "contained type. Please add a contained type, e.g. "
             "Future[int]"
         )
-    return getattr(ann, "__origin__", None) is Future
+    return get_origin(ann) is Future
 
 
 def is_await(ann) -> bool:
     if ann is _Await:
         return True
-    return getattr(ann, "__origin__", None) is _Await
+    return get_origin(ann) is _Await
 
 
 if torch.distributed.rpc.is_available():
@@ -1075,7 +1082,7 @@ if torch.distributed.rpc.is_available():
                 "contained type. Please add a contained type, e.g. "
                 "RRef[int]"
             )
-        return getattr(ann, "__origin__", None) is RRef
+        return get_origin(ann) is RRef
 
     def is_rref_instance(obj) -> bool:
         return isinstance(obj, PyRRef)
@@ -1089,7 +1096,7 @@ else:
 
 def is_final(ann) -> bool:
     return ann.__module__ in {"typing", "typing_extensions"} and (
-        getattr(ann, "__origin__", None) is Final or isinstance(ann, type(Final))
+        get_origin(ann) is Final or isinstance(ann, type(Final))
     )
 
 
@@ -1329,14 +1336,6 @@ def raise_error_container_parameter_missing(target_type) -> None:
         "contained type. Please add a contained type, e.g. "
         f"{target_type}[int]"
     )
-
-
-def get_origin(target_type):
-    return getattr(target_type, "__origin__", None)
-
-
-def get_args(target_type):
-    return getattr(target_type, "__args__", None)
 
 
 def check_args_exist(target_type) -> None:

@@ -9,6 +9,7 @@ from torch.testing import FileCheck
 from enum import Enum
 from textwrap import dedent
 from typing import Dict, List, Optional, Tuple, Union
+import unittest
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -32,6 +33,22 @@ class TestUnion(JitTestCase):
     script mode wouldn't run! So, some test cases have separate but
     equivalent functions to emulate `checkScript`.
     """
+
+    @unittest.skipIf(sys.version_info < (3, 10), "Requires Python 3.10")
+    def test_union_pep604(self):
+        def test_func(a: int | float, b: Optional[int]):
+            return 0
+
+        scripted_func = torch.jit.script(test_func)
+        graph_rep = str(scripted_func.graph)
+        code_rep = str(scripted_func.code)
+        # TS graph IR for Union should be annotated as Union()
+        FileCheck().check("Union(").check("int?").run(graph_rep)
+        # Serialized code for Union should be annotated as Union[]
+        FileCheck().check("Union[").check("Optional[int]").run(code_rep)
+        self.checkScript(test_func, (5, 6))
+        # this shouldn't error out
+        torch._C.parse_ir(str(scripted_func.graph))
 
     def test_check_union_annotation(self):
         def test_func(a: Union[int, float], b: Optional[int]):
