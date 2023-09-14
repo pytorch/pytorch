@@ -2353,7 +2353,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         #   - manual_seed graph breaks
         #   - dynamo traces through manual_seed calls
         # That gives us 3 frames and 3 ops + 1 (torch.seed()).
-        self.assertEqual(cnts.op_count, 4)
+        # If assume_static_by_default is False, there is +1 op for the symint call.
+        has_symint_call = not torch._dynamo.config.assume_static_by_default
+        self.assertEqual(cnts.op_count, 4 + int(has_symint_call))
         self.assertEqual(cnts.frame_count, 3)
 
     def test_is_tensor_like(self):

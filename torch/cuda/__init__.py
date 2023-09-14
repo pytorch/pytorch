@@ -22,7 +22,7 @@ import torch
 import torch._C
 from torch.types import Device
 from .. import device as _device
-from .._utils import classproperty
+from .._utils import classproperty, false
 from ._utils import _dummy_type, _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -42,7 +42,7 @@ _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
-_is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
+_is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", false)
 _device_t = Union[_device, str, int, None]
 
 _HAS_PYNVML = False

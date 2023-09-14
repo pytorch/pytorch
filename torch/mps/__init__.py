@@ -6,8 +6,9 @@ See https://developer.apple.com/documentation/metalperformanceshaders for more d
 """
 import torch
 from .. import Tensor
+from .._utils import false
 
-_is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", lambda: False)
+_is_in_bad_fork = getattr(torch._C, "_mps_is_in_bad_fork", false)
 _default_mps_generator: torch._C.Generator = None  # type: ignore[assignment]
 
 
