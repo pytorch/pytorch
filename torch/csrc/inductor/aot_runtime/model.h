@@ -8,6 +8,7 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #define AOT_VECTOR_SIZE_CHECK(vec, expected_size) \
   {                                               \
@@ -235,6 +236,34 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
     return std::make_unique<AOTInductorModel>(constants);
   }
 };
+
+#define AOTI_TORCH_ERROR_CHECK(call)                                      \
+  if ((call) != AOTI_TORCH_SUCCESS) {                                     \
+    throw std::runtime_error(                                             \
+        std::string(#call " API call failed at ") + __FILE__ + ", line" + \
+        std::to_string(__LINE__));                                        \
+  }
+
+// For fallback ops like reinterpret_tensor which returns a short-lived
+// tensor, this RAII class will achieve a similarly short live range for
+// AtenTensorHandle in the ABI compatible mode.
+
+using RAIIAtenTensorHandle = std::shared_ptr<AtenTensorOpaque>;
+
+inline RAIIAtenTensorHandle create_raii_tensor_handle_for_extern(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
+    // Do nothing for extern tensor handles
+  });
+}
+
+inline RAIIAtenTensorHandle create_raii_tensor_handle_for_temp(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_delete_tensor_object(static_cast<AtenTensorHandle>(ptr)));
+  });
+}
 
 } // namespace aot_inductor
 } // namespace torch

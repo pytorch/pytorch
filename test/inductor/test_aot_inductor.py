@@ -10,8 +10,6 @@ import torch._inductor
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
 from torch._inductor.utils import aot_inductor_launcher
-from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
 
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -227,28 +225,6 @@ class AotInductorTests(TestCase):
         )
         self.assertTrue(same(actual, expected))
 
-    def test_convolution(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn((32, 16, 8), device="cuda")
-                self.bias = torch.randn((16), device="cuda")
-
-            def forward(self, x):
-                return (
-                    aten.convolution(
-                        x, self.weight, self.bias, [4], [0], [1], True, [0], 1
-                    ),
-                )
-
-        model = Model()
-        example_inputs = (torch.randn((2, 32, 90), device="cuda"),)
-        expected = model(*example_inputs)
-        actual, compiled_cpp = AOTInductorModelRunner.run(
-            model, example_inputs, expected
-        )
-        self.assertTrue(same(actual, expected))
-
     def test_aliased_buffer_reuse(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -271,18 +247,6 @@ class AotInductorTests(TestCase):
         actual, compiled_cpp = AOTInductorModelRunner.run(
             model, example_inputs, expected
         )
-        with open(compiled_cpp) as f:
-            src_code = f.read()
-            FileCheck().check_count(
-                "aoti_torch_empty_strided(",
-                3,
-                exactly=True,
-            ).run(src_code)
-            FileCheck().check_count(
-                "aoti_torch_free_tensor_storage(",
-                3,
-                exactly=True,
-            ).run(src_code)
         self.assertTrue(same(actual, expected))
 
     def test_buffer_reuse(self):
@@ -309,37 +273,6 @@ class AotInductorTests(TestCase):
         actual, compiled_cpp = AOTInductorModelRunner.run(
             model, example_inputs, expected
         )
-        with open(compiled_cpp) as f:
-            src_code = f.read()
-            FileCheck().check_count(
-                "aoti_torch_empty_strided(",
-                3,
-                exactly=True,
-            ).run(src_code)
-            FileCheck().check_count(
-                "aoti_torch_free_tensor_storage(",
-                3,
-                exactly=True,
-            ).run(src_code)
-        self.assertTrue(same(actual, expected))
-
-    @unittest.skipIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    def test_scaled_dot_product_flash_attention(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, q, k, v):
-                return torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
-
-        model = Repro()
-        example_inputs = (
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-        )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
     def test_duplicated_params(self):

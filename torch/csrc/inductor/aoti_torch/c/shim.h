@@ -13,7 +13,17 @@
 // model using AOTInductor and directly call aten ops or use aten/c10 data
 // structures in the generated code, we will end up with ABI compatibility
 // breakage. By introducing a C shim layer, we can minimize the surface that
-// will cause breakage.
+// will cause breakage. The corresponding software stack can be illustrated
+// as follows:
+//
+// |--------------------------------|
+// |     inference service code     |
+// |--------------------------------|
+// |           model.so             |
+// |--------------|-----------------|
+// |           <c shim>             |
+// |          libtorch.so           |
+// |--------------------------------|
 
 #ifdef __GNUC__
 #define AOTI_TORCH_EXPORT __attribute__((__visibility__("default")))
@@ -33,23 +43,27 @@
 #define AOTI_TORCH_NOINLINE
 #endif
 
-struct AOTITensorOpaque {};
-using AOTITensorHandle = AOTITensorOpaque*;
-
+// AtenTensorHandle is basically an at::Tensor pointer. We pass AtenTensorHandle
+// instead of raw at::Tensor aross the boundary between model.so and libtorch.so
+// to avoid accidental ABI breakage.
+//
+// In terms of the ownership of at::Tensor objects, model.so owns them:
+// For fallback ops that allocate new at::Tensor objects, e.g. empty_strided
+// and convolution (which has no out-variant), the fallback functions will
+// allocate those at::Tensor objects and return their raw pointers. The caller,
+// generated code in model.so, is responsible for wrapping those raw pointers
+// into RAIIAtenTensorHandle (see aot_runtime/model.h) which will take care of
+// freeing those allocated at::Tensor objects.
 struct AtenTensorOpaque {};
 using AtenTensorHandle = AtenTensorOpaque*;
-
-struct AOTITensorManagerOpaque {};
-using AOTITensorManagerHandle = AOTITensorManagerOpaque*;
-
-enum AOTITorchError : int32_t {
-  Success = 0,
-  Failure = 1,
-};
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+using AOTITorchError = int32_t;
+#define AOTI_TORCH_SUCCESS 0
+#define AOTI_TORCH_FAILURE 1
 
 // WARNING: Change the following signatures will break ABI compatibility
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_device_type_cpu();
@@ -74,47 +88,33 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int32();
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int64();
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITensorHandle
-aoti_torch_optional_tensor();
-
+// Free the tensor object
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_create_tensor_manager(
-    AOTITensorManagerHandle* tensor_manager,
-    int64_t reserve_size);
-
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_destroy_tensor_manager(AOTITensorManagerHandle tensor_manager);
-
-// Convert input/output aten tensors to AOTInductorTensor
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_extern_tensor_to_aoti_tensor(
-    AOTITensorManagerHandle tensor_manager,
-    AOTITensorHandle* aoti_tensor,
-    AtenTensorHandle aten_tensor);
-
-// Free the underlying storage data
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_free_tensor_storage(AOTITensorHandle aoti_tensor);
+aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_get_data_ptr(AOTITensorHandle aoti_tensor, void** data_ptr);
+aoti_torch_get_data_ptr(AtenTensorHandle tensor, void** data_ptr);
 
-// Return AOTITensorHandle instead of AOTITorchError makes it easier to create
-// an AOTITensor for a view op
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITensorHandle
+// This function will create a new tensor object and its pointer is returned
+// through *out. The caller is responsible for wrapping the tensor pointer
+// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// when going out of scope.
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch__reinterpret_tensor(
-    AOTITensorManagerHandle tensor_manager,
-    AOTITensorHandle self,
+    AtenTensorHandle* out,
+    AtenTensorHandle self,
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
     int64_t storage_offset);
 
-// Allocate a new AOTInductorTensor with a new tensor storage created
+// This function will create a new tensor object and its pointer is returned
+// through *out. The caller is responsible for wrapping the tensor pointer
+// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// when going out of scope.
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
-    AOTITensorManagerHandle tensor_manager,
-    AOTITensorHandle* out,
+    AtenTensorHandle* out,
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
@@ -123,55 +123,35 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
     int32_t device_index);
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_tensor_copy_(AOTITensorHandle src, AOTITensorHandle dst);
+aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_addmm_out(
-    AOTITensorHandle out,
-    AOTITensorHandle self,
-    AOTITensorHandle mat1,
-    AOTITensorHandle mat2,
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    AtenTensorHandle mat1,
+    AtenTensorHandle mat2,
     float beta,
     float alpha);
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_bmm_out(
-    AOTITensorHandle out,
-    AOTITensorHandle self,
-    AOTITensorHandle mat2);
-
-// aten::convolution does not have an out variant, so we will create an out
-// AOTITensor and return through *out
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_convolution(
-    AOTITensorManagerHandle tensor_manager,
-    AOTITensorHandle* out,
-    int64_t ndim,
-    const int64_t* sizes_ptr,
-    const int64_t* strides_ptr,
-    AOTITensorHandle input,
-    AOTITensorHandle weight,
-    AOTITensorHandle bias,
-    const int64_t* stride,
-    size_t len_stride,
-    const int64_t* padding,
-    size_t len_padding,
-    const int64_t* dilation,
-    size_t len_dilation,
-    int32_t transposed,
-    const int64_t* output_padding,
-    size_t len_output_padding,
-    int32_t groups);
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    AtenTensorHandle mat2);
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_mm_out(
-    AOTITensorHandle out,
-    AOTITensorHandle self,
-    AOTITensorHandle mat2);
+    AtenTensorHandle out,
+    AtenTensorHandle self,
+    AtenTensorHandle mat2);
 
 #ifdef USE_CUDA
+// Assuming CUDA ABI is stable, and any major CUDA upgrade will require a
+// rebuild of model.so
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_set_current_cuda_stream(void* stream, int32_t device_index);
 #endif
 
 #ifdef __cplusplus
-}
+} // extern "C"
 #endif
 
 #endif // AOTI_TORCH_SHIM
