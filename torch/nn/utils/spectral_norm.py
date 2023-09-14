@@ -29,7 +29,7 @@ class SpectralNorm:
         self.dim = dim
         if n_power_iterations <= 0:
             raise ValueError('Expected n_power_iterations to be positive, but '
-                             'got n_power_iterations={}'.format(n_power_iterations))
+                             f'got n_power_iterations={n_power_iterations}')
         self.n_power_iterations = n_power_iterations
         self.eps = eps
 
@@ -115,7 +115,7 @@ class SpectralNorm:
 
     @staticmethod
     def apply(module: Module, name: str, n_power_iterations: int, dim: int, eps: float) -> 'SpectralNorm':
-        for k, hook in module._forward_pre_hooks.items():
+        for hook in module._forward_pre_hooks.values():
             if isinstance(hook, SpectralNorm) and hook.name == name:
                 raise RuntimeError(f"Cannot register two spectral_norm hooks on the same parameter {name}")
 

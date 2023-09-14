@@ -1069,14 +1069,17 @@ class CUDAGraphNode:
                 for i, elem in enumerate(inputs)
                 if isinstance(elem, torch.Tensor)
                 and i not in self.wrapped_function.static_input_idxs
-                and elem.data_ptr() != 0
+                and elem.untyped_storage().data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
         with preserve_rng_state(), torch.cuda.device(
             self.device
         ), clear_cublas_manager(), torch.cuda.graph(
-            self.graph, stream=self.stream, pool=self.cuda_graphs_pool
+            self.graph,
+            stream=self.stream,
+            pool=self.cuda_graphs_pool,
+            capture_error_mode="thread_local",
         ), get_history_recording():
             static_outputs = model(inputs)
 
@@ -1130,7 +1133,7 @@ class CUDAGraphNode:
             )
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
-            is_empty_storage = o.data_ptr() == 0
+            is_empty_storage = o.untyped_storage().data_ptr() == 0
             if ref and ref() is not None or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o
@@ -1545,10 +1548,10 @@ def get_block_addrs(pool_id, live_only=True):
     return blocks
 
 
-def format_tb(caching_allocator_trace):
+def format_tb(frames):
     formatted_traceback = []
 
-    for entry in caching_allocator_trace["frames"]:
+    for entry in frames:
         formatted_traceback.append(
             traceback.FrameSummary(entry["filename"], entry["line"], entry["name"])
         )
@@ -1594,9 +1597,7 @@ def check_memory_pool(device, pool_id, live_storages_ptrs: List[StorageWeakRefWr
     if allocated_not_in_live_storages != 0:
         formatted = []
         for dp, block in allocated_not_in_live_storages.items():
-            trace = (
-                format_tb(block["history"][-1]) if block.get("history", None) else None
-            )
+            trace = format_tb(block.get("frames", []))
             formatted.append(f"Data Pointer: {dp}, history: \n{trace}")
         formatted_s = "\n".join(formatted)
         msg = (
@@ -1688,6 +1689,7 @@ class CUDAGraphTreeManager:
                 self.graph,
                 pool=self.cuda_graphs_thread_pool,
                 stream=self.stream,
+                capture_error_mode="thread_local",
             ):
                 pass
 

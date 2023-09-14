@@ -2383,7 +2383,7 @@ class TestMixTracingScripting(JitTestCase):
 
             def forward(self, feature_map: Dict[str, List[Tensor]]) -> Tensor:
                 output = []
-                for i, j in feature_map.items():
+                for j in feature_map.values():
                     output.append(self.linear(j[0]))
 
                 return torch.stack(output)

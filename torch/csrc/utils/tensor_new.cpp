@@ -385,10 +385,12 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type{ScalarType::Undefined};
         bool is_typed_storage = false;
-        Storage storage =
-            createStorageGetType(data, storage_scalar_type, is_typed_storage);
+        ScalarType storage_scalar_type{ScalarType::Undefined};
+        Storage storage;
+        std::tie(storage, storage_scalar_type, is_typed_storage) =
+            createStorageGetType(data);
+
         TORCH_CHECK(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
@@ -837,7 +839,7 @@ class CheckSparseTensorInvariantsContext {
 };
 
 static Tensor sparse_compressed_tensor_ctor_worker(
-    std::string name,
+    const std::string& name,
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
     PythonArgs& r,
@@ -1107,6 +1109,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_DEVICE1,
     ARG_REQUIRES_GRAD1,
     ARG_CHECK_INVARIANTS1,
+    ARG_IS_COALESCED1,
     ARGS_COUNT1
   };
   enum {
@@ -1117,6 +1120,7 @@ Tensor sparse_coo_tensor_ctor(
     ARG_CHECK_INVARIANTS2,
     ARGS_COUNT2
   };
+
   CheckSparseTensorInvariantsContext
       restores_check_sparse_tensor_invariants_global_state{};
   bool default_check_invariants =
@@ -1184,7 +1188,8 @@ Tensor sparse_coo_tensor_ctor(
                indices,
                values,
                r.intlist(ARG_SIZE1),
-               values.options().layout(at::kSparse))
+               values.options().layout(at::kSparse),
+               r.toBoolOptional(ARG_IS_COALESCED1))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   } else if (r.idx == 2) {
     const auto inferred_options =
@@ -1633,6 +1638,9 @@ Tensor asarray(
   bool force_alias = !copy.value_or(true);
   bool should_warn_numpy_not_writable = false;
 
+  // Used when:
+  // 1. 'obj' implements the buffer protocol and no type is given.
+  // 2. creating a new tensor from a Python sequence.
   auto dtype_unwrapped =
       dtype.value_or(torch::tensors::get_default_scalar_type());
 
@@ -1704,7 +1712,9 @@ Tensor asarray(
       if (wrong_device || wrong_dtype) {
         tensor = tensor.to(
             device.value_or(tensor.device()),
-            dtype.value_or(tensor.scalar_type()));
+            dtype.value_or(tensor.scalar_type()),
+            /*non_blocking=*/false,
+            /*copy=*/force_copy);
       } else {
         tensor = tensor.clone();
       }

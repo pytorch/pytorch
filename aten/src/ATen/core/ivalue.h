@@ -14,6 +14,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <typeindex>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -80,8 +81,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
 // Similar to ComplexHolder, for StreamData3
 struct StreamData3Holder : c10::intrusive_ptr_target {
   public:
-    StreamData3Holder(struct c10::StreamData3 d) {
-      val = d;
+    StreamData3Holder(struct c10::StreamData3 d):val(d) {
     }
     StreamData3Holder() = delete;
     struct c10::StreamData3 val;
@@ -511,17 +511,17 @@ public:
   template <
       typename... Args,
       std::enable_if_t<
-          !guts::disjunction<
+          !std::disjunction<
               std::is_lvalue_reference<Args>...,
-              guts::negation<std::is_constructible<IValue, Args>>...>::value,
+              std::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
       std::enable_if_t<
-          !guts::disjunction<
+          !std::disjunction<
               std::is_lvalue_reference<Args>...,
-              guts::negation<std::is_constructible<IValue, Args>>...>::value,
+              std::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
@@ -585,7 +585,7 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) {
+  IValue(const c10::SymInt& i) {
     if (auto mi = i.maybe_as_int()) {
       tag = Tag::Int;
       payload.u.as_int = *mi;
@@ -602,7 +602,7 @@ public:
   c10::SymInt toSymInt() &&;
   c10::SymInt toSymInt() const&;
 
-  IValue(c10::SymFloat i) {
+  IValue(const c10::SymFloat& i) {
     if (i.is_symbolic()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
@@ -619,13 +619,13 @@ public:
   c10::SymFloat toSymFloat() &&;
   c10::SymFloat toSymFloat() const&;
 
-  IValue(c10::SymBool i) {
-    if (i.is_symbolic()) {
+  IValue(const c10::SymBool& i) {
+     if (auto mi = i.maybe_as_bool()) {
+      tag = Tag::Bool;
+      payload.u.as_int = *mi;
+    } else {
       tag = Tag::SymBool;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
-    } else {
-      tag = Tag::Bool;
-      payload.u.as_bool = i.as_bool_unchecked();
     }
   }
 
@@ -982,7 +982,7 @@ public:
       TORCH_FORALL_TAGS(DEFINE_CASE)
 #undef DEFINE_CASE
     }
-    return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
+    return "InvalidTag(" + std::to_string(static_cast<int>(tag)) + ")";
   }
 
   // generic v.to<at::Tensor>() implementations
@@ -1112,8 +1112,10 @@ public:
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy() const;
-  IValue deepcopy(HashAliasedIValueMap& memo) const;
+  IValue deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo,
+      c10::optional<at::Device> device = c10::nullopt) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(c10::intrusive_ptr_target* p) {

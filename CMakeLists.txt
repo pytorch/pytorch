@@ -46,6 +46,7 @@ include(cmake/public/utils.cmake)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   include(cmake/CheckAbi.cmake)
   string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
+  string(APPEND CMAKE_CUDA_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=${GLIBCXX_USE_CXX11_ABI}")
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
   else()
@@ -206,6 +207,9 @@ cmake_dependent_option(
 cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
+cmake_dependent_option(
+    USE_CUSPARSELT "Use cuSPARSELt" ON
+    "USE_CUDA" OFF)
 cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
     "USE_CUDA" OFF)
@@ -715,12 +719,23 @@ endif()
 
 set(BUILD_ONEDNN_GRAPH OFF)
 
+if(MSVC)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+
+# Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
+cmake_dependent_option(
+  USE_MEM_EFF_ATTENTION
+  "Enable memory-efficient attention for scaled dot product attention" ON
   "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 
 if(DEBUG_CUDA)
@@ -807,6 +822,8 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
+# Re-include to override append_cxx_flag_if_supported from third_party/FBGEMM
+include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   # Eigen fails to build with some versions, so convert this to a warning
@@ -923,8 +940,6 @@ else()
   add_compile_definitions(_UCRT_LEGACY_INFINITY)
   # disable min/max macros
   add_compile_definitions(NOMINMAX)
-  # The source code is in utf-8 encoding
-  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
   # Turn off these warnings on Windows.
   # destructor was implicitly defined as delete
   append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
@@ -1150,6 +1165,10 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 

@@ -198,11 +198,19 @@ def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
+        padding = tuple(tuple_fn(padding))
+        if ceil_mode:
+            padding_ceil = opset9.get_pool_ceil_padding(
+                input, kernel_size, stride, padding
+            )
+            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
+        else:
+            padding = padding * 2
         kwargs = {
             "kernel_shape_i": tuple_fn(kernel_size),
-            "pads_i": tuple_fn(padding) * 2,
+            "pads_i": padding,
             "strides_i": tuple_fn(stride),
-            "ceil_mode_i": ceil_mode,
+            "ceil_mode_i": 0,
         }
         if set(tuple_fn(dilation)) != {1}:
             kwargs["dilations_i"] = tuple_fn(dilation)

@@ -6,43 +6,50 @@ This module contains functionality to support the JIT's scripting frontend, nota
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
-import functools
 import collections
-import enum
-import inspect
 import copy
+import enum
+import functools
+import inspect
 import pickle
 import warnings
-from typing import Any, Dict, List, Set, Tuple, Union, Callable
-
+from typing import Any, Callable, Dict, List, Set, Tuple, Union
 
 import torch
 import torch._jit_internal as _jit_internal
-from torch.utils import set_module
-from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module, infer_methods_to_compile, _compile_and_register_class
-from torch.nn import Module
-from torch.jit._state import _enabled
-from torch.jit._builtins import _register_builtin
-from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
+from torch._classes import classes
 from torch._jit_internal import _qualified_name
+from torch.jit._builtins import _register_builtin
 from torch.jit._fuser import _graph_for, _script_method_graph_for
-from torch.jit._state import (
-    _try_get_jit_cached_function,
-    _try_get_jit_cached_overloads,
-    _set_jit_function_cache,
-    _set_jit_overload_cache,
-)
-from torch.overrides import (
-    has_torch_function, has_torch_function_unary, has_torch_function_variadic)
-from torch.package import PackageExporter, PackageImporter
-from ._serialization import validate_map_location
 
 from torch.jit._monkeytype_config import (
+    JitTypeTraceConfig,
+    JitTypeTraceStore,
     monkeytype_trace,
-    JitTypeTraceConfig ,
-    JitTypeTraceStore
 )
-from torch._classes import classes
+from torch.jit._recursive import (
+    _compile_and_register_class,
+    infer_methods_to_compile,
+    ScriptMethodStub,
+    wrap_cpp_module,
+)
+from torch.jit._state import (
+    _enabled,
+    _set_jit_function_cache,
+    _set_jit_overload_cache,
+    _try_get_jit_cached_function,
+    _try_get_jit_cached_overloads,
+)
+from torch.jit.frontend import get_default_args, get_jit_class_def, get_jit_def
+from torch.nn import Module
+from torch.overrides import (
+    has_torch_function,
+    has_torch_function_unary,
+    has_torch_function_variadic,
+)
+from torch.package import PackageExporter, PackageImporter
+from torch.utils import set_module
+from ._serialization import validate_map_location
 
 type_trace_db = JitTypeTraceStore()  # DB to hold all call traces from MonkeyType
 
@@ -55,10 +62,12 @@ function and does not have any attributes or Parameters.
 """
 set_module(ScriptFunction, "torch.jit")
 
+
 # Throws an error if a jit function is pickled.
 # Helps to avoid Python crashes for Python versions 3.9.5 + when protocol 0 or 1 is given as an argument.
 def _reduce(cls):
     raise pickle.PickleError("ScriptFunction cannot be pickled")
+
 
 ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
@@ -69,6 +78,7 @@ else:
 
     def Attribute(value, type):  # type: ignore[no-redef]
         return value
+
 
 Attribute.__doc__ = """
     This method is a pass-through function that returns `value`, mostly
@@ -116,7 +126,7 @@ Attribute.__doc__ = """
         del AttributeModule
         del m
 
-    Note: it's now preferred to instead use type annotations instead of `torch.jit.Annotate`:
+    Note: it's now preferred to instead use type annotations instead of `torch.jit.Attribute`:
 
     .. testcode::
 
@@ -145,9 +155,11 @@ Attribute.__doc__ = """
         Returns `value`
 """
 
+
 def _get_type_trace_db():
     # This is a private API. Use of this for external purposes is discouraged.
     return type_trace_db
+
 
 # Gets a function from the name of a method on a type
 def _get_function_from_type(cls, name):
@@ -245,7 +257,7 @@ class OrderedModuleDict(OrderedDictWrapper):
         else:
             raise RuntimeError(
                 "Cannot re-assign modules in a ScriptModule with non-scripted "
-                "module, tried to replace existing module '{}': {}".format(k, v)
+                f"module, tried to replace existing module '{k}': {v}"
             )
 
     def __getitem__(self, k):
@@ -302,7 +314,9 @@ class ScriptMeta(type):
 
                 self.__dict__[
                     "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(self, make_stubs, share_types=not added_methods_in_init)
+                ] = torch.jit._recursive.create_script_module(
+                    self, make_stubs, share_types=not added_methods_in_init
+                )
 
                 # Delete the Python attributes that now shadow the ScriptModule
                 # ones, so that __getattr__ and __setattr__ will properly find
@@ -356,7 +370,9 @@ class ConstMap:
         return self.const_mapping[attr]
 
 
-def unpackage_script_module(importer: PackageImporter, script_module_id: str) -> torch.nn.Module:
+def unpackage_script_module(
+    importer: PackageImporter, script_module_id: str
+) -> torch.nn.Module:
     """
     Called by ``torch.package.PackageImporter``'s Pickler's ``persistent_load`` function.
     Performs work of loading and returning a ScriptModule from a ``torch.package`` archive.
@@ -421,13 +437,17 @@ if _enabled:
             _props [Dict[str, property]]: A dictionary of properties fetched from self._c and
                 exposed on this wrppaer.
         """
+
         def __init__(self, cpp_class):
             super().__init__()
             self.__dict__["_initializing"] = True
             self._c = cpp_class
 
             # Add wrapped object's properties to this class instance.
-            self._props = {prop.name: property(prop.getter, prop.setter) for prop in self._c._properties()}
+            self._props = {
+                prop.name: property(prop.getter, prop.setter)
+                for prop in self._c._properties()
+            }
 
             self.__dict__["_initializing"] = False
 
@@ -467,8 +487,8 @@ if _enabled:
             else:
                 return self.forward_magic_method("__add__", other)
 
-
     for method_name in _magic_methods:
+
         def method_template(self, *args, **kwargs):
             return self.forward_magic_method(method_name, *args, **kwargs)
 
@@ -488,7 +508,13 @@ if _enabled:
         contain methods, attributes, parameters, and
         constants. These can be accessed the same way as on a normal ``nn.Module``.
         """
-        __jit_unused_properties__ = ['code', 'code_with_constants', 'graph', 'inlined_graph', 'original_name']
+        __jit_unused_properties__ = [
+            "code",
+            "code_with_constants",
+            "graph",
+            "inlined_graph",
+            "original_name",
+        ]
 
         def __init__(self):
             super().__init__()
@@ -707,7 +733,9 @@ if _enabled:
             r"""
             save(f, _extra_files={})
 
-            See :func:`torch.jit.save <torch.jit.save>` for details.
+            See :func:`torch.jit.save <torch.jit.save>` witch accepts a file-like object.
+            This function, torch.save(), converts the object to a string, treating it as a path.
+            DO NOT confuse these two functions when it comes to the 'f' parameter functionality.
             """
             return self._c.save(str(f), **kwargs)
 
@@ -843,8 +871,9 @@ if _enabled:
         # it is not overridden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == _get_function_from_type(  # type: ignore[attr-defined]
-                RecursiveScriptModule, "__dir__"
+            if (
+                self_method.__func__  # type: ignore[attr-defined]
+                == _get_function_from_type(RecursiveScriptModule, "__dir__")
             ):
                 return super().__dir__()
             return self_method()
@@ -854,8 +883,9 @@ if _enabled:
         # class throws if it isn't overridden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == _get_function_from_type(  # type: ignore[attr-defined]
-                RecursiveScriptModule, "__bool__"
+            if (
+                self_method.__func__  # type: ignore[attr-defined]
+                == _get_function_from_type(RecursiveScriptModule, "__bool__")
             ):
                 return True
             return self_method()
@@ -931,7 +961,7 @@ if _enabled:
         "eval",
         "train",
         "get_extra_state",
-        "set_extra_state"
+        "set_extra_state",
     }
 
     def _make_fail(name):
@@ -963,6 +993,7 @@ else:
         def __init__(self, arg=None):
             super().__init__()
 
+
 def call_prepare_scriptable_func_impl(obj, memo):
     if not isinstance(obj, torch.nn.Module):
         return obj
@@ -974,7 +1005,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
     if obj_id in memo:
         return memo[id(obj)]
 
-    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore[operator]
+    obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
     # hierarchy when recursing below.
     memo[obj_id] = obj
@@ -982,11 +1013,13 @@ def call_prepare_scriptable_func_impl(obj, memo):
     new_obj_dict = {}
 
     for name, sub_module in obj.__dict__.items():
-        if name == '_modules':
+        if name == "_modules":
             for k, v in sub_module.items():
                 sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
             new_obj_dict[name] = sub_module
-        elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
+        elif isinstance(sub_module, torch.nn.Module) and not isinstance(
+            sub_module, ScriptModule
+        ):
             new_obj_dict[name] = call_prepare_scriptable_func_impl(sub_module, memo)
         else:
             new_obj_dict[name] = sub_module
@@ -1000,6 +1033,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
 def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
+
 
 def create_script_dict(obj):
     """
@@ -1031,8 +1065,13 @@ def create_script_list(obj, type_hint=None):
     return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
 
 
-def script(obj, optimize=None, _frames_up=0, _rcb=None,
-           example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
+def script(
+    obj,
+    optimize=None,
+    _frames_up=0,
+    _rcb=None,
+    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
     it as TorchScript code using the TorchScript compiler, and return a :class:`ScriptModule` or
@@ -1269,18 +1308,24 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
                     for examples in example_inputs:
                         obj(*examples)
                 else:
-                    raise ValueError("Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
-                                     " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType.")
+                    raise ValueError(
+                        "Error: Unable to infer types. Please format the inputs to type `List[Tuple]`"
+                        " or `Dict[Callable, List[Tuple]]` to be run with MonkeyType."
+                    )
         else:
-            warnings.warn("Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
-                          "to enable Profile-Directed Typing in TorchScript. Refer to "
-                          "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. ")
+            warnings.warn(
+                "Warning: monkeytype is not installed. Please install https://github.com/Instagram/MonkeyType "
+                "to enable Profile-Directed Typing in TorchScript. Refer to "
+                "https://github.com/Instagram/MonkeyType/blob/master/README.rst to install MonkeyType. "
+            )
 
     if isinstance(obj, torch.nn.Module):
         obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
+    else:
+        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)
@@ -1357,7 +1402,7 @@ def _check_overload_defaults(impl_defaults, overload_defaults, loc):
                 loc,
                 "Default parameters on overloads do not affect the runtime so they "
                 "must equal to the default parameter on the implementation function. Found on "
-                "parameter {name}".format(name=name),
+                f"parameter {name}",
             )
 
 
@@ -1393,8 +1438,9 @@ def _get_overloads(obj):
         return existing_compiled_fns
 
     if obj in uncompiled_overloads:
-        raise RuntimeError(_jit_internal.get_overload_no_implementation_error_message(
-            'function', obj))
+        raise RuntimeError(
+            _jit_internal.get_overload_no_implementation_error_message("function", obj)
+        )
 
     compiled_fns = []
     for overload_fn in uncompiled_overloads:
@@ -1415,9 +1461,9 @@ def _check_directly_compile_overloaded(obj):
     qual_name = _qualified_name(obj)
     if _jit_internal._get_fn_overloads(qual_name) or _try_get_jit_cached_overloads(obj):
         raise RuntimeError(
-            "Function {} cannot be directly compiled because it"
+            f"Function {qual_name} cannot be directly compiled because it"
             " is overloaded. It must be used in a context of a function"
-            " where its inputs can determine which overload to call.".format(qual_name)
+            " where its inputs can determine which overload to call."
         )
 
 
@@ -1460,14 +1506,15 @@ def _recursive_compile_class(obj, loc):
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     return _compile_and_register_class(obj, rcb, _qual_name)
 
+
 CompilationUnit = torch._C.CompilationUnit
 set_module(CompilationUnit, "torch.jit")
 
 
-def pad(s: str, padding: int, offset: int = 0, char: str = ' '):
+def pad(s: str, padding: int, offset: int = 0, char: str = " "):
     if padding >= len(s):
         padding -= len(s)
-    return ''.join([char for _ in range(padding + offset)]) + s
+    return "".join([char for _ in range(padding + offset)]) + s
 
 
 class _ScriptProfileColumn:
@@ -1483,7 +1530,7 @@ class _ScriptProfileColumn:
     def materialize(self):
         max_length = len(self.header)
         rows: List[Tuple[int, str]] = []
-        for (key, value) in self.rows.items():
+        for key, value in self.rows.items():
             cell = str(value)
             rows.append((key, cell))
             max_length = max(len(cell), max_length)
@@ -1506,24 +1553,24 @@ class _ScriptProfileTable:
     def dump_string(self):
         outputs: List[str] = []
         cells: List[Tuple[str, Dict[int, str]]] = []
-        header_buffer = ''
+        header_buffer = ""
         for col in self.cols:
             header, rows = col.materialize()
             header_buffer += header
             cells.append((header, dict(rows)))
 
         outputs.append(header_buffer)
-        outputs.append(pad('', len(header_buffer), 0, '='))
+        outputs.append(pad("", len(header_buffer), 0, "="))
         for line in self.source_range:
-            row_buffer = ''
+            row_buffer = ""
             for header, rows in cells:
                 cell = rows.get(line)
                 if cell is None:
-                    row_buffer += pad('', len(header))
+                    row_buffer += pad("", len(header))
                 else:
                     row_buffer += cell
             outputs.append(row_buffer)
-        return '\n'.join(outputs)
+        return "\n".join(outputs)
 
 
 class _ScriptProfile:
@@ -1541,7 +1588,7 @@ class _ScriptProfile:
         for source_stats in self.profile._dump_stats():
             source_ref = source_stats.source()
             source_lines = source_ref.text().splitlines()
-            dedent = min([len(line) - len(line.lstrip(' ')) for line in source_lines])
+            dedent = min([len(line) - len(line.lstrip(" ")) for line in source_lines])
             source_lines = [line[dedent:] for line in source_lines]
 
             start_line = source_ref.starting_lineno()
@@ -1560,9 +1607,11 @@ class _ScriptProfile:
                     hits.add_row(line, stat.count())
                     time_ns.add_row(line, stat.duration_ns())
 
-            table = _ScriptProfileTable([lineno, hits, time_ns, line_contents], list(source_range))
+            table = _ScriptProfileTable(
+                [lineno, hits, time_ns, line_contents], list(source_range)
+            )
             outputs.append(table.dump_string())
-        return '\n\n'.join(outputs)
+        return "\n\n".join(outputs)
 
     def dump(self):
         print(self.dump_string())

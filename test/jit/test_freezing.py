@@ -13,7 +13,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM
-from torch.testing._internal.common_cuda import TEST_CUDNN
+from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
 
@@ -29,7 +29,6 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
-TEST_CUDA = torch.cuda.is_available()
 TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
 
 def removeExceptions(graph):
@@ -1996,8 +1995,8 @@ class TestFrozenOptimizations(JitTestCase):
         torch.set_default_dtype(torch.double)
 
     def tearDown(self):
-        super().tearDown()
         torch.set_default_dtype(self.default_dtype)
+        super().tearDown()
 
     def test_conv_bn_folding(self):
         conv_bias = [True, False]

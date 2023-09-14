@@ -119,7 +119,9 @@ def generate_index_rst(example_cases, tag_to_modules, support_level_to_modules):
         blurb = file.read()
 
     # Generate contents of the .rst file
-    doc_contents = f"""ExportDB
+    doc_contents = f""".. _torch.export_db:
+
+ExportDB
 ========
 
 {blurb}
@@ -145,7 +147,11 @@ def generate_tag_rst(tag_to_modules):
 
     for tag, modules_rst in tag_to_modules.items():
         doc_contents = f"{tag}\n{'=' * (len(tag) + 4)}\n"
-        doc_contents += "\n\n".join(modules_rst).replace("=", "-")
+        full_modules_rst = "\n\n".join(modules_rst)
+        full_modules_rst = re.sub(
+            r"={3,}", lambda match: "-" * len(match.group()), full_modules_rst
+        )
+        doc_contents += full_modules_rst
 
         with open(os.path.join(EXPORTDB_SOURCE, f"{tag}.rst"), "w") as f:
             f.write(doc_contents)
@@ -159,13 +165,14 @@ def generate_rst():
     tag_to_modules = {}
     support_level_to_modules = {}
     for example_case in example_cases.values():
-
         doc_contents = generate_example_rst(example_case)
 
         for tag in example_case.tags:
             tag_to_modules.setdefault(tag, []).append(doc_contents)
 
-        support_level_to_modules.setdefault(example_case.support_level, []).append(doc_contents)
+        support_level_to_modules.setdefault(example_case.support_level, []).append(
+            doc_contents
+        )
 
     generate_tag_rst(tag_to_modules)
     generate_index_rst(example_cases, tag_to_modules, support_level_to_modules)
