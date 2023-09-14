@@ -326,6 +326,13 @@ class VariableTracker(metaclass=HasPostInit):
             return self.var_getattr(tx, args[0].as_python_constant()).add_options(
                 self, args[0]
             )
+        elif (
+            name == "__contains__"
+            and hasattr(self.value, "__len__")
+            and len(self.value) == 0
+        ):
+            return variables.ConstantVariable(False, **VariableTracker.propagate(self))
+
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
     def __init__(

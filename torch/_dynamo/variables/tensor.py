@@ -338,6 +338,7 @@ class TensorVariable(VariableTracker):
                 unimplemented(f"Illegal method invocation {name} in strict mode")
         from . import ConstantVariable, TorchVariable, TupleVariable
         from .builder import wrap_fx_proxy
+        from .user_defined import UserDefinedClassVariable
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
@@ -471,8 +472,8 @@ class TensorVariable(VariableTracker):
             constant_result = ConstantVariable(index, **options)
         elif (
             name == "as_subclass"
-            and len(args) == 2
-            and isintance(args[1], UserDefinedClassVariable)
+            and len(args) == 1
+            and isinstance(args[0], UserDefinedClassVariable)
         ):
             from .torch_function import TensorWithTFOverrideVariable
 
@@ -480,7 +481,7 @@ class TensorVariable(VariableTracker):
             # in eager, this is just a type change. This isn't sound if a __torch_function__ tensor subclass
             # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
             # It is up to the user whether this is correct behavior or not.
-            py_cls = args[1].as_python_constant()
+            py_cls = args[0].as_python_constant()
             return TensorWithTFOverrideVariable.create(
                 tx, self, py_cls.__torch_function__, py_cls
             )

@@ -228,12 +228,13 @@ class TorchVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value is torch.overrides.get_default_nowrap_functions:
-            # handle this here since we don't properly trace LRU cache
+            # [Note: __torch_function__] we return empty here because we restrict
+            # the set of functions that we trace __torch_function__ on to
+            # functions outside of the actual set. Implementing this properly will require implementing
+            # some variable types to track and compare tensor getset descriptors
             from .builder import SourcelessBuilder
 
-            return SourcelessBuilder()(
-                tx, torch.overrides.get_default_nowrap_functions()
-            ).add_options(options)
+            return SourcelessBuilder()(tx, set()).add_options(options)
         if self.value is torch._functorch.vmap.vmap_impl:
             return TorchHigherOrderOperatorVariable.make(
                 self.value,

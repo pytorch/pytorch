@@ -557,15 +557,6 @@ def _traceable_collectives_source(fn):
     return AttrSource(path_source, inner_name)
 
 
-class MethodWrapperVariable(VariableTracker):
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
-    def as_python_constant(self):
-        return self.value
-
-
 class CollectiveFunctionRewriteVariable(UserFunctionVariable):
     """
     Some of the torch.distributed.* collective APIs are possible to rewrite to 'traceable' collectives.
