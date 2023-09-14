@@ -618,15 +618,15 @@ _assert_z3_installed_if_tv_set()
 # might be silently happening. This function tries to nail down exactly at which
 # point things went wrong from a validation perspective.
 def bisect(shape_env):
-    from torch.fx.experimental.symbolic_shapes import FakeTensorMeta, ShapeEnv, ShapeEnvEvent
-    from torch.fx.experimental.recording import replay_shape_env_events
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SHAPEENV_EVENT_KEY, CURRENT_NODE_KEY
+    from torch.fx.experimental.recording import FakeTensorMeta, ShapeEnvEvent, replay_shape_env_events
 
     events = shape_env.events
 
     # Retrieves the ShapeEnvEvent associated with node.
     def get_node_event(node: torch.fx.Node) -> ShapeEnvEvent:
-        assert "event" in node.meta
-        return events[node.meta["event"]]
+        assert SHAPEENV_EVENT_KEY in node.meta
+        return events[node.meta[SHAPEENV_EVENT_KEY]]
 
     # Creates a new instance of fake, but updating every symbolic value's ShapeEnv
     # reference to the one given as argument.
@@ -664,7 +664,7 @@ def bisect(shape_env):
     # Checks whether the ShapeEnv reconstructed by replaying the events until
     # node is created fails when produce_guards is called.
     def check_node_fails(node: torch.fx.Node) -> Optional[ValidationException]:
-        number = node.meta["event"]
+        number = node.meta[SHAPEENV_EVENT_KEY]
         # Reconstruct shape_env until the event at event_number.
         shape_env = replay_shape_env_events(events[:number + 1])
         shape_env.graph.lint()
@@ -675,6 +675,7 @@ def bisect(shape_env):
     if not last_exception:
         # We don't actually fail due to a produce_guards call.
         # Stop and don't bisect.
+        log.info("translation validation succeeded: no errors found.")
         return
 
     if not shape_env.should_record_events or torch._dynamo.config.translation_validation_no_bisect:
@@ -723,7 +724,6 @@ def bisect(shape_env):
         f"bisecting expects {event.name} to have at least 2 positional arguments. "
         f"Got: {len(args)}"
     )
-    sympy.Eq
     assert isinstance(args[1], sympy.Basic), (
         f"bisecting expects {event.name} to have a SymPy expression as its second argument. "
         f"Got: {type(args[1])}"
@@ -733,5 +733,5 @@ def bisect(shape_env):
         exception[left],
         expr=args[1],
         failed_action=failed_action,
-        traced_node=node.meta["node"],
+        traced_node=node.meta[CURRENT_NODE_KEY],
     )

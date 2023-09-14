@@ -66,8 +66,12 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool",
+    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
 ]
+
+# FX node metadata keys for symbolic shape FX graph.
+SHAPEENV_EVENT_KEY = "shapeenv_event"
+CURRENT_NODE_KEY = "current_node"
 
 # These are modules that contain generic code for interacting with ShapeEnv
 # which are unlikely to identify a particular interesting guard statement
@@ -2414,8 +2418,8 @@ class ShapeEnv:
 
     def add_fx_node_metadata(self, node: torch.fx.Node) -> None:
         from torch._dynamo.utils import get_current_node
-        node.meta["event"] = self.last_event_index()
-        node.meta["node"] = get_current_node()
+        node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
+        node.meta[CURRENT_NODE_KEY] = get_current_node()
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -3208,9 +3212,7 @@ class ShapeEnv:
 
         # First, issue all the non-trivial guards.
         for guard in self.guards:
-            static_expr = self._maybe_evaluate_static(guard.expr)
-            if static_expr is not None:
-                self.log.debug("eval %s == %s [statically known]", guard.expr, static_expr)
+            if self._maybe_evaluate_static(guard.expr) is not None:
                 continue
             issue_guard(guard)
 
