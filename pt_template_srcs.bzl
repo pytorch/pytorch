@@ -146,6 +146,7 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_linalg_functions.cpp": ["autograd/generated/python_linalg_functions.cpp"],
             "autograd/generated/python_nested_functions.cpp": ["autograd/generated/python_nested_functions.cpp"],
             "autograd/generated/python_nn_functions.cpp": ["autograd/generated/python_nn_functions.cpp"],
+            "autograd/generated/python_return_types.h": ["autograd/generated/python_return_types.h"],
             "autograd/generated/python_return_types.cpp": ["autograd/generated/python_return_types.cpp"],
             "autograd/generated/python_sparse_functions.cpp": ["autograd/generated/python_sparse_functions.cpp"],
             "autograd/generated/python_special_functions.cpp": ["autograd/generated/python_special_functions.cpp"],
