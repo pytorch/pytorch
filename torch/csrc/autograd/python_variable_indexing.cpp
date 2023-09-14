@@ -15,6 +15,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/DeviceGuard.h>
@@ -271,6 +272,12 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   if (THPVariable_Check(index)) {
     return false;
   }
+#ifdef USE_NUMPY
+  TORCH_CHECK(::torch::utils::is_numpy_available(), "Numpy is not available");
+  if (PyArray_CheckExact(index)) {
+    return false;
+  }
+#endif
   if (!PySequence_Check(index)) {
     return false;
   }
@@ -290,9 +297,6 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 32) {
-    return false;
-  }
-  if (PyArray_CheckExact(index)) {
     return false;
   }
   for (Py_ssize_t i = 0; i < n; i++) {
