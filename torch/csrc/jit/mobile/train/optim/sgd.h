@@ -81,7 +81,7 @@ class TORCH_API SGDParamGroup {
 class TORCH_API SGD {
  public:
   explicit SGD(
-      std::vector<torch::jit::mobile::SGDParamGroup> param_groups,
+      const std::vector<torch::jit::mobile::SGDParamGroup>& param_groups,
       SGDOptions defaults)
       : defaults_(std::make_unique<SGDOptions>(defaults)) {
     for (const auto& param_group : param_groups) {
@@ -103,8 +103,7 @@ class TORCH_API SGD {
   }
 
   explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      : SGD({std::move(SGDParamGroup(params))}, defaults) {}
+      : SGD({SGDParamGroup(std::move(params))}, defaults) {}
 
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const SGDParamGroup& param_group);
