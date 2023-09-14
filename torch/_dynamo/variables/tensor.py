@@ -10,21 +10,24 @@ except ModuleNotFoundError:
     np = None
 
 
+import itertools
+import weakref
+
 import sympy
 
 import torch._numpy as tnp
 
 import torch.fx
 import torch.random
-from torch._higher_order_ops.invoke import invoke
 
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
+from ..compiled_autograd import _invoke_in_backward
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, GlobalSource
 from ..utils import (
     fqn,
     get_custom_getattr,
@@ -54,11 +57,6 @@ supported_const_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
-
-
-def record_hook(*args, real_hook):
-    grad = args[0]
-    return invoke(real_hook, grad, reenter=True)
 
 
 class TensorVariable(VariableTracker):
@@ -699,7 +697,7 @@ class TensorVariable(VariableTracker):
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-                fn = functools.partial(record_hook, real_hook=fn)
+                fn = functools.partial(_invoke_in_backward, fn=fn, reenter=True)
 
                 # This little piece of logic ensures we only ever lift a given hook up once
                 # this important, because a dynamo->aot_autograd invariant is no duplicate sources in inputs.
