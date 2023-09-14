@@ -13,6 +13,9 @@ import torch._numpy._util as _util
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_allclose, assert_equal
 
+from torch.testing._internal.common_cuda import TEST_CUDA
+
+
 # These function receive one array_like arg and return one array_like result
 one_arg_funcs = [
     w.asarray,
@@ -545,6 +548,9 @@ class TestDefaultDtype:
             w.set_default_dtype(fp_dtype="numpy")
 
 
+@pytest.mark.skipif(
+    _np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23"
+)
 class TestExport:
     def test_exported_objects(self):
         exported_fns = (
@@ -555,7 +561,7 @@ class TestExport:
             and x != "set_default_dtype"
         )
         diff = set(exported_fns).difference(set(dir(_np)))
-        assert len(diff) == 0
+        assert len(diff) == 0, str(diff)
 
 
 class TestCtorNested:
@@ -571,6 +577,7 @@ def test_ndarrays_to_tensors():
     assert isinstance(out[0][0], torch.Tensor)
 
 
+@pytest.mark.skipif(not TEST_CUDA, reason="requires cuda")
 def test_f16_on_cuda():
     # make sure operations with float16 tensors give same results on CUDA and on CPU
     t = torch.arange(5, dtype=torch.float16)
@@ -583,3 +590,9 @@ def test_f16_on_cuda():
 
     assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
     assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

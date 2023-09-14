@@ -217,14 +217,16 @@ optimize_ddp = True
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 
+# Make dynamo skip guarding on hooks on nn modules
+# Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
+# dynamo will not notice and will execute whichever version you first compiled.
+skip_nnmodule_hook_guards = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
-
-# Throw an error if backend changes without reset
-raise_on_backend_change = False
 
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
@@ -252,6 +254,22 @@ translation_validation = (
 translation_validation_timeout = int(
     os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
 )
+# Disables bisection for translation validation.
+#
+# Translation validation bisection is enabled by default, if translation validation
+# is also enabled. This should help finding guard simplification issues. However,
+# since validation uses Z3 for bisecting, it might take a lot of time.
+#
+# Set this configuration option so as to avoid bisecting.
+translation_validation_no_bisect = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
+)
+# Disables ShapeEnv event recording.
+# See: [Note: Recording ShapeEnv Events]
+dont_record_shape_env_events = False
+# Checks whether replaying ShapeEnv events on a freshly constructed one yields
+# the a ShapeEnv with the same state. This should be used only in testing.
+check_shape_env_recorded_events = False
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
@@ -261,6 +279,9 @@ trace_numpy = True
 numpy_default_float = "float64"
 numpy_default_complex = "complex128"
 numpy_default_int = "int64"
+
+# use numpy's PRNG if True, pytorch otherwise
+use_numpy_random_stream = False
 
 
 def is_fbcode():

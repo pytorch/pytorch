@@ -107,6 +107,29 @@ class SuperVariable(VariableTracker):
             return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
                 collections.OrderedDict.__getitem__(self.objvar.value, key)
             )
+        elif (
+            inner_fn in (collections.OrderedDict.__setitem__, object.__setattr__)
+            and isinstance(self.objvar, variables.CustomizedDictVariable)
+            and args
+            and variables.ConstDictVariable.is_valid_key(args[0])
+            and self.objvar.mutable_local
+        ):
+            assert not kwargs and len(args) == 2
+            k = variables.ConstDictVariable.get_key(args[0])
+
+            newval = collections.OrderedDict(self.objvar.items)
+            newval[k] = args[1]
+
+            new_rec_contains = self.objvar.recursively_contains.union(
+                args[1].recursively_contains
+            )
+            if args[1].mutable_local is not None:
+                new_rec_contains.add(args[1].mutable_local)
+
+            return tx.replace_all(
+                self.objvar,
+                self.objvar.modifed(newval, new_rec_contains, **options),
+            )
         else:
             unimplemented(f"non-function or method super: {inner_fn}")
 
@@ -737,6 +760,17 @@ class SkipFilesVariable(VariableTracker):
                 unimplemented("deque() with more than 1 arg not supported")
             return variables.lists.DequeVariable(
                 items, mutable_local=MutableLocal(), **options
+            )
+        elif self.value is functools.partial:
+            if not args:
+                unimplemented("functools.partial malformed")
+            # The first arg, a callable (the ctor below will assert on types)
+            fn = args[0]
+            rest_args = args[1:]
+            # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
+            # args and keywords
+            return variables.functions.FunctoolsPartialVariable(
+                fn, args=rest_args, keywords=kwargs, **options
             )
         else:
             try:
