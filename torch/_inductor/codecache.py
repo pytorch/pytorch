@@ -1410,7 +1410,7 @@ class TritonCodeCache:
         return getattr(mod, kernel_name)
 
 
-def _cuda_compiler() -> str:
+def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
