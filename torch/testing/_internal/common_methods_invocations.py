@@ -13802,6 +13802,8 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
                          device_type='cuda', dtypes=[torch.bfloat16]),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         device_type='cuda', dtypes=[torch.bfloat16]),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
                          device_type='cuda', dtypes=[torch.bfloat16]),),
     ),
