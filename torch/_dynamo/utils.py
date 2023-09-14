@@ -61,7 +61,6 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo_utils import DYNAMO_FORCE_INLINE
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
@@ -91,13 +90,6 @@ def tabulate(rows, headers):
         return "\n".join(
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
-
-
-def should_force_inline(func):
-    from .variables.functions import NestedUserFunctionVariable, UserFunctionVariable
-
-    assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
-    return func.get_code() in DYNAMO_FORCE_INLINE
 
 
 def dynamo_profiled(func):

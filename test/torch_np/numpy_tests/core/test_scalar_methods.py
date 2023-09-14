@@ -224,3 +224,9 @@ class TestBitCount:
             assert np.uint64(a - 1).bit_count() == exp
             assert np.uint64(a ^ 63).bit_count() == 7
             assert np.uint64((a - 1) ^ 510).bit_count() == exp - 8
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
