@@ -340,23 +340,14 @@ class CachingAutotuner(KernelInterface):
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
+            "x_block": launcher.config.kwargs.get("XBLOCK", 1),
+            "y_block": launcher.config.kwargs.get("YBLOCK", None),
+            "z_block": launcher.config.kwargs.get("ZBLOCK", None),
             "num_warps": launcher.bin.num_warps,
             "shared_mem": launcher.bin.shared,
             "stream": stream,
         }
-
-        if torch.version.hip is None:
-            CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
-        else:
-            # There is some divergence between CUDA and ROCm here.
-            # On ROCm's triton we only have the the path to the binary, not the binary itself.
-            # For ROCm we will copy the binary to the new location instead of writing to file
-            import pathlib
-
-            launcher.bin.asm["hsaco"] = pathlib.Path(
-                launcher.bin.asm["hsaco_path"]
-            ).read_bytes()
-            CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
+        CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
 
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """

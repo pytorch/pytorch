@@ -29,6 +29,8 @@ using namespace at::mps;
 
 namespace at::native::mps {
 
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
+
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
 
@@ -220,31 +222,22 @@ struct MPSGraphCache
   MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
 
     __block MPSCachedGraph* cachedGraph = nil;
-    __block std::optional<std::exception_ptr> block_exception;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
-
-      try {
-        // verify the cached entry doesn't already exist
-        if (cache_.count(hash) != 0) {
-          auto& entry = cache_.at(hash);
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
-          cachedGraph = entry.cachedGraph_;
-        } else {
-          cachedGraph = createCacheBlock();
-          CacheEntry entry(key, cachedGraph);
-          cache_.emplace(hash, entry);
-          profileCachedGraph(entry);
-        }
-      } catch (...) {
-        block_exception = std::current_exception();
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      // verify the cached entry doesn't already exist
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        cachedGraph = entry.cachedGraph_;
+      } else {
+        cachedGraph = createCacheBlock();
+        CacheEntry entry(key, cachedGraph);
+        cache_.emplace(hash, entry);
+        profileCachedGraph(entry);
       }
     });
-    if (block_exception) {
-            std::rethrow_exception(*block_exception);
-    }
     return cachedGraph;
   }
 

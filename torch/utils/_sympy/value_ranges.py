@@ -6,7 +6,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict, Optional
+from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -190,7 +190,7 @@ class SymPyValueRangeAnalysis:
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
-        if math.isnan(value):
+        if isinstance(value, SupportsFloat) and math.isnan(value):
             return ValueRanges.unknown()
 
         if is_python:
@@ -455,6 +455,30 @@ class SymPyValueRangeAnalysis:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
             return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
+
+    # expr_cond_pair is used to represent a single (expr, condition) pair in piecewise.
+    # We just return the value range of the expression and its corresponding condition as a tuple
+    # and defer the analysis to piecewise
+    @staticmethod
+    def expr_cond_pair(a, b):
+        assert b.is_bool, f"expect cond_expr's ValueRange to be a boolean range but got {b}"
+        return (a, b)
+
+    # piecewise function can be used to convert a SymBool to SymInt:
+    # int_expr = Piecewise((1, bool_expr), (0, True)), it evalutes to 1 when sym_bool is True and 0 otherwise.
+    #
+    # ranges is a sequence of (expr_range, condition_range) pairs. The range pair is constructed in expr_cond_pair.
+    # The ValueRange of Piecewise is just the union of all expr ranges whose condition expr can be True.
+    @staticmethod
+    def piecewise(*ranges):
+        init_range = None
+        for expr_range, cond_range in ranges:
+            if sympy.true in cond_range:
+                if init_range is None:
+                    init_range = expr_range
+                else:
+                    init_range = init_range | expr_range
+        return init_range
 
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
