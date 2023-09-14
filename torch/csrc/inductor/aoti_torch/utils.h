@@ -1,15 +1,16 @@
+#pragma once
 
+#include <c10/util/Logging.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <iostream>
 
-#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)      \
-  try {                                                      \
-    __VA_ARGS__                                              \
-  } catch (const std::exception& e) {                        \
-    std::cerr << "Error: " << e.what() << std::endl;         \
-    return AOTI_TORCH_FAILURE;                               \
-  } catch (...) {                                            \
-    std::cerr << "Unknown exception occurred." << std::endl; \
-    return AOTI_TORCH_FAILURE;                               \
-  }                                                          \
+#define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)    \
+  try {                                                    \
+    __VA_ARGS__                                            \
+  } catch (const std::exception& e) {                      \
+    LOG(ERROR) << "Exception in aoti_torch: " << e.what(); \
+    return AOTI_TORCH_FAILURE;                             \
+  } catch (...) {                                          \
+    LOG(ERROR) << "Exception in aoti_torch: UNKNOWN";      \
+    return AOTI_TORCH_FAILURE;                             \
+  }                                                        \
   return AOTI_TORCH_SUCCESS;

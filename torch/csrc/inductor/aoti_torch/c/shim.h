@@ -54,6 +54,10 @@
 #define AOTI_TORCH_NOINLINE
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // AtenTensorHandle represents an abstract notion of Tensor that can be passed
 // between model.so and libtorch.so.  The contents of the structure itself
 // are private; model.so is not allowed to access any fields directly, it must
@@ -68,12 +72,8 @@
 // (see aot_runtime/model.h) to ensure the deallocator is called in RAII style
 // (note that RAIIAtenTensorHandle is private to model.so, and never crosses
 // the ABI boundary.)
-struct AtenTensorOpaque {};
+struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
@@ -103,8 +103,7 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
 // Get a pointer to the underlying storage data
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_get_data_ptr(
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
     void** out_data_ptr // returns borrowed reference
 );
@@ -115,7 +114,7 @@ aoti_torch_get_data_ptr(
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch__reinterpret_tensor(
-    AtenTensorHandle* out, // returns new reference
+    AtenTensorHandle* ret, // returns new reference
     AtenTensorHandle self,
     int64_t ndim,
     const int64_t* sizes_ptr,
@@ -127,7 +126,7 @@ aoti_torch__reinterpret_tensor(
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
-    AtenTensorHandle* out, // returns new reference
+    AtenTensorHandle* ret, // returns new reference
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
@@ -157,8 +156,6 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle mat2);
 
 #ifdef USE_CUDA
-// Assuming CUDA ABI is stable, and any major CUDA upgrade will require a
-// rebuild of model.so
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_set_current_cuda_stream(void* stream, int32_t device_index);
 #endif

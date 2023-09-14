@@ -147,6 +147,34 @@ def generate_opcheck_tests(
                 result = method(*args, **kwargs)
             return result
 
+        if pytestmark := new_method.__dict__.get("pytestmark"):
+            import pytest
+
+            # check if we need to simplify the parametrize marks
+            # NB: you need to add this mark to your pytest.ini
+            opcheck_only_one = False
+            for mark in pytestmark:
+                if isinstance(mark, pytest.Mark) and mark.name == "opcheck_only_one":
+                    opcheck_only_one = True
+
+            if opcheck_only_one:
+                new_pytestmark = []
+                for mark in pytestmark:
+                    if isinstance(mark, pytest.Mark) and mark.name == "parametrize":
+                        argnames, argvalues = mark.args
+                        assert not mark.kwargs, "NYI"
+                        # Special case for device, we want to run on all
+                        # devices
+                        if argnames != "device":
+                            new_pytestmark.append(
+                                pytest.mark.parametrize(
+                                    argnames, (next(iter(argvalues)),)
+                                )
+                            )
+                            continue
+                    new_pytestmark.append(mark)
+                new_method.__dict__["pytestmark"] = new_pytestmark
+
         if new_method_name in additional_decorators:
             for dec in additional_decorators[new_method_name]:
                 new_method = dec(new_method)
