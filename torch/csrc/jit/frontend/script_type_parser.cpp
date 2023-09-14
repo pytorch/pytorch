@@ -233,6 +233,8 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
+  std::cout << "\n parseTypeFromExpr" << "\n";
+  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind()) << "\n";
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text().str(), expr.range())) {
@@ -242,7 +244,40 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   return parseTypeFromExprImpl(expr);
 }
 
+/*
+ * NOTE: transforming PEP 604 union into equivalent union type
+ *
+ * NOTE: Union[int, float] parses into:
+ * <EXPR> expr:(subscript
+ *  (variable (ident Union))
+ *  (list
+ *    (variable (ident int))
+ *    (variable (ident float))))
+ * <KIND> subscript
+ *
+ * NOTE: (int | float) parses into:
+ * <EXPR> expr:(|
+ *  (variable (ident int))
+ *  (variable (ident float)))
+ * <KIND> |
+ */
+
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  std::cout << "\n\nparseTypeFromExprImpl" << "\n";
+  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind()) << "\n";
+  if (expr.kind() == '|') {
+    // transform to equivalent union
+    auto binop = BinOp(expr);
+    std::vector<Expr> operands;
+    // create subscript node for Union[lhs, rhs]
+    auto synthesised_union = Subscript::create(
+        expr.range(),
+        Var::create(expr.range(), Ident::create(expr.range(), "Union")),
+        List<Expr>::create(expr.range(), {binop.lhs(), binop.rhs()})
+    );
+//    std::cout << "\n <EXPR> synthesised_union:" << synthesised_union << " <KIND> " << kindToString(synthesised_union.kind()) << "\n";
+    return parseTypeFromExprImpl(synthesised_union);
+  }
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
