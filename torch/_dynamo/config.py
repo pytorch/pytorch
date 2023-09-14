@@ -227,9 +227,6 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# Throw an error if backend changes without reset
-raise_on_backend_change = False
-
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
@@ -281,6 +278,9 @@ trace_numpy = True
 numpy_default_float = "float64"
 numpy_default_complex = "complex128"
 numpy_default_int = "int64"
+
+# use numpy's PRNG if True, pytorch otherwise
+use_numpy_random_stream = False
 
 
 def is_fbcode():

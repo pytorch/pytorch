@@ -10,7 +10,6 @@ def operator_compile_check(
         args,
         kwargs=None,
         *,
-        dynamic_only=False,
         supports_autograd=True,
         fullgraph=True,
 ):
@@ -21,10 +20,6 @@ def operator_compile_check(
             and returns a Tensor or a Tuple of Tensors.
         args (Tuple): args to the operator
         kwargs (dict, optional): kwargs to the operator
-        dynamic_only (bool, optional): If the operator only works with dynamic
-            shapes. This can happen if it returns Tensors whose shape are
-            dependent on the data on the input Tensors. If True, we skip
-            tests related to torch.compile with static shapes.
         supports_autograd (bool, optional): If the operator does not support
             autograd. If False, we will skip autograd-related tests.
         fullgraph (bool, optional): If we expect torch.compile to not graph
@@ -48,9 +43,8 @@ def operator_compile_check(
         check_compile(func, args, kwargs, fullgraph=fullgraph, backend='inductor', dynamic=dynamic)
 
     schema_check(func, args, kwargs)
-    fake_check(func, args, kwargs, dynamic_only)
-    if not dynamic_only:
-        run_static_or_dynamic_tests(dynamic=False)
+    fake_check(func, args, kwargs)
+    run_static_or_dynamic_tests(dynamic=False)
     run_static_or_dynamic_tests(dynamic=True)
 
 
