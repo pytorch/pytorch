@@ -368,4 +368,4 @@ However for release we have following :
 * Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
 * Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
 
-Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI one branch cut is completed. Please include the PIN hash in the request: https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt
+Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .
