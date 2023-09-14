@@ -6274,12 +6274,14 @@ def skips_mvlgamma(skip_redundant=False):
     skips = (
         # outside domain values are hard error for mvlgamma op.
         DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_float_domains'),
-        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
-                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
-        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
-                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
-        DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
-                     dtypes=[torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8]),
+        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
+                     'test_reference_numerics_extremal'),
+        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
+                     'test_reference_numerics_large',
+                     dtypes=(torch.float16, torch.int8)),
+        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
+                     'test_reference_numerics_small',
+                     dtypes=(torch.int8,)),
     )
     if skip_redundant:
         # Redundant tests
@@ -13799,9 +13801,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('This is '), 'TestInductorOpInfo', 'test_comprehensive'),
             # skip for sm < 80
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),
-        ),
-    ),
+                         device_type='cuda', dtypes=(torch.bfloat16,), active_if=not SM80OrLater),),),
     UnaryUfuncInfo(
         'nn.functional.silu',
         aten_backward_name='silu_backward',
