@@ -3125,6 +3125,10 @@ else:
             dst._neg_view().copy_(src)
             self.assertEqual(dst, src.neg(), exact_dtype=False)
 
+            # issue: https://github.com/pytorch/pytorch/issues/106051
+            dst._neg_view().copy_(dst)
+            self.assertEqual(dst, src, exact_dtype=False)
+
         for dst_dtype, src_dtype in [
                 (torch.complex64, torch.complex64),
                 (torch.complex128, torch.complex64),
@@ -6049,6 +6053,30 @@ class TestTorch(TestCase):
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+
+    def test_linspace_logspace(self):
+        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # The output of factory functions should not be part of any computational graph.
+        start = 0.0
+        end = 3.0
+
+        for step in [0, 1, 2]:
+            self.assertFalse(
+                torch.linspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.linspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.linspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
+            self.assertFalse(
+                torch.logspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.logspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.logspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
 
     # FIXME: move to shape ops test suite
     def test_unflatten(self):

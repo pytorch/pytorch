@@ -1,5 +1,6 @@
 import collections
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -1039,3 +1040,49 @@ def is_welford_reduction(reduction_type):
 
 def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
+
+
+# Placeholder strings used in triton codegen.
+class Placeholder(enum.Enum):
+    # The placeholder for the actual name of a triton kernel.
+    # e.g. for "def triton_" it would be "triton_"
+    KERNEL_NAME = "KERNEL_NAME"
+
+    # The descriptive name of the triton kernel; when unique_kernel_names = False, this
+    # placeholder will be replaced with a string with more information.
+    DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+# A utility function for easier AOTInductor testing
+aot_inductor_launcher = """
+    #include <c10/cuda/CUDAStream.h>
+    #include <torch/csrc/inductor/aot_runtime/interface.h>
+
+    void run(
+            std::vector<at::Tensor>& input_tensors,
+            std::vector<at::Tensor>& output_tensors) {
+        AOTInductorModelContainerHandle container_handle;
+        AOT_INDUCTOR_ERROR_CHECK(
+            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
+        const auto stream_id = cuda_stream.stream();
+        AOTInductorStreamHandle stream_handle =
+            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+        AOTInductorTensorHandle inputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
+        AOTInductorTensorHandle outputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
+        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+            container_handle,
+            inputs_handle,
+            input_tensors.size(),
+            outputs_handle,
+            output_tensors.size(),
+            stream_handle,
+            proxy_executor_handle));
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+    }
+"""
