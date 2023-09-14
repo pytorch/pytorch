@@ -233,7 +233,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "exponential": {f16},
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
     "linalg.eig": {f32, f64},
@@ -251,7 +250,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
     "uniform": {f16},
-    "pca_lowrank": {f64},
+    "pca_lowrank": {f32, f64},
+    "svd_lowrank": {f32, f64},
 }
 
 
@@ -307,7 +307,6 @@ test_skips_or_fails = (
 
 def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
-
 
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
