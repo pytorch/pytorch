@@ -176,7 +176,6 @@ def _annotate_linear(
             continue
         if filter_fn and not filter_fn(node):
             continue
-        annotated_partitions.append([node])
         act_node = node.args[0]
         weight_node = node.args[1]
         bias_node = None
@@ -186,7 +185,6 @@ def _annotate_linear(
             )
         if len(node.args) > 2:
             bias_node = node.args[2]
-        # find use of act node within the matched pattern
 
         if _is_annotated([node]) is False:  # type: ignore[list-item]
             _annotate_input_qspec_map(
@@ -199,12 +197,22 @@ def _annotate_linear(
                 weight_node,
                 weight_qspec,
             )
+            nodes_to_mark_annotated = [node, weight_node]
+            if bias_node and _is_annotated([bias_node]):
+                raise RuntimeError(
+                    f"{bias_node} is already annotated for linear {node}"
+                )
+            if bias_node:
+                _annotate_input_qspec_map(
+                    node,
+                    bias_node,
+                    bias_qspec,
+                )
+                nodes_to_mark_annotated.append(bias_node)
             _annotate_output_qspec(node, output_act_qspec)
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            annotated_partitions.append(nodes_to_mark_annotated)
 
-        if bias_node and _is_annotated([bias_node]) is False:
-            _annotate_output_qspec(bias_node, bias_qspec)
-
-        _mark_nodes_as_annotated([node, weight_node, bias_node])
     return annotated_partitions
 
 
