@@ -1598,7 +1598,6 @@ symbolic_tensor_failures = {
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
-    xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
