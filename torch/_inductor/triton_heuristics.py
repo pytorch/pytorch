@@ -17,6 +17,7 @@ import torch
 
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor import cuda_properties
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -175,10 +176,16 @@ class CachingAutotuner(KernelInterface):
                 self.launchers.append(launcher)
                 compiled_binaries.append(compiled_binary)
 
+            seen_configs = set(self.configs)
+
+            device_prop = cuda_properties.get_device_properties(self.meta["device"])
             if (
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION
                 and self.size_hints is not None
+                # TODO not enable for H100 yet since we haven't got a chance to test this
+                # on H100. Will remove this check once we test on H100
+                and device_prop.major == 8
             ):
                 for triton_config, compiled_binary in zip(
                     self.configs, compiled_binaries
@@ -200,12 +207,17 @@ class CachingAutotuner(KernelInterface):
                     # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
                     # from PLBartForCausalLM, latency improve from
                     # 7.795ms to 4.883ms.
-                    if nreg <= 32:
+                    #
+                    # Note both A100 and H100 have 65536 32-bit registers per SM.
+                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
                         continue
-                    max_blocks_per_sm = 2048 // (32 * triton_config.num_warps)
-                    # TODO: this is hardcoded for A100, we should revise for H100
-                    # for optimal perf.
-                    if total_block <= max_blocks_per_sm * 108:
+                    max_blocks_per_sm = device_prop.max_threads_per_multi_processor // (
+                        32 * triton_config.num_warps
+                    )
+                    if (
+                        total_block
+                        <= max_blocks_per_sm * device_prop.multi_processor_count
+                    ):
                         # <100% occupancy is fine
                         continue
                     # make sure rblock is not too small
@@ -213,6 +225,9 @@ class CachingAutotuner(KernelInterface):
                         continue
                     new_config = copy.deepcopy(triton_config)
                     new_config.kwargs["RBLOCK"] = rblock // 2
+                    if new_config in seen_configs:
+                        continue
+                    seen_configs.add(new_config)
                     self.launchers.append(
                         self._precompile_config(new_config, warm_cache_only_with_cc)[1]
                     )
