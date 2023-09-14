@@ -65,17 +65,19 @@ class AOTInductorModelContainer {
     for (size_t i = 0; i < num_inputs; i++) {
       input_names_.push_back(model->input_name(i));
       input_dtypes_.push_back(model->get_input_dtype(i));
-      max_input_shapes_.emplace_back(model->max_input_shape(i));
+      max_input_shapes_.push_back(model->max_input_shape(i));
     }
 
     size_t num_outputs = model->num_outputs();
     output_names_.reserve(num_outputs);
     output_dtypes_.reserve(num_outputs);
     max_output_shapes_.reserve(num_outputs);
+    output_shapes_.reserve(num_outputs);
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.push_back(model->output_name(i));
       output_dtypes_.push_back(model->get_output_dtype(i));
-      max_output_shapes_.emplace_back(model->max_output_shape(i));
+      max_output_shapes_.push_back(model->max_output_shape(i));
+      output_shapes_.emplace_back(max_output_shapes_.back().size(), -1);
     }
 
     size_t num_constants = model->num_constants();
@@ -127,6 +129,7 @@ class AOTInductorModelContainer {
   void run(
       const std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
+      std::vector<std::vector<int64_t>>** output_shapes,
       cudaStream_t stream,
       ProxyExecutor* proxy_executor) {
     auto* model = get_available_model();
@@ -139,6 +142,11 @@ class AOTInductorModelContainer {
       available_models_.push_back(model);
       throw;
     }
+
+    for (size_t i = 0; i < num_outputs(); i++) {
+      output_shapes_[i] = model->output_shape(i);
+    }
+    *output_shapes = &output_shapes_;
 
     {
       std::lock_guard lk(models_mutex_);
@@ -200,6 +208,9 @@ class AOTInductorModelContainer {
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in constant_blob_.
   std::shared_ptr<ConstantMap> constants_;
+
+  // Holds the current value for each dimension of any output shape.
+  std::vector<std::vector<int64_t>> output_shapes_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;
