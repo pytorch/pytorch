@@ -28,7 +28,6 @@ def replace_params_with_constants(
     flat_params: list[Any],
     fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
 ) -> List[int]:
-    breakpoint()
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
