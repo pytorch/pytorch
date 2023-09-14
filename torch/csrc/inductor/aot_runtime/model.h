@@ -331,10 +331,6 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
         std::to_string(__LINE__));                                        \
   }
 
-// For fallback ops like reinterpret_tensor which returns a short-lived
-// tensor, this RAII class will achieve a similarly short live range for
-// AtenTensorHandle in the ABI compatible mode.
-
 using RAIIAtenTensorHandle = std::shared_ptr<AtenTensorOpaque>;
 
 inline RAIIAtenTensorHandle create_raii_tensor_handle_for_extern(
@@ -351,6 +347,29 @@ inline RAIIAtenTensorHandle create_raii_tensor_handle_for_temp(
         aoti_torch_delete_tensor_object(static_cast<AtenTensorHandle>(ptr)));
   });
 }
+
+class AOTICudaStreamGuard {
+ public:
+  AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
+    // store the current stream and set the new stream as current
+    cudaStream_t current_stream;
+    AOTI_TORCH_ERROR_CHECK(aoti_torch_get_current_cuda_stream(
+        reinterpret_cast<void**>(&current_stream), device_index));
+    stream_ = current_stream;
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_set_current_cuda_stream(stream, device_index));
+  }
+
+  ~AOTICudaStreamGuard() {
+    // restore the previous stream as current
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_set_current_cuda_stream(stream_, device_index_));
+  }
+
+ private:
+  cudaStream_t stream_;
+  int32_t device_index_;
+};
 
 } // namespace aot_inductor
 } // namespace torch

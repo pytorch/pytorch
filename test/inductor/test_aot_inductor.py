@@ -23,7 +23,7 @@ try:
     try:
         from . import test_torchinductor
     except ImportError:
-        pass
+        import test_torchinductor
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)

@@ -104,9 +104,8 @@ aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_data_ptr(
-    AtenTensorHandle tensor,
-    void** out_data_ptr // returns borrowed reference
-);
+    void** ret, // returns borrowed reference
+    AtenTensorHandle tensor);
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
@@ -156,6 +155,9 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle mat2);
 
 #ifdef USE_CUDA
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+aoti_torch_get_current_cuda_stream(void** ret, int32_t device_index);
+
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_set_current_cuda_stream(void* stream, int32_t device_index);
 #endif

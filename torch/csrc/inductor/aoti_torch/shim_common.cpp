@@ -85,12 +85,10 @@ AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   });
 }
 
-AOTITorchError aoti_torch_get_data_ptr(
-    AtenTensorHandle tensor,
-    void** data_ptr) {
+AOTITorchError aoti_torch_get_data_ptr(void** ret, AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *data_ptr = t->data_ptr();
+    *ret = t->data_ptr();
   });
 }
 
@@ -106,8 +104,8 @@ AOTITorchError aoti_torch__reinterpret_tensor(
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
     at::Tensor* out_tensor =
-        new at::Tensor(std::move(torch::inductor::_reinterpret_tensor(
-            *self_tensor, sizes, strides, offset_increment)));
+        new at::Tensor(torch::inductor::_reinterpret_tensor(
+            *self_tensor, sizes, strides, offset_increment));
     *ret = tensor_pointer_to_tensor_handle(out_tensor);
   });
 }
@@ -130,7 +128,7 @@ AOTITorchError aoti_torch_empty_strided(
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
     at::Tensor* out_tensor =
-        new at::Tensor(std::move(at::empty_strided(sizes, strides, options)));
+        new at::Tensor(at::empty_strided(sizes, strides, options));
     *ret = tensor_pointer_to_tensor_handle(out_tensor);
   });
 }

@@ -158,7 +158,7 @@ class EnterCudaDeviceContextManagerLine:
                 # CUDAStreamGuard sets the stream and the device.
                 if config.aot_inductor.abi_compatible:
                     code.writeline(
-                        f"AOTI_TORCH_ERROR_CHECK(aoti_torch_set_current_cuda_stream(stream, {self.device_idx}));"
+                        f"AOTICudaStreamGuard stream_guard(stream, {self.device_idx});"
                     )
                 else:
                     code.writeline(
@@ -1270,7 +1270,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_end(self, result):
         if V.graph.aot_mode:
-            result.writeline("}")
+            result.writeline("} // AOTInductorModel::run_impl")
             result.writeline("} // namespace aot_inductor")
             result.writeline("} // namespace inductor")
             return
@@ -1347,6 +1347,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.codegen_int_array_var(size),
                 self.codegen_int_array_var(stride),
             ] + args
+            # TODO: support extern kernel that allocates
             self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             super().generate_extern_kernel_alloc(extern_kernel, args)
@@ -1443,7 +1444,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # position of the generated code, so the second pass codegen should not
         # reuse int array declarations generated in the first pass
         if writer is None:
+            # The first pass codegen uses `self` as the writer
             writer = self
+
         var = f"int_array_{next(self.int_array_id)}"
         if var not in self.declared_int_array_vars:
             self.declared_int_array_vars.add(var)
@@ -1922,7 +1925,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 if config.aot_inductor.abi_compatible:
                     self.writeline(f"CUdeviceptr {var_name};")
                     self.writeline(
-                        f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_data_ptr({arg}.get(), reinterpret_cast<void**>(&{var_name})));"
+                        f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_data_ptr(reinterpret_cast<void**>(&{var_name}), {arg}.get()));"
                     )
                 else:
                     self.writeline(
