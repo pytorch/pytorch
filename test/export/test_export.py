@@ -383,7 +383,12 @@ class TestExport(TestCase):
         batch = Dim("batch")
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Constraints violated!\n.*batch was inferred to be a constant",
+            (
+                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "batch was inferred to be a constant(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "batch = _  # 10"
+            ),
         ):
             export(foo, inputs, kwinputs, dynamic_shapes={"x": {0: batch}})
 
@@ -455,7 +460,12 @@ class TestExport(TestCase):
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Constraints violated!\n.*K2.*and.*K1.*must always be equal",
+            (
+                "Constraints violated \\(K2\\)!(.*\n)*.*"
+                "K2.*and.*K1.*must always be equal(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "K2 = K1"
+            ),
         ):
             export(foo, inputs)
 
@@ -468,7 +478,12 @@ class TestExport(TestCase):
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Constraints violated!\n.*K1 was inferred to be a constant",
+            (
+                "Constraints violated \\(K1\\)!(.*\n)*.*"
+                "K1 was inferred to be a constant(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "K1 = _  # 3"
+            ),
         ):
             export(foo, inputs)
 
@@ -484,7 +499,12 @@ class TestExport(TestCase):
         inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Constraints violated!\n.*Not all values of batch.*satisfy the generated guard",
+            (
+                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "Not all values of batch.*satisfy the generated guard(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "batch = Dim\\('batch', max=15\\)"
+            ),
         ):
             export(foo, inputs)
 
@@ -1222,6 +1242,45 @@ class TestExport(TestCase):
                     actual_source_fns.append(node.meta.get("source_fn", None))
         exp_source_fns = [("cos", "cos"), ("sin", "sin")]
         self.assertEqual(actual_source_fns, exp_source_fns)
+
+    def test_lift_constants(self) -> None:
+        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
+
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 1)
+        self.assertEqual(len(ep.state_dict), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        nodes = list(ep.graph.nodes)
+
+        for node in nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 3)
+        self.assertEqual(len(ep.state_dict), 3)
+
+        # These constants should be placed after the param/buffers
+        self.assertTrue(
+            nodes[1].name in ep.graph_signature.inputs_to_buffers and
+            nodes[2].name in ep.graph_signature.inputs_to_buffers
+        )
 
 
 if __name__ == '__main__':

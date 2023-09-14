@@ -1159,7 +1159,7 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
+            msg = dim_constraints.prettify_results(original_signature, constraint_violation_error)
             forced_specializations = dim_constraints.forced_specializations()
             if forced_specializations:
                 msg = (
