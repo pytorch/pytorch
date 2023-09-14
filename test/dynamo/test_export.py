@@ -3889,6 +3889,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         inp = torch.randn(2, 2)
         out = gm(inp)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = arg0 + 1;  arg0 = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
         self.assertEqual(out.requires_grad, False)
         with self.assertRaisesRegex(
             RuntimeError,
@@ -3901,6 +3911,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return x + 1
 
         gm_no_inference, _ = torch._dynamo.export(fn_no_inference, torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm_no_inference.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
+    add = arg0 + 1;  arg0 = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
 
         inp = torch.randn(2, 2)
         out = gm_no_inference(inp)
