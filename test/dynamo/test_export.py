@@ -2271,6 +2271,21 @@ def forward(self, x):
         ):
             torch._export.export(qux, (t,), constraints=constraints)
 
+    def test_untracked_inputs_in_constraints(self):
+        from copy import copy
+
+        def foo(x, y):
+            return y + 1
+
+        x = torch.randn(2)
+        y = torch.randn(5, 4)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
+
+        example_inputs = (copy(x), y)
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+            ep(torch.randn(3), y)
+
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -2377,6 +2392,44 @@ def forward(self, x):
             torch._export.export(
                 foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
             )
+
+    def test_enforce_equalities(self):
+        def bar(x, y):
+            return torch.matmul(x, y)
+
+        def specify_constraints(x, y):
+            return [
+                dynamic_dim(x, 0) == dynamic_dim(y, 0),
+                dynamic_dim(x, 1) == dynamic_dim(x, 2),
+                dynamic_dim(x, 2) == dynamic_dim(y, 1),
+                dynamic_dim(y, 1) == dynamic_dim(y, 2),
+            ]
+
+        x = torch.randn(10, 3, 3)
+        y = torch.randn(10, 3, 4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            ".*y.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+        ):
+            torch._export.export(
+                bar,
+                (x, y),
+                constraints=specify_constraints(x, y),
+            )
+        y = torch.randn(10, 3, 3)
+        ebar = torch._export.export(
+            bar,
+            (x, y),
+            constraints=specify_constraints(x, y),
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in ebar.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
+        )
 
     @config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -2998,7 +3051,7 @@ def forward(self, x):
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_return_multiple_tensors,
@@ -3027,7 +3080,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3469,13 +3522,13 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_branch, ones_false_branch):
+def forward(self, l_x_, a, b, d, c_false_branch, b_false_branch, a_false_branch):
     add = l_x_ + l_x_;  l_x_ = None
-    cos = ones.cos();  ones = None
+    cos = a.cos();  a = None
     add_1 = add + cos;  add = cos = None
-    cos_1 = ones_1.cos();  ones_1 = None
+    cos_1 = b.cos();  b = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = ones_3.cos();  ones_3 = None
+    cos_2 = d.cos();  d = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
     return add_3""",
         )
@@ -3483,13 +3536,13 @@ def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch, ones, ones_1, ones_2):
+def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
     mul = l_x_ * l_x_;  l_x_ = None
-    sin = ones.sin();  ones = None
+    sin = a.sin();  a = None
     add = mul + sin;  mul = sin = None
-    sin_1 = ones_1.sin();  ones_1 = None
+    sin_1 = b.sin();  b = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = ones_2.sin();  ones_2 = None
+    sin_2 = c.sin();  c = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return add_2""",
         )

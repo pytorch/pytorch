@@ -155,9 +155,7 @@ void ProcessGroup::init() {
 }
 
 const std::string& ProcessGroup::getGroupName() const {
-  if (deviceTypeToBackend_.size() == 0) {
-    return "";
-  }
+  TORCH_CHECK(deviceTypeToBackend_.size(), "ProcessGroup name not set");
   return deviceTypeToBackend_.begin()->second->getGroupName();
 }
 
