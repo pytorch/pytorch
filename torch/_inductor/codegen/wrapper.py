@@ -905,6 +905,7 @@ class WrapperCodeGen(CodeGen):
             name in V.graph.removed_buffers
             or name in V.graph.graph_inputs
             or name in V.graph.constants
+            or name in V.graph.never_reuse_buffers
             or name in self.freed
             or self.use_preallocated_output(output_buffer)
         ):
