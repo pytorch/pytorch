@@ -10,7 +10,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FUSED_SDPA,
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
@@ -248,8 +248,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             div = q @ k.transpose(-2, -1) / math.sqrt(q.size(-1))
             div = div.to(torch.float32)
             attn_weight = torch.softmax(div, dim=-1)
-            # very small dropout to make sure test passes
-            attn_weight = torch.nn.functional.dropout(attn_weight, 0.00001, training)
+            # Set to False
+            attn_weight = torch.dropout(attn_weight, 0.00000000001, training)
             attn_weight = attn_weight.to(torch.float16)
             return attn_weight @ v
 
@@ -318,7 +318,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             div = div.to(torch.float32)
             attn_weight = torch.softmax(div, dim=-1)
             # very low dropout to make test pass
-            attn_weight = torch.nn.functional.dropout(attn_weight, 0.9999, training)
+            attn_weight = torch.dropout(attn_weight, 0.00000000001, training)
             attn_weight = attn_weight.to(torch.float16)
             return attn_weight @ v
 
@@ -534,7 +534,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
 
 
-if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_SDPA:
+if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
     class SDPAPatternRewriterCudaTests(TestSDPAPatternRewriterTemplate):
         device = "cuda"
