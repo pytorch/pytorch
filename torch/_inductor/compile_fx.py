@@ -515,12 +515,12 @@ def fx_codegen_and_compile(
     # on node.meta["val"]. if in the future we rely on these being
     # correct we will need to fix.
 
-    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
         post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
-    with V.set_fake_mode(fake_mode):  # type: ignore[call-arg]
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,
@@ -531,7 +531,7 @@ def fx_codegen_and_compile(
             user_visible_outputs=user_visible_outputs,
             extern_node_serializer=extern_node_serializer,
         )
-        with V.set_graph_handler(graph):  # type: ignore[call-arg]
+        with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             context = torch._guards.TracingContext.get()
             if context is not None and context.output_strides is not None:
@@ -831,7 +831,7 @@ def compile_fx_aot(
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
 ):
-    config_patches = (
+    config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None
         else {**config_patches, "cpp_wrapper": True}
@@ -968,9 +968,18 @@ def compile_fx(
         ), V.set_real_inputs(
             example_inputs_
         ):  # type: ignore[call-arg]
+            inputs_ = example_inputs_
+            if isinstance(model_, torch.fx.GraphModule):
+                fake_inputs = [
+                    node.meta.get("val")
+                    for node in model_.graph.nodes
+                    if node.op == "placeholder"
+                ]
+                if all(v is not None for v in fake_inputs):
+                    inputs_ = fake_inputs
             return compile_fx(
                 model_,
-                example_inputs_,
+                inputs_,
                 inner_compile=inner_compile_with_cpp_wrapper(inner_compile),
                 decompositions=decompositions,
             )
@@ -997,9 +1006,11 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        # Since handle_dynamo_export_graph will trigger compile_fx again,
-        # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-        model_ = pre_grad_passes(model_, example_inputs_)
+        if not config.from_export:
+            # Since handle_dynamo_export_graph will trigger compile_fx again,
+            # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
+            # If we come from export, the graph is already in aten IR, so pre-grad passes is no-op.
+            model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -1130,6 +1141,7 @@ def compile_fx(
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
     # in torch._functorch/aot_autograd.py::aot_module_simplified::aot_function_simplified::new_func
     # once torchdynamo is merged into pytorch
+
     fake_mode = detect_fake_mode(example_inputs_) or torch._subclasses.FakeTensorMode(
         allow_non_fake_inputs=True
     )
