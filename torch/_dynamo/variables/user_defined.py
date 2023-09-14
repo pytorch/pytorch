@@ -339,6 +339,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchVariable(obj.__class__).call_function(
                     tx, args, kwargs
                 )
+
+            if (
+                func is torch.autograd.grad_mode.inference_mode.clone
+                and obj.__class__ is torch.autograd.grad_mode.inference_mode
+            ):
+                # simulate the inference_mode.clone implementation
+                var = variables.ConstantVariable(obj.mode)
+                return variables.TorchVariable(obj.__class__).call_function(
+                    tx, [var], kwargs
+                )
         elif (
             istype(self.value, functools.partial)
             and is_allowed(self.value.func)
@@ -379,6 +389,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 tx, partial_args, partial_kwargs
             )
         elif callable(self.value):
+            print("ENTERED HERE: ")
             self.add_guard(self.source.make_guard(GuardBuilder.FUNCTION_MATCH))
             return self.call_method(tx, "__call__", args, kwargs)
 

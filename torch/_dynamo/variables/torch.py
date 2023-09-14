@@ -222,6 +222,7 @@ class TorchVariable(VariableTracker):
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            InferenceModeVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -324,6 +325,10 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.use_deterministic_algorithms and len(args) == 1:
             return DeterministicAlgorithmsVariable.create(
+                tx, args[0].as_python_constant(), **options
+            )
+        elif self.value is torch.inference_mode:
+            return InferenceModeVariable.create(
                 tx, args[0].as_python_constant(), **options
             )
         elif self.value is torch.are_deterministic_algorithms_enabled:

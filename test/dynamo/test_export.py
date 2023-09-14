@@ -3880,6 +3880,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             if node.op == "call_function":
                 self.assertIn("nn_module_stack", node.meta)
 
+    def test_torch_inference_mode_ctx(self):
+        @torch.inference_mode()
+        def fn(x):
+            return x + 1
+
+        gm, _ = torch._dynamo.export(fn, torch.rand(2, 2))
+
+        inp = torch.randn(2, 2)
+        out = gm(inp)
+        self.assertEqual(out.requires_grad, False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.",
+        ):
+            out.requires_grad = True
+
+        @torch.inference_mode(False)
+        def fn_no_inference(x):
+            return x + 1
+
+        gm_no_inference, _ = torch._dynamo.export(fn_no_inference, torch.rand(2, 2))
+
+        inp = torch.randn(2, 2)
+        out = gm_no_inference(inp)
+        self.assertEqual(out.requires_grad, False)
+        out.requires_grad = True
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
