@@ -1525,12 +1525,11 @@ def _automatic_dynamic(e, tx, name, static_shapes):
 
     # We preserve the dynamism of inputs. For example, when users call
     # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
-    # We throw an error if e.size() consists of mixed int and SymInt since we haven't found a use case.
     if any(isinstance(s, SymInt) for s in e.size()):
-        assert all(
-            isinstance(s, SymInt) for s in e.size()
-        ), f"Expect size of e to be either all int or SymInt but got {e.size()}"
-        return [DimDynamic.DYNAMIC] * e.dim(), [None] * e.dim()
+        return [
+            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+            for s in e.size()
+        ], [None] * e.dim()
 
     # Prep for automatic dynamic
     frame_state_entry = None
