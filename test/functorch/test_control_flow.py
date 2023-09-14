@@ -2,6 +2,7 @@
 import functools
 import unittest
 
+from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 import torch
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import from_fun, to_fun
@@ -1466,7 +1467,9 @@ def forward(self, arg0_1, arg1_1):
         new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
         self.assertEqual(all_source_fns, new_source_fns)
 
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "triggers cache limit for foo and changes unique_graphs count.")
     def test_cond_no_dynamo_cache_limit(self):
+        torch._dynamo.reset()
         counters = torch._dynamo.utils.counters
         counters.clear()
 
