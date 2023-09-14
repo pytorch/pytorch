@@ -1234,10 +1234,15 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_non_fake_inputs=False,
         shape_env=None,
+        static_shapes=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
+        if static_shapes is not None:
+            self.static_shapes = static_shapes
+        else:
+            self.static_shapes = shape_env is None
 
         import torch._functorch.config
 
@@ -1758,7 +1763,7 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         tensor,
         *,
-        static_shapes=False,
+        static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
@@ -1768,6 +1773,8 @@ class FakeTensorMode(TorchDispatchMode):
         memoized_only=False,
     ):
         shape_env = self.shape_env
+        if static_shapes is None:
+            static_shapes = self.static_shapes
         if static_shapes:
             assert (
                 dynamic_dims is None
