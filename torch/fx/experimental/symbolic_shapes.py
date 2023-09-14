@@ -3818,7 +3818,7 @@ class ShapeEnv:
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True, replace_unbacked_with_size_hint=True)
                 # new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                   raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
                 expr = new_expr
 
             self._check_frozen(expr, concrete_val)
