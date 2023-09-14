@@ -96,7 +96,8 @@ void PythonEngine::thread_init(
     // PyThreadState_Clear can safely be called from finalize NOTE: deploy.cpp
     // calls `PyInterpreterState_Delete` to destruct PyThreadState, so avoid
     // use-after-free here.
-    gil.release();
+    auto ptr = gil.release();
+    operator delete(ptr);
   }
 #endif
 }
@@ -192,6 +193,7 @@ PyObject* THPEngine_run_backward(
           args,
           kwargs,
           "OObb|Obb",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast,-warnings-as-errors)
           const_cast<char**>(accepted_kwargs),
           &tensors,
           &grad_tensors,
