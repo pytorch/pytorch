@@ -44,6 +44,31 @@ def _listlike_contains_helper(items, search, tx, options):
     return result
 
 
+def _index_helper(items, search, tx, args, options):
+    # Optional start and end parameters needs to be set here
+    start = 0 if len(args) < 2 else args[1].as_python_constant()
+    end = len(items) if len(args) < 3 else args[2].as_python_constant()
+    # Manage negative values, both in start and end
+    start = len(items) + start if start < 0 else start
+    end = len(items) + end if end < 0 else end
+
+    # If search is constant we can directly retrieve value
+    if search.is_python_constant():
+        for i in range(start, end):
+            if items[i].as_python_constant() == search.as_python_constant():
+                return variables.ConstantVariable(i, **options)
+        raise ValueError(f"\'{search.as_python_constant()}\' is not in list")
+
+    # If not constant, we can retrieve value by encapsulation with BuiltinVariable
+    from .builtin import BuiltinVariable
+
+    for i in range(start, end):
+        check = BuiltinVariable(operator.eq).call_function(tx, [items[i], search], {})
+        if check.as_python_constant():
+            return ConstantVariable(i)
+    raise ValueError(f"\'{BuiltinVariable(str).call_function(tx, [search], {}).as_python_constant()}\' is not in list")
+
+
 class BaseListVariable(VariableTracker):
     @staticmethod
     def cls_for(obj):
@@ -136,6 +161,14 @@ class BaseListVariable(VariableTracker):
             assert len(args) == 1
             assert not kwargs
             return _listlike_contains_helper(self.items, args[0], tx, options)
+        elif name == "index":
+            assert len(args) <= 3
+            assert not kwargs
+            if len(args) > 1:
+                assert args[1].is_python_constant()
+            if len(args) > 2:
+                assert args[2].is_python_constant()
+            return _index_helper(self.items, args[0], tx, args, options)
 
         return super().call_method(tx, name, args, kwargs)
 
