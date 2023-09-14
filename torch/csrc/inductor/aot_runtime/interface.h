@@ -53,7 +53,8 @@ extern "C" {
 // the same input model.
 AOTInductorError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
-    size_t num_models);
+    size_t num_models,
+    bool is_cpu = false);
 
 // Deletes the AOTInductor model container.
 AOTInductorError AOTInductorModelContainerDelete(
@@ -66,6 +67,7 @@ AOTInductorError AOTInductorModelContainerRun(
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
+    AOTInductorParamShape* output_shapes,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle);
 
