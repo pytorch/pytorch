@@ -10,7 +10,7 @@ from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
-    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM80OrLater,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
@@ -496,7 +496,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention)
 
 
-if HAS_CUDA and PLATFORM_SUPPORTS_FLASH_ATTENTION:
+if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
     class SDPAPatternRewriterCudaTests(TestSDPAPatternRewriterTemplate):
         device = "cuda"

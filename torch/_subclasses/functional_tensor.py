@@ -180,6 +180,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        print(f'  FunctionalTensor. func={str(func)}')
         if kwargs is None:
             kwargs = {}
 

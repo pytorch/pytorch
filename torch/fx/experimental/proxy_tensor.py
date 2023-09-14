@@ -570,6 +570,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        print(f'  ProxyTensor. func={str(func)}')
         with self.sym_mode.enable(False), set_original_aten_op(func):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
