@@ -3048,6 +3048,8 @@ class TestArgmaxArgminCommon:
     @pytest.mark.parametrize("method", [np.argmax, np.argmin])
     def test_np_argmin_argmax_keepdims(self, size, axis, method):
         arr = np.random.normal(size=size)
+        if size is None or size == ():
+            arr = np.asarray(arr)
 
         # contiguous arrays
         if axis is None:

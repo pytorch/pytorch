@@ -3,7 +3,6 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_export_persist_assert)
 """
-import copy
 import functools
 import inspect
 import math
@@ -20,11 +19,17 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
+from torch._dynamo.testing import normalize_gm
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    DimDynamic,
+    ShapeEnv,
+)
 from torch.testing._internal import common_utils
 
 
@@ -3052,7 +3057,7 @@ def forward(self, x):
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_return_multiple_tensors,
@@ -3081,7 +3086,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3156,8 +3161,6 @@ def forward(self, x):
 
     def test_capture_symbolic_tracing_simple_within_fake_mode(self):
         from torch._dynamo.output_graph import config
-        from torch._subclasses import fake_tensor
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         def f(x):
             y = torch.randn(3)
@@ -3178,6 +3181,73 @@ def forward(self, x):
                     msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
                     + str(aten_graph),
                 )
+
+    def test_export_with_symbool_inputs(self):
+        def f(pred: bool, x: torch.Tensor):
+            if pred:
+                return x.sin()
+            else:
+                return x.cos()
+
+        x = torch.randn([3, 4])
+
+        def test_symbool_guards(
+            f, size_tests, exp_graph, exp_guard_code, exp_shape_env_guards
+        ):
+            shape_env = ShapeEnv()
+            with fake_tensor.FakeTensorMode(
+                shape_env=shape_env,
+            ) as fake_mode:
+                fake_x = fake_mode.from_tensor(
+                    x, dynamic_dims=[DimDynamic.DYNAMIC for _ in range(x.dim())]
+                )
+                for i, size in enumerate(size_tests):
+                    pred = fake_x.size(0) == size
+                    gm, guards = torch._dynamo.export(f)(pred, x)
+                    actual = normalize_gm(gm.print_readable(print_output=False))
+                    self.assertExpectedInline(actual, exp_graph[i])
+                    dynamo_shape_env_guards = [
+                        guard for guard in guards if "SHAPE_ENV" in guard.guard_types
+                    ]
+                    self.assertEqual(len(dynamo_shape_env_guards), 1)
+                    guard_code_on_predicate = [
+                        code
+                        for code in dynamo_shape_env_guards[0].code_list
+                        if "L['pred']" in code
+                    ]
+                    self.assertEqual(guard_code_on_predicate, exp_guard_code[i])
+                    outter_shape_env_guards = [
+                        str(guard.expr) for guard in shape_env.guards
+                    ]
+                    self.assertEqual(outter_shape_env_guards, exp_shape_env_guards[i])
+
+        true_graph = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, pred, x):
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        sin = arg1.sin();  arg1 = None
+        return pytree.tree_unflatten([sin], self._out_spec)
+"""
+        false_graph = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, pred, x):
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        cos = arg1.cos();  arg1 = None
+        return pytree.tree_unflatten([cos], self._out_spec)
+"""
+        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        false_guard_code = [
+            "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
+            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
+        ]
+        test_symbool_guards(
+            f,
+            [3, 3, 4, 5],
+            [true_graph, true_graph, false_graph, false_graph],
+            [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
+            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
+            [[], [], [], []],
+        )
 
     def test_invalid_input_global(self) -> None:
         global bulbous_bouffant
@@ -3523,13 +3593,13 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_branch, ones_false_branch):
+def forward(self, l_x_, a, b, d, c_false_branch, b_false_branch, a_false_branch):
     add = l_x_ + l_x_;  l_x_ = None
-    cos = ones.cos();  ones = None
+    cos = a.cos();  a = None
     add_1 = add + cos;  add = cos = None
-    cos_1 = ones_1.cos();  ones_1 = None
+    cos_1 = b.cos();  b = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = ones_3.cos();  ones_3 = None
+    cos_2 = d.cos();  d = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
     return add_3""",
         )
@@ -3537,13 +3607,13 @@ def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch, ones, ones_1, ones_2):
+def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
     mul = l_x_ * l_x_;  l_x_ = None
-    sin = ones.sin();  ones = None
+    sin = a.sin();  a = None
     add = mul + sin;  mul = sin = None
-    sin_1 = ones_1.sin();  ones_1 = None
+    sin_1 = b.sin();  b = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = ones_2.sin();  ones_2 = None
+    sin_2 = c.sin();  c = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return add_2""",
         )
@@ -3880,130 +3950,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         for node in gm.graph.nodes:
             if node.op == "call_function":
                 self.assertIn("nn_module_stack", node.meta)
-
-    def test_preserve_fx_node_metadata(self):
-        class Module1(torch.nn.Module):
-            def forward(self, x):
-                return torch.sin(x)
-
-        class Module2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.mod1 = Module1()
-
-            def forward(self, x):
-                x = torch.cos(x)
-                x = self.mod1(x)
-                x = torch.relu(x)
-                return x
-
-        def fn(x):
-            return torch.abs(x)
-
-        mod = Module2()
-        inp = torch.randn(3, 3)
-
-        gm, _ = torch._dynamo.export(mod)(inp)
-
-        # replace relu with fn
-        gm_edit = copy.deepcopy(gm)
-        for nd in gm_edit.graph.nodes:
-            if nd.target == torch.relu:
-                nd.target = fn
-                nd.meta.clear()
-                break
-        gm_edit.recompile()
-
-        gm2, _ = torch._dynamo.export(gm_edit)(inp)
-
-        # check for source code
-        gm_code = gm.print_readable(print_output=False)
-        gm_edit_code = gm_edit.print_readable(print_output=False)
-        gm2_code = gm2.print_readable(print_output=False)
-        for code in (gm_code, gm_edit_code, gm2_code):
-            self.assertIn("x = torch.cos(x)", code)
-            self.assertIn("return torch.sin(x)", code)
-        self.assertIn("x = torch.relu(x)", gm_code)
-        self.assertNotIn("x = torch.relu(x)", gm_edit_code)
-        self.assertNotIn("x = torch.relu(x)", gm2_code)
-        self.assertIn("return torch.abs(x)", gm2_code)
-
-        # check for other metadata
-        for op in (torch.sin, torch.cos):
-            nd1 = next(filter(lambda nd: nd.target == op, gm.graph.nodes))
-            nd2 = next(filter(lambda nd: nd.target == op, gm2.graph.nodes))
-            self.assertTrue(
-                ("nn_module_stack" in nd1.meta) == ("nn_module_stack" in nd2.meta)
-            )
-            if "nn_module_stack" in nd1.meta:
-                self.assertEqual(
-                    nd1.meta["nn_module_stack"], nd2.meta["nn_module_stack"]
-                )
-            self.assertEqual(nd1.meta["source_fn"], nd2.meta["source_fn"])
-            self.assertEqual(nd1.meta["stack_trace"], nd2.meta["stack_trace"])
-
-    def test_preserve_fx_node_metadata_recompile(self):
-        def fn(x):
-            return torch.sin(x)
-
-        gm, _ = torch._dynamo.export(fn)(torch.randn(3, 3))
-        do_export = torch._dynamo.export(gm)
-        torch._dynamo.optimize("eager")(fn)(torch.randn(3, 3))
-        gm1, _ = do_export(torch.randn(3, 3))
-        gm2, _ = do_export(torch.randn(5, 3))
-
-        self.assertIn("return torch.sin(x)", gm1.print_readable(print_output=False))
-        self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
-
-    def test_preserve_fx_node_metadata_inline(self):
-        def f1(x):
-            return torch.sin(x)
-
-        gm, _ = torch._dynamo.export(f1)(torch.randn(3, 3))
-
-        def f2(x):
-            x = torch.cos(x)
-            return gm(x)
-
-        gm2, _ = torch._dynamo.export(f2)(torch.randn(3, 3))
-
-        self.assertIn("return torch.sin(x)", gm2.print_readable(print_output=False))
-
-    def test_preserve_fx_node_metadata_graph_break(self):
-        def fn(x):
-            x = torch.sin(x)
-            x = torch.abs(x)
-            return torch.cos(x)
-
-        def bad_fn(x):
-            torch._dynamo.graph_break()
-            return x
-
-        gm, _ = torch._dynamo.export(fn)(torch.randn(3, 3))
-
-        # replace abs with graph break
-        gm_edit = copy.deepcopy(gm)
-        for nd in gm_edit.graph.nodes:
-            if nd.target == torch.abs:
-                nd.target = bad_fn
-                nd.meta.clear()
-                break
-        gm_edit.recompile()
-
-        expected = [
-            "x = torch.sin(x)",
-            "return torch.cos(x)",
-        ]
-
-        def test_backend(gm: torch.fx.GraphModule, example_inputs):
-            self.assertTrue(expected)
-            self.assertIn(expected[0], gm.print_readable(print_output=False))
-            expected.pop(0)
-            return gm.forward
-
-        torch._dynamo.reset()
-        opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
-        opt_gm_edit(torch.randn(3, 3))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
