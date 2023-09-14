@@ -66,6 +66,8 @@ namespace {
     class FunctionalTests : public ::testing::Test {};
     template <typename T>
     class FunctionalTestsReducedFloat : public ::testing::Test {};
+    template <typename T>
+    class InfiniteTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -106,6 +108,7 @@ namespace {
     TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
     TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
+    TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
         Quantization8BitWithTailTests,
@@ -1591,6 +1594,36 @@ namespace {
         EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
             << "Test failed for uint16 to float " << u16 << "\n";
       }
+    }
+    TYPED_TEST(InfiniteTests, Has_infinite) {
+      using vec = TypeParam;
+      using VT = UholdType<TypeParam>;
+      auto vec_size = vec::size();
+      VT values[20];
+      for (const auto i : c10::irange(20)) {
+        values[i] = i + 0.3;
+      }
+      auto vec_val = vec::loadu(values);
+      auto seed = TestSeed();
+      ValueGen<int> generator(int(0), int(vec_size - 1), seed);
+      int index = generator.get();
+      int nanBits = 0x7FC00000;
+      VT v_nan = static_cast<VT>(*(float *)&nanBits);
+      values[index] = v_nan;
+      auto vec_nan = vec::loadu(values);
+      int infBits = 0x7F800000;
+      VT v_pinf = static_cast<VT>(*(float *)&infBits);
+      values[index] = v_pinf;
+      auto vec_pinf = vec::loadu(values);
+      int negInfBits = 0xFF800000;
+      VT v_ninf  = static_cast<VT>(*(float *)&negInfBits);
+      values[index] = v_ninf;
+      auto vec_ninf = vec::loadu(values);
+
+      ASSERT_TRUE(!(vec_val.has_infinite())) << "Test failed for normal value\n";
+      ASSERT_TRUE(vec_nan.has_infinite()) << "Test failed for NAN\n";
+      ASSERT_TRUE(vec_pinf.has_infinite()) << "Test failed for positive Infinity\n";
+      ASSERT_TRUE(vec_ninf.has_infinite()) << "Test failed for negative Infinity\n";
     }
 
 #else

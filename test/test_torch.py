@@ -24,7 +24,7 @@ import subprocess
 import weakref
 import sys
 from torch import inf, nan
-from itertools import product, combinations, permutations
+from itertools import product, combinations, permutations, chain
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
@@ -58,7 +58,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
     get_all_qint_dtypes,
 )
-
+from copy import deepcopy
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
@@ -67,6 +67,8 @@ assert torch.get_default_dtype() is torch.float32
 load_tests = load_tests
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+TEST_CUDA = torch.cuda.is_available()
+TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 @contextlib.contextmanager
 def torch_vital_set(value):
@@ -5304,40 +5306,80 @@ else:
             self._test_memory_format_transformations(
                 'cpu', get_generator(mf, shape), transformation_cuda_fn, mf, default_is_preserve=True)
 
-    # FIXME: move to test_serialization
-    def test_pickle_gradscaler(self, device):
-        # This test is not in test_cuda.py because it should pass in 3 cases:
-        #  1. cuda is not available.
-        #  2. cuda is available but device is not cuda.
-        #  3. cuda is available and device is cuda.
-        # In case 1, a and b disable themselves on construction and shouldn't try to pickle workhorse attributes.
-        # In case 2, a and b are enabled.  Workhorse attributes participate in pickling, but none are lazy-inited
-        # to cuda Tensors, because I don't want to do cuda things if device is not cuda.
-        # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
-        device = torch.device(device)
-        try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
-        for lazy_init_scale in try_lazy_inits:
-            a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
-            if lazy_init_scale:
-                # Dummy a.scale() call lazy-inits a._scale Tensor.
-                a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
-                self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
-            # The following three lines should work whether or not cuda is available.
-            serialized = pickle.dumps(a)
-            b = pickle.loads(serialized)
-            self.assertEqual(b.is_enabled(), a.is_enabled())
-            if a.is_enabled():
-                self.assertEqual(b.get_scale(), 3.)
-                self.assertEqual(b.get_growth_factor(), 4.)
-                self.assertEqual(b.get_backoff_factor(), .5)
-                self.assertEqual(b.get_growth_interval(), 2)
-                self.assertEqual(b._init_growth_tracker, 0)
-                # supplies a dummy key to test the defaultdict's default_factory
-                self.assertEqual(b._per_optimizer_states["fdsa"],
-                                 torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
-                if lazy_init_scale:
-                    self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_grad_scaling_unscale(self, device, dtype):
+        inv_scale = torch.full((1,), 0.25, dtype=torch.float, device=device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
+
+        size = 20
+        g = torch.full((size, size), 4.0, dtype=dtype, device=device)
+        ginf = g.clone()
+        ginf[2, 2] = float('inf')
+        gnan = g.clone()
+        gnan[2, 2] = float('nan')
+
+        # Tries selected combinations of
+        #  - contiguous grads
+        #  - g.clone().t() which is not contiguous but still non overlapping and dense
+        #  - variants of g.clone()[:, :5] which are not non overlapping and dense
+        # Non overlapping and dense grads route into a multi tensor apply kernel,
+        # others use a fallback per-tensor kernel, so we should try both.
+        cases = (
+            ([g.clone(), g.clone()], False),
+            ([g.clone(), g.clone().t()], False),
+            ([g.clone(), g.clone()[:, :5]], False),
+            ([g.clone()[:, :5], g.clone()[:, :5]], False),
+            ([g.clone(), ginf.clone()], True),
+            ([g.clone(), gnan.clone()], True),
+            ([g.clone(), ginf.clone()[:, :5]], True),
+            ([g.clone(), gnan.clone()[:, :5]], True),
+            ([ginf.clone(), g.clone()[:, :5]], True),
+            ([ginf.clone()[:, :5], g.clone()[:, :5]], True),
+        )
+
+        for grads, has_inf in cases:
+            found_inf.zero_()
+            torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+            if has_inf:
+                self.assertEqual(found_inf, 1.0)
+            else:
+                self.assertEqual(found_inf, 0.0)
+                for grad in grads:
+                    self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+
+        # When passing lists with mismatched dtypes to a raw
+        # _amp_foreach_non_finite_check_and_unscale_ call,
+        # it's expected to fall back to single-tensor TensorIterator kernel.
+        grads = [g.clone(), g.to(dtype=torch.float16)]
+        torch._amp_foreach_non_finite_check_and_unscale_(grads, found_inf, inv_scale)
+        for grad in grads:
+            self.assertEqual(grad, torch.ones_like(grad), rtol=1e-5, atol=1e-7)
+
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_grad_scaling_update_scale(self, device, dtype):
+        growth = 2.0
+        backoff = 0.25
+        growth_interval = 2
+        scale = torch.full((1,), 4.0, dtype=dtype, device=device)
+        growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
+        found_inf = torch.full((1,), 0.0, dtype=torch.float, device=device)
+
+        # Simulates 2 consecutive unskipped iterations
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 1)
+        self.assertEqual(scale, 4.0)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 8.0)
+
+        # Simulates a skipped iteration
+        found_inf.fill_(1.0)
+        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
+        self.assertEqual(growth_tracker, 0)
+        self.assertEqual(scale, 2.0)
 
     # FIXME: move to test distributions
     def _test_multinomial_empty(self, device, replacement, num_samples):

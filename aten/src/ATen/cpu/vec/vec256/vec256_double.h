@@ -101,6 +101,10 @@ public:
   Vectorized<double> isnan() const {
     return _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_UNORD_Q);
   }
+  bool has_infinite() const {
+    __m256d self_sub  = _mm256_sub_pd(values, values);
+    return (_mm256_movemask_epi8(_mm256_castpd_si256(self_sub)) & 0x77777777) != 0;
+  }
   Vectorized<double> map(double (*const f)(double)) const {
     __at_align__ double tmp[size()];
     store(tmp);
