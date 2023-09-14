@@ -564,6 +564,7 @@ def cached_autotune(
     heuristic_type,
     filename=None,
 ):
+    print(f"{heuristic_type=}, {size_hints=}, {meta=}, {[config.kwargs for config in configs]=}")
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.

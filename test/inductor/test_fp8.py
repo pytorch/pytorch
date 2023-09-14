@@ -3,6 +3,7 @@
 import unittest
 
 import torch
+from torch import Tensor
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
@@ -13,6 +14,26 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
+
+
+# Utility functions are copied from
+# https://github.com/pytorch-labs/float8_playground/blob/main/float8_playground/float8_utils.py.
+# define the e4m3/e5m2 constants
+E4M3_MAX_POS = 448.0
+E5M2_MAX_POS = 57344.0
+
+def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
+    # The default behavior in PyTorch for casting to `float8_e4m3fn`
+    # and `e5m2` is to not saturate. In this context, we should saturate.
+    # A common case where we want to saturate is when the history of a
+    # tensor has a maximum value of `amax1`, and the current amax value
+    # is `amax2`, where `amax1 < amax2`. This is common when using delayed
+    # scaling.
+    if float8_dtype == torch.float8_e4m3fn:
+        x = x.clamp(min=-1*E4M3_MAX_POS, max=E4M3_MAX_POS)
+    else:
+        x = x.clamp(min=-1*E5M2_MAX_POS, max=E5M2_MAX_POS)
+    return x.to(float8_dtype)
 
 
 @instantiate_parametrized_tests
@@ -91,6 +112,36 @@ class TestFP8Types(TestCase):
         with self.assertRaises(Exception):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e5m2)
             y = compiled_fp8_cast(x, torch.float8_e4m3fn)
+
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    def test_layernorm_fp8_quant(self, float8_dtype: torch.dtype):
+        hidden_size = 4096
+        sequence_length = 2048
+        batch_size = 4
+
+        def ln_fp8(x: Tensor, scale: float, amax_buffer: Tensor):
+            x = torch.nn.functional.layer_norm(x, [hidden_size], weight=None, bias=None, eps=1e-05)
+            amax_buffer.fill_(torch.max(torch.abs(x)))
+            x_scaled = x * scale
+            bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
+            return bits_fp8
+
+        compiled_ln_fp8_quant = torch.compile(ln_fp8, backend="inductor")
+
+        x_shape = (batch_size, sequence_length, hidden_size)
+        x = torch.rand(*x_shape, device="cuda", dtype=torch.half)
+        scale = 0.2
+
+        amax_buffer_compiled = torch.zeros((1), device="cuda", dtype=torch.half)
+        y_compiled = compiled_ln_fp8_quant(x, scale, amax_buffer_compiled)
+        amax_buffer = torch.zeros((1), device="cuda", dtype=torch.half)
+        y = ln_fp8(x, scale, amax_buffer)
+
+        torch.testing.assert_close(y_compiled, y, rtol=1e-2, atol=1e-2)
+        torch.testing.assert_close(amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2)
 
 
 if __name__ == "__main__":
