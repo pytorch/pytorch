@@ -85,6 +85,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'aminmax': [torch.float32],
         'polar': [torch.float32],
+        '_embedding_bag_dense_backward': [torch.float16, torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -667,6 +668,7 @@ def mps_ops_modifier(ops):
         'linalg.pinv': None,
         'linalg.pinvhermitian': None,
         'nonzero_static': None,
+        '_embedding_bag_dense_backward': None,
 
         # MPS: input sizes must be divisible by output sizes
         'nn.functional.adaptive_avg_pool1d': None,
@@ -10816,14 +10818,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
-        'nn.functional.batch_norm',
-        'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',
-        '_native_batch_norm_legit',
-        'native_batch_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

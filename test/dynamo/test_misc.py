@@ -13,6 +13,7 @@ import operator
 import os
 import random
 import sys
+import threading
 import traceback
 import typing
 import unittest
@@ -61,7 +62,9 @@ from torch.testing._internal.common_cuda import (
     TEST_CUDA,
     TEST_MULTIGPU,
 )
-from torch.testing._internal.common_methods_invocations import sample_inputs_gather
+from torch.testing._internal.common_methods_invocations import (
+    sample_inputs_take_along_dim,
+)
 from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -1297,7 +1300,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 2)
 
     def test_numpy_take_along_axis(self):
-        def fn(x, a, i):
+        def fn(x, i, a):
             return np.take_along_axis(x, i, a)
 
         def sample_to_args(s):
@@ -1305,8 +1308,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return tuple(a.numpy() if isinstance(a, torch.Tensor) else a for a in args)
 
         samples = list(
-            sample_inputs_gather(
-                None, "cpu", torch.float32, requires_grad=False, include_0d=False
+            sample_inputs_take_along_dim(
+                None, "cpu", torch.float32, requires_grad=False
             )
         )
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1314,6 +1317,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         i = 1
         for sample in samples:
             args = sample_to_args(sample)
+            if len(args) < 3:
+                # if axis is None, second argument is treated as 1d array
+                args = (args[0], np.ravel(args[1]), None)
             self.assertEqual(fn(*args), opt_fn(*args))
             self.assertEqual(cnts.frame_count, i)
             i += 1
@@ -2789,6 +2795,16 @@ def fn():
         self.assertEqual(len(sub_of_foo_subclass_var_optim), 1)
         self.assertEqual(sub_of_foo_subclass_var_optim, sub_of_foo_subclass_var_reg)
 
+    def test_builtin_str_on_user_defined_function(self):
+        def another_fn():
+            pass
+
+        def fn():
+            return "another_fn" in str(another_fn)
+
+        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        self.assertTrue(opt_fn())
+
     def test_enum_no_graphbreaks(self):
         class Foo(enum.Enum):
             FOO = 0
@@ -3465,38 +3481,99 @@ def fn():
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    # '__torch__.torch.SymInt (of Python compilation unit at: 0x4c9c0e0)'
-    # object has no attribute or method '__ne__'
-    # NB: I don't think this ever can actually work, cuz TorchScript
-    # can't deal with SymInt inputs
-    @expectedFailureDynamic
-    @torch._dynamo.config.patch(raise_on_backend_change=True)
-    def test_change_backends(self):
-        @torch._dynamo.optimize("eager", nopython=True)
-        def fn1():
-            return x + 1
+    def _optimize_then_check_exp(
+        self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
+    ):
+        opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
+        self.assertEqual(exp_out, opt_out)
+        self.assertEqual(cnt.frame_count, exp_frame_count)
+        self.assertEqual(
+            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
+            exp_n_cached_backend,
+        )
 
-        @torch._dynamo.optimize("ts")
-        def fn2():
-            return x + 2
+    def test_backend_match_guard(self):
+        x = torch.randn([3, 4])
 
-        @torch._dynamo.optimize("eager", nopython=False)
-        def fn3():
-            return x + 1
+        def foo(x):
+            return x.sin() + x.cos()
 
-        x = torch.tensor([3, 5])
+        def foo_graph_break(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            b = x.cos()
+            return a + b
 
-        fn1()
-        fn1()
-        fn3()
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn2)
-        fn1()
+        eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        backends = [eager_record_backend, "eager"]
+
+        # We intentionally don't reset dynamo for each backend so that we can test
+        # 1. dynamo doesn't recompile when backend stays the same, i.e. frame_count doesn't increase
+        # 2. dynamo recompiles when backend changes, i.e. frame_count is non-zero for next backend
+        def test_recompile(foo, *, exp_frame_count):
+            eager_result = foo(x)
+            for i, backend in enumerate(backends):
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                # Run opt_f multiple times to make sure dynamo doesn't recompile.
+                # Specifically, frame_count doesn't increase
+                # the number of cached backends is i + 2 because we have the optimizing backend + None
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                )
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                )
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                )
+
+        test_recompile(foo, exp_frame_count=1)
         torch._dynamo.reset()
-        fn2()
-        fn2()
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn1)
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn3)
-        fn2()
+        test_recompile(foo_graph_break, exp_frame_count=2)
+
+    def test_backend_match_guard_multi_threads(self):
+        x = torch.randn([3, 4])
+
+        def foo(x):
+            return x.sin() + x.cos()
+
+        def compile_then_check_exp(*args):
+            self._optimize_then_check_exp(*args)
+            self._optimize_then_check_exp(*args)
+            self._optimize_then_check_exp(*args)
+            thread_success[threading.current_thread()] = True
+
+        eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        backends = [eager_record_backend, "eager"]
+
+        # Test dynamo recompiles but only caches a single backend for each thread
+        eager_result = foo(x)
+        # cnt and None
+        exp_n_cached_backend = 2
+        exp_frame_count = 1
+        threads = []
+        thread_success = {}
+        for i, backend in enumerate(backends):
+            cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            thread = threading.Thread(
+                target=compile_then_check_exp,
+                args=(
+                    foo,
+                    (x,),
+                    cnt,
+                    eager_result,
+                    exp_frame_count,
+                    exp_n_cached_backend,
+                ),
+            )
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(thread_success), len(threads))
 
     def test_dynamo_min_operator_with_shape(self):
         @torch._dynamo.optimize("eager", nopython=True)

@@ -3320,6 +3320,27 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     return output, offset2bag, bag_size, max_indices
 
 
+@register_meta(aten._embedding_bag_dense_backward.default)
+def meta_embedding_bag_dense_backward(
+    grad,
+    indices,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    torch._check(
+        grad.dtype in (torch.half, torch.bfloat16, torch.float, torch.double),
+        lambda: f"grad is not floating point, got {grad.dtype}",
+    )
+    index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
+    return index_grad_weight
+
+
 def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
     # if specified, dtype takes precedence
     if dtype:
