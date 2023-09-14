@@ -22,9 +22,7 @@ _export_tracepoint.fallthrough(DispatchKey.AutogradCPU)
 
 
 @_export_tracepoint.py_impl(ProxyTorchDispatchMode)
-def export_tracepoint_dispatch_mode(*args, **kwargs):
-    mode = args[0]
-    args = args[1:]
+def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
     if not mode.enable_tracing:
         return _export_tracepoint(*args, **kwargs)
     p_args, p_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, (args, kwargs))
