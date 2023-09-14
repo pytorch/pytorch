@@ -1296,6 +1296,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        print(f'  FakeTensor. func={str(func)}')
         # FakeTensorMode should not be set when we're inside of it.
         assert (
             torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is None
