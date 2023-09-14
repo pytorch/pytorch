@@ -152,6 +152,7 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
+        self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
@@ -165,10 +166,56 @@ class CachingAutotuner(KernelInterface):
         with self.lock:
             if self.launchers:
                 return
-            self.launchers = [
-                self._precompile_config(c, warm_cache_only_with_cc)
-                for c in self.configs
-            ]
+            self.launchers = []
+            compiled_binaries = []
+            for c in self.configs:
+                compiled_binary, launcher = self._precompile_config(
+                    c, warm_cache_only_with_cc
+                )
+                self.launchers.append(launcher)
+                compiled_binaries.append(compiled_binary)
+
+            if (
+                config.dynamic_scale_rblock
+                and self.heuristic_type == HeuristicType.REDUCTION
+                and self.size_hints is not None
+            ):
+                for triton_config, compiled_binary in zip(
+                    self.configs, compiled_binaries
+                ):
+                    assert len(self.size_hints) == 2
+                    xblock = triton_config.kwargs["XBLOCK"]
+                    rblock = triton_config.kwargs["RBLOCK"]
+                    total_block = (self.size_hints[0] + xblock - 1) // xblock
+                    nreg = getattr(compiled_binary, "n_regs", None)
+                    if nreg is None:
+                        continue
+
+                    # each SM of A100 has 65536 32-bit registers. To maximize
+                    # the theoretical occupancy, we need run 2048 threads on each
+                    # SM. So each thread should use no more than 65536 / 2048
+                    # = 32 registers. In cases where occupancy matters, and each
+                    # thread uses too many registers, reduce RBLOCK to reduce
+                    # the register usage.
+                    # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
+                    # from PLBartForCausalLM, latency improve from
+                    # 7.795ms to 4.883ms.
+                    if nreg <= 32:
+                        continue
+                    max_blocks_per_sm = 2048 // (32 * triton_config.num_warps)
+                    # TODO: this is hardcoded for A100, we should revise for H100
+                    # for optimal perf.
+                    if total_block <= max_blocks_per_sm * 108:
+                        # <100% occupancy is fine
+                        continue
+                    # make sure rblock is not too small
+                    if rblock <= 64:
+                        continue
+                    new_config = copy.deepcopy(triton_config)
+                    new_config.kwargs["RBLOCK"] = rblock // 2
+                    self.launchers.append(
+                        self._precompile_config(new_config, warm_cache_only_with_cc)[1]
+                    )
             self.configs = None
 
     def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
@@ -186,13 +233,15 @@ class CachingAutotuner(KernelInterface):
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
         if warm_cache_only_with_cc:
-            triton.compile(
-                self.fn,
-                warm_cache_only=True,
-                cc=warm_cache_only_with_cc,
-                **compile_meta,
+            return (
+                triton.compile(
+                    self.fn,
+                    warm_cache_only=True,
+                    cc=warm_cache_only_with_cc,
+                    **compile_meta,
+                ),
+                None,
             )
-            return
 
         # load binary to the correct device
         with torch.cuda.device(compile_meta["device"]):
@@ -252,7 +301,7 @@ class CachingAutotuner(KernelInterface):
             launcher.fn = self.fn
             launcher.bin = binary
 
-        return launcher
+        return binary, launcher
 
     def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
@@ -378,7 +427,7 @@ class CachingAutotuner(KernelInterface):
 
         def benchmark_one_config(config):
             with self.lock:
-                launcher = self._precompile_config(config, None)
+                _, launcher = self._precompile_config(config, None)
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *cloned_args, **kwargs)

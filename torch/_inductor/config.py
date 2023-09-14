@@ -57,6 +57,9 @@ batch_fusion = True
 # enable reordering pass
 reordering = True
 
+# Scale down RBLOCK for better occupancy
+dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
+
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
