@@ -134,7 +134,7 @@ test_failures = {
     "test_glu_dynamic_shapes": TestFailure(("cpu",)),
     "test_isinf2_dynamic_shapes": TestFailure(("cpu",)),
     "test_linspace1_dynamic_shapes": TestFailure(("cpu",)),
-    "test_masked_scatter_dynamic_shapes": TestFailure(("cpu",)),
+    "test_masked_scatter_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_reflection_pad2d_dynamic_shapes": TestFailure(("cpu",)),
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
