@@ -23,8 +23,6 @@ import pytest
 import torch._numpy as np
 from pytest import raises as assert_raises
 
-# from numpy.core._rational_tests import rational
-
 from torch._numpy.testing import (
     assert_,
     assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
@@ -45,9 +43,6 @@ HAS_REFCOUNT = True
 
 from numpy.core.tests._locales import CommaDecimalPointLocale
 from numpy.testing._private.utils import _no_tracing, requires_memory
-
-# Need to test an object that does not fully implement math interface
-# from datetime import timedelta, datetime
 
 
 # #### stubs to make pytest pass the collections stage ####
@@ -3053,6 +3048,8 @@ class TestArgmaxArgminCommon:
     @pytest.mark.parametrize("method", [np.argmax, np.argmin])
     def test_np_argmin_argmax_keepdims(self, size, axis, method):
         arr = np.random.normal(size=size)
+        if size is None or size == ():
+            arr = np.asarray(arr)
 
         # contiguous arrays
         if axis is None:
