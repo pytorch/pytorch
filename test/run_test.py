@@ -353,6 +353,7 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+    "inductor/test_max_autotune",  # Testing, probably revert later
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -1289,7 +1290,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[ShardedTest]:
+def get_selected_tests(options) -> List[str]:
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
