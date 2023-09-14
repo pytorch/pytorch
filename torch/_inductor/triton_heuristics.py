@@ -677,7 +677,7 @@ def triton_config(
     z=None,
     num_stages=1,
     num_elements_per_warp=256,
-    min_elements_per_thread=1,
+    min_elements_per_thread=0,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -825,7 +825,7 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
 
 
 def pointwise(
-    size_hints, meta, tile_hint=None, filename=None, min_elements_per_thread=1
+    size_hints, meta, tile_hint=None, filename=None, min_elements_per_thread=0
 ):
     """
     Construct @triton.heuristics() based on size_hints.

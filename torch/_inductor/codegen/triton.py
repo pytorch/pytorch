@@ -180,7 +180,8 @@ class TritonOverrides(OpOverrides):
                 return 4
             if src_dtype == torch.float8_e4m3fn or dst_dtype == torch.float8_e4m3fn:
                 return 2
-            return 1
+            # No requirements on min_elements_per_thread.
+            return 0
 
         if src_dtype is not None:
             # Both dtype and src_dtype are set. This is used by torch to(dtype=dtype).
@@ -799,7 +800,7 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        min_elements_per_thread=1,
+        min_elements_per_thread=0,
     ):
         if pid_cache is None:
             pid_cache = {}
