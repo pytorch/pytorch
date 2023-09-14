@@ -105,7 +105,12 @@ from .variables.tensor import (
     TensorVariable,
 )
 from .variables.torch import TorchVariable
-from .variables.user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .variables.user_defined import (
+    RemovableHandleVariable,
+    UserDefinedClassVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 log = logging.getLogger(__name__)
 graph_break_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
@@ -611,7 +616,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        return f"{self.f_code.co_name} {self.f_code.co_filename}:{lineno}{inline_depth_str}"
+        return f"{self.f_code.co_filename}:{lineno} in {self.f_code.co_name}{inline_depth_str}"
 
     def get_log_starts_line_log_str(self):
         log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
@@ -788,7 +793,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.push(self.symbolic_locals[inst.argval])
 
     def STORE_FAST(self, inst):
-        self.symbolic_locals[inst.argval] = self.pop()
+        loaded_vt = self.pop()
+        name = inst.argval
+        loaded_vt = loaded_vt.rename(self, name)
+        self.symbolic_locals[name] = loaded_vt
 
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
@@ -859,6 +867,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
+        if isinstance(value, RemovableHandleVariable):
+            unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
@@ -1854,7 +1864,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             lookup_line=False,
         )
 
-    def store_dict_key(self, name, value):
+    def store_global_weakref(self, name, value):
         self.output.guards.add(
             GlobalWeakRefSource(name).make_guard(GuardBuilder.WEAKREF_ALIVE)
         )
@@ -2154,8 +2164,20 @@ class InstructionTranslator(InstructionTranslatorBase):
         cg.append_output(create_instruction("RETURN_VALUE"))
         return cg.get_instructions()
 
+    def symbolic_locals_contain_module_class(self):
+        for v in self.symbolic_locals.values():
+            if isinstance(v, UserDefinedClassVariable) and issubclass(
+                v.as_python_constant(), torch.nn.Module
+            ):
+                return True
+        return False
+
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if (
+            self.output.count_calls() == 0
+            and not self.symbolic_locals_contain_module_class()
+            and not self.export
+        ):
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
@@ -2252,7 +2274,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented(f"unconverted arg {v}")
 
         code: types.CodeType = func.get_code()
-        if code.co_name in ("__setitem__", "__setattr__"):
+        if code.co_name in ("__setitem__", "__setattr__") and not (
+            args is not None
+            and len(args) > 0
+            and isinstance(args[0], variables.CustomizedDictVariable)
+        ):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""

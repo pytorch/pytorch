@@ -1,3 +1,4 @@
+import functools
 import warnings
 from typing import Callable, Union
 
@@ -9,6 +10,7 @@ from torch._subclasses.fake_tensor import (
     tree_flatten_only,
     UnsupportedFakeTensorException,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
@@ -79,9 +81,12 @@ class CrossRefFakeMode(TorchDispatchMode):
             and torch.Tag.data_dependent_output not in func.tags
         ):
             try:
-                with FakeTensorMode() as fake_mode:
+                # TODO: enable_python_dispatcher() here
+                with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
-                        torch.Tensor, fake_mode.from_tensor, (args, kwargs)
+                        torch.Tensor,
+                        functools.partial(fake_mode.from_tensor, static_shapes=True),
+                        (args, kwargs),
                     )
                     with warnings.catch_warnings():
                         fake_r = func(*fake_args, **fake_kwargs)
@@ -143,7 +148,10 @@ class CrossRefFakeMode(TorchDispatchMode):
 
                     try:
                         torch._prims.utils.compare_tensor_meta(
-                            r_out, fake_out, check_strides=self.check_strides
+                            r_out,
+                            fake_out,
+                            check_strides=self.check_strides,
+                            allow_rhs_unbacked=True,
                         )
                     except Exception as e:
                         error_message = (

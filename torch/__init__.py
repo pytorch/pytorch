@@ -55,7 +55,7 @@ __all__ = [
     'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
     'SymBool', 'sym_not',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'compile', 'vmap',
-    'export',
+    'export', 'autocast',
 ]
 
 ################################################################################
@@ -174,13 +174,13 @@ def _load_global_deps() -> None:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        # As PyTorch is not purelib, but nvidia-*-cu12 is
         cuda_libs: Dict[str, str] = {
             'cublas': 'libcublas.so.*[0-9]',
             'cudnn': 'libcudnn.so.*[0-9]',
-            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
-            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
-            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9]',
             'cufft': 'libcufft.so.*[0-9]',
             'curand': 'libcurand.so.*[0-9]',
             'cusolver': 'libcusolver.so.*[0-9]',
@@ -789,7 +789,7 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
         >>> torch.use_deterministic_algorithms(True)
 
         # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(0)
+        >>> torch.randn(10, device='cuda').kthvalue(1)
         ...
         RuntimeError: kthvalue CUDA does not have a deterministic implementation...
 
@@ -1005,6 +1005,20 @@ def _check(cond, message=None):
             message. Default: ``None``
     """
     _check_with(RuntimeError, cond, message)
+
+def _check_is_size(i, message=None):
+    """Checks that a given integer is a valid size (i.e., is non-negative).
+    You should use this over _check(i >= 0) because we can use the semantic
+    information (that i is a size) to make some further inferences in case
+    i is an unbacked SymInt.
+
+    NB: Do NOT use this in contexts where a -1 size would be valid (indicating
+    to infer the size from context, or if you should wrap-around or truncate).
+    Only use this if the only valid value is an honest to goodness size.
+    """
+    # This is responsible for the expect_true
+    _check(i >= 0, message)
+    torch.fx.experimental.symbolic_shapes._advise_is_size(i)
 
 def _check_index(cond, message=None):
     r"""Throws error containing an optional message if the specified condition
@@ -1303,17 +1317,6 @@ _storage_classes = {
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
-################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
-################################################################################
-
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
-
-################################################################################
-# Import miscelaneous torch functions
-################################################################################
-
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
@@ -1377,6 +1380,13 @@ for name in dir(_C._VariableFunctions):
         __all__.append(name)
 
 
+
+################################################################################
+# Import TorchDynamo's lazy APIs to avoid circular dependenices
+################################################################################
+
+# needs to be before from .functional import * to avoid circular dependencies
+from ._compile import _disable_dynamo
 
 ################################################################################
 # Import interface functions defined in Python

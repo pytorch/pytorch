@@ -409,7 +409,13 @@ def is_typing(value):
         return isinstance(value, typing._GenericAlias)
     else:
         return isinstance(
-            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
+            # `_SpecialForm`` is the parent class of `Optional`
+            value,
+            (
+                typing._SpecialGenericAlias,
+                typing._UnionGenericAlias,
+                typing._SpecialForm,
+            ),
         )
 
 
@@ -993,9 +999,14 @@ def same(
                 log_error("Accuracy failed for key name %s", k)
                 return False
         return True
-    elif isinstance(ref, torch.Tensor):
+    elif isinstance(ref, (torch.Tensor, float)):
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
+
+        def to_tensor(t):
+            return t if isinstance(t, torch.Tensor) else torch.tensor(t)
+
+        ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
 
         if ref.is_sparse:
             assert res.is_sparse
@@ -1043,6 +1054,12 @@ def same(
             # Check error from fp64 version
             if fp64_ref.dtype == torch.float64:
                 ref_error = rmse(fp64_ref, ref).item()
+                # ref unable to produce this with stable numerics in this precision, ignore
+                if math.isnan(ref_error):
+                    log.warning(
+                        "Found nan in reference. Consider running in higher precision."
+                    )
+
                 res_error = rmse(fp64_ref, res).item()
                 multiplier = 2.0
 
@@ -1079,13 +1096,6 @@ def same(
         r = ref == res
         if not r:
             log_error("Accuracy failed (%s): %s != %s", type(ref), ref, res)
-        return r
-    elif isinstance(ref, float):
-        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
-        if not r:
-            log_error(
-                "Accuracy failed (float): %s != %s (within tol=%s)", ref, res, tol
-            )
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality and not (
@@ -1393,6 +1403,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise an AssertionError.
     """
     op = node.op
+
     try:
         if op == "call_function":
             return node.target(*args, **kwargs)
@@ -1406,6 +1417,12 @@ def run_node(tracer, node, args, kwargs, nnmodule):
         elif op == "placeholder":
             assert "example_value" in node.meta
             return node.meta["example_value"]
+    except NotImplementedError as e:
+        # NB: mimic how wrap_fake_exception does it
+        from .exc import unimplemented
+
+        raise unimplemented(f"running {op} {node.target}(*{args}, **{kwargs})") from e
+
     except Exception as e:
         fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
         raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e

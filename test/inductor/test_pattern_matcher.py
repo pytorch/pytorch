@@ -3,9 +3,9 @@ import copy
 import unittest
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import expectedFailureDynamicWrapper
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
 from torch._inductor.utils import run_and_get_code
@@ -386,7 +386,6 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 2)
         self.assertEqual(counters["inductor"]["pattern_matcher_nodes"], 5)
 
-    @expectedFailureDynamicWrapper
     def test_cat_slice_cat(self):
         def check_counter(counter, expected):
             if not inductor_config.cpp_wrapper:
@@ -409,7 +408,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         counters.clear()
         args = [
@@ -419,8 +418,10 @@ class TestPaternMatcher(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
-        check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        # We don't recompile for dynamic-shape cases.
+        if dynamo_config.assume_static_by_default:
+            check_counter(counters["inductor"]["pattern_matcher_count"], 1)
+            check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
         # Verify we fallback to non-optimal path for negative `end`.
         def fn(a, b):
@@ -438,7 +439,7 @@ class TestPaternMatcher(TestCase):
         actual = torch.compile(fn)(*args)
         torch.testing.assert_close(actual, expected)
         check_counter(counters["inductor"]["pattern_matcher_count"], 1)
-        check_counter(counters["inductor"]["pattern_matcher_nodes"], 4)
+        check_counter(counters["inductor"]["pattern_matcher_nodes"], 3)
 
     def test_pointless_convert(self):
         def fn1(x):
@@ -462,6 +463,10 @@ class TestPaternMatcher(TestCase):
         self.assertEqual(count_calls(gm.graph), 2)
 
     def test_pointless_cumsum(self):
+        # Constant folding was explicitly turned off due to issue #108388
+        # Turn it back on for test
+        torch._inductor.config.joint_graph_constant_folding = True
+
         def fn1():
             ones = torch.full(
                 [1, 128], 1, layout=torch.strided, dtype=torch.float32
@@ -474,7 +479,15 @@ class TestPaternMatcher(TestCase):
             ).to(torch.int64)
             return torch.cumsum(ones, 1)
 
-        for fn in (fn1, fn2):
+        def fn3():
+            twos = torch.full([5, 4, 3], 2, dtype=torch.int64)
+            return torch.cumsum(twos, 0)
+
+        def fn4():
+            x = torch.full([100], 0.1, dtype=torch.float32)
+            return torch.cumsum(x, 0)
+
+        for fn in (fn1, fn2, fn3, fn4):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())

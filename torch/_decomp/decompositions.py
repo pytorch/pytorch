@@ -12,6 +12,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -1192,8 +1193,8 @@ def split_with_sizes(
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check(
-            length >= 0,
+        torch._check_is_size(
+            length,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
         # We know this is true thanks to the sum, but this assertion helps
@@ -2092,6 +2093,12 @@ def _index_add(
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    index_size = index.size(0) if index.ndim == 1 else 1
+    tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
+    torch._check(
+        tensor_size == index_size,
+        lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
@@ -3494,39 +3501,6 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot)
-@out_wrapper()
-@pw_cast_for_opmath
-def dot(self, other):
-    if self.is_complex():
-        if self.is_conj():
-            if other.is_conj():
-                return torch.dot(self.conj(), other.conj()).conj()
-            else:
-                return torch.vdot(self.conj(), other)
-        elif other.is_conj():
-            return torch.vdot(other.conj(), self)
-
-    torch._check(
-        self.dim() == 1 and other.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
-    )
-    torch._check(
-        self.dtype == other.dtype,
-        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
-    )
-
-    def numel_error():
-        return (
-            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
-            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
-        )
-
-    torch._check(self.numel() == other.numel(), numel_error)
-
-    return (self * other).sum()
-
-
 @register_decomposition(aten.binary_cross_entropy_with_logits)
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
@@ -3828,6 +3802,13 @@ def arange_start(
     )
 
 
+@register_decomposition(out_dtype)
+def out_dtype_decomp(*args, **kwargs):
+    from torch._higher_order_ops.out_dtype import out_dtype_dense
+
+    return out_dtype_dense(*args, **kwargs)
+
+
 @register_decomposition(aten.multi_margin_loss)
 @aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
@@ -3992,8 +3973,42 @@ def scaled_dot_product_flash_attention(
     output, _ = aten._scaled_dot_product_attention_math.default(
         query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
     )
+    # Why this change?
+    # In pre-dispatch export scaled_dot_product_attention is executed via
+    # * flash_attention.
+    # flash_attention allocates output tensor as (N, L, H, E)
+    #   it then tranposes that to get (N, H, L, E) which is supposed to be the return
+    # tensor dim for scaled_dot_product_attention
+    # assume x: [N, H, L, E] is the output sdpa
+    # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
+    # (L, N, H, E) dim tensor
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+    # During pre autograd dispatch call to contiguous is not traced because
+    # flash_attention output after the x.permute is already contiguous
+    # on which the view is valid
+    # However, during 2nd stage export, post-dispatch, we run _match variant
+    # instead of flash* to get the decomposition. _match variant returns
+    # x: [N, H, L, E] applying x.permute(2, 0, 1, 3) returns
+    # x: [L, N, H, E] and without converting this to contiguous tensor
+    # subsequent view is not valid and the export fails
+    # solution is to maintain the return tensor view from the decomp to be
+    # exactly same as *flash* variant.
+    # flash variants output is contiguous as [N, L, H, E]
+    # _match variant out is contiguous as [N, H, L, E]
+    # out = out.tranpose(1, 2).contiguous gets output as contiguous
+    # in [N, L, H, E].
+    # Subsrequent tranpose(1, 2) then returns a view on which
+    # aforementioned code snippet, as showm below, is valid
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+
+    # Really the invairant you want to maintain is:
+    # pre-dispatch op-output and its decomposed representation must
+    # return tensor with same view and dims
+    output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
     return (
-        output,
+        output.transpose(1, 2),
         logsumexp,
         cum_seq_q,
         cum_seq_k,
