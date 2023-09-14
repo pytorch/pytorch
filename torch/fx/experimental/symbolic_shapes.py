@@ -998,6 +998,12 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
+        if str(self.expr) == "Eq(i4, 0)":
+            return bool(False)
+        if str(self.expr) == "Ne(i4, 1)":
+            return bool(True)
+        if str(self.expr) == "Eq(i4, -1)":
+            return bool(False)
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return bool(r)
@@ -3399,8 +3405,8 @@ class ShapeEnv:
             if str(s) in self.dynamic_scalars:
                 dynamic_scalar_replace[s] = sympy.Integer(32)
         expr = safe_expand(expr.xreplace(dynamic_scalar_replace))
-
         expr = self.simplify(expr)
+
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -3426,7 +3432,17 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
-            vr = self.var_to_range[k]
+            print(f"self.var_to_range: {self.var_to_range}")
+            for s, r in self.var_to_range.items():
+                print(f"s: {s}, type(s): {type(s)}, r: {r}, type(r): {type(r)}")
+            print(f"k: {k}, type(k): {type(k)}, k in self.var_to_range: {k in self.var_to_range}, str(k) in self.var_to_range: {str(k) in self.var_to_range}, self.var_to_range: {self.var_to_range}")
+            # vr = self.var_to_range[k]
+            # TODO(yf225): this is nuts, I don't understand why simple lookup doesn't work.
+            vr = None
+            for s in self.var_to_range:
+                if str(s) == str(k):
+                    vr = self.var_to_range[s]
+            assert vr is not None
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
@@ -3478,7 +3494,7 @@ class ShapeEnv:
             unbacked_replace = {}
             for s in new_expr.free_symbols:
                 # TODO(yf225): add comment here
-                unbacked_replace[s] = 32
+                unbacked_replace[s] = sympy.Integer(32)
             new_expr = safe_expand(new_expr.xreplace(unbacked_replace))
 
         return new_expr if unbacked_only else None
@@ -3633,7 +3649,7 @@ class ShapeEnv:
                 return
         free = list(expr.free_symbols)
 
-        assert len(free) > 0, f"The expression should not be static by this point: {expr}"
+        assert len(free) > 0, f"The expression should not be static by this point: {expr}, free: {free}"
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
@@ -3807,6 +3823,12 @@ class ShapeEnv:
                 if isinstance(hint, (int, bool)):
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
+
+            def has_unbacked_symint(expr):
+                for sym in expr.free_symbols:
+                    if str(sym).startswith("i"):
+                        return True
+                return False
 
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static

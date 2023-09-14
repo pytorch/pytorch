@@ -49,4 +49,8 @@ Scalar _local_scalar_dense_cpu(const Tensor& self) {
   return r;
 }
 
+Scalar _local_scalar_dense_meta(const Tensor& self) {
+  return c10::SymInt(1);
+}
+
 }} // at::native

@@ -7050,7 +7050,50 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
-    def test_dynamic_scalar(self):
+    def test_tolist_tile(self):
+        """
+        TODO(yf225): current problem is that DynamicScalar is not substituted by unbacked symint, resulting in errors like:
+        ```
+        File "/data/users/willfeng/pytorch_yf225/torch/_inductor/lowering.py", line 790, in repeat
+        new_size[i] = new_size[i] * repeats[i]
+                    ~~~~~~~~~~~~^~~~~~~~~~~~
+        torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+        LoweringException: TypeError: unsupported operand type(s) for *: 'Integer' and 'DynamicScalar'
+        ```
+        ideally it should be multiplication between 'Integer' and unbacked symint.
+        """
+        def f(x):
+            a, b = x[0].tolist()
+            torch.export.constrain_as_size(a)
+            torch.export.constrain_as_size(b)
+            return torch.tile(x, (a, b))
+
+        with (
+            torch._dynamo.config.patch(
+                dynamic_shapes=True,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+            ),
+        ):
+            compiled = torch.compile(f, fullgraph=True, dynamic=True)
+            x = torch.tensor([[1, 2], [3, 4]], device=self.device)
+            code = run_and_get_triton_code(compiled, x)
+            FileCheck() \
+                .check("buf0 = arg0_1[0].item()") \
+                .check("buf1 = arg0_1[1].item()") \
+                .check("buf4 = empty_strided((buf0 + buf1, ), (1, ), device='cuda', dtype=torch.float32)") \
+                .check("buf2 = reinterpret_tensor(buf4, (math.floor(buf0), ), (1, ), 0)  # alias") \
+                .check("buf3 = reinterpret_tensor(buf4, (math.floor(buf1), ), (1, ), buf0)  # alias") \
+                .run(code)
+            print(f"code: {code}")
+
+            ref = f(x)
+            actual = compiled(x)
+            print(f"ref: {ref}, actual: {actual}")
+            self.assertEqual(ref, actual)
+
+
+    def test_tolist_zeros_cat(self):
         def f(x):
             a, b = x.tolist()
             torch.export.constrain_as_size(a)

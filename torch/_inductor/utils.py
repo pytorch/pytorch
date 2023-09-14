@@ -30,6 +30,7 @@ from typing import (
     ValuesView,
 )
 from unittest import mock
+import traceback
 
 import sympy
 

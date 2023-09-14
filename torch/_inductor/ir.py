@@ -24,6 +24,7 @@ from typing import (
     Union,
 )
 from unittest.mock import patch
+import sys
 
 import sympy
 from sympy import Expr, Integer
@@ -314,12 +315,7 @@ class IRNode:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
     def get_numel(self):
-        size = self.get_size()
-        for i in range(len(size)):
-            if isinstance(size[i], DynamicScalar):
-                # TODO(yf225): add comment
-                size[i] = 32
-        return sympy_product(size)
+        return sympy_product(self.get_size())
 
     def is_zero_elements(self):
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
@@ -3757,7 +3753,9 @@ class DynamicScalar(ExternKernelAlloc):
         constant_args=(),
     ):
         super().__init__(layout, inputs, constant_args)
-        V.graph.sizevars.shape_env.dynamic_scalars.add(self.get_name())
+        self.symint = V.graph.sizevars.shape_env.create_unbacked_symint()
+        torch.fx.experimental.symbolic_shapes.constrain_range(self.symint, min=-sys.maxsize, max=sys.maxsize - 1)
+        V.graph.sizevars.shape_env.dynamic_scalars.add(str(self.symint))
 
     def should_allocate(self):
         return False
@@ -3771,21 +3769,36 @@ class DynamicScalar(ExternKernelAlloc):
         return False
 
     def codegen(self, wrapper):
-        wrapper.writeline(f"{self.get_name()} = {self.inputs[0].get_name()}[{self.inputs[0].get_layout().offset}].item()")
+        wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")
+        wrapper.writeline(f"{self.symint} = {self.get_name()}")
 
     @classmethod
     def create(cls, x: "TensorBox"):
         return DynamicScalar(
-            layout=AliasedLayout(x),
+            layout=FixedLayout(
+                torch.device("cpu"), x.get_dtype(), [1], [1]
+            ),
             inputs=[x],
         )
 
-    def get_alias_names(self):
-        # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].get_name()]
+    def __add__(self, other):
+        return self.symint + other
+
+    def __mul__(self, other):
+        return self.symint * other
+
+    def __rmul__(self, other):
+        return self.symint * other
+
+    def __truediv__(self, other):
+        return self.symint / other
+
+    def __sub__(self, other):
+        return self.symint - other
 
     def __str__(self):
-        return self.get_name()
+        return str(self.symint)
+        # return self.get_name()
 
     __repr__ = __str__
 
