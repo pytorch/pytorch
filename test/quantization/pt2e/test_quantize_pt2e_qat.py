@@ -30,11 +30,9 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
+    TestHelperModules,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-
-# TODO: merge all TestHelperModules and put them in a shared utils file
-from .test_quantize_pt2e import TestHelperModules
 
 
 class PT2EQATTestCase(QuantizationTestCase):
@@ -64,6 +62,8 @@ class PT2EQATTestCase(QuantizationTestCase):
         Helper method to verify that the QAT numerics for PT2E quantization match those of
         FX graph mode quantization for symmetric qnnpack.
         """
+        # resetting dynamo cache
+        torch._dynamo.reset()
         MANUAL_SEED = 100
 
         # PT2 export

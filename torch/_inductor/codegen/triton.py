@@ -2081,6 +2081,7 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
+        grid = wrapper.generate_default_grid(name, grid)
         wrapper.generate_kernel_call(
             name,
             call_args,
