@@ -4738,8 +4738,6 @@ class TestCompileTransforms(TestCase):
     # torch.compile is not supported on Windows
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf(IS_WINDOWS or (TEST_CUDA and not SM70OrLater))
-    @torch._dynamo.config.patch(suppress_errors=False)
-    @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
@@ -4768,6 +4766,28 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
+    # torch.compile is not supported on Windows
+    @expectedFailureIf(IS_WINDOWS)
+    @torch._dynamo.config.patch(suppress_errors=False)
+    @torch._dynamo.config.patch(capture_func_transforms=True)
+    @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
+    def test_grad_deprecated_api(self, device):
+        x = torch.randn((), device=device)
+        y = torch.randn((), device=device)
+
+        def wrapper_fn(x, y):
+            return functorch.grad(torch.mul)(x, y)
+
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
+
+        def wrapper_fn(x, y):
+            return functorch.grad(torch.mul, argnums=(0, 1))(x, y)
+
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(

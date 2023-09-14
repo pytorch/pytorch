@@ -363,6 +363,19 @@ void clear_hooks(const at::TensorBase& self) {
   materialize_autograd_meta(self)->hooks_.clear();
 }
 
+void set_post_acc_grad_hooks(
+    const at::TensorBase& self,
+    std::unique_ptr<PostAccumulateGradHook> dict) {
+  AutogradMeta* meta = materialize_autograd_meta(self);
+  meta->post_acc_grad_hooks_ = std::move(dict);
+}
+
+std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
+    const Variable& self) {
+  TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
+  return get_autograd_meta(self)->post_acc_grad_hooks_;
+}
+
 void set_name(const Variable& self, const std::string& name) {
   materialize_autograd_meta(self)->name_ = name;
 }
@@ -672,7 +685,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             view_info.base_.options(),
             self.sym_sizes(), // Note: sizes(), not base_.sizes(), is
                               // intentional
-            self.unsafeGetTensorImpl()->is_python_dispatch());
+            self.unsafeGetTensorImpl()->is_python_dispatch(),
+            self.is_nested());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
@@ -711,7 +725,7 @@ unsigned VariableHooks::_register_hook(
   auto& list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if (!list) {
     torch::autograd::impl::create_cpp_hook(
-        self, /*is_retains_grad_hook=*/false);
+        self, /*is_retains_grad_hooks=*/false);
   }
   unsigned idx = list->size();
   list->push_back(hook);

@@ -92,8 +92,7 @@ class SGD(Optimizer):
         return loss
 
 
-SGD.__doc__ = r"""\
-    Implements stochastic gradient descent (optionally with momentum).
+SGD.__doc__ = r"""Implements stochastic gradient descent (optionally with momentum).
 
     .. math::
        \begin{aligned}
@@ -127,7 +126,7 @@ SGD.__doc__ = r"""\
 
     Nesterov momentum is based on the formula from
     `On the importance of initialization and momentum in deep learning`__.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -136,10 +135,10 @@ SGD.__doc__ = r"""\
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
-        {maximize}
-        {foreach}
-        {differentiable}
-    """.format(maximize=_maximize_doc, foreach=_foreach_doc, differentiable=_differentiable_doc) + r"""
+        {_maximize_doc}
+        {_foreach_doc}
+        {_differentiable_doc}
+    """ + r"""
 
     Example:
         >>> # xdoctest: +SKIP

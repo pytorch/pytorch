@@ -1,3 +1,4 @@
+import logging
 import warnings
 import weakref
 import torch
@@ -10,7 +11,18 @@ Moved eager kernel implementations to a separate file partly for readability and
 easier in dynamo to set tracing policy on a file-by-file level.
 
 Do not put code in this file that Dynamo is expected to trace into, as dynamo may disallow this whole file.
+
+DEBUG/TESTING HELPERS:
+
+This module includes some helpers that are quite useful when debugging or testing functional collectives:
+
+_tensor_needs_wait
+_outstanding_wait_count
+_wait_all
+
 """
+
+logger = logging.getLogger(__name__)
 
 data_ptr_to_work = dict()
 work_version = 0
@@ -20,15 +32,20 @@ class _WaitRegistration:
         global work_version
         self.work = work
         self.version = work_version
-        self.ptrs = []
+        self.ptrs = set()
+        self.ptr_alias_count = {}
         self.cleanup_count = 0
         work_version += 1
 
-    def _register(self, tensor):
+    def _register_tensor_ptr(self, data_ptr):
         global data_ptr_to_work
-        ptr = tensor.data_ptr()
-        data_ptr_to_work[ptr] = self
-        self.ptrs.append(ptr)
+        data_ptr_to_work[data_ptr] = self
+        self.ptrs.add(data_ptr)
+
+    def _record_wrapper(self, ptr):
+        self._register_tensor_ptr(ptr)
+        self.ptr_alias_count.setdefault(ptr, 0)
+        self.ptr_alias_count[ptr] += 1
         self.cleanup_count += 1
 
     def wait(self):
@@ -40,9 +57,10 @@ class _WaitRegistration:
     def decrement_live_tensor(self, ptr):
         self.cleanup_count -= 1
         if self.cleanup_count == 0:
-            self.cleanup()
+            self.wait()
         else:
-            if data_ptr_to_work.get(ptr, None) == self:
+            self.ptr_alias_count[ptr] -= 1
+            if self.ptr_alias_count[ptr] < 1 and data_ptr_to_work.get(ptr, None) == self:
                 del data_ptr_to_work[ptr]
 
     def cleanup(self):
@@ -57,27 +75,36 @@ def _register_tensor_work(tensor_or_list, work_or_list):
     if not isinstance(work_or_list, list):
         reg = _WaitRegistration(work_or_list)
         for tensor in tensor_or_list:
-            reg._register(tensor)
+            reg._register_tensor_ptr(tensor.data_ptr())
     else:
         for tensor, work in zip(tensor_or_list, work_or_list):
             reg = _WaitRegistration(work)
-            reg._register(tensor)
+            reg._register_tensor_ptr(tensor.data_ptr())
+
+
 
 def _wait_reg_dec(ptr, wait_reg):
     wait_reg.decrement_live_tensor(ptr)
 
-def _register_wrapper_tensor(tensor_wrapper, tensor):
+def _register_tensor_wrapper(tensor) -> None:
     global data_ptr_to_work
+    data_ptr = tensor.elem.data_ptr()
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
-    wait_reg = data_ptr_to_work.get(tensor.data_ptr(), None)
+    wait_reg = data_ptr_to_work.get(data_ptr, None)
     if wait_reg is None:
         warnings.warn(
-            "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
+            "Trying to register finalizer to AsyncCollectiveTensor but the inner tensor is already gone"
         )
     else:
         # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
-        weakref.finalize(tensor_wrapper, _wait_reg_dec, tensor.data_ptr(), wait_reg)
+        # NOTE: we register the callback to the ACT wrapper class, for the following reasons:
+        # 1. The inner tensor is referenced by the associated Work object, so it's uncollective until we release the
+        #  associated work object
+        # 2. There's a n-to-1 relationship between wrappers and inner tensor due to non-waitable ops like view()
+        wait_reg._record_wrapper(data_ptr)
+        weakref.finalize(tensor, _wait_reg_dec, data_ptr, wait_reg)
+
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
@@ -86,6 +113,23 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     if wait_reg is not None:
         wait_reg.wait()
     return tensor
+
+def _tensor_needs_wait(tensor: torch.Tensor) -> bool:
+    """Returns true if ```tensor``` needs to be waited. Works with ACS and inner tensors."""
+    if hasattr(tensor, "_get_acs_underlying_tensor"):
+        tensor = tensor._get_acs_underlying_tensor()
+    data_ptr = tensor.data_ptr()
+    wait_reg = data_ptr_to_work.get(data_ptr)
+    return wait_reg is not None and wait_reg.work is not None
+
+def _outstanding_wait_count() -> int:
+    """ Returns the number of outstanding work objects waiting to be waited (sic). """
+    return len(data_ptr_to_work)
+
+def _wait_all() -> None:
+    """ Wait for all outstanding collectives. """
+    for work_reg in list(data_ptr_to_work.values()):
+        work_reg.wait()
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()
@@ -177,13 +221,26 @@ def _reduce_scatter_tensor(
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
     op = _str_to_reduce_op(reduceOp)
-    out_size = list(input.size())
-    out_size[0] //= group_size
-    out_tensor = input.new_empty(out_size)
-    work = dist.reduce_scatter_tensor(
-        out_tensor, input, op=op, group=group, async_op=True
-    )
-    _register_tensor_work(out_tensor, work)
+
+    if dist.get_backend(group) == dist.Backend.GLOO or input.is_cpu:
+        # cpu::gloo backend does not have reduce_scatter we fallback to do all_reduce
+        # + local chunk
+        logger.warning(
+            "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
+        )
+        reduction_input = input.clone()
+        group_rank = dist.get_rank(group)
+        work = dist.all_reduce(reduction_input, op=op, group=group, async_op=True)
+        out_tensor = reduction_input.chunk(group_size, dim=0)[group_rank]
+        _register_tensor_work(out_tensor, work)
+    else:
+        out_size = list(input.size())
+        out_size[0] //= group_size
+        out_tensor = input.new_empty(out_size)
+        work = dist.reduce_scatter_tensor(
+            out_tensor, input, op=op, group=group, async_op=True
+        )
+        _register_tensor_work(out_tensor, work)
 
     return out_tensor
 

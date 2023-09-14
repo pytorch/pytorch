@@ -22,6 +22,7 @@
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
 #include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -203,6 +204,74 @@ auto PyNode::name() const -> std::string {
   return name;
 }
 
+void PyNode::compiled_args(CompiledNodeArgs& args) {
+  static PyObject* method_name =
+      PyUnicode_InternFromString("_compiled_autograd_key");
+  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
+  if (!pykey)
+    throw_python_error();
+  TORCH_CHECK(
+      PyTuple_CheckExact(pykey.get()),
+      "_compiled_autograd_key shoud return tuple of ints");
+  auto size = PyTuple_GET_SIZE(pykey.get());
+  TORCH_INTERNAL_ASSERT(size > 0);
+  // first value is unique ID of the AotAutograd graph
+  auto key = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), 0));
+  if (C10_UNLIKELY(key < 0)) {
+    TORCH_CHECK(PyErr_Occurred(), "key must be positive");
+    throw_python_error();
+  }
+  args.collect_size(static_cast<size_t>(key));
+  args.collect_size(size);
+
+  auto f = (THPFunction*)obj;
+  f->compiled_autograd_symints.clear();
+  f->compiled_autograd_symints.reserve(size - 1);
+  for (const auto i : c10::irange(1, size)) {
+    auto val = PyLong_AsSsize_t(PyTuple_GET_ITEM(pykey.get(), i));
+    if (C10_UNLIKELY(val == -1 && PyErr_Occurred()))
+      throw_python_error();
+    f->compiled_autograd_symints.emplace_back(val);
+  }
+
+  // AotAutograd symints are all dynamic
+  auto prior =
+      args.set_default_dyn_type(torch::dynamo::autograd::SizeInput::DYNAMIC);
+  args.collect(f->compiled_autograd_symints);
+  args.set_default_dyn_type(prior);
+
+  args.collect(f->saved_variables);
+  args.collect(f->materialize_grads);
+  args.collect(f->is_variable_input);
+  args.collect(f->needs_input_grad);
+  args.collect(f->materialize_non_diff_grads);
+  args.collect(f->output_info);
+  args.collect(f->input_info);
+}
+
+variable_list PyNode::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  auto f = (THPFunction*)obj;
+  TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
+  saved.before(f->compiled_autograd_symints);
+  saved.before(f->saved_variables);
+  saved.before(f->needs_input_grad);
+  saved.before(f->materialize_non_diff_grads);
+  saved.before(f->output_info);
+  saved.before(f->input_info);
+  f->compiled_autograd_tracing = true;
+  auto result = apply(variable_list(inputs));
+  f->compiled_autograd_tracing = false;
+  saved.after(f->compiled_autograd_symints);
+  saved.after(f->saved_variables);
+  saved.after(f->needs_input_grad);
+  saved.after(f->materialize_non_diff_grads);
+  saved.after(f->output_info);
+  saved.after(f->input_info);
+  return result;
+}
+
 } // namespace autograd
 } // namespace torch
 
@@ -280,6 +349,7 @@ PyObject* THPFunction_new(
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
   self->materialize_non_diff_grads = true;
+  self->compiled_autograd_tracing = false;
   return obj;
 }
 
@@ -866,6 +936,13 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  return THPUtils_packUInt64(cdata->sequence_nr());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1216,6 +1293,38 @@ PyObject* THPFunction_saved_variables(THPFunction* self, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_is_compiled_autograd_tracing(
+    PyObject* self,
+    PyObject* _unused) {
+  HANDLE_TH_ERRORS
+  if (((THPFunction*)self)->compiled_autograd_tracing) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_get_compiled_autograd_symints(
+    PyObject* _self,
+    PyObject* _unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
+  auto size = self->compiled_autograd_symints.size();
+  PyObject* result = PyTuple_New(size);
+  if (!result) {
+    throw python_error();
+  }
+  for (const auto i : c10::irange(size)) {
+    PyTuple_SET_ITEM(
+        result,
+        i,
+        py::cast(self->compiled_autograd_symints[i]).release().ptr());
+  }
+  return result;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   HANDLE_TH_ERRORS
   // User tries to access saved variables after they have been freed
@@ -1401,6 +1510,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
+    {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,
@@ -1412,6 +1522,14 @@ static struct PyMethodDef THPFunction_methods[] = {
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
     {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
+    {(char*)"_is_compiled_autograd_tracing",
+     THPFunction_is_compiled_autograd_tracing,
+     METH_NOARGS,
+     nullptr},
+    {(char*)"_get_compiled_autograd_symints",
+     THPFunction_get_compiled_autograd_symints,
+     METH_NOARGS,
+     nullptr},
     {nullptr}};
 
 PyTypeObject THPFunctionType = {

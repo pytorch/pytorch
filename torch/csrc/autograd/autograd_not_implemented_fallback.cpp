@@ -104,7 +104,6 @@ static void basicAutogradNotImplementedFallbackImpl(
   const auto num_arguments = schema.arguments().size();
   const auto num_returns = schema.returns().size();
   const auto stack_start = stack->size() - num_arguments;
-  const bool grad_mode = GradMode::is_enabled();
 
   if (getAutogradFallbackMode() == AutogradFallbackMode::Nothing) {
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
@@ -114,17 +113,18 @@ static void basicAutogradNotImplementedFallbackImpl(
       getAutogradFallbackMode() == AutogradFallbackMode::Warn);
 
   bool any_input_requires_grad = false;
-  if (grad_mode) {
-    _foreach_tensor(
-        [&](size_t _, size_t idx_arg, const at::Tensor& t) {
-          if (t.requires_grad()) {
-            any_input_requires_grad = true;
-          }
-        },
-        stack,
-        stack_start,
-        num_arguments);
-  }
+  _foreach_tensor(
+      [&](size_t _, size_t idx_arg, const at::Tensor& t) {
+        if (t.requires_grad()) {
+          any_input_requires_grad = true;
+        }
+      },
+      stack,
+      stack_start,
+      num_arguments);
+  // Optimization: TLS access can be slow. So we only check if it necessary
+  // by putting it after the requires_grad checks.
+  any_input_requires_grad = any_input_requires_grad && GradMode::is_enabled();
 
   std::shared_ptr<WarnNotImplemented> grad_fn;
   if (any_input_requires_grad) {
@@ -184,10 +184,13 @@ static void basicAutogradNotImplementedFallbackImpl(
             // the entire program).
             if (t.is_view() && is_mutable_output) {
               // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              const_cast<at::TensorBase&>(t._base()).register_hook(
-                  [op_name](const at::TensorBase& grad) {
-                    warnAutogradNotImplemented(op_name);
-                  });
+              auto& base = const_cast<at::TensorBase&>(t._base());
+              if (base.requires_grad()) {
+                // Can only register_hook on tensors that require grad.
+                base.register_hook([op_name](const at::TensorBase& grad) {
+                  warnAutogradNotImplemented(op_name);
+                });
+              }
             }
             return;
           }

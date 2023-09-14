@@ -1,13 +1,15 @@
-from caffe2.python import workspace, core
 import numpy as np
+from caffe2.python import core, workspace
 
 from utils import NUM_LOOP_ITERS
 
-workspace.GlobalInit(['caffe2'])
+workspace.GlobalInit(["caffe2"])
+
 
 def add_blob(ws, blob_name, tensor_size):
     blob_tensor = np.random.randn(*tensor_size).astype(np.float32)
     ws.FeedBlob(blob_name, blob_tensor)
+
 
 class C2SimpleNet:
     """
@@ -17,6 +19,7 @@ class C2SimpleNet:
     needed for the op.
     Provides forward method to run the net niter times.
     """
+
     def __init__(self, op_name, num_inputs=1, debug=False):
         self.input_names = []
         self.net = core.Net("framework_benchmark_net")
