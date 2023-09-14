@@ -277,33 +277,33 @@ command = [
 code = 'CLANGTIDY'
 include_patterns = [
     'c10/**/*.cpp',
-    'torch/csrc/fx/**/*.cpp',
-    'torch/csrc/generic/**/*.cpp',
-    'torch/csrc/onnx/**/*.cpp',
-    'torch/csrc/tensor/**/*.cpp',
-    'torch/csrc/utils/**/*.cpp',
+    'torch/csrc/**/*.cpp',
 ]
 exclude_patterns = [
     # The negative filters below are to exclude files that include onnx_pb.h or
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
-    # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
-    # in a follow up PR.
-    # that are not easily converted to accepted c++
-    'c10/cuda/**/*.cpp',
-    'c10/test/**/*.cpp',
+    # CUDA files are also excluded.
     '**/fb/**',
-    'torch/csrc/jit/passes/onnx/helper.cpp',
-    'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
-    'torch/csrc/jit/serialization/onnx.cpp',
-    'torch/csrc/jit/serialization/export.cpp',
-    'torch/csrc/jit/serialization/import.cpp',
+    '**/*pb.h',
+    '**/*CUDA*',
+    '**/cuda/*pp',
+    'c10/test/**',
+    'third_party/**/*',
+    'torch/csrc/api/**',
+    'torch/csrc/autograd/**',
+    'torch/csrc/CudaIPCTypes.cpp',
+    'torch/csrc/cuda/**',
+    'torch/csrc/dynamo/*',
+    'torch/csrc/distributed/**/*',
+    'torch/csrc/inductor/**/*',
+    'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/import_legacy.cpp',
+    'torch/csrc/jit/serialization/export.cpp',
+    'torch/csrc/lazy/**/*',
     'torch/csrc/onnx/init.cpp',
-    'torch/csrc/cuda/nccl.*',
-    'torch/csrc/cuda/python_nccl.cpp',
-    'torch/csrc/autograd/FunctionsManual.cpp',
-    'torch/csrc/jit/codegen/cuda/runtime/*',
-    'torch/csrc/utils/disable_torch_function.cpp',
+    'torch/csrc/profiler/**/*',
+    'torch/csrc/quantized/**/*',
+    'torch/csrc/mps/**/*',
 ]
 init_command = [
     'python3',
