@@ -1338,33 +1338,35 @@ class SubgraphTracer(fx.Tracer):
                 for key in ("nn_module_stack", "source_fn", "stack_trace"):
                     if key in meta:
                         rv.node.meta[key] = meta[key]
-                return rv
 
-        nn_module_stack = tx.nn_module_stack
-        if nn_module_stack:
-            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+        if "nn_module_stack" not in rv.node.meta:
+            nn_module_stack = tx.nn_module_stack
+            if nn_module_stack:
+                rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = (rv.node.name, target)
-        elif kind == "call_module":
-            if self.parent is not None:
-                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
-            # For modules we store the class
-            rv.node.meta["source_fn"] = (
-                rv.node.name,
-                rv.node.meta["nn_module_stack"][target][1],
-            )
+        if "source_fn" not in rv.node.meta:
+            if kind in {"call_function", "call_method"}:
+                rv.node.meta["source_fn"] = (rv.node.name, target)
+            elif kind == "call_module":
+                if self.parent is not None:
+                    unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+                # For modules we store the class
+                rv.node.meta["source_fn"] = (
+                    rv.node.name,
+                    rv.node.meta["nn_module_stack"][target][1],
+                )
 
-        frame_summaries: List[traceback.FrameSummary] = []
-        while tx:
-            frame_summaries.append(tx.frame_summary())
-            tx = getattr(tx, "parent", None)
-        # Reverse the frame_summaries, such that the innermost frame is at the last
-        frame_summaries.reverse()
+        if "stack_trace" not in rv.node.meta:
+            frame_summaries: List[traceback.FrameSummary] = []
+            while tx:
+                frame_summaries.append(tx.frame_summary())
+                tx = getattr(tx, "parent", None)
+            # Reverse the frame_summaries, such that the innermost frame is at the last
+            frame_summaries.reverse()
 
-        # official from_list stub doesn't have new-style type
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = "".join(msgs)
+            # official from_list stub doesn't have new-style type
+            msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
+            rv.node.stack_trace = "".join(msgs)
 
         return rv
 
