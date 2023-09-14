@@ -2164,8 +2164,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             def sumt(y: torch.Tensor) -> torch.Tensor:
                 return torch.sum(y)
+
             def foo(c: typing.Callable[[T], T], y: T) -> T:
                 return c(y)
+
             return foo(sumt, x)
 
         x = torch.randn(3)
