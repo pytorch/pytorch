@@ -1,15 +1,14 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import copy
 import itertools
 
 import torch
-import torch._dynamo as torchdynamo
 import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
+from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
@@ -91,22 +90,23 @@ class TestPatternMatcherBase(TestCase):
         check_quantization=False,
     ):
         counters.clear()
+        torch._dynamo.reset()
         maybe_autocast = contextlib.nullcontext()
         if check_autocast and torch.ops.mkldnn._is_mkldnn_bf16_supported():
             maybe_autocast = torch.cpu.amp.autocast()
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
             with torch.no_grad():
-                export_model, guards = torchdynamo.export(
+                export_model = capture_pre_autograd_graph(
                     mod,
-                    *copy.deepcopy(inputs),
-                    aten_graph=True,
+                    inputs,
                 )
                 quantizer = X86InductorQuantizer()
                 quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
                 prepare_model = prepare_pt2e(export_model, quantizer)
                 prepare_model(*inputs)
-                convert_model = convert_pt2e(prepare_model).eval()
+                convert_model = convert_pt2e(prepare_model)
+                torch.ao.quantization.move_exported_model_to_eval(convert_model)
                 _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
@@ -515,6 +515,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Pair of to_int8 and to_fp32 at conv input * 1, extra input of add * 1, and graph output * 1
             #    matched in pointless_convert pass at
             #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #        However when dq has multiple users we will have
+            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #                                          \-> to_float -> sub -> mul]
+            #        So for now we will discount one pattern here
             # 2. Dequant pattern matcher for dequant promotion * 1
             #    [convert_element_type_3, sub_1, mul_3]
             # 3. Dequant-conv pattern matched in quantization weight prepack * 2
@@ -527,8 +534,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod,
                 (v,),
-                8,
-                39,
+                7,
+                37,
                 check_quantization=True,
             )
 
@@ -575,6 +582,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 1. Pair of to_int8 and to_fp32 at conv input * 1, extra input of add * 1, and graph output * 1
             #    matched in pointless_convert pass at
             #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+            #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+            #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+            #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #        However when dq has multiple users we will have
+            #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+            #                                          \-> to_float -> sub -> mul]
+            #        So for now we will discount one pattern here
             # 2. Dequant pattern matcher for dequant promotion * 1
             #    [convert_element_type_3, sub_1, mul_3]
             # 3. Dequant-conv pattern matched in quantization weight prepack * 2
@@ -587,8 +601,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod,
                 (v,),
-                8,
-                40,
+                7,
+                38,
                 check_quantization=True,
             )
 
@@ -631,6 +645,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # 1. Pair of to_int8 and to_fp32 at conv input * 2, extra input of add * 1, and graph output * 1
         #    matched in pointless_convert pass at
         #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+        #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+        #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+        #        However when dq has multiple users we will have
+        #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+        #                                          \-> to_float -> sub -> mul]
+        #        So for now we will discount one pattern here
         # 2. Dequant pattern matcher for dequant promotion * 1
         #    [convert_element_type_3, sub_1, mul_3]
         # 3. Dequant-conv pattern matched in quantization weight prepack * 3
@@ -643,8 +664,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._test_common(
             mod,
             (v,),
-            11,
-            54,
+            10,
+            52,
             check_quantization=True,
         )
 
@@ -766,6 +787,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # 1. Pair of to_int8 and to_fp32 at linear input * 2, extra input of add * 1, and graph output * 1
         #    matched in pointless_convert pass at
         #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
+        #    NB: since quant workflow now duplicates DQ node, for each user, we wont necessarily see
+        #        pointless_convert. A pointless convert appears in [q -> dq] decomposed, in inductor
+        #        decomp, as [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+        #        However when dq has multiple users we will have
+        #        [mul(fp32) -> add(fp32) -> to_int8 -> to_float -> sub -> mul]
+        #                                          \-> to_float -> sub -> mul]
+        #        So for now we will discount one pattern here
         # 2. Dequant pattern matcher for dequant promotion * 1
         #    [convert_element_type_3, sub_1, mul_3]
         # 3. Dequant-linear pattern matched in quantization weight prepack * 3
@@ -775,8 +803,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
         self._test_common(
             mod,
             (v,),
-            11,
-            50,
+            10,
+            48,
             check_quantization=True,
         )
 

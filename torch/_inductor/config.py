@@ -45,6 +45,22 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# register custom graph optimizatin pass hook. so far, pre/post passes are
+# only applied before/after pattern_matcher in post_grad_passes.
+#
+# def my_custom_pre_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# def my_custom_post_pass(graph: torch.fx.graph.Graph):
+#     # my custom graph optimization pass
+#     ...
+#
+# torch._inductor.config.post_grad_custom_pre_pass = my_custom_pre_pass
+# torch._inductor.config.post_grad_custom_post_pass = my_custom_post_pass
+post_grad_custom_pre_pass = None
+post_grad_custom_post_pass = None
+
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
@@ -68,12 +84,6 @@ use_mixed_mm = False
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
 force_mixed_mm = False
 
-# AOTInductor output path
-# If an absolute path is specified, the generated lib files will be stored under the directory;
-# If a relative path is specified, it will be used as a subdirectory under the default caching path;
-# If not specified, a temp directory will be created under the default caching path
-aot_inductor_output_path = ""
-
 # TODO: capture whether the graph is from export
 from_export = False
 
@@ -87,9 +97,10 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton.
+# Possible choices are combinations of: ATen, Triton, CUTLASS.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
+# CUTLASS: Cutlass templates and kernels.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
 ).upper()
@@ -101,6 +112,9 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# If autotuning in subprocess, whether to use multiple devices
+autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
@@ -166,16 +180,17 @@ benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 # Enable constant and index_expr folding
 constant_and_index_propagation = True
 
-# constant folding on the joint graph
-joint_graph_constant_folding = True
-
-# Enable indirect_indexing asserts for decompositions and lowerings
-debug_index_asserts = False
-
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
+
+# constant folding on the joint graph
+# Turn off constant folding due to issue #108388
+joint_graph_constant_folding = not is_fbcode()
+
+# Enable indirect_indexing asserts for decompositions and lowerings
+debug_index_asserts = False
 
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
@@ -313,6 +328,10 @@ class cpp:
     # how many nodes to allow into a single horizontal fusion
     max_horizontal_fusion_size = 16
 
+    # Make scatter_reduce fallback when reduce is sum to avoid performance regression
+    # using atomic_add.
+    fallback_scatter_reduce_sum = True
+
 
 # config specific to codegen/triton.py
 class triton:
@@ -320,7 +339,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = not is_fbcode()
+    cudagraph_trees = True
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
@@ -405,6 +424,63 @@ class triton:
     # extraction and minification functionality.
     # Valid values: "compile_error", "runtime_error", "accuracy"
     inject_relu_bug_TESTING_ONLY = None
+
+
+class aot_inductor:
+    # AOTInductor output path
+    # If an absolute path is specified, the generated lib files will be stored under the directory;
+    # If a relative path is specified, it will be used as a subdirectory under the default caching path;
+    # If not specified, a temp directory will be created under the default caching path
+    output_path = ""
+
+
+class cuda:
+    # CUDA arch to use for CUDA template kernel compilation.
+    # e.g. "70", "75", "80", "90", etc.
+    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
+    arch = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, Inductor uses torch.version.cuda.
+    version = None
+
+    # Optimization level for the host compiler.
+    compile_opt_level = "-O1"
+
+    # Whether to enable device LTO (link-time-optimization).
+    enable_cuda_lto = False
+
+    # Whether to keep intermediate files dring compilation.
+    enable_ptxas_info = False
+
+    # Whether to enable debug info, e.g. line number, cutlass debug info.
+    enable_debug_info = False
+
+    # Whether to use fast math.
+    use_fast_math = False
+
+    # Path to the CUTLASS repo root directory.
+    # The default path only works under PyTorch local development environment.
+    cutlass_dir = os.environ.get(
+        "TORCHINDUCTOR_CUTLASS_DIR",
+        os.path.abspath(
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/")
+        ),
+    )
+
+    # Configures the maximum number of CUTLASS configs to profile in max_autotune.
+    # By default it's None, so that all CUTLASS configs are tuned.
+    # This is mainly used to reduce test time in CI.
+    cutlass_max_profiling_configs = None
+
+    # Path to CUDA NVCC.
+    # NVCC search order:
+    # 1) cuda_cxx set in this config
+    # 2）CUDACXX environment variable
+    # 3）CUDA_HOME environment variable
+    # 4) default system search PATH.
+    cuda_cxx = None
 
 
 # create a directory containing lots of debug information

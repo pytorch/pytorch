@@ -5,7 +5,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import itertools
 import logging
 import operator
 import re
@@ -22,7 +21,7 @@ import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor, is_fake
+from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
@@ -87,10 +86,12 @@ from .dicts import (
 from .distributed import (
     DeviceMeshVariable,
     PlacementClassVariable,
+    PlacementVariable,
     ProcessGroupVariable,
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    FunctoolsPartialVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -187,6 +188,9 @@ class GraphArg:
 
     def erase(self):
         self._example = None
+
+    def __eq__(self, other):
+        return self.source.name() == other.source.name()
 
 
 @dataclasses.dataclass
@@ -408,7 +412,7 @@ class VariableBuilder:
             # store key variables in global location for reconstruction
             for key in value.keys():
                 if self.tensor_can_be_dict_key(key):
-                    self.tx.store_dict_key(global_key_name(key), key)
+                    self.tx.store_global_weakref(global_key_name(key), key)
 
             def index_source(key):
                 if self.tensor_can_be_dict_key(key):
@@ -469,6 +473,33 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, functools.partial):
+            func_src = AttrSource(self.get_source(), "func")
+            func_obj = VariableBuilder(self.tx, func_src)(value.func)
+
+            args = []
+            args_source = AttrSource(self.get_source(), "args")
+            for i, arg in enumerate(value.args):
+                args.append(
+                    VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
+                )
+
+            keywords = {}
+            keywords_source = AttrSource(self.get_source(), "keywords")
+            for k, v in value.keywords.items():
+                keywords[k] = VariableBuilder(
+                    self.tx, GetItemSource(keywords_source, k)
+                )(v)
+
+            guards = {
+                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                args_source.make_guard(GuardBuilder.LIST_LENGTH),
+            }
+
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original=value, guards=guards
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
@@ -666,6 +697,14 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead
+            # of a simple ID_MATCH
+            return PlacementVariable(
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
         elif issubclass(type(value), type):
             # TODO(whc) the following seems preferable but breaks some tests, debug
             # elif inspect.isclass(value):
@@ -822,16 +861,8 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            base = self.name
-            name = self.name
-            for i in itertools.count():
-                if name not in self.tx.output.nn_modules:
-                    self.tx.output.nn_modules[name] = value
-                    break
-                name = f"{base}_{i}"
             return FSDPManagedNNModuleVariable(
                 value,
-                name,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
                 source=self.get_source(),
             )
@@ -1283,8 +1314,8 @@ def wrap_fx_proxy_cls(
 
         # Handle recursive calls here
         elif (
-            isinstance(example_value, FakeTensor)
-            and example_value.fake_mode is tx.fake_mode
+            is_fake(example_value)
+            and maybe_get_fake_mode(example_value) is tx.fake_mode
         ) or _is_functional_tensor_fakified_by_dynamo(example_value):
             pass
 
