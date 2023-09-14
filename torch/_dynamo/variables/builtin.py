@@ -467,6 +467,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
@@ -587,6 +588,10 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
             return out
+
+        # Handle `str` on a user defined function
+        if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
+            return variables.ConstantVariable(value=str(args[0].fn))
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here

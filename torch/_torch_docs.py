@@ -11384,9 +11384,11 @@ Example::
 add_docstr(
     torch.take_along_dim,
     r"""
-take_along_dim(input, indices, dim, *, out=None) -> Tensor
+take_along_dim(input, indices, dim=None, *, out=None) -> Tensor
 
 Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
+
+If :attr:`dim` is None, the input array is treated as if it has been flattened to 1d.
 
 Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
 are designed to work with this function. See the examples below.
@@ -11398,7 +11400,7 @@ are designed to work with this function. See the examples below.
 Args:
     {input}
     indices (tensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int): dimension to select along.
+    dim (int, optional): dimension to select along.
 
 Keyword args:
     {out}
