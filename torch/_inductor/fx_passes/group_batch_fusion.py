@@ -214,6 +214,8 @@ def is_linear_node_can_be_fused(node):
     weight = get_arg_value(node, 1, "weight")
     return (
         is_node_meta_valid(node)
+        and is_node_meta_valid(input)
+        and is_node_meta_valid(weight)
         and len(input.meta["example_value"].shape) == 2
         and len(weight.meta["example_value"].shape) == 2
     )
