@@ -61,7 +61,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             functools.partial(less_match_failure_fn, expected=10),
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 3)
-        self.assertEqual(len(guard_manager.get_child_managers()), 0)
+        self.assertEqual(len(guard_manager.get_accessors()), 0)
         self.assertTrue(guard_manager.check(6))
         self.assertFalse(guard_manager.check(4))
         self.assertFalse(guard_manager.check("foo"))
@@ -88,13 +88,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
-        self.assertEqual(len(guard_manager.get_child_managers()), 2)
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[0][0], AttrGuardAccessor)
-        )
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[1][0], AttrGuardAccessor)
-        )
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+        self.assertTrue(isinstance(guard_manager.get_accessors()[0], AttrGuardAccessor))
+        self.assertTrue(isinstance(guard_manager.get_accessors()[1], AttrGuardAccessor))
         # Check leaf guards on child managers
         self.assertEqual(len(guard_manager.x.get_leaf_guards()), 1)
         self.assertEqual(len(guard_manager.y.get_leaf_guards()), 1)
@@ -133,13 +129,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
-        self.assertEqual(len(guard_manager.get_child_managers()), 2)
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[0][0], ItemGuardAccessor)
-        )
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[1][0], ItemGuardAccessor)
-        )
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+        self.assertTrue(isinstance(guard_manager.get_accessors()[0], ItemGuardAccessor))
+        self.assertTrue(isinstance(guard_manager.get_accessors()[1], ItemGuardAccessor))
         # Check leaf guards on child managers
         self.assertEqual(len(guard_manager["x"].get_leaf_guards()), 1)
         self.assertEqual(len(guard_manager["y"].get_leaf_guards()), 1)
@@ -168,13 +160,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 1)
         # 2 child managers, one for x and one for y
-        self.assertEqual(len(guard_manager.get_child_managers()), 2)
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[0][0], ItemGuardAccessor)
-        )
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[1][0], ItemGuardAccessor)
-        )
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+        self.assertTrue(isinstance(guard_manager.get_accessors()[0], ItemGuardAccessor))
+        self.assertTrue(isinstance(guard_manager.get_accessors()[1], ItemGuardAccessor))
         # Check leaf guards on child managers
         self.assertEqual(len(guard_manager["x"].get_leaf_guards()), 1)
         self.assertEqual(len(guard_manager["y"].get_leaf_guards()), 1)
@@ -195,11 +183,9 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             lambda x: x is not str, lambda x: "type mismatch"
         )
         self.assertEqual(len(guard_manager.get_leaf_guards()), 0)
-        self.assertEqual(len(guard_manager.get_child_managers()), 1)
+        self.assertEqual(len(guard_manager.get_accessors()), 1)
         self.assertTrue(
-            isinstance(
-                guard_manager.get_child_managers()[0][0], PythonLambdaGuardAccessor
-            )
+            isinstance(guard_manager.get_accessors()[0], PythonLambdaGuardAccessor)
         )
         self.assertEqual(
             len(guard_manager.lambda_accessor(accessor_fn).get_leaf_guards()), 2
@@ -254,25 +240,17 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
         # Check structure
         self.assertEqual(len(guard_manager.get_leaf_guards()), 0)
-        self.assertEqual(len(guard_manager.get_child_managers()), 2)
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[0][0], ItemGuardAccessor)
-        )
-        self.assertTrue(
-            isinstance(guard_manager.get_child_managers()[1][0], ItemGuardAccessor)
-        )
+        self.assertEqual(len(guard_manager.get_accessors()), 2)
+        self.assertTrue(isinstance(guard_manager.get_accessors()[0], ItemGuardAccessor))
+        self.assertTrue(isinstance(guard_manager.get_accessors()[1], ItemGuardAccessor))
         self.assertEqual(len(guard_manager["foo"].get_leaf_guards()), 6)
         self.assertEqual(len(guard_manager["bar"].get_leaf_guards()), 1)
-        self.assertEqual(len(guard_manager["bar"].get_child_managers()), 2)
+        self.assertEqual(len(guard_manager["bar"].get_accessors()), 2)
         self.assertTrue(
-            isinstance(
-                guard_manager["bar"].get_child_managers()[0][0], AttrGuardAccessor
-            )
+            isinstance(guard_manager["bar"].get_accessors()[0], AttrGuardAccessor)
         )
         self.assertTrue(
-            isinstance(
-                guard_manager["bar"].get_child_managers()[1][0], AttrGuardAccessor
-            )
+            isinstance(guard_manager["bar"].get_accessors()[1], AttrGuardAccessor)
         )
         self.assertEqual(len(guard_manager["bar"].x.get_leaf_guards()), 2)
         self.assertEqual(len(guard_manager["bar"].y.get_leaf_guards()), 2)
