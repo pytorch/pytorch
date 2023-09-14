@@ -1466,5 +1466,21 @@ def forward(self, arg0_1, arg1_1):
         new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
         self.assertEqual(all_source_fns, new_source_fns)
 
+    def test_cond_no_dynamo_cache_limit(self):
+        counters = torch._dynamo.utils.counters
+        counters.clear()
+
+        def foo(x, true_fn, false_fn):
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
+
+        inp = torch.ones(3, 4)
+        exp_out = inp.sin()
+        iter_n = torch._dynamo.config.cache_size_limit + 1
+        for _ in range(iter_n):
+            # each lambda has a different object id thus fails the guard
+            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
+        self.assertEqual(counters["stats"]["calls_captured"], iter_n)
+        self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
+
 if __name__ == '__main__':
     run_tests()

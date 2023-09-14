@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo.exc import CondOpArgsMismatchError
+from torch._dynamo.utils import disable_cache_limit
 
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -151,9 +152,10 @@ def cond(pred, true_fn, false_fn, operands):
         raise RuntimeError("torch.cond requires dynamo support.")
 
     with _set_compilation_env():
-        return torch.compile(cond_op, backend="eager", fullgraph=True)(
-            pred, true_fn, false_fn, operands
-        )
+        with disable_cache_limit():
+            return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                pred, true_fn, false_fn, operands
+            )
 
 
 """
