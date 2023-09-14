@@ -1102,6 +1102,11 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, fn(*args))
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(len(backend.graphs), 1)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
         gm = backend.graphs[0]
         graph = gm.code.strip()
         true_graph = gm.cond_true_0.code.strip()
