@@ -64,12 +64,8 @@ def reset() -> None:
     guard_failures.clear()
     graph_break_reasons.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
-    cached_backends = getattr(eval_frame.guarded_backend_cache, "cached_backends", None)
-    if cached_backends is not None:
-        for backend in cached_backends.values():
-            if hasattr(backend, "reset"):
-                backend.reset()
-        cached_backends.clear()
-    eval_frame.guarded_backend_cache.current_backend = None
+    if hasattr(eval_frame.most_recent_backend, "reset"):
+        eval_frame.most_recent_backend.reset()
+    eval_frame.most_recent_backend = None
     reset_frame_count()
     torch._C._dynamo.compiled_autograd.clear_cache()

@@ -2466,6 +2466,51 @@ class CPUReproTests(TestCase):
         y = torch.randn(8, 8, 3136, 8)
         self.common(fn, (x, y))
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_no_default_contiguous_input(self):
+        mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
+        temp = torch.randn(1, 16, 1, 1)
+        v = torch.as_strided(temp, [1, 16], [0, 1], 0)
+        self.assertTrue(v.is_contiguous())
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            mod = mod.to(torch.bfloat16)
+            v = v.to(torch.bfloat16)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_reshape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x.view(4, 4, 4)
+
+        mod = M().eval()
+        v = torch.randn(4, 16)
+        with torch.no_grad():
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                mod,
+                (v,),
+            )
+            assert metrics.generated_kernel_count == 0
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
