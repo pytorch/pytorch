@@ -95,6 +95,29 @@ namespace serialize {
 
 static constexpr const char* kSerializationIdRecordName = ".data/serialization_id";
 
+struct MzZipReaderIterWrapper;
+
+class TORCH_API ChunkRecordIterator {
+ public:
+  ~ChunkRecordIterator();
+
+  // Read at most `chunkSize` into `buf`. Return the number of actual bytes read.
+  size_t next(void* buf);
+
+ private:
+ ChunkRecordIterator(
+      size_t recordSize,
+      size_t chunkSize,
+      std::unique_ptr<MzZipReaderIterWrapper> iter);
+
+  const size_t recordSize_;
+  const size_t chunkSize_;
+  size_t offset_;
+  std::unique_ptr<MzZipReaderIterWrapper> iter_;
+
+  friend class PyTorchStreamReader;
+};
+
 class TORCH_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
@@ -111,10 +134,18 @@ class TORCH_API PyTorchStreamReader final {
       size_t n,
       size_t chunk_size,
       void* buf,
-      const std::function<void(void*, const void*, size_t)>& memcpy_func);
+      const std::function<void(void*, const void*, size_t)>& memcpy_func = nullptr);
+
+  size_t getRecordSize(const std::string& name);
+
   size_t getRecordOffset(const std::string& name);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();
+
+  ChunkRecordIterator createChunkReaderIter(
+      const std::string& name,
+      const size_t recordSize,
+      const size_t chunkSize);
 
   ~PyTorchStreamReader();
   uint64_t version() const {
