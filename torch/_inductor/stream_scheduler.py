@@ -450,10 +450,10 @@ class SSGraph:
                     if nop_node_count >= 2:
                         cur_node.stream_id = 0
                     else:
-                        if cur_node.kernel_volumn > HIGH_KERNEL_VOLUMN:
-                            cur_node.stream_id = self.stream_pool_pop()
-                        else:
-                            cur_node.stream_id = self.stream_pool_pop(predecessor)
+                        tmp_arg = None
+                        if cur_node.kernel_volumn < HIGH_KERNEL_VOLUMN:
+                            tmp_arg = predecessor
+                        cur_node.stream_id = self.stream_pool_pop(tmp_arg)
             else:
                 # fix nop node bug in super_slomo. there are corrosing references between two nop nodes.
                 nop_node_count = 0
@@ -463,13 +463,10 @@ class SSGraph:
                 if nop_node_count >= 2:
                     cur_node.stream_id = 0
                 else:
-                    if cur_node.kernel_volumn > HIGH_KERNEL_VOLUMN:
-                        cur_node.stream_id = self.stream_pool_pop()
-                    else:
-                        if len(cur_node.predecessors) == 0:
-                            cur_node.stream_id = self.stream_pool_pop()
-                        else:
-                            cur_node.stream_id = self.stream_pool_pop(list(cur_node.predecessors.values())[0])
+                    tmp_arg = None
+                    if cur_node.kernel_volumn < HIGH_KERNEL_VOLUMN and len(cur_node.predecessors) != 0:
+                        tmp_arg = list(cur_node.predecessors.values())[0]
+                    cur_node.stream_id = self.stream_pool_pop(tmp_arg)
         for successor in cur_node.successors.values():
             if successor.stream_id == -1:
                 self.dig_node(successor)
