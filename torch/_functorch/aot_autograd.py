@@ -1314,6 +1314,9 @@ def create_joint(
                         allow_unused=True,
                     )
                 else:
+                    print("#####")
+                    print("#####")
+                    print("TRACING BACKWARD")
                     backward_out = torch.autograd.grad(
                         needed_outs,
                         grad_primals,
@@ -3798,6 +3801,20 @@ def aot_module_simplified(
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("@@@@")
+    print("MOD:")
+    print(mod.code)
+    print("@@@@")
     """
     This is the simplified or low overhead version of aot_module. For frontends
     like TorchDynamo, the input functions/modules to AOT are static and have
