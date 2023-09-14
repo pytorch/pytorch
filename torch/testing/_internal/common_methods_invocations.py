@@ -7288,69 +7288,6 @@ def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwar
     for case, scale in product(cases, scale_vals):
         yield SampleInput(make_arg(case), make_mask(case), scale)
 
-def sample_inputs_embedding_bag_dense_backward(op_info, device, dtype, requires_grad, **kwargs):
-    for sample in sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
-        weight = sample.input  # NB: is flipped with indices!
-        assert len(sample.args) == 1
-        indices = sample.args[0]
-        offsets = sample.kwargs.pop('offsets', None)
-        per_sample_weights = sample.kwargs.pop('per_sample_weights', None)
-        # Some of the logic here is cribbed from torch.nn.functional.embedding_bag
-        if offsets is None:
-            offsets = torch.arange(0, indices.numel(), indices.size(1), dtype=indices.dtype, device=indices.device)
-            indices = indices.reshape(-1)
-            if per_sample_weights is not None:
-                per_sample_weights = per_sample_weights.reshape(-1)
-        num_weights = weight.size(0)
-        scale_grad_by_freq = sample.kwargs.pop('scale_grad_by_freq', False)
-        mode = sample.kwargs.pop('mode', 'mean')
-        if mode == "sum":
-            mode_enum = 0
-        elif mode == "mean":
-            mode_enum = 1
-        elif mode == "max":
-            mode_enum = 2
-        padding_idx = sample.kwargs.pop('padding_idx', None)
-        include_last_offset = sample.kwargs.pop('include_last_offset', False)
-
-        if padding_idx is None:
-            padding_idx = -1
-        else:
-            from torch._meta_registrations import maybe_wrap_dim
-            padding_idx = maybe_wrap_dim(padding_idx, weight.size(0))
-
-        sample.kwargs.pop('max_norm', None)  # not used by the op
-        sample.kwargs.pop('norm_type', None)  # not used by the op
-
-        # This is a precondition for the function, so force it
-        indices = indices.contiguous()
-        offsets = offsets.contiguous()
-
-        if sample.kwargs.pop('sparse', False):
-            # don't do sparse samples
-            continue
-
-        assert not sample.kwargs, sample.kwargs
-
-        # Run the internal op to compute maximum_indices/offset2bag/etc
-        # sparse=False.  Force grad enabled to ensure the gradient stuff
-        # gets allocated.
-        weight.requires_grad = True
-        with torch.enable_grad():
-            output, offset2bag, bag_size, maximum_indices = torch.ops.aten.embedding_bag.padding_idx(
-                weight, indices, offsets, scale_grad_by_freq, mode_enum, False, per_sample_weights, include_last_offset, padding_idx
-            )
-
-        grad = torch.randn_like(output)
-
-        yield SampleInput(
-            grad,
-            args=(
-                indices, offset2bag, bag_size, maximum_indices, num_weights, scale_grad_by_freq,
-                mode_enum, per_sample_weights, padding_idx
-            ),
-        )
-
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -17780,27 +17717,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
             DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness'),
             DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
-        ),
-    ),
-    OpInfo(
-        "_embedding_bag_dense_backward",
-        op=torch.ops.aten._embedding_bag_dense_backward.default,
-        aten_name="_embedding_bag_dense_backward",
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16),
-        supports_out=False,
-        supports_autograd=False,
-        sample_inputs_func=sample_inputs_embedding_bag_dense_backward,
-        skips=(
-            # It might be OK to call contiguous() in the backward anyway, in
-            # case of direct use
-            DecorateInfo(unittest.skip('precondition for function is contiguity'), 'TestCommon', 'test_noncontiguous_samples'),
-            # NYI
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
-                'TestInductorOpInfo', 'test_comprehensive'
-            ),
         ),
     ),
     OpInfo(
