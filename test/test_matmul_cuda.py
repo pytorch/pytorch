@@ -6,6 +6,11 @@ from functools import partial
 from typing import Optional
 
 import torch
+
+from torch.quantization._quantized_conversions import (
+    quantized_weight_reorder_for_mixed_dtypes_linear,
+)
+
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
@@ -396,7 +401,7 @@ class TestMixedDtypesLinearCuda(TestCase):
 
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
-                preprocess_weights_for_mixed_gemm(weight).view(torch.uint8),
+                quantized_weight_reorder_for_mixed_dtypes_linear(weight).view(torch.uint8),
                 scale,
                 bias=bias,
                 activation=activation
