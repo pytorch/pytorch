@@ -317,8 +317,8 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
               *numWorkers_,
               somaxconn);
         }
-      } catch (std::exception& e) {
-        // ignore
+      } catch (std::logic_error& e) {
+        C10D_INFO("failed to parse somaxconn proc file due to {}", e.what());
       }
     }
 
