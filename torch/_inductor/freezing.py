@@ -4,7 +4,7 @@ import itertools
 import logging
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
