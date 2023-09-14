@@ -8,24 +8,15 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import count_calls, counters
 from torch._inductor.fx_passes import joint_graph
-<<<<<<< HEAD
-=======
 from torch._inductor.fx_passes.serialized_patterns.central_index import (
     get_serialized_pattern,
 )
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
-    Arg,
-    CallFunction,
     gen_pattern,
-    KeywordArg,
-    Match,
     PatternExpr,
-    PatternMatcherPass,
     PatternPrettyPrinter,
-    register_graph_pattern,
 )
->>>>>>> cf505f4dee4... Add Pretty Python Print to serialize patterns
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -808,44 +799,48 @@ class TestPaternMatcher(TestCase):
             if isinstance(attr, type) and issubclass(attr, (PatternExpr, _TargetExpr)):
                 global_vals[name] = attr
 
-        for _, kwargs in _get_sfdp_patterns():
-            gen_kwargs = {
-                key: kwargs[key]
-                for key in (
-                    "search_fn",
-                    "example_inputs",
-                    "trace_fn",
-                    "scalar_workaround",
-                )
-            }
-            pattern = gen_pattern(**gen_kwargs)
-            pattern_pp = PatternPrettyPrinter.run(pattern)
-            env = global_vals.copy()
-            exec(pattern_pp, env)
-            pattern_2 = env["output"]
-            self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
+        with torch._subclasses.FakeTensorMode():
+            for _, kwargs in _get_sfdp_patterns():
+                gen_kwargs = {
+                    key: kwargs[key]
+                    for key in (
+                        "search_fn",
+                        "example_inputs",
+                        "trace_fn",
+                        "scalar_workaround",
+                    )
+                }
+                pattern = gen_pattern(**gen_kwargs)
+                pattern_pp = PatternPrettyPrinter.run(pattern)
+                env = global_vals.copy()
+                exec(pattern_pp, env)
+                pattern_2 = env["output"]
+                self.assertEqual(pattern_pp, PatternPrettyPrinter.run(pattern_2))
 
     def test_fuse_attention_all_patterns_serialized(self):
         from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
 
-        for key, kwargs in _get_sfdp_patterns():
-            gen_kwargs = {
-                key: kwargs[key]
-                for key in (
-                    "search_fn",
-                    "example_inputs",
-                    "trace_fn",
-                    "scalar_workaround",
+        with torch._subclasses.FakeTensorMode():
+            for key, kwargs in _get_sfdp_patterns():
+                gen_kwargs = {
+                    key: kwargs[key]
+                    for key in (
+                        "search_fn",
+                        "example_inputs",
+                        "trace_fn",
+                        "scalar_workaround",
+                    )
+                }
+                pattern = gen_pattern(**gen_kwargs)
+                pattern_pp = PatternPrettyPrinter.run(pattern)
+
+                search_fn_pattern = get_serialized_pattern(key)
+                if search_fn_pattern is None:
+                    continue
+
+                self.assertEqual(
+                    pattern_pp, PatternPrettyPrinter.run(search_fn_pattern)
                 )
-            }
-            pattern = gen_pattern(**gen_kwargs)
-            pattern_pp = PatternPrettyPrinter.run(pattern)
-
-            search_fn_pattern = get_serialized_pattern(key)
-            if search_fn_pattern is None:
-                continue
-
-            self.assertEqual(pattern_pp, PatternPrettyPrinter.run(search_fn_pattern))
 
 
 if __name__ == "__main__":
