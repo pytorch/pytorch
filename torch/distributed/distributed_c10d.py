@@ -1130,7 +1130,7 @@ def init_process_group(
             )
 
         default_pg, _ = _new_process_group_helper(
-            -1, -1, [], backend, None, group_name=group_name, timeout=timeout
+            -1, -1, [], backend, None, group_name, timeout=timeout
         )
         _update_default_pg(default_pg)
     else:
@@ -1152,8 +1152,8 @@ def init_process_group(
             [],
             backend,
             store,
+            group_name,
             pg_options=pg_options,
-            group_name=group_name,
             timeout=timeout
         )
         _update_default_pg(default_pg)
@@ -1190,8 +1190,8 @@ def _new_process_group_helper(
     global_ranks_in_group,
     backend,
     store,
+    group_name,
     pg_options=None,
-    group_name=None,
     timeout=default_pg_timeout,
     pg_tag=None
 ):
@@ -1579,7 +1579,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank. Destination rank should not be the same
-        as the rank of the current process.
+            as the rank of the current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -3951,7 +3951,7 @@ def _new_group_with_tag(
         ranks,
         backend,
         default_store,
-        group_name=group_name,
+        group_name,
         pg_options=pg_options,
         timeout=timeout,
         pg_tag=pg_tag
