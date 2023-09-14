@@ -4466,6 +4466,16 @@ class CommonTemplate:
         tmp[1, 1] = float("inf")
         self.common(fn, [tmp])
 
+    def test_multilayer_any(self):
+        def fn(x):
+            return (x.isinf().any(), x.isfinite().all())
+
+        sample = torch.rand(9, 3, 353, 353)
+        self.common(fn, [sample])
+
+        sample.view(-1)[-1] = float("inf")
+        self.common(fn, [sample])
+
     def test_inplace_activations(self):
         def fn(x):
             a = aten.hardswish_(x + 1)

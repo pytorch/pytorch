@@ -281,7 +281,13 @@ class TritonOverrides(OpOverrides):
     def masked(mask, body, other):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
-        return ops.where(new_mask, result, triton_constant(other))
+
+        # Take dtype from result to prevent accidental promotion
+        other = V.kernel.cse.generate(
+            V.kernel.compute,
+            f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+        )
+        return ops.where(new_mask, result, other)
 
     @staticmethod
     def lgamma(x):
