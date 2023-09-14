@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
+import datetime
 import os
 import socket
 import sys
 import tempfile
 import time
+import threading
 from datetime import timedelta
 from sys import platform
 
@@ -744,6 +746,53 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
 
 
 instantiate_parametrized_tests(TestMultiThreadedWait)
+
+@skip_if_win32()
+class TimeoutTest(TestCase):
+    def tearDown(self):
+        import signal
+        super().tearDown()
+        signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+
+    def test_interrupt_doesnt_break_wait(self):
+        import signal
+        rank_res = [None, None]
+
+        def run(rank, my_store):
+            nonlocal rank_res
+            try:
+                if rank == 0:
+                    time.sleep(4)
+                    my_store.set("foo", "bar")
+                else:
+                    my_store.wait(["foo"], datetime.timedelta(seconds=10))
+                rank_res[rank] = True
+            except Error as e:
+                rank_res[rank] = e
+            time.sleep(1)
+
+        rank0_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=0, world_size=2, is_master=True, wait_for_workers=False)
+        rank1_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=rank0_store.port, world_size=2, is_master=False, wait_for_workers=False)
+
+        ths = []
+        for i in range(2):
+            t = threading.Thread(target=run, args=(i, [rank0_store, rank1_store][i],))
+            t.start()
+            ths.append(t)
+
+        def handler(a, b):
+            pass
+
+        signal.signal(signal.SIGUSR1, handler)
+        time.sleep(1)
+        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+
+        for t in ths:
+            t.join()
+        self.assertTrue(rank_res[0], "rank0")
+        self.assertTrue(rank_res[1], "rank1")
 
 if __name__ == "__main__":
     assert (
