@@ -78,10 +78,6 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* p
   return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr));
 }
 
-inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const Half* ptr) {
-  return convert_half_float(Vectorized<Half>::loadu(ptr));
-}
-
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr) {
   using Vec = Vectorized<float>;
   return std::make_tuple(Vec::loadu(ptr), Vec::loadu(ptr + Vec::size()));
@@ -89,10 +85,6 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr)
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const BFloat16* ptr, int64_t count) {
   return convert_bfloat16_float(Vectorized<BFloat16>::loadu(ptr, count));
-}
-
-inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const Half* ptr, int64_t count) {
-  return convert_half_float(Vectorized<Half>::loadu(ptr, count));
 }
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> load2f(const float* ptr, int64_t count) {
