@@ -87,14 +87,12 @@ struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
 #endif
 
 #if !defined(USE_ROCM)
-namespace at { namespace native {
+namespace at::native {
 namespace cub = ::at_cuda_detail::cub;
-}}
+} // namespace at::native
 #endif
 
-namespace at {
-namespace cuda {
-namespace cub {
+namespace at::cuda::cub {
 
 namespace detail {
 
@@ -177,15 +175,12 @@ inline void unique_by_key(
   RealKeysOutputIteratorT keys_out_;
   auto allocator = c10::cuda::CUDACachingAllocator::get();
   c10::DataPtr keys_out_owner;
-  c10::guts::if_constexpr<null_keys_out>(
-    [&](auto _) {
-      keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
-      keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
-    },
-    [&](auto _) {
-      keys_out_ = keys_out;
-    }
-  );
+  if constexpr (null_keys_out) {
+    keys_out_owner = allocator->allocate(num_input_items * sizeof(KeyT));
+    keys_out_ = static_cast<KeyT *>(keys_out_owner.get());
+  } else {
+    keys_out_ = keys_out;
+  }
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
@@ -417,4 +412,4 @@ void reduce(InputIteratorT input, OutputIteratorT output, int64_t num_items, Red
 
 }
 
-}}}  // namespace at::cuda::cub
+}  // namespace at::cuda::cub

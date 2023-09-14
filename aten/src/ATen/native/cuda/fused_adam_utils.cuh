@@ -111,6 +111,7 @@ struct FusedAdamMathFunctor {
     C10_DEVICE __forceinline__ void operator()(
             int chunk_size,
             FusedOptimizerTensorListMetadata<depth>& tl,
+            const float* lr_ptr,
             const double lr,
             const double beta1,
             const double beta2,
@@ -125,11 +126,12 @@ struct FusedAdamMathFunctor {
         int tensor_loc = tl.block_to_tensor[blockIdx.x];
         int chunk_idx = tl.block_to_chunk[blockIdx.x];
         int n = tl.numel_for_tensor[tensor_loc];
+        double lr_double = lr_ptr ? *lr_ptr : lr;
 
         if (found_inf_ptr && *found_inf_ptr == 1) {
             return;
         }
-        float *step_count = reinterpret_cast<float*>(tl.state_steps_addresses[tensor_loc]);
+        auto *step_count = reinterpret_cast<const float*>(tl.state_steps_addresses[tensor_loc]);
 
         scalar_type* args[depth];
         const bool all_aligned{init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc)};
@@ -137,13 +139,13 @@ struct FusedAdamMathFunctor {
         scalar_type r_args[depth][kILP];
 
         if ((n % kILP == 0) && (chunk_size % kILP == 0) && all_aligned) {
-            for (int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
+            for (int64_t i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
 #pragma unroll
                 for (int i = 0; i < depth; i++) {
                     load_store(r_args[i], args[i], 0, i_start);
                 }
                 adam_math<scalar_type, opmath_t, depth>(
-                    r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr, adam_mode);
+                    r_args, step_count, lr_double, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr, adam_mode);
 #pragma unroll
                 for (int i = 0; i < depth; i++) {
                   if (i != kGradIdx || grad_scale_ptr) {
@@ -152,10 +154,10 @@ struct FusedAdamMathFunctor {
                 }
             }
         } else {
-            for (int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
+            for (int64_t i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
               load_args<depth>(r_args, args, i_start, chunk_size, n);
               adam_math<scalar_type, opmath_t, depth>(
-                  r_args, step_count, lr, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr, adam_mode);
+                  r_args, step_count, lr_double, beta1, beta2, weight_decay, eps, maximize, amsgrad, grad_scale_ptr, found_inf_ptr, adam_mode);
 #pragma unroll
               for (int i = 0; i < depth; i++) {
                   if (i != kGradIdx || grad_scale_ptr) {

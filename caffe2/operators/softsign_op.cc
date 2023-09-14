@@ -58,7 +58,7 @@ OPERATOR_SCHEMA(Softsign)
 
 Github Links:
 
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softsign_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/softsign_op.cc
 
 
 <details>

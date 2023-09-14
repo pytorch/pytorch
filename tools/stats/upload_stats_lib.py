@@ -2,8 +2,8 @@ import gzip
 import io
 import json
 import os
-import xml.etree.ElementTree as ET
 import zipfile
+
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -13,7 +13,12 @@ import rockset  # type: ignore[import]
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
 S3_RESOURCE = boto3.resource("s3")
-TARGET_WORKFLOW = "--rerun-disabled-tests"
+
+# NB: In CI, a flaky test is usually retried 3 times, then the test file would be rerun
+# 2 more times
+MAX_RETRY_IN_NON_DISABLED_MODE = 3 * 3
+# NB: Rockset has an upper limit of 5000 documents in one request
+BATCH_SIZE = 5000
 
 
 def _get_request_headers() -> Dict[str, str]:
@@ -106,19 +111,36 @@ def download_gha_artifacts(
     return paths
 
 
-def upload_to_rockset(collection: str, docs: List[Any]) -> None:
-    print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.RocksetClient(
-        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-    client.Documents.add_documents(collection=collection, data=docs)
+def upload_to_rockset(
+    collection: str,
+    docs: List[Any],
+    workspace: str = "commons",
+    client: Any = None,
+) -> None:
+    if not client:
+        client = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+
+    index = 0
+    while index < len(docs):
+        from_index = index
+        to_index = min(from_index + BATCH_SIZE, len(docs))
+        print(f"Writing {to_index - from_index} documents to Rockset")
+
+        client.Documents.add_documents(
+            collection=collection,
+            data=docs[from_index:to_index],
+            workspace=workspace,
+        )
+        index += BATCH_SIZE
+
     print("Done!")
 
 
 def upload_to_s3(
-    workflow_run_id: int,
-    workflow_run_attempt: int,
-    collection: str,
+    bucket_name: str,
+    key: str,
     docs: List[Dict[str, Any]],
 ) -> None:
     print(f"Writing {len(docs)} documents to S3")
@@ -128,14 +150,42 @@ def upload_to_s3(
         body.write("\n")
 
     S3_RESOURCE.Object(
-        "ossci-raw-job-status",
-        f"{collection}/{workflow_run_id}/{workflow_run_attempt}",
+        f"{bucket_name}",
+        f"{key}",
     ).put(
         Body=gzip.compress(body.getvalue().encode()),
         ContentEncoding="gzip",
         ContentType="application/json",
     )
     print("Done!")
+
+
+def read_from_s3(
+    bucket_name: str,
+    key: str,
+) -> List[Dict[str, Any]]:
+    print(f"Reading from s3://{bucket_name}/{key}")
+    body = (
+        S3_RESOURCE.Object(
+            f"{bucket_name}",
+            f"{key}",
+        )
+        .get()["Body"]
+        .read()
+    )
+    results = gzip.decompress(body).decode().split("\n")
+    return [json.loads(result) for result in results if result]
+
+
+def upload_workflow_stats_to_s3(
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    collection: str,
+    docs: List[Dict[str, Any]],
+) -> None:
+    bucket_name = "ossci-raw-job-status"
+    key = f"{collection}/{workflow_run_id}/{workflow_run_attempt}"
+    upload_to_s3(bucket_name, key, docs)
 
 
 def upload_file_to_s3(
@@ -169,14 +219,12 @@ def unzip(p: Path) -> None:
         zip.extractall(unzipped_dir)
 
 
-def is_rerun_disabled_tests(root: ET.ElementTree) -> bool:
+def is_rerun_disabled_tests(tests: Dict[str, Dict[str, int]]) -> bool:
     """
-    Check if the test report is coming from rerun_disabled_tests workflow
+    Check if the test report is coming from rerun_disabled_tests workflow where
+    each test is run multiple times
     """
-    skipped = root.find(".//*skipped")
-    # Need to check against None here, if not skipped doesn't work as expected
-    if skipped is None:
-        return False
-
-    message = skipped.attrib.get("message", "")
-    return TARGET_WORKFLOW in message or "num_red" in message
+    return all(
+        t.get("num_green", 0) + t.get("num_red", 0) > MAX_RETRY_IN_NON_DISABLED_MODE
+        for t in tests.values()
+    )

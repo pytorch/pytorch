@@ -6,7 +6,7 @@ import torch._decomp
 from torch import Tensor
 
 decomposition_table = torch._decomp.decomposition_table
-decomposition_table_for_jvp: Dict[torch._ops.OpOverload, Callable] = {}
+decomposition_table_for_jvp: Dict[torch._ops.OperatorBase, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition
 aten = torch.ops.aten
 
@@ -46,7 +46,7 @@ def maybe_register_decomposition(op):
 
 # Functions where we need a special decomposition for jvp but there's another version that
 # should be used more generally (ex. for jvp we need to recompute the mean and variance for
-# the backwards of a normalization function. Without jvp, it should used the saved value)
+# the backwards of a normalization function. Without jvp, it should use the saved value)
 decomposition_table_for_jvp = {}
 
 
@@ -85,6 +85,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
 
 
 # The only decompositions here are temporary or hacks for the purposes of jvp
+
 
 # TODO: do these also belong here?
 @maybe_register_decomposition(aten.trace.default)

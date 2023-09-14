@@ -2,7 +2,7 @@
 
 from typing import Optional, List
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 
 # End-to-end tests of features in native_functions.yaml
 
@@ -81,6 +81,7 @@ class TestNativeFunctions(TestCase):
             return torch._C._nn._test_optional_floatlist(values, const)
         return torch.jit.trace(wrapper, torch.tensor([1.5, 2.5], dtype=torch.float))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_optional_floatlist(self):
         self.do_test_optional_floatlist_with_module(FloatListWrapperModule())
         self.do_test_optional_floatlist_with_module(torch.jit.script(FloatListWrapperModule()))
@@ -134,6 +135,7 @@ class TestNativeFunctions(TestCase):
             return torch._C._nn._test_optional_intlist(values, const)
         return torch.jit.trace(wrapper, torch.tensor([1, 2], dtype=torch.int))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_optional_intlist(self):
         self.do_test_optional_intlist_with_module(IntListWrapperModule())
         self.do_test_optional_intlist_with_module(torch.jit.script(IntListWrapperModule()))
@@ -187,6 +189,7 @@ class TestNativeFunctions(TestCase):
             return torch._C._nn._test_optional_filled_intlist(values, const)
         return torch.jit.trace(wrapper, torch.tensor([1, 2], dtype=torch.int))
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_optional_filled_intlist(self):
 
         def f(n: int):

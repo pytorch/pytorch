@@ -179,15 +179,15 @@ PyObject* THPEngine_run_backward(
   unsigned char allow_unreachable = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
-  constexpr char* accepted_kwargs[] = {// NOLINT
-                                       "tensors",
-                                       "grad_tensors",
-                                       "keep_graph",
-                                       "create_graph",
-                                       "inputs",
-                                       "allow_unreachable",
-                                       "accumulate_grad",
-                                       nullptr};
+  constexpr const char* accepted_kwargs[] = {// NOLINT
+                                             "tensors",
+                                             "grad_tensors",
+                                             "keep_graph",
+                                             "create_graph",
+                                             "inputs",
+                                             "allow_unreachable",
+                                             "accumulate_grad",
+                                             nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
@@ -277,7 +277,8 @@ PyObject* THPEngine_run_backward(
           i);
       THPUtils_assert(
           !variable.requires_grad(),
-          "element %d of gradients tuple is None, but the corresponding Tensor requires grad");
+          "element %d of gradients tuple is None, but the corresponding Tensor requires grad",
+          i);
     }
   }
 

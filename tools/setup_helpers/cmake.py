@@ -29,6 +29,8 @@ def _mkdir_p(d: str) -> None:
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
 USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
+if "CMAKE_GENERATOR" in os.environ:
+    USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
 
 
 class CMake:
@@ -57,14 +59,12 @@ class CMake:
         cmake3_version = CMake._get_version(which("cmake3"))
         cmake_version = CMake._get_version(which("cmake"))
 
-        _cmake_min_version = LooseVersion("3.13.0")
+        _cmake_min_version = LooseVersion("3.18.0")
         if all(
-            (
-                ver is None or ver < _cmake_min_version
-                for ver in [cmake_version, cmake3_version]
-            )
+            ver is None or ver < _cmake_min_version
+            for ver in [cmake_version, cmake3_version]
         ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.13.0 found")
+            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
 
         if cmake3_version is None:
             cmake_command = "cmake"
@@ -106,7 +106,7 @@ class CMake:
         "Adds definitions to a cmake argument list."
         for key, value in sorted(kwargs.items()):
             if value is not None:
-                args.append("-D{}={}".format(key, value))
+                args.append(f"-D{key}={value}")
 
     def get_cmake_cache_variables(self) -> Dict[str, CMakeValue]:
         r"""Gets values in CMakeCache.txt into a dictionary.
@@ -143,7 +143,7 @@ class CMake:
             os.environ["CMAKE_GENERATOR"] = "Ninja"
             args.append("-GNinja")
         elif IS_WINDOWS:
-            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 15 2017")
+            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 16 2019")
             supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
                 print("Unsupported `CMAKE_GENERATOR`: " + generator)
@@ -170,9 +170,7 @@ class CMake:
                     args.append("-Ax64")
                     toolset_dict["host"] = "x64"
             if toolset_dict:
-                toolset_expr = ",".join(
-                    ["{}={}".format(k, v) for k, v in toolset_dict.items()]
-                )
+                toolset_expr = ",".join([f"{k}={v}" for k, v in toolset_dict.items()])
                 args.append("-T" + toolset_expr)
 
         base_dir = os.path.dirname(
@@ -203,10 +201,11 @@ class CMake:
                 # CMakeLists.txt.
                 var: var
                 for var in (
+                    "UBSAN_FLAGS",
                     "BLAS",
                     "WITH_BLAS",
                     "BUILDING_WITH_TORCH_LIBS",
-                    "CUDA_HOST_COMILER",
+                    "CUDA_HOST_COMPILER",
                     "CUDA_NVCC_EXECUTABLE",
                     "CUDA_SEPARABLE_COMPILATION",
                     "CUDNN_LIBRARY",
@@ -230,6 +229,7 @@ class CMake:
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
                     "SELECTED_OP_LIST",
+                    "TORCH_CUDA_ARCH_LIST",
                     "TRACING_BASED",
                 )
             }
@@ -318,11 +318,9 @@ class CMake:
         expected_wrapper = "/usr/local/opt/ccache/libexec"
         if IS_DARWIN and os.path.exists(expected_wrapper):
             if "CMAKE_C_COMPILER" not in build_options and "CC" not in os.environ:
-                CMake.defines(args, CMAKE_C_COMPILER="{}/gcc".format(expected_wrapper))
+                CMake.defines(args, CMAKE_C_COMPILER=f"{expected_wrapper}/gcc")
             if "CMAKE_CXX_COMPILER" not in build_options and "CXX" not in os.environ:
-                CMake.defines(
-                    args, CMAKE_CXX_COMPILER="{}/g++".format(expected_wrapper)
-                )
+                CMake.defines(args, CMAKE_CXX_COMPILER=f"{expected_wrapper}/g++")
 
         for env_var_name in my_env:
             if env_var_name.startswith("gh"):
@@ -331,11 +329,9 @@ class CMake:
                 try:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
-                    shex = ":".join(
-                        "{:02x}".format(ord(c)) for c in my_env[env_var_name]
-                    )
+                    shex = ":".join(f"{ord(c):02x}" for c in my_env[env_var_name])
                     print(
-                        "Invalid ENV[{}] = {}".format(env_var_name, shex),
+                        f"Invalid ENV[{env_var_name}] = {shex}",
                         file=sys.stderr,
                     )
                     print(e, file=sys.stderr)
@@ -392,7 +388,7 @@ class CMake:
             build_args += ["--"]
             if IS_WINDOWS and not USE_NINJA:
                 # We are likely using msbuild here
-                build_args += ["/p:CL_MPCount={}".format(max_jobs)]
+                build_args += [f"/p:CL_MPCount={max_jobs}"]
             else:
                 build_args += ["-j", max_jobs]
         self.run(build_args, my_env)

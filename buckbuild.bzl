@@ -186,9 +186,7 @@ def third_party(name):
 
 def get_pt_compiler_flags():
     return select({
-        "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accommodate for eigen
-        ],
+        "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
 
@@ -245,6 +243,7 @@ def get_aten_preprocessor_flags():
         "-DCAFFE2_USE_LITE_PROTO",
         "-DATEN_CUDNN_ENABLED_FBXPLAT=0",
         "-DATEN_MKLDNN_ENABLED_FBXPLAT=0",
+        "-DATEN_MKLDNN_ACL_ENABLED_FBXPLAT=0",
         "-DATEN_NNPACK_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_ENABLED_FBXPLAT=0",
         "-DATEN_MKL_SEQUENTIAL_FBXPLAT=0",
@@ -900,7 +899,6 @@ def define_buck_targets(
                 # Don't need on mobile.
                 "torch/csrc/Exceptions.h",
                 "torch/csrc/python_headers.h",
-                "torch/csrc/utils/auto_gil.h",
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
             ],
         ),
@@ -1041,6 +1039,9 @@ def define_buck_targets(
             "--replace",
             "@AT_MKLDNN_ENABLED@",
             "ATEN_MKLDNN_ENABLED_FBXPLAT",
+            "--replace",
+            "@AT_MKLDNN_ACL_ENABLED@",
+            "ATEN_MKLDNN_ACL_ENABLED_FBXPLAT",
             "--replace",
             "@AT_MKL_ENABLED@",
             "ATEN_MKL_ENABLED_FBXPLAT",
@@ -1463,6 +1464,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            "torch/csrc/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
@@ -1993,6 +1995,7 @@ def define_buck_targets(
                 ("", "torch/csrc/jit/python/*.h"),
                 ("", "torch/csrc/jit/frontend/*.h"),
                 ("", "torch/csrc/jit/serialization/*.h"),
+                ("", "torch/csrc/profiler/**/*.h"),
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([
@@ -2036,6 +2039,7 @@ def define_buck_targets(
             "aten/src/ATen/EmptyTensor.cpp",
             "aten/src/ATen/Utils.cpp",
             "aten/src/ATen/detail/CUDAHooksInterface.cpp",
+            "aten/src/ATen/detail/PrivateUse1HooksInterface.cpp",
             ":gen_aten[Operators_0.cpp]",
             ":gen_aten[Operators_1.cpp]",
             ":gen_aten[Operators_2.cpp]",

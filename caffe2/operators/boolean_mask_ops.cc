@@ -151,7 +151,7 @@ Given a 1D `data` tensor and a boolean `mask` tensor of the same shape, returns 
 
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_mask_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/boolean_mask_ops.cc
 
 <details>
 
@@ -217,7 +217,7 @@ If `lengths` tensor is $[a_1, a_2, ..., a_n]$, then length of `mask` tensor must
 
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/boolean_mask_ops.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/boolean_mask_ops.cc
 
 <details>
 

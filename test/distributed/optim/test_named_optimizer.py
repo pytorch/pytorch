@@ -28,7 +28,7 @@ def _run_model_training(model_optim_lists):
 
 class TestDummyModel(torch.nn.Module):
     def __init__(self):
-        super(TestDummyModel, self).__init__()
+        super().__init__()
         torch.manual_seed(0)
         self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
         self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())

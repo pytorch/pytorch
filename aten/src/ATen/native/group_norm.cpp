@@ -119,11 +119,18 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-
+  TORCH_CHECK(
+      X.suggest_memory_format() == dY.suggest_memory_format(),
+      "Expected memory formats of X and dY are same.");
+  TORCH_CHECK(
+      X.scalar_type() == dY.scalar_type(),
+      "Expected scalar types of X and dY are same.");
   bool mixed_type = is_mixed_type(X, mean, rstd);
   if (mixed_type) {
     check_mixed_data_type(X, mean, rstd);
   }
+  auto memory_format = X.device().is_cpu() ?
+      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
 
   Tensor dX;
   Tensor dgamma;
@@ -135,7 +142,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm_backward(
         c10::nullopt /* layout */,
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
-        X.suggest_memory_format());
+        memory_format);
   }
   if (grad_input_mask[1]) {
     dgamma = at::native::empty_like(

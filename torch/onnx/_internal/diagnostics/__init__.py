@@ -1,19 +1,21 @@
 from ._diagnostic import (
-    context,
     create_export_diagnostic_context,
     diagnose,
     engine,
-    ExportDiagnostic,
+    export_context,
+    ExportDiagnosticEngine,
+    TorchScriptOnnxExportDiagnostic,
 )
 from ._rules import rules
 from .infra import levels
 
 __all__ = [
-    "ExportDiagnostic",
+    "TorchScriptOnnxExportDiagnostic",
+    "ExportDiagnosticEngine",
     "rules",
     "levels",
     "engine",
-    "context",
+    "export_context",
     "create_export_diagnostic_context",
     "diagnose",
 ]

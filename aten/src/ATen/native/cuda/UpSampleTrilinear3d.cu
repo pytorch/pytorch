@@ -264,7 +264,8 @@ static void upsample_trilinear3d_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 512);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_trilinear3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
@@ -330,7 +331,8 @@ static void upsample_trilinear3d_backward_out_cuda_template(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 256);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(),
       "upsample_trilinear3d_backward_out_frame",
       [&] {
@@ -338,7 +340,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
 
         auto idata = grad_input.packed_accessor64<scalar_t, 5>();
         auto odata = grad_output.packed_accessor64<scalar_t, 5>();
-        scalar_t* idata_ptr = grad_input.data_ptr<scalar_t>();
+        scalar_t* idata_ptr = grad_input.mutable_data_ptr<scalar_t>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
             input_depth, output_depth, align_corners, scales_d);

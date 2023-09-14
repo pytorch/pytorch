@@ -5,9 +5,13 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/native/StridedRandomAccessor.h>
+
+#define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
+
 
 namespace at { namespace native {
 
@@ -152,6 +156,93 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
     }
   }
 }
+
+#if HAS_WARP_MERGE_SORT()
+
+template <int KeyDims, int ValueDims, int sort_size, int max_block_dim_y,
+          typename K, typename V, typename Comparator, typename IndexType>
+C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE * max_block_dim_y)
+__global__ void
+warpMergeSortKVInPlace(
+    at::cuda::detail::TensorInfo<K, IndexType> keys,
+    IndexType keySlices,
+    IndexType keySliceSize,
+    IndexType keySliceStride,
+    at::cuda::detail::TensorInfo<V, IndexType> values,
+    IndexType valueSliceStride,
+    Comparator comp,
+    K invalid_key) {
+  // Find the slice of the tensor that we are sorting
+  // NOTE: blockDim.y may be less max_block_dim_y
+  const IndexType blockIndex = getLinearBlockId<IndexType>();
+  const IndexType linearIndex = blockIndex * blockDim.y + threadIdx.y;
+
+  // If this row is out of bounds exit early
+  if (linearIndex >= keySlices) {
+    return;
+  }
+
+  const IndexType keyStartOffset =
+    at::cuda::detail::IndexToOffset<K, IndexType, KeyDims>::get(linearIndex, keys);
+  const IndexType valueStartOffset =
+    at::cuda::detail::IndexToOffset<V, IndexType, ValueDims>::get(linearIndex, values);
+
+  K *keys_slice = &keys.data[keyStartOffset];
+  V *values_slice = &values.data[valueStartOffset];
+
+  StridedRandomAccessor<K, IndexType> keys_iter(keys_slice, keySliceStride);
+  StridedRandomAccessor<V, IndexType> values_iter(values_slice, valueSliceStride);
+
+  namespace cub = ROCM_HIPCUB(at_cuda_detail::cub);
+
+  assert(blockDim.x == C10_WARP_SIZE);
+  assert(blockDim.y <= max_block_dim_y);
+  constexpr int items_per_thread = sort_size / C10_WARP_SIZE;
+  static_assert(
+      items_per_thread * C10_WARP_SIZE == sort_size,
+      "sort_size must be a multiple of C10_WARP_SIZE");
+
+
+  using LoadKeys = cub::WarpLoad<K, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
+  using LoadValues = cub::WarpLoad<V, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
+  using Sort = cub::WarpMergeSort<K, items_per_thread, C10_WARP_SIZE, V>;
+  using StoreKeys = cub::WarpStore<K, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
+  using StoreValues = cub::WarpStore<V, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
+
+  __shared__ union {
+    typename LoadKeys::TempStorage load_keys;
+    typename LoadValues::TempStorage load_values;
+    typename Sort::TempStorage sort;
+    typename StoreKeys::TempStorage store_keys;
+    typename StoreValues::TempStorage store_values;
+  } tmp_storage[max_block_dim_y];
+
+  auto& warp_storage = tmp_storage[threadIdx.y];
+
+  // Load inputs
+  K local_keys[items_per_thread];
+  V local_values[items_per_thread];
+
+  const auto invalid_value = V{};
+  LoadKeys(warp_storage.load_keys).Load(keys_iter, local_keys, keySliceSize, invalid_key);
+  WARP_SYNC();
+  LoadValues(warp_storage.load_values).Load(values_iter, local_values, keySliceSize, invalid_value);
+  WARP_SYNC();
+
+  // Sort! We use stable sort to ensure that invalid values are never
+  // sorted before valid values. In testing it performed the same as
+  // .Sort, so there is no down-side.
+  Sort(warp_storage.sort).StableSort(
+      local_keys, local_values, comp, keySliceSize, invalid_key);
+  WARP_SYNC();
+
+  // Store outputs
+  StoreKeys(warp_storage.store_keys).Store(keys_iter, local_keys, keySliceSize);
+  WARP_SYNC();
+  StoreValues(warp_storage.store_values).Store(values_iter, local_values, keySliceSize);
+}
+
+#endif // HAS_WARP_MERGE_SORT()
 
 template <int KeyDims, int ValueDims,
           int block_size, int items_per_thread,

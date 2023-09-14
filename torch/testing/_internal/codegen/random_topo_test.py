@@ -96,7 +96,7 @@ def random_topology_test(seed, *inp_tensor_list):
         out_tensor = None
 
         if DEBUG_PRINT:
-            print("iteration {0}, num_sets{1}, candidates {2}, tensor_list {3}, lh_index {4}, op_index {5}".format(
+            print("iteration {}, num_sets{}, candidates {}, tensor_list {}, lh_index {}, op_index {}".format(
                 num_operations, num_sets, candidate, len(tensor_list), lh_index, op_index))
         if num_operations >= 0:
             num_operations -= 1
@@ -125,10 +125,10 @@ def random_topology_test(seed, *inp_tensor_list):
                     #  right = tensor_list[lh_index]
                     out_tensor = binary_operations[op_index - u_op_size](left, right)
                 if DEBUG_PRINT:
-                    print("binary, op_2_index {0}, rh_index ?{1}".format(op_2_index, rh_index))
+                    print(f"binary, op_2_index {op_2_index}, rh_index ?{rh_index}")
         else:
             # binary operation, we just randomly pick two candidates.
-            # this is not the most efficient way to close dependecy, as we could have
+            # this is not the most efficient way to close dependency, as we could have
             # two candidate that are actually connected
             cand_index = np.random.randint(0, len(candidate))
             if cand_index == index:
@@ -136,7 +136,7 @@ def random_topology_test(seed, *inp_tensor_list):
             # [if rh_index: create binary operator output tensor]
             rh_index = candidate[cand_index]
             if DEBUG_PRINT:
-                print("binary rh_index ?{0}".format(rh_index))
+                print(f"binary rh_index ?{rh_index}")
 
         # update candidate should happen before we remove rh_index
         candidate[index] = len(tensor_list)
@@ -185,7 +185,7 @@ def random_topology_test(seed, *inp_tensor_list):
             ret_list.append(tensor_list[ind])
 
     if DEBUG_PRINT:
-        print("ended with tensor_list: {0}".format(len(tensor_list)))
+        print(f"ended with tensor_list: {len(tensor_list)}")
 
     return tuple(ret_list)
 
@@ -248,19 +248,19 @@ def prepareInputTensorsToRandomTopoTest(seed,
 
 
 def reproString(current_seed, args):
-    repro_str = "python {0}".format(__file__)
+    repro_str = f"python {__file__}"
     if args.cuda_fuser:
-        repro_str += " --cuda_fuser"
+        repro_str += " --cuda-fuser"
     if args.legacy_fuser:
-        repro_str += " --legacy_fuser"
+        repro_str += " --legacy-fuser"
     if args.profiling_executor:
-        repro_str += " --profiling_executor"
+        repro_str += " --profiling-executor"
     if args.fp16:
         repro_str += " --fp16"
     if args.cpu:
         repro_str += " --cpu"
-    repro_str += " --max_num_tensor {0} --max_tensor_dim {1} --max_tensor_size {2}"\
-        " --depth_factor {3} --seed {4} --repro_run".format(
+    repro_str += " --max-num-tensor {} --max-tensor-dim {} --max-tensor-size {}"\
+        " --depth-factor {} --seed {} --repro-run".format(
             args.max_num_tensor, args.max_tensor_dim, args.max_tensor_size,
             args.depth_factor, current_seed)
     return repro_str
@@ -337,21 +337,21 @@ def runTest(seed, args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cuda_fuser", action='store_true', default=True)
-    parser.add_argument("--legacy_fuser", action='store_true', default=False)
-    parser.add_argument("--profiling_executor", action='store_true', default=False)
+    parser.add_argument("--cuda-fuser", "--cuda_fuser", action='store_true', default=True)
+    parser.add_argument("--legacy-fuser", "--legacy_fuser", action='store_true', default=False)
+    parser.add_argument("--profiling-executor", "--profiling_executor", action='store_true', default=False)
     parser.add_argument("--fp16", action='store_true', default=False)
     parser.add_argument("--cpu", action='store_true', default=False)
-    parser.add_argument("--debug_print", action='store_true', default=False)
-    parser.add_argument("--debug_tensor", action='store_true', default=False)
-    parser.add_argument("--max_num_tensor", default=MAX_TENSOR, type=int)
-    parser.add_argument("--max_tensor_dim", default=MAX_TENSOR_DIM, type=int)
-    parser.add_argument("--max_tensor_size", default=MAX_TENSOR_SIZE, type=int)
-    parser.add_argument("--depth_factor", default=GRAPH_FACTOR, type=int)
+    parser.add_argument("--debug-print", "--debug_print", action='store_true', default=False)
+    parser.add_argument("--debug-tensor", "--debug_tensor", action='store_true', default=False)
+    parser.add_argument("--max-num-tensor", "--max_num_tensor", default=MAX_TENSOR, type=int)
+    parser.add_argument("--max-tensor-dim", "--max_tensor_dim", default=MAX_TENSOR_DIM, type=int)
+    parser.add_argument("--max-tensor-size", "--max_tensor_size", default=MAX_TENSOR_SIZE, type=int)
+    parser.add_argument("--depth-factor", "--depth-factor", default=GRAPH_FACTOR, type=int)
     parser.add_argument("--seed", default=45589, type=int)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--iterations", default=4, type=int)
-    group.add_argument("--repro_run", action='store_true', default=False)
+    group.add_argument("--repro-run", "--repro_run", action='store_true', default=False)
     return parser.parse_args()
 
 
@@ -390,8 +390,7 @@ if __name__ == '__main__':
         if len(failing_repros) == 0:
             print("test passed")
         else:
-            print("{0} out of {1} tests failed;".format(
-                  len(failing_repros), args.iterations))
+            print(f"{len(failing_repros)} out of {args.iterations} tests failed;")
             print("To repro failing tests, run\n")
             for repro in failing_repros:
                 print(repro)

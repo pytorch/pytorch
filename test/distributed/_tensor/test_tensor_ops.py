@@ -95,7 +95,7 @@ class DistTensorOpsTest(DTensorTestBase):
         partial_grad = DTensor.from_local(torch.randn(12, 3), mesh, partial_spec)
         res = dt_to_inplace_add.add_(partial_grad)
         self.assertTrue(res is dt_to_inplace_add)
-        self.assertTrue(res.placements == shard_spec)
+        self.assertTrue(res.placements == tuple(shard_spec))
 
     @with_comms
     def test_op_out_variant(self):
@@ -115,7 +115,7 @@ class DistTensorOpsTest(DTensorTestBase):
         expected_dt = replicate_out.clone() + 3
         res = torch.add(sharded_dt_input, 3, out=replicate_out)
         self.assertTrue(res is replicate_out)
-        self.assertTrue(res.placements == replica_spec)
+        self.assertTrue(res.placements == tuple(replica_spec))
         self.assertEqual(replicate_out.to_local(), expected_dt.to_local())
 
     @with_comms
@@ -233,6 +233,32 @@ class DistTensorOpsTest(DTensorTestBase):
         zeros_like_dt = torch.zeros_like(dist_tensor)
         zeros_expected = torch.zeros(4, 8)
         self.assertEqual(zeros_expected, zeros_like_dt.to_local())
+
+    @with_comms
+    def test_equal(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        shard_spec = [Shard(0)]
+
+        input_tensor_1 = torch.ones(4, 4)
+        dist_tensor_1 = DTensor.from_local(input_tensor_1, device_mesh, shard_spec)
+
+        # tensors are equal
+        input_tensor_2 = torch.ones(4, 4)
+        dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
+
+        eq_result = dist_tensor_1.equal(dist_tensor_2)
+        self.assertTrue(eq_result)
+
+        # tensors are different on some shards
+        if self.rank == 0:
+            input_tensor_2 = torch.ones(4, 4)
+        else:
+            input_tensor_2 = torch.randn(4, 4)
+        dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
+
+        eq_result = dist_tensor_1.equal(dist_tensor_2)
+        # equal op all reduces each shard's local result
+        self.assertFalse(eq_result)
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)

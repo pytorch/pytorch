@@ -89,8 +89,8 @@ This op computes the elementwise linear combination of a batch of input vectors 
 $$Y_{ij} = X_{ij}w_j + b_j \ for \ i\in{N}, j\in{D}$$
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_linear_op.h
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_linear_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/elementwise_linear_op.h
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/elementwise_linear_op.cc
 
 <details>
 

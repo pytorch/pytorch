@@ -5,22 +5,25 @@ import inspect
 import sys
 import typing
 import warnings
-from typing import Any, Callable, List, NoReturn, Optional, Sequence, Set, Tuple, Union
-
-from typing_extensions import Literal
+from typing import (
+    Any,
+    Callable,
+    List,
+    Literal,
+    NoReturn,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _patch_torch,
-    _type_utils,
-    errors,
-)
+from torch.onnx import _constants, _deprecation, _type_utils, errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
 from torch.types import Number
@@ -312,8 +315,10 @@ def quantized_args(
     *arg_q_descriptors: bool,
     scale: Optional[float] = None,
     zero_point: Optional[int] = None,
+    quantize_output: bool = True,
 ):
     """A decorator which extends support for quantized version of the base operator.
+
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
@@ -350,6 +355,7 @@ def quantized_args(
           the first quantized input scale.
         zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
+        quantize_output: If True, quantize the output of the base operator. Default is True
     """
 
     def decorator(fn):
@@ -432,7 +438,9 @@ def quantized_args(
                 _zero_point is not None
             ), "Bug: Zero point must be set for quantized operator"
 
-            return quantize_helper(g, output, _scale, _zero_point)
+            if quantize_output:
+                return quantize_helper(g, output, _scale, _zero_point)
+            return output
 
         return wrapper
 
@@ -714,7 +722,6 @@ def _slice_helper(
     starts,
     ends,
     steps=None,
-    dynamic_slice=False,
 ):
     if g.opset <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
@@ -723,7 +730,7 @@ def _slice_helper(
     else:
         from torch.onnx.symbolic_opset10 import _slice as _slice10
 
-        return _slice10(g, input, axes, starts, ends, steps, dynamic_slice)
+        return _slice10(g, input, axes, starts, ends, steps)
 
 
 @_beartype.beartype
@@ -1260,6 +1267,49 @@ def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
 
 
 @_beartype.beartype
+def _repeat_interleave_single_value_repeat_helper(
+    g: jit_utils.GraphContext, self, repeats, dim
+):
+    from torch.onnx.symbolic_opset9 import flatten, unsqueeze
+
+    if not _is_tensor(repeats):
+        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+
+    const_repeats: bool = _is_constant(repeats)
+    reps = _maybe_get_const(repeats, "t")
+
+    # Convert 'repeats' to 1-d if it is 0-d.
+    if _get_tensor_rank(repeats) == 0:
+        repeats = g.op("Reshape", repeats, g.op("Constant", value_t=torch.tensor([1])))
+
+    # Create a new dim of size 1, then expand it to be 'repeats' long, and finally collapse it.
+    unsqueezed = unsqueeze(g, self, dim + 1)
+
+    # repeats_per_dim is 1 for all dims except for the new unsqueezed dim, where it has value 'repeats'.
+    if const_repeats:
+        # 'Repeats' is a constant, 'repeats_per_dim' can be a constant.
+        onehot = torch.ones(_get_tensor_rank(unsqueezed), dtype=torch.int64)
+        onehot[dim + 1] = reps
+        repeats_per_dim = g.op("Constant", value_t=onehot)
+    else:
+        # 'Repeats' is a variable, 'repeats_per_dim' cannot be a constant.
+        onehot = g.op(
+            "OneHot",
+            unsqueeze(g, dim + 1, 0),  # indices, must be >= 1-dimensional
+            g.op(
+                "Constant", value_t=torch.tensor(_get_tensor_rank(unsqueezed))
+            ),  # depth
+            g.op(
+                "Concat", g.op("Constant", value_t=torch.tensor([1])), repeats, axis_i=0
+            ),  # on/off values
+        )
+        repeats_per_dim = flatten(g, onehot, 0, 1)
+
+    tiled = g.op("Tile", unsqueezed, repeats_per_dim)
+    return flatten(g, tiled, dim, dim + 1)
+
+
+@_beartype.beartype
 def _arange_cast_helper(
     g: jit_utils.GraphContext, end, start=None, step=None, dtype=None
 ) -> Tuple[
@@ -1510,7 +1560,7 @@ def _optional_input_placeholder_tensor(g):
 def _handle_reduce_dim_none(g: jit_utils.GraphContext, self, op_name):
     rank = _get_tensor_rank(self)
     if rank is not None and any(
-        [_get_tensor_dim_size(self, i) == 0 for i in range(rank)]
+        _get_tensor_dim_size(self, i) == 0 for i in range(rank)
     ):
         # If input tensor is empty, according to ONNX ReduceSum definition,
         # set keepdims=1 so that the resulted tensor has the same rank as the input.

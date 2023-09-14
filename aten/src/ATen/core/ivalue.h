@@ -8,11 +8,15 @@
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
 #include <c10/macros/Export.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <typeindex>
+#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace torch {
@@ -77,8 +81,7 @@ struct ComplexHolder : c10::intrusive_ptr_target {
 // Similar to ComplexHolder, for StreamData3
 struct StreamData3Holder : c10::intrusive_ptr_target {
   public:
-    StreamData3Holder(struct c10::StreamData3 d) {
-      val = d;
+    StreamData3Holder(struct c10::StreamData3 d):val(d) {
     }
     StreamData3Holder() = delete;
     struct c10::StreamData3 val;
@@ -162,6 +165,7 @@ struct Capsule {
   _(Int)                     \
   _(SymInt)                  \
   _(SymFloat)                \
+  _(SymBool)                 \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -507,17 +511,17 @@ public:
   template <
       typename... Args,
       std::enable_if_t<
-          !guts::disjunction<
+          !std::disjunction<
               std::is_lvalue_reference<Args>...,
-              guts::negation<std::is_constructible<IValue, Args>>...>::value,
+              std::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
       std::enable_if_t<
-          !guts::disjunction<
+          !std::disjunction<
               std::is_lvalue_reference<Args>...,
-              guts::negation<std::is_constructible<IValue, Args>>...>::value,
+              std::negation<std::is_constructible<IValue, Args>>...>::value,
           std::nullptr_t> = nullptr>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
@@ -581,13 +585,13 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) {
-    if (i.is_symbolic()) {
-      tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
-    } else {
+  IValue(const c10::SymInt& i) {
+    if (auto mi = i.maybe_as_int()) {
       tag = Tag::Int;
-      payload.u.as_int = i.as_int_unchecked();
+      payload.u.as_int = *mi;
+    } else {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = i.toSymNode().release();
     }
   }
 
@@ -598,7 +602,7 @@ public:
   c10::SymInt toSymInt() &&;
   c10::SymInt toSymInt() const&;
 
-  IValue(c10::SymFloat i) {
+  IValue(const c10::SymFloat& i) {
     if (i.is_symbolic()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
@@ -614,6 +618,23 @@ public:
 
   c10::SymFloat toSymFloat() &&;
   c10::SymFloat toSymFloat() const&;
+
+  IValue(const c10::SymBool& i) {
+     if (auto mi = i.maybe_as_bool()) {
+      tag = Tag::Bool;
+      payload.u.as_int = *mi;
+    } else {
+      tag = Tag::SymBool;
+      payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
+    }
+  }
+
+  bool isSymBool() const {
+    return Tag::SymBool == tag;
+  }
+
+  c10::SymBool toSymBool() &&;
+  c10::SymBool toSymBool() const&;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -648,9 +669,11 @@ public:
 
   // IntList
   bool isIntList() const;
+  bool isSymIntList() const;
   c10::List<int64_t> toIntList() &&;
   c10::List<int64_t> toIntList() const&;
   std::vector<int64_t> toIntVector() const;
+  std::vector<c10::SymInt> toSymIntVector() const;
   at::DimVector toDimVector() const;
 
   // ConstantString
@@ -836,10 +859,13 @@ public:
     // for both SymFloat and double
     if (s.isSymInt()) {
       tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = s.toSymInt().toSymNodeImpl().release();
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymNode().release();
     } else if (s.isSymFloat()) {
       tag = Tag::SymFloat;
       payload.u.as_intrusive_ptr = s.toSymFloat().toSymNodeImpl().release();
+    } else if (s.isSymBool()) {
+      tag = Tag::SymBool;
+      payload.u.as_intrusive_ptr = s.toSymBool().toSymNodeImpl().release();
     } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
@@ -856,7 +882,7 @@ public:
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat() || isSymBool();
   }
 
   at::Scalar toScalar() const {
@@ -872,6 +898,8 @@ public:
       return toSymInt();
     else if (isSymFloat())
       return toSymFloat();
+    else if (isSymBool())
+      return toSymBool();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -954,7 +982,7 @@ public:
       TORCH_FORALL_TAGS(DEFINE_CASE)
 #undef DEFINE_CASE
     }
-    return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
+    return "InvalidTag(" + std::to_string(static_cast<int>(tag)) + ")";
   }
 
   // generic v.to<at::Tensor>() implementations
@@ -1084,8 +1112,10 @@ public:
   // TODO: There are several places that recurse over IValue. This is fragile.
   // This visitor should be used to recurse over ivalues.
   void visit(const std::function<bool(const IValue&)>& visitor) const;
-  IValue deepcopy() const;
-  IValue deepcopy(HashAliasedIValueMap& memo) const;
+  IValue deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
+  IValue deepcopy(
+      HashAliasedIValueMap& memo,
+      c10::optional<at::Device> device = c10::nullopt) const;
 
  private:
   static c10::intrusive_ptr_target* null_to_undefined_tensor(c10::intrusive_ptr_target* p) {
@@ -1171,6 +1201,8 @@ public:
         return true;
       case Tag::SymFloat:
         return true;
+      case Tag::SymBool:
+        return true;
       case Tag::Bool:
         return false;
       case Tag::Tuple:
@@ -1238,7 +1270,7 @@ public:
       // representation with Tensor.
       c10::intrusive_ptr_target* as_intrusive_ptr;
       struct {
-        DeviceType type;
+        c10::DeviceType type;
         DeviceIndex index;
       } as_device;
     } u;

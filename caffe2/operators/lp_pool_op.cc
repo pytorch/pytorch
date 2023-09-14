@@ -237,7 +237,7 @@ Pooling layers reduce the spatial dimensionality of the input blob. Each of the 
 $$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
 
 Github Links:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lp_pool_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/lp_pool_op.cc
 
 <details>
 

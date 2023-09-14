@@ -122,6 +122,7 @@ from .fx.ns_types import (
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.match_utils import _find_matches
+from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 from torch.ao.quantization.fx.qconfig_mapping_utils import _generate_node_name_to_qconfig
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.ao.quantization.qconfig import QConfigAny
@@ -398,11 +399,13 @@ def extract_weights(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    if hasattr(model_a, '_node_name_to_scope'):
-        gm_a._node_name_to_scope = model_a._node_name_to_scope
+    maybe_model_a_node_name_to_scope = _get_observed_graph_module_attr(model_a, 'node_name_to_scope')
+    if maybe_model_a_node_name_to_scope is not None:
+        gm_a._node_name_to_scope = maybe_model_a_node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    if hasattr(model_b, '_node_name_to_scope'):
-        gm_b._node_name_to_scope = model_b._node_name_to_scope
+    maybe_model_b_node_name_to_scope = _get_observed_graph_module_attr(model_b, 'node_name_to_scope')
+    if maybe_model_b_node_name_to_scope is not None:
+        gm_b._node_name_to_scope = maybe_model_b_node_name_to_scope
     return _extract_weights_impl(
         model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops,
         unmatchable_types_map, op_to_type_to_weight_extraction_fn)
@@ -509,11 +512,13 @@ def add_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    if hasattr(model_a, '_node_name_to_scope'):
-        gm_a._node_name_to_scope = model_a._node_name_to_scope
+    maybe_model_a_node_name_to_scope = _get_observed_graph_module_attr(model_a, 'node_name_to_scope')
+    if maybe_model_a_node_name_to_scope is not None:
+        gm_a._node_name_to_scope = maybe_model_a_node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    if hasattr(model_b, '_node_name_to_scope'):
-        gm_b._node_name_to_scope = model_b._node_name_to_scope
+    maybe_model_b_node_name_to_scope = _get_observed_graph_module_attr(model_b, 'node_name_to_scope')
+    if maybe_model_b_node_name_to_scope is not None:
+        gm_b._node_name_to_scope = maybe_model_b_node_name_to_scope
     return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -662,11 +667,13 @@ def add_shadow_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
-    if hasattr(model_a, '_node_name_to_scope'):
-        gm_a._node_name_to_scope = model_a._node_name_to_scope
+    maybe_model_a_node_name_to_scope = _get_observed_graph_module_attr(model_a, 'node_name_to_scope')
+    if maybe_model_a_node_name_to_scope is not None:
+        gm_a._node_name_to_scope = maybe_model_a_node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
-    if hasattr(model_b, '_node_name_to_scope'):
-        gm_b._node_name_to_scope = model_b._node_name_to_scope
+    maybe_model_b_node_name_to_scope = _get_observed_graph_module_attr(model_b, 'node_name_to_scope')
+    if maybe_model_b_node_name_to_scope is not None:
+        gm_b._node_name_to_scope = maybe_model_b_node_name_to_scope
     return _add_shadow_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -725,8 +732,8 @@ def extend_logger_results_with_comparison(
         comparison_name: string name of model to use for
           layer names in the output
     """
-    for _, results_type_to_results in results.items():
-        for _, model_name_to_results in results_type_to_results.items():
+    for results_type_to_results in results.values():
+        for model_name_to_results in results_type_to_results.values():
             assert model_name_1 in model_name_to_results, \
                 f"{model_name_1} not found in results"
             assert model_name_2 in model_name_to_results, \
@@ -849,7 +856,7 @@ def prepare_n_shadows_model(
         create_n_transformed_and_logged_copies_of_subgraph(
             mt, subgraph_idx, match_name, nodes_in_this_subgraph,
             qconfig_multi_mapping.qconfig_mappings_list, list_of_node_name_to_qconfig,
-            custom_prepare_fn, custom_prepare_kwargs
+            custom_prepare_fn, custom_prepare_kwargs  # type: ignore[arg-type]
         )
 
     return mt
@@ -861,7 +868,7 @@ def _prepare_n_shadows_add_loggers_model(
     qconfig_mapping: QConfigMapping,
     backend_config: BackendConfig,
 ) -> torch.nn.Module:
-    """
+    r"""
     Note: this API is not recommended for wide usage, it is only
     provided for customers who need to migrate from the `add_loggers`
     API.

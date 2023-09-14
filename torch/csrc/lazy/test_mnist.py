@@ -1,19 +1,21 @@
+import os
+
 import torch
+import torch._lazy
+import torch._lazy.metrics
+import torch._lazy.ts_backend
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import os
-from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
-import torch._lazy
-import torch._lazy.ts_backend
-import torch._lazy.metrics
+from torchvision import datasets, transforms
+
 torch._lazy.ts_backend.init()
 
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 32, 3, 1)
         self.conv2 = nn.Conv2d(32, 64, 3, 1)
         self.dropout1 = nn.Dropout(0.25)
@@ -49,33 +51,39 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
         torch._lazy.mark_step()
 
         if batch_idx % log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item()))
+            print(
+                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+                    epoch,
+                    batch_idx * len(data),
+                    len(train_loader.dataset),
+                    100.0 * batch_idx / len(train_loader),
+                    loss.item(),
+                )
+            )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     bsz = 64
-    device = 'lazy'
+    device = "lazy"
     epochs = 14
     log_interval = 10
     lr = 1
     gamma = 0.7
-    train_kwargs = {'batch_size': bsz}
+    train_kwargs = {"batch_size": bsz}
     # if we want to use CUDA
     if "LTC_TS_CUDA" in os.environ:
-        cuda_kwargs = {'num_workers': 1,
-                       'pin_memory': True,
-                       'shuffle': True,
-                       'batch_size': bsz}
+        cuda_kwargs = {
+            "num_workers": 1,
+            "pin_memory": True,
+            "shuffle": True,
+            "batch_size": bsz,
+        }
         train_kwargs.update(cuda_kwargs)
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    dataset1 = datasets.MNIST('./data', train=True, download=True,
-                              transform=transform)
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+    )
+    dataset1 = datasets.MNIST("./data", train=True, download=True, transform=transform)
     train_loader = torch.utils.data.DataLoader(dataset1, **train_kwargs)
     model = Net().to(device)
     optimizer = optim.Adadelta(model.parameters(), lr=lr)

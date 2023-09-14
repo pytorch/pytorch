@@ -20,7 +20,7 @@ class VFModule(types.ModuleType):
     vf: types.ModuleType
 
     def __init__(self, name):
-        super(VFModule, self).__init__(name)
+        super().__init__(name)
         self.vf = torch._C._VariableFunctions
 
     def __getattr__(self, attr):

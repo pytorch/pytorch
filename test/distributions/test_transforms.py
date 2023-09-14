@@ -17,6 +17,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform, Compo
                                             identity_transform, Transform, _InverseTransform,
                                             PositiveDefiniteTransform)
 from torch.distributions.utils import tril_matrix_to_vec, vec_to_tril_matrix
+from torch.testing._internal.common_utils import run_tests
 
 
 def get_transforms(cache_size):
@@ -155,7 +156,7 @@ def generate_data(transform):
         x /= x.norm(dim=-1, keepdim=True)
         x.diagonal(dim1=-1).copy_(x.diagonal(dim1=-1).abs())
         return x
-    raise ValueError('Unsupported domain: {}'.format(domain))
+    raise ValueError(f'Unsupported domain: {domain}')
 
 
 TRANSFORMS_CACHE_ACTIVE = get_transforms(cache_size=1)
@@ -214,19 +215,19 @@ def test_forward_inverse(transform, test_cached):
     if transform.bijective:
         # verify function inverse
         assert torch.allclose(x2, x, atol=1e-4, equal_nan=True), '\n'.join([
-            '{} t.inv(t(-)) error'.format(transform),
-            'x = {}'.format(x),
-            'y = t(x) = {}'.format(y),
-            'x2 = t.inv(y) = {}'.format(x2),
+            f'{transform} t.inv(t(-)) error',
+            f'x = {x}',
+            f'y = t(x) = {y}',
+            f'x2 = t.inv(y) = {x2}',
         ])
     else:
         # verify weaker function pseudo-inverse
         assert torch.allclose(y2, y, atol=1e-4, equal_nan=True), '\n'.join([
-            '{} t(t.inv(t(-))) error'.format(transform),
-            'x = {}'.format(x),
-            'y = t(x) = {}'.format(y),
-            'x2 = t.inv(y) = {}'.format(x2),
-            'y2 = t(x2) = {}'.format(y2),
+            f'{transform} t(t.inv(t(-))) error',
+            f'x = {x}',
+            f'y = t(x) = {y}',
+            f'x2 = t.inv(y) = {x2}',
+            f'y2 = t(x2) = {y2}',
         ])
 
 
@@ -494,5 +495,5 @@ def test_save_load_transform():
     assert torch.allclose(log_prob, other.log_prob(x))
 
 
-if __name__ == '__main__':
-    pytest.main([__file__])
+if __name__ == "__main__":
+    run_tests()

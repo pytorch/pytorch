@@ -39,7 +39,7 @@ class Identity(Module):
 
     """
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super(Identity, self).__init__()
+        super().__init__()
 
     def forward(self, input: Tensor) -> Tensor:
         return input
@@ -90,7 +90,7 @@ class Linear(Module):
     def __init__(self, in_features: int, out_features: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Linear, self).__init__()
+        super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(torch.empty((out_features, in_features), **factory_kwargs))
@@ -114,9 +114,7 @@ class Linear(Module):
         return F.linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
-        return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, self.bias is not None
-        )
+        return f'in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None}'
 
 
 # This class exists solely to avoid triggering an obscure error when scripting
@@ -178,7 +176,7 @@ class Bilinear(Module):
     def __init__(self, in1_features: int, in2_features: int, out_features: int, bias: bool = True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Bilinear, self).__init__()
+        super().__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features

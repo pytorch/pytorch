@@ -10,6 +10,8 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymBool.h>
+#include <c10/core/Device.h>
 
 #include <array>
 #include <memory>
@@ -824,8 +826,8 @@ struct TORCH_API TensorType : public SharedType {
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& strides,
+      SymbolicShape sizes,
+      VaryingShape<Stride> strides,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
 
@@ -897,10 +899,12 @@ struct TORCH_API ListType
   static ListTypePtr ofTensors();
   static ListTypePtr ofOptionalTensors();
   static ListTypePtr ofInts();
+  static ListTypePtr ofSymInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
+  static ListTypePtr ofNumbers();
 
  private:
   ListType(TypePtr elem) : SingleElementType(std::move(elem)) {}
@@ -999,12 +1003,7 @@ struct TORCH_API DictType : public SharedType {
     types.push_back(std::move(value));
   }
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
-    std::stringstream ss;
-    ss << "Dict[" << getKeyType()->annotation_str(printer) << ", ";
-    ss << getValueType()->annotation_str(std::move(printer)) << "]";
-    return ss.str();
-  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
 
   std::vector<TypePtr> types;
   bool has_free_variables;
@@ -1381,6 +1380,26 @@ struct TORCH_API SymFloatType : public Type {
 
  private:
   SymFloatType() : Type(TypeKind::SymFloatType) {}
+};
+
+struct SymBoolType;
+using SymBoolTypePtr = SingletonTypePtr<SymBoolType>;
+struct TORCH_API SymBoolType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymBool";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "bool";
+  }
+  static const TypeKind Kind = TypeKind::SymBoolType;
+  // global singleton
+  static SymBoolTypePtr get();
+
+ private:
+  SymBoolType() : Type(TypeKind::SymBoolType) {}
 };
 
 struct IntType;
@@ -1853,6 +1872,13 @@ struct getTypePtr_<int64_t> final {
 };
 
 template <>
+struct getTypePtr_<DeviceIndex> final {
+  static decltype(auto) call() {
+    return IntType::get();
+  }
+};
+
+template <>
 struct getMaybeFakeTypePtr_<SymInt, false> final {
   static decltype(auto) call() {
     return SymIntType::get();
@@ -1875,6 +1901,19 @@ template <>
 struct getMaybeFakeTypePtr_<SymFloat, true> final {
   static decltype(auto) call() {
     return FloatType::get();
+  }
+};
+
+template <>
+struct getMaybeFakeTypePtr_<SymBool, false> final {
+  static decltype(auto) call() {
+    return SymBoolType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<SymBool, true> final {
+  static decltype(auto) call() {
+    return BoolType::get();
   }
 };
 

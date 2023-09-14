@@ -47,7 +47,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             This attribute access will be consistent with MTML model.
         '''
 
-        super(LayerModelHelper, self).__init__(name=name)
+        super().__init__(name=name)
         self._layer_names = set()
         self._layers = []
         self._param_to_shape = {}
@@ -148,7 +148,7 @@ class LayerModelHelper(model_helper.ModelHelper):
                 op_name = 'GivenTensorIntFill'
             elif array.dtype == np.int64:
                 op_name = 'GivenTensorInt64Fill'
-            elif array.dtype == np.str:
+            elif array.dtype == str:
                 op_name = 'GivenTensorStringFill'
             elif array.dtype == np.bool:
                 op_name = 'GivenTensorBoolFill'

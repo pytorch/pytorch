@@ -105,8 +105,8 @@ static inline Py_ssize_t doPartialPythonIO(
     size_t nbytes,
     bool is_read) {
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
-  THPObjectPtr memview(
-      PyMemoryView_FromMemory(reinterpret_cast<char*>(buf), nbytes, rw_flag));
+  THPObjectPtr memview(PyMemoryView_FromMemory(
+      reinterpret_cast<char*>(buf), static_cast<Py_ssize_t>(nbytes), rw_flag));
   if (!memview)
     throw python_error();
 
@@ -228,17 +228,20 @@ void THPStorage_writeFileRaw(
   c10::DeviceGuard guard(self->device());
   uint8_t* data{};
   at::Tensor cpu_tensor;
-  int64_t size_bytes = self->nbytes();
-  int64_t numel = size_bytes / element_size;
+  size_t size_bytes = self->nbytes();
+  size_t numel = size_bytes / element_size;
   if (self->device_type() == at::kCPU) {
-    data = self->data<uint8_t>();
+    // We are using a mutable pointer here because we're ultimately
+    // calling into a Python API that requires that, even though it
+    // won't mutate the data.
+    data = static_cast<uint8_t*>(self->mutable_data());
   } else {
     // Here we use a tensor.to() to impl D2H for all non-CPU device.
     auto device_tensor = at::from_blob(
-        self->data<void>(),
-        {size_bytes},
+        self->mutable_data(),
+        {static_cast<int64_t>(size_bytes)},
         {1},
-        NULL,
+        nullptr,
         at::device(self->device()).dtype(c10::kByte),
         {self->device()});
     cpu_tensor = device_tensor.to(at::kCPU);
@@ -264,11 +267,11 @@ void THPStorage_writeFileRaw(
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN) {
     doWrite(fd, data, size_bytes);
   } else {
-    int64_t buffer_size = std::min(numel, (int64_t)5000);
+    size_t buffer_size = std::min(numel, (size_t)5000);
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     std::unique_ptr<uint8_t[]> le_buffer(
         new uint8_t[buffer_size * element_size]);
-    for (int64_t i = 0; i < numel; i += buffer_size) {
+    for (size_t i = 0; i < numel; i += buffer_size) {
       size_t to_convert = std::min(numel - i, buffer_size);
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
@@ -320,10 +323,9 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     int64_t tsize = size; // convert little endian storage to big endian cpu
-    torch::utils::THP_decodeInt64Buffer(
-        &size, (const uint8_t*)&tsize, torch::utils::THP_nativeByteOrder(), 1);
+    torch::utils::THP_decodeInt64Buffer(&size, (const uint8_t*)&tsize, true, 1);
   }
-  int64_t nbytes = element_size * size;
+  size_t nbytes = element_size * size;
   if (!storage.defined()) {
     storage = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
@@ -331,7 +333,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
         c10::GetDefaultCPUAllocator(),
         /*resizable=*/true);
   } else {
-    int64_t _storage_nbytes = storage->nbytes();
+    size_t _storage_nbytes = storage->nbytes();
     TORCH_CHECK(
         _storage_nbytes == nbytes,
         "storage has wrong byte size: expected %ld got %ld",
@@ -339,12 +341,14 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
         _storage_nbytes);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   std::unique_ptr<char[]> cpu_data;
 
   uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
-    data = storage->data<uint8_t>();
+    data = static_cast<uint8_t*>(storage->mutable_data());
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
     data = (uint8_t*)cpu_data.get();
   }
@@ -367,22 +371,13 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
         torch::utils::THP_decodeInt16Buffer(
-            (int16_t*)data + i,
-            le_buffer.get(),
-            torch::utils::THP_nativeByteOrder(),
-            to_convert);
+            (int16_t*)data + i, le_buffer.get(), true, to_convert);
       } else if (element_size == 4) {
         torch::utils::THP_decodeInt32Buffer(
-            (int32_t*)data + i,
-            le_buffer.get(),
-            torch::utils::THP_nativeByteOrder(),
-            to_convert);
+            (int32_t*)data + i, le_buffer.get(), true, to_convert);
       } else if (element_size == 8) {
         torch::utils::THP_decodeInt64Buffer(
-            (int64_t*)data + i,
-            le_buffer.get(),
-            torch::utils::THP_nativeByteOrder(),
-            to_convert);
+            (int64_t*)data + i, le_buffer.get(), true, to_convert);
       }
     }
   }
@@ -390,12 +385,14 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (storage->device_type() != at::kCPU) {
     // Here we use a tensor.copy_() to impl H2D for all non-CPU device.
     auto cpu_tensor = at::from_blob(
-        (void*)data, {nbytes}, at::device(at::kCPU).dtype(c10::kByte));
+        (void*)data,
+        {static_cast<int64_t>(nbytes)},
+        at::device(at::kCPU).dtype(c10::kByte));
     auto device_tensor = at::from_blob(
-        storage->data<void>(),
-        {nbytes},
+        storage->mutable_data(),
+        {static_cast<int64_t>(nbytes)},
         {1},
-        NULL,
+        nullptr,
         at::device(storage->device()).dtype(c10::kByte),
         {storage->device()});
     device_tensor.copy_(cpu_tensor);

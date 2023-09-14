@@ -18,8 +18,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 using namespace at;
 using namespace torch::autograd;
 
@@ -251,8 +250,7 @@ std::vector<at::Tensor>& scatter_out(
         out_tensors[i].device(),
         "'");
     auto out_sizes = out_tensors[i].sizes().vec();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    bool same_ndim = out_sizes.size() == tensor.dim();
+    bool same_ndim = out_sizes.size() == static_cast<size_t>(tensor.dim());
     if (same_ndim) {
       total_size += out_sizes[dim];
       chunk_sizes.emplace_back(out_sizes[dim]);
@@ -504,5 +502,4 @@ at::Tensor gather(
   return _gather_out_impl(tensors, result, dim);
 }
 
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda

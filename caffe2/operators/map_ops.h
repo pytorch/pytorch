@@ -52,7 +52,7 @@ class CreateMapOp final : public Operator<Context> {
   template <class... Args>
   explicit CreateMapOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~CreateMapOp() {}
+  ~CreateMapOp() override {}
 
   bool RunOnDevice() override {
     TensorProto::DataType key_dtype = static_cast<TensorProto::DataType>(
@@ -104,7 +104,7 @@ class KeyValueToMapOp final : public Operator<Context> {
   template <class... Args>
   explicit KeyValueToMapOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~KeyValueToMapOp() {}
+  ~KeyValueToMapOp() override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
@@ -157,7 +157,7 @@ class MapToKeyValueOp final : public Operator<Context> {
   template <class... Args>
   explicit MapToKeyValueOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~MapToKeyValueOp() {}
+  ~MapToKeyValueOp() override {}
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<

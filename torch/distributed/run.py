@@ -30,11 +30,11 @@ Transitioning from torch.distributed.launch to torchrun
 
 
 ``torchrun`` supports the same arguments as ``torch.distributed.launch`` **except**
-for ``--use_env`` which is now deprecated. To migrate from ``torch.distributed.launch``
+for ``--use-env`` which is now deprecated. To migrate from ``torch.distributed.launch``
 to ``torchrun`` follow these steps:
 
 1.  If your training script is already reading ``local_rank`` from the ``LOCAL_RANK`` environment variable.
-    Then you need simply omit the ``--use_env`` flag, e.g.:
+    Then you need simply omit the ``--use-env`` flag, e.g.:
 
     +--------------------------------------------------------------------+--------------------------------------------+
     |         ``torch.distributed.launch``                               |                ``torchrun``                |
@@ -42,11 +42,11 @@ to ``torchrun`` follow these steps:
     |                                                                    |                                            |
     | .. code-block:: shell-session                                      | .. code-block:: shell-session              |
     |                                                                    |                                            |
-    |    $ python -m torch.distributed.launch --use_env train_script.py  |    $ torchrun train_script.py              |
+    |    $ python -m torch.distributed.launch --use-env train_script.py  |    $ torchrun train_script.py              |
     |                                                                    |                                            |
     +--------------------------------------------------------------------+--------------------------------------------+
 
-2.  If your training script reads local rank from a ``--local_rank`` cmd argument.
+2.  If your training script reads local rank from a ``--local-rank`` cmd argument.
     Change your training script to read from the ``LOCAL_RANK`` environment variable as
     demonstrated by the following code snippet:
 
@@ -59,7 +59,7 @@ to ``torchrun`` follow these steps:
     |                                                       |                                                    |
     |    import argparse                                    |     import os                                      |
     |    parser = argparse.ArgumentParser()                 |     local_rank = int(os.environ["LOCAL_RANK"])     |
-    |    parser.add_argument("--local_rank", type=int)      |                                                    |
+    |    parser.add_argument("--local-rank", type=int)      |                                                    |
     |    args = parser.parse_args()                         |                                                    |
     |                                                       |                                                    |
     |    local_rank = args.local_rank                       |                                                    |
@@ -85,7 +85,7 @@ Single-node multi-worker
     torchrun
         --standalone
         --nnodes=1
-        --nproc_per_node=$NUM_TRAINERS
+        --nproc-per-node=$NUM_TRAINERS
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
 Stacked single-node multi-worker
@@ -94,18 +94,18 @@ Stacked single-node multi-worker
 To run multiple instances (separate jobs) of single-node, multi-worker on the
 same host, we need to make sure that each instance (job) is
 setup on different ports to avoid port conflicts (or worse, two jobs being merged
-as a single job). To do this you have to run with ``--rdzv_backend=c10d``
-and specify a different port by setting ``--rdzv_endpoint=localhost:$PORT_k``.
+as a single job). To do this you have to run with ``--rdzv-backend=c10d``
+and specify a different port by setting ``--rdzv-endpoint=localhost:$PORT_k``.
 For ``--nodes=1``, its often convenient to let ``torchrun`` pick a free random
-port automatically instead of manually assgining different ports for each run.
+port automatically instead of manually assigning different ports for each run.
 
 ::
 
     torchrun
-        --rdzv_backend=c10d
-        --rdzv_endpoint=localhost:0
+        --rdzv-backend=c10d
+        --rdzv-endpoint=localhost:0
         --nnodes=1
-        --nproc_per_node=$NUM_TRAINERS
+        --nproc-per-node=$NUM_TRAINERS
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
 
@@ -116,11 +116,11 @@ Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failur
 
     torchrun
         --nnodes=$NUM_NODES
-        --nproc_per_node=$NUM_TRAINERS
-        --max_restarts=3
-        --rdzv_id=$JOB_ID
-        --rdzv_backend=c10d
-        --rdzv_endpoint=$HOST_NODE_ADDR
+        --nproc-per-node=$NUM_TRAINERS
+        --max-restarts=3
+        --rdzv-id=$JOB_ID
+        --rdzv-backend=c10d
+        --rdzv-endpoint=$HOST_NODE_ADDR
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
 ``HOST_NODE_ADDR``, in form <host>[:<port>] (e.g. node1.example.com:29400), specifies the node and
@@ -137,11 +137,11 @@ Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
 
     torchrun
         --nnodes=1:4
-        --nproc_per_node=$NUM_TRAINERS
-        --max_restarts=3
-        --rdzv_id=$JOB_ID
-        --rdzv_backend=c10d
-        --rdzv_endpoint=$HOST_NODE_ADDR
+        --nproc-per-node=$NUM_TRAINERS
+        --max-restarts=3
+        --rdzv-id=$JOB_ID
+        --rdzv-backend=c10d
+        --rdzv-endpoint=$HOST_NODE_ADDR
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
 ``HOST_NODE_ADDR``, in form <host>[:<port>] (e.g. node1.example.com:29400), specifies the node and
@@ -156,10 +156,10 @@ Note on rendezvous backend
 
 For multi-node training you need to specify:
 
-1. ``--rdzv_id``: A unique job id (shared by all nodes participating in the job)
-2. ``--rdzv_backend``: An implementation of
+1. ``--rdzv-id``: A unique job id (shared by all nodes participating in the job)
+2. ``--rdzv-backend``: An implementation of
    :py:class:`torch.distributed.elastic.rendezvous.RendezvousHandler`
-3. ``--rdzv_endpoint``: The endpoint where the rendezvous backend is running; usually in form
+3. ``--rdzv-endpoint``: The endpoint where the rendezvous backend is running; usually in form
    ``host:port``.
 
 Currently ``c10d`` (recommended), ``etcd-v2``, and ``etcd`` (legacy)  rendezvous backends are
@@ -221,7 +221,7 @@ The following environment variables are made available to you in your script:
    of the worker is specified in the ``WorkerSpec``.
 
 5. ``LOCAL_WORLD_SIZE`` - The local world size (e.g. number of workers running locally); equals to
-   ``--nproc_per_node`` specified on ``torchrun``.
+   ``--nproc-per-node`` specified on ``torchrun``.
 
 6. ``WORLD_SIZE`` - The world size (total number of workers in the job).
 
@@ -246,7 +246,7 @@ Deployment
 ------------
 
 1. (Not needed for the C10d backend) Start the rendezvous backend server and get the endpoint (to be
-   passed as ``--rdzv_endpoint`` to the launcher script)
+   passed as ``--rdzv-endpoint`` to the launcher script)
 
 2. Single-node multi-worker: Start the launcher on the host to start the agent process which
    creates and monitors a local worker group.
@@ -325,7 +325,7 @@ utility
 5. This module only supports homogeneous ``LOCAL_WORLD_SIZE``. That is, it is assumed that all
    nodes run the same number of local workers (per role).
 
-6. ``RANK`` is NOT stable. Between restarts, the local workers on a node can be assgined a
+6. ``RANK`` is NOT stable. Between restarts, the local workers on a node can be assigned a
    different range of ranks than before. NEVER hard code any assumptions about the stable-ness of
    ranks or some correlation between ``RANK`` and ``LOCAL_RANK``.
 
@@ -384,9 +384,9 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
+from torch.utils.backend_registration import _get_custom_mod_func
 
-
-log = get_logger()
+log = get_logger(__name__)
 
 
 def get_args_parser() -> ArgumentParser:
@@ -406,6 +406,7 @@ def get_args_parser() -> ArgumentParser:
         help="Number of nodes, or the range of nodes in form <minimum_nodes>:<maximum_nodes>.",
     )
     parser.add_argument(
+        "--nproc-per-node",
         "--nproc_per_node",
         action=env,
         type=str,
@@ -418,6 +419,7 @@ def get_args_parser() -> ArgumentParser:
     #
 
     parser.add_argument(
+        "--rdzv-backend",
         "--rdzv_backend",
         action=env,
         type=str,
@@ -425,6 +427,7 @@ def get_args_parser() -> ArgumentParser:
         help="Rendezvous backend.",
     )
     parser.add_argument(
+        "--rdzv-endpoint",
         "--rdzv_endpoint",
         action=env,
         type=str,
@@ -432,6 +435,7 @@ def get_args_parser() -> ArgumentParser:
         help="Rendezvous backend endpoint; usually in form <host>:<port>.",
     )
     parser.add_argument(
+        "--rdzv-id",
         "--rdzv_id",
         action=env,
         type=str,
@@ -439,6 +443,7 @@ def get_args_parser() -> ArgumentParser:
         help="User-defined group id.",
     )
     parser.add_argument(
+        "--rdzv-conf",
         "--rdzv_conf",
         action=env,
         type=str,
@@ -449,8 +454,8 @@ def get_args_parser() -> ArgumentParser:
         "--standalone",
         action=check_env,
         help="Start a local standalone rendezvous backend that is represented by a C10d TCP store "
-        "on port 29400. Useful when launching single-node, multi-worker job. If specified "
-        "--rdzv_backend, --rdzv_endpoint, --rdzv_id are auto-assigned; any explicitly set values "
+        "on a free port. Useful when launching single-node, multi-worker job. If specified "
+        "--rdzv-backend, --rdzv-endpoint, --rdzv-id are auto-assigned and any explicitly set values "
         "are ignored.",
     )
 
@@ -459,6 +464,7 @@ def get_args_parser() -> ArgumentParser:
     #
 
     parser.add_argument(
+        "--max-restarts",
         "--max_restarts",
         action=env,
         type=int,
@@ -466,6 +472,7 @@ def get_args_parser() -> ArgumentParser:
         help="Maximum number of worker group restarts before failing.",
     )
     parser.add_argument(
+        "--monitor-interval",
         "--monitor_interval",
         action=env,
         type=float,
@@ -473,6 +480,7 @@ def get_args_parser() -> ArgumentParser:
         help="Interval, in seconds, to monitor the state of workers.",
     )
     parser.add_argument(
+        "--start-method",
         "--start_method",
         action=env,
         type=str,
@@ -495,6 +503,7 @@ def get_args_parser() -> ArgumentParser:
         "with the same behavior as 'python -m'.",
     )
     parser.add_argument(
+        "--no-python",
         "--no_python",
         action=check_env,
         help="Skip prepending the training script with 'python' - just execute it directly. Useful "
@@ -502,13 +511,15 @@ def get_args_parser() -> ArgumentParser:
     )
 
     parser.add_argument(
+        "--run-path",
         "--run_path",
         action=check_env,
         help="Run the training script with runpy.run_path in the same interpreter."
         " Script must be provided as an abs path (e.g. /abs/path/script.py)."
-        " Takes precedence over --no_python.",
+        " Takes precedence over --no-python.",
     )
     parser.add_argument(
+        "--log-dir",
         "--log_dir",
         action=env,
         type=str,
@@ -541,6 +552,7 @@ def get_args_parser() -> ArgumentParser:
     #
 
     parser.add_argument(
+        "--node-rank",
         "--node_rank",
         type=int,
         action=env,
@@ -548,16 +560,18 @@ def get_args_parser() -> ArgumentParser:
         help="Rank of the node for multi-node distributed training.",
     )
     parser.add_argument(
+        "--master-addr",
         "--master_addr",
         default="127.0.0.1",
         type=str,
         action=env,
         help="Address of the master node (rank 0) that only used for static rendezvous. It should "
         "be either the IP address or the hostname of rank 0. For single node multi-proc training "
-        "the --master_addr can simply be 127.0.0.1; IPv6 should have the pattern "
+        "the --master-addr can simply be 127.0.0.1; IPv6 should have the pattern "
         "`[0:0:0:0:0:0:0:1]`.",
     )
     parser.add_argument(
+        "--master-port",
         "--master_port",
         default=29500,
         type=int,
@@ -566,6 +580,7 @@ def get_args_parser() -> ArgumentParser:
         "training. It is only used for static rendezvous.",
     )
     parser.add_argument(
+        "--local-addr",
         "--local_addr",
         default=None,
         type=str,
@@ -613,7 +628,7 @@ def parse_min_max_nnodes(nnodes: str):
 
 def determine_local_world_size(nproc_per_node: str):
     try:
-        logging.info(f"Using nproc_per_node={nproc_per_node}.")
+        logging.info("Using nproc_per_node=%s.", nproc_per_node)
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
@@ -624,10 +639,19 @@ def determine_local_world_size(nproc_per_node: str):
                 raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
+        elif nproc_per_node == torch._C._get_privateuse1_backend_name():
+            if not _get_custom_mod_func("is_available")():
+                raise ValueError(f"{nproc_per_node} is not available.") from e
+            device_type = nproc_per_node
+            num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
             if torch.cuda.is_available():
                 num_proc = torch.cuda.device_count()
                 device_type = "gpu"
+            elif hasattr(torch, torch._C._get_privateuse1_backend_name()) and \
+                    _get_custom_mod_func("is_available")():
+                num_proc = _get_custom_mod_func("device_count")()
+                device_type = torch._C._get_privateuse1_backend_name()
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
@@ -635,9 +659,10 @@ def determine_local_world_size(nproc_per_node: str):
             raise ValueError(f"Unsupported nproc_per_node value: {nproc_per_node}") from e
 
         log.info(
-            f"Using nproc_per_node={nproc_per_node},"
-            f" seting to {num_proc} since the instance "
-            f"has {os.cpu_count()} {device_type}"
+            "Using nproc_per_node=%s,"
+            " setting to %s since the instance "
+            "has %s %s",
+            nproc_per_node, num_proc, os.cpu_count(), device_type
         )
         return num_proc
 
@@ -652,7 +677,7 @@ def get_use_env(args) -> bool:
     """
     Retrieves ``use_env`` from the args.
     ``use_env`` is a legacy argument, if ``use_env`` is False, the
-    ``--node_rank`` argument will be transferred to all worker processes.
+    ``--node-rank`` argument will be transferred to all worker processes.
     ``use_env`` is only used by the ``torch.distributed.launch`` and will
     be deprecated in future releases.
     """
@@ -677,12 +702,13 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
         log.warning(
-            f"\n*****************************************\n"
-            f"Setting OMP_NUM_THREADS environment variable for each process to be "
-            f"{omp_num_threads} in default, to avoid your system being overloaded, "
-            f"please further tune the variable for optimal performance in "
-            f"your application as needed. \n"
-            f"*****************************************"
+            "\n*****************************************\n"
+            "Setting OMP_NUM_THREADS environment variable for each process to be "
+            "%s in default, to avoid your system being overloaded, "
+            "please further tune the variable for optimal performance in "
+            "your application as needed. \n"
+            "*****************************************",
+            omp_num_threads
         )
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
@@ -729,12 +755,12 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
         else:
             if args.module:
                 raise ValueError(
-                    "Don't use both the '--no_python' flag"
+                    "Don't use both the '--no-python' flag"
                     " and the '--module' flag at the same time."
                 )
             cmd = args.training_script
     if not use_env:
-        cmd_args.append(f"--local_rank={macros.local_rank}")
+        cmd_args.append(f"--local-rank={macros.local_rank}")
     cmd_args.extend(args.training_script_args)
 
     return config, cmd, cmd_args
@@ -755,15 +781,16 @@ def run_script_path(training_script: str, *training_script_args: str):
 def run(args):
     if args.standalone:
         args.rdzv_backend = "c10d"
-        args.rdzv_endpoint = "localhost:29400"
+        args.rdzv_endpoint = "localhost:0"
         args.rdzv_id = str(uuid.uuid4())
         log.info(
-            f"\n**************************************\n"
-            f"Rendezvous info:\n"
-            f"--rdzv_backend={args.rdzv_backend} "
-            f"--rdzv_endpoint={args.rdzv_endpoint} "
-            f"--rdzv_id={args.rdzv_id}\n"
-            f"**************************************\n"
+            "\n**************************************\n"
+            "Rendezvous info:\n"
+            "--rdzv-backend=%s "
+            "--rdzv-endpoint=%s "
+            "--rdzv-id=%s\n"
+            "**************************************\n",
+            args.rdzv_backend, args.rdzv_endpoint, args.rdzv_id
         )
 
     config, cmd, cmd_args = config_from_args(args)

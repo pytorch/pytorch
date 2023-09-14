@@ -50,12 +50,14 @@ inline void check_inplace(const at::Tensor& tensor, bool requires_grad) {
       // This can throw or warn
       handle_view_on_rebase(diff_view_meta);
       if (tensor.requires_grad() && tensor._base().is_leaf()) {
-        AT_ERROR(
+        TORCH_CHECK(
+            false,
             "a view of a leaf Variable that requires grad is being used in an in-place operation.");
       }
     }
     if (tensor.requires_grad() && tensor.is_leaf()) {
-      AT_ERROR(
+      TORCH_CHECK(
+          false,
           "a leaf Variable that requires grad is being used in an in-place operation.");
     }
   }
@@ -330,7 +332,7 @@ inline std::vector<at::Tensor> as_view(
         "Non-backward differentiable views must have creation_meta=CreationMeta::DEFAULT");
   }
   if (is_fw_differentiable) {
-    // Check if base is a forward differentiabble view
+    // Check if base is a forward differentiable view
     auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
     if (diff_view_meta && diff_view_meta->has_fw_view()) {
       const auto& base_fw_info = diff_view_meta->get_forward_view();
@@ -423,21 +425,24 @@ inline void check_no_requires_grad(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    at::ITensorListRef tensors) {
-  return fmap(tensors, [](const at::Tensor& tensor) -> SavedVariable {
-    return SavedVariable{tensor, false /* is output */};
+    at::ITensorListRef tensors,
+    const bool is_output = false) {
+  return fmap(tensors, [&is_output](const at::Tensor& tensor) -> SavedVariable {
+    return SavedVariable{tensor, is_output /* is output */};
   });
 }
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    const c10::List<c10::optional<at::Tensor>>& tensors) {
+    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const bool is_output = false) {
   return fmap(
-      tensors, [](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
+      tensors,
+      [&is_output](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
         if (tensor.has_value()) {
-          return SavedVariable{*tensor, false /* is output */};
+          return SavedVariable{*tensor, is_output /* is output */};
         } else {
-          return SavedVariable{at::Tensor(), false /* is output */};
+          return SavedVariable{at::Tensor(), is_output /* is output */};
         }
       });
 }

@@ -17,7 +17,7 @@ def get_custom_backend_library_path():
         library_filename = "libcustom_backend.dylib"
     else:
         library_filename = "libcustom_backend.so"
-    path = os.path.abspath("build/{}".format(library_filename))
+    path = os.path.abspath(f"build/{library_filename}")
     assert os.path.exists(path), path
     return path
 
@@ -42,9 +42,6 @@ class Model(torch.nn.Module):
     Simple model used for testing that to_backend API supports saving, loading,
     and executing in C++.
     """
-
-    def __init__(self):
-        super(Model, self).__init__()
 
     def forward(self, a, b):
         return (a + b, a - b)

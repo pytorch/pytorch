@@ -1,9 +1,7 @@
 #pragma once
 
-#include <assert.h>
 #include <stdint.h>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -37,7 +35,7 @@ class C10_API Scalar {
   Scalar() : Scalar(int64_t(0)) {}
 
   void destroy() {
-    if (Tag::HAS_si == tag || Tag::HAS_sd == tag) {
+    if (Tag::HAS_si == tag || Tag::HAS_sd == tag || Tag::HAS_sb == tag) {
       raw::intrusive_ptr::decref(v.p);
       v.p = nullptr;
     }
@@ -50,7 +48,13 @@ class C10_API Scalar {
 #define DEFINE_IMPLICIT_CTOR(type, name) \
   Scalar(type vv) : Scalar(vv, true) {}
 
-  AT_FORALL_SCALAR_TYPES_AND3(Half, BFloat16, ComplexHalf, DEFINE_IMPLICIT_CTOR)
+  AT_FORALL_SCALAR_TYPES_AND5(
+      Half,
+      BFloat16,
+      Float8_e5m2,
+      Float8_e4m3fn,
+      ComplexHalf,
+      DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
 
 #undef DEFINE_IMPLICIT_CTOR
@@ -64,6 +68,14 @@ class C10_API Scalar {
           nullptr>
   Scalar(T vv) : tag(Tag::HAS_b) {
     v.i = convert<int64_t, bool>(vv);
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<std::is_same<T, c10::SymBool>::value, bool>::
+          type* = nullptr>
+  Scalar(T vv) : tag(Tag::HAS_sb) {
+    v.i = convert<int64_t, c10::SymBool>(vv);
   }
 
 #define DEFINE_ACCESSOR(type, name)                                   \
@@ -81,6 +93,8 @@ class C10_API Scalar {
       TORCH_CHECK(false, "tried to get " #name " out of SymInt")      \
     } else if (Tag::HAS_sd == tag) {                                  \
       TORCH_CHECK(false, "tried to get " #name " out of SymFloat")    \
+    } else if (Tag::HAS_sb == tag) {                                  \
+      TORCH_CHECK(false, "tried to get " #name " out of SymBool")     \
     }                                                                 \
     TORCH_CHECK(false)                                                \
   }
@@ -105,6 +119,15 @@ class C10_API Scalar {
           static_cast<SymNodeImpl*>(v.p)));
     } else {
       return toDouble();
+    }
+  }
+
+  SymBool toSymBool() const {
+    if (Tag::HAS_sb == tag) {
+      return c10::SymBool(intrusive_ptr<SymNodeImpl>::reclaim_copy(
+          static_cast<SymNodeImpl*>(v.p)));
+    } else {
+      return toBool();
     }
   }
 
@@ -137,7 +160,7 @@ class C10_API Scalar {
     return Tag::HAS_z == tag;
   }
   bool isBoolean() const {
-    return Tag::HAS_b == tag;
+    return Tag::HAS_b == tag || Tag::HAS_sb == tag;
   }
 
   // you probably don't actually want these; they're mostly for testing
@@ -147,9 +170,12 @@ class C10_API Scalar {
   bool isSymFloat() const {
     return Tag::HAS_sd == tag;
   }
+  bool isSymBool() const {
+    return Tag::HAS_sb == tag;
+  }
 
   bool isSymbolic() const {
-    return Tag::HAS_si == tag || Tag::HAS_sd == tag;
+    return Tag::HAS_si == tag || Tag::HAS_sd == tag || Tag::HAS_sb == tag;
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) noexcept {
@@ -254,12 +280,12 @@ class C10_API Scalar {
   }
 
   Scalar(c10::SymInt si) {
-    if (si.is_symbolic()) {
+    if (auto m = si.maybe_as_int()) {
+      tag = Tag::HAS_i;
+      v.i = *m;
+    } else {
       tag = Tag::HAS_si;
       v.p = std::move(si).release();
-    } else {
-      tag = Tag::HAS_i;
-      v.i = si.as_int_unchecked();
     }
   }
 
@@ -273,16 +299,27 @@ class C10_API Scalar {
     }
   }
 
+  Scalar(c10::SymBool sb) {
+    if (auto m = sb.maybe_as_bool()) {
+      tag = Tag::HAS_b;
+      v.i = *m;
+    } else {
+      tag = Tag::HAS_sb;
+      v.p = std::move(sb).release();
+    }
+  }
+
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
  private:
-  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_sd, HAS_si };
+  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_sd, HAS_si, HAS_sb };
 
   // NB: assumes that self has already been cleared
   C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
     v = rhs.v;
     tag = rhs.tag;
-    if (rhs.tag == Tag::HAS_si || rhs.tag == Tag::HAS_sd) {
+    if (rhs.tag == Tag::HAS_si || rhs.tag == Tag::HAS_sd ||
+        rhs.tag == Tag::HAS_sb) {
       // Move out of scalar
       rhs.tag = Tag::HAS_i;
       rhs.v.i = 0;

@@ -179,6 +179,7 @@ Tensor autograd functions
    torch.Tensor.detach
    torch.Tensor.detach_
    torch.Tensor.register_hook
+   torch.Tensor.register_post_accumulate_grad_hook
    torch.Tensor.retain_grad
 
 :hidden:`Function`
@@ -304,3 +305,7 @@ Also see :ref:`saved-tensors-hooks-doc`.
 .. autoclass:: torch.autograd.graph.save_on_cpu
 
 .. autoclass:: torch.autograd.graph.disable_saved_tensors_hooks
+
+.. autoclass:: torch.autograd.graph.register_multi_grad_hook
+
+.. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors

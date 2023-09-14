@@ -22,7 +22,7 @@ import tempfile
 
 class Foo(torch.nn.Module):
     def __init__(self):
-        super(Foo, self).__init__()
+        super().__init__()
         self.qscheme = torch.per_tensor_symmetric
 
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
@@ -1404,7 +1404,7 @@ class TestQuantizedTensor(TestCase):
                 __constants__ = ['fname']
 
                 def __init__(self):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.fname = fname
 
                 @torch.jit.script_method
@@ -1432,7 +1432,7 @@ class TestQuantizedTensor(TestCase):
     def test_jit_serialization(self):
         class SimpleQTensor(torch.jit.ScriptModule):
             def __init__(self, per_channel):
-                super(SimpleQTensor, self).__init__()
+                super().__init__()
                 x = torch.rand(5, 5).float()
                 if not per_channel:
                     x_q = torch.quantize_per_tensor(x, 0.2, 10, torch.quint8)
@@ -1513,7 +1513,7 @@ class TestQuantizedTensor(TestCase):
 
         # Now try decomposed pattern
         (scale_decomposed, zero_point_decomposed) = torch.ops.quantized_decomposed.choose_qparams.tensor(
-            X, quant_min, quant_max, dtype)
+            X, quant_min, quant_max, torch.Tensor([torch.finfo(torch.float32).eps]), dtype)
         quantized_decomposed_X = torch.ops.quantized_decomposed.quantize_per_tensor.tensor(
             X, scale_decomposed, zero_point_decomposed, quant_min, quant_max, dtype)
 

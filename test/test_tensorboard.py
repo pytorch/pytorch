@@ -53,6 +53,7 @@ def tensor_N(shape, dtype=float):
 class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
     def setUp(self):
+        super().setUp()
         if not TEST_TENSORBOARD:
             return self.skipTest("Skip the test since TensorBoard is not installed")
         if TEST_WITH_CROSSREF:
@@ -67,7 +68,7 @@ class BaseTestCase(TestCase):
         return SummaryWriter(temp_dir)
 
     def tearDown(self):
-        super(BaseTestCase, self).tearDown()
+        super().tearDown()
         # Remove directories created by SummaryWriter
         for temp_dir in self.temp_dirs:
             if os.path.exists(temp_dir):
@@ -78,6 +79,8 @@ if TEST_TENSORBOARD:
     from tensorboard.compat.proto.graph_pb2 import GraphDef
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+    from tensorboard.compat.proto.types_pb2 import DataType
+    from torch.utils.tensorboard.summary import tensor_proto
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
@@ -93,14 +96,14 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
             self.assertIsInstance(make_np(tensor), np.ndarray)
 
             # CUDA tensor
-            if torch.cuda.device_count() > 0:
+            if torch.cuda.is_available():
                 self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
 
             # regular variable
             self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
 
             # CUDA variable
-            if torch.cuda.device_count() > 0:
+            if torch.cuda.is_available():
                 self.assertIsInstance(make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
 
         # python primitive type
@@ -518,7 +521,7 @@ def get_expected_file(function_ptr):
 def read_expected_content(function_ptr):
     expected_file = get_expected_file(function_ptr)
     assert os.path.exists(expected_file), expected_file
-    with open(expected_file, "r") as f:
+    with open(expected_file) as f:
         return f.read()
 
 def compare_image_proto(actual_proto, function_ptr):
@@ -562,7 +565,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         class myLinear(torch.nn.Module):
             def __init__(self):
-                super(myLinear, self).__init__()
+                super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
             def forward(self, x):
@@ -682,7 +685,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         # the add_graph call and still continue.
         class myMLP(torch.nn.Module):
             def __init__(self):
-                super(myMLP, self).__init__()
+                super().__init__()
                 self.input_len = 1 * 28 * 28
                 self.fc1 = torch.nn.Linear(self.input_len, 1200)
                 self.fc2 = torch.nn.Linear(1200, 1200)
@@ -763,11 +766,11 @@ class TestTensorBoardFigure(BaseTestCase):
             figures.append(figure)
 
         writer.add_figure("add_figure/figure_list", figures, 0, close=False)
-        self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa: F812
+        self.assertTrue(all(plt.fignum_exists(figure.number) is True for figure in figures))  # noqa: F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
         if matplotlib.__version__ != '3.3.0':
-            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa: F812
+            self.assertTrue(all(plt.fignum_exists(figure.number) is False for figure in figures))  # noqa: F812
         else:
             print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 
@@ -806,7 +809,7 @@ class TestTensorBoardNumpy(BaseTestCase):
         model = ModelHelper(name="mnist")
         # how come those inputs don't break the forward pass =.=a
         workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
 
         with core.NameScope("conv1"):
             conv1 = brew.conv(model, "data", 'conv1', dim_in=1, dim_out=20, kernel=5)
@@ -841,7 +844,7 @@ class TestTensorBoardNumpy(BaseTestCase):
     def test_caffe2_simple_cnnmodel(self):
         model = cnn.CNNModelHelper("NCHW", name="overfeat")
         workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(np.int))
+        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
         with core.NameScope("conv1"):
             conv1 = model.Conv("data", "conv1", 3, 96, 11, stride=4)
             relu1 = model.Relu(conv1, conv1)
@@ -860,6 +863,44 @@ class TestTensorBoardNumpy(BaseTestCase):
             show_simplified=False,
         )
         compare_proto(graph, self)
+
+class TestTensorProtoSummary(BaseTestCase):
+    def test_float_tensor_proto(self):
+        float_values = [1.0, 2.0, 3.0]
+        actual_proto = (
+            tensor_proto("dummy", torch.tensor(float_values)).value[0].tensor
+        )
+        self.assertEqual(actual_proto.float_val, float_values)
+        self.assertTrue(actual_proto.dtype == DataType.DT_FLOAT)
+
+    def test_int_tensor_proto(self):
+        int_values = [1, 2, 3]
+        actual_proto = (
+            tensor_proto("dummy", torch.tensor(int_values, dtype=torch.int32))
+            .value[0]
+            .tensor
+        )
+        self.assertEqual(actual_proto.int_val, int_values)
+        self.assertTrue(actual_proto.dtype == DataType.DT_INT32)
+
+    def test_scalar_tensor_proto(self):
+        scalar_value = 0.1
+        actual_proto = (
+            tensor_proto("dummy", torch.tensor(scalar_value)).value[0].tensor
+        )
+        self.assertAlmostEqual(actual_proto.float_val[0], scalar_value)
+
+    def test_complex_tensor_proto(self):
+        real = torch.tensor([1.0, 2.0])
+        imag = torch.tensor([3.0, 4.0])
+        actual_proto = (
+            tensor_proto("dummy", torch.complex(real, imag)).value[0].tensor
+        )
+        self.assertEqual(actual_proto.scomplex_val, [1.0, 3.0, 2.0, 4.0])
+
+    def test_empty_tensor_proto(self):
+        actual_proto = tensor_proto("dummy", torch.empty(0)).value[0].tensor
+        self.assertEqual(actual_proto.float_val, [])
 
 if __name__ == '__main__':
     run_tests()

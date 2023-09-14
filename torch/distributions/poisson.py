@@ -5,7 +5,8 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Poisson']
+__all__ = ["Poisson"]
+
 
 class Poisson(ExponentialFamily):
     r"""
@@ -26,7 +27,7 @@ class Poisson(ExponentialFamily):
     Args:
         rate (Number, Tensor): the rate parameter
     """
-    arg_constraints = {'rate': constraints.nonnegative}
+    arg_constraints = {"rate": constraints.nonnegative}
     support = constraints.nonnegative_integer
 
     @property
@@ -42,12 +43,12 @@ class Poisson(ExponentialFamily):
         return self.rate
 
     def __init__(self, rate, validate_args=None):
-        self.rate, = broadcast_all(rate)
+        (self.rate,) = broadcast_all(rate)
         if isinstance(rate, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.rate.size()
-        super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Poisson, _instance)
@@ -70,7 +71,7 @@ class Poisson(ExponentialFamily):
 
     @property
     def _natural_params(self):
-        return (torch.log(self.rate), )
+        return (torch.log(self.rate),)
 
     def _log_normalizer(self, x):
         return torch.exp(x)

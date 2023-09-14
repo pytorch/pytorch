@@ -22,7 +22,7 @@ DEFINE_DISPATCH(qtanh_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
 // This ALWAYS outputs scale=2.0/256, zp=128, dtype=quint8
-Tensor qnnpack_tanh(Tensor input) {
+static Tensor qnnpack_tanh(Tensor input) {
   TORCH_CHECK(input.ndimension() > 0, "qnnpack_tanh(): Got empty input tensor");
   TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
                "qnnpack_tanh(): Expected input data type ",

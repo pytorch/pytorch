@@ -22,7 +22,7 @@ OPERATOR_SCHEMA(Sqrt)
 Performs element-wise square-root ($\sqrt{x}$) of input tensor $X$.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sqrt_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/sqrt_op.cc
 
 <details>
 

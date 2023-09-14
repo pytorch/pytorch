@@ -19,7 +19,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
   ~CUDAGraph();
 
-  void capture_begin(MempoolId_t pool={0, 0});
+  void capture_begin(MempoolId_t pool={0, 0}, cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
   void capture_end();
   void replay();
   void reset();
@@ -28,7 +28,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
 
   protected:
-#if !defined(USE_ROCM)
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   cudaGraph_t graph_ = NULL;
   cudaGraphExec_t graph_exec_ = NULL;
 #endif

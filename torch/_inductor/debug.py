@@ -1,33 +1,30 @@
 import collections
 import contextlib
 import cProfile
+import dataclasses
 import functools
 import itertools
 import logging
+import os
 import os.path
+import pickle
 import pstats
 import shutil
 import subprocess
-import sys
 from typing import Any, List
 from unittest.mock import patch
 
-from functorch.compile import (
-    config as functorch_config,
-    draw_graph,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-)
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
 from torch import fx as fx
 
-from torch._dynamo import config as dynamo_config
-from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
-from torch._dynamo.utils import get_debug_dir, init_logging
+from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
 from .scheduler import (
@@ -101,9 +98,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         func1.__name__ = name
         return func1
 
-    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snodes", "type"])
+    FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
-    func_dict = {s: get_fake_func(s) for s in ["extern", "nop", "compute", "fused"]}
     buf_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
@@ -129,20 +125,25 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
             group = snode.group
         else:
             raise RuntimeError("Unknown node type")
-        node_func = func_dict[node_type]
+
+        fused_name = torch._inductor.utils.get_fused_kernel_name(
+            snode.get_nodes(), "original_aten"
+        )
+        func_name = f"{node_type}: {fused_name}"
+        node_func = get_fake_func(func_name)
         fx_node = graph.call_function(node_func, args=(), kwargs=None)
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
-                return any([in_output(x) for x in snode.snodes])
-            return any([isinstance(user.node, OutputNode) for user in snode.users])
+                return any(in_output(x) for x in snode.snodes)
+            return any(isinstance(user.node, OutputNode) for user in snode.users)
 
         if in_output(snode):
             outputs.append(fx_node)
         name = snode.get_name()
         fx_node.name = name
 
-        fx_node.meta["fusion_meta"] = FusionMeta(group, [snode], node_type)
+        fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
         if isinstance(snode, FusedSchedulerNode):
             for x in snode.snodes:
@@ -176,23 +177,13 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
 @contextlib.contextmanager
 def enable_aot_logging():
-    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
-    debug_graphs = functorch_config.debug_graphs
-    debug_joint_graphs = functorch_config.debug_joint
+    compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     import torch._functorch.aot_autograd
 
     log = logging.getLogger(torch._functorch.aot_autograd.__name__)
 
     stack = contextlib.ExitStack()
-    stack.enter_context(patch("functorch.compile.config.log_level", logging.DEBUG))
-    # if user has specified they want to see graphs via either env var
-    # add stream to std out
-    if debug_graphs or debug_joint_graphs:
-        stdout_handler = logging.StreamHandler(sys.stdout)
-        log.addHandler(stdout_handler)
-        stack.callback(lambda: log.removeHandler(stdout_handler))
-
     if not compile_debug:
         try:
             yield
@@ -203,10 +194,8 @@ def enable_aot_logging():
     # Enable all graphs to be logged to a file by setting the flags to True
     # and the log level of the file logger to DEBUG
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
-    stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
-    stack.enter_context(patch("functorch.compile.config.debug_joint", True))
 
-    path = os.path.join(get_debug_dir(), "aot_torchinductor")
+    path = os.path.join(get_debug_dir(), "torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -245,7 +234,7 @@ class DebugContext:
         for n in DebugContext._counter:
             dirname = os.path.join(
                 get_debug_dir(),
-                "aot_torchinductor",
+                "torchinductor",
                 f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
@@ -257,17 +246,19 @@ class DebugContext:
         self._path = None
         self._stack = contextlib.ExitStack()
 
-    def rename(self, new_path: str):
+    def copy(self, new_path: str):
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
         if os.path.exists(new_path):
             shutil.rmtree(new_path)
         try:
-            os.rename(self._path, new_path)
+            shutil.copytree(self._path, new_path)
             self._path = new_path
         except OSError:
-            # other OS might have troubling renaming dir with open files
+            log.warning(
+                "Failed to copy debug files from %s to %s", self._path, new_path
+            )
             pass
 
     def fopen(self, filename):
@@ -290,17 +281,15 @@ class DebugContext:
             config.trace.upload_tar(tar_file)
 
     def __enter__(self):
-        log = logging.getLogger("torch._inductor")
-        if not log.handlers:
-            init_logging()
-
         if config.debug:
+            log = logging.getLogger("torch._dynamo")
+            prev_level = log.level
+            log.setLevel(logging.DEBUG)
 
             def reset_log_level(level):
-                dynamo_config.log_level = level
+                log.setLevel(level)
 
-            self._stack.callback(reset_log_level, dynamo_config.log_level)
-            dynamo_config.log_level = logging.DEBUG
+            self._stack.callback(reset_log_level, prev_level)
 
         self._stack.enter_context(V.set_debug_handler(self))
 
@@ -402,3 +391,81 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+
+
+@dataclasses.dataclass
+class TensorMetadataHolder:
+    tensor_metadata: TensorMetadata
+    device: torch.device
+
+
+save_args_cnt = itertools.count()
+
+
+def save_args_for_compile_fx_inner(*args, **kwargs):
+    """
+    This function is used to save arguments for a compile_fx_inner function call
+    to the file system.  Later on one can replay the compile_fx_inner call
+    with the saved arguments using load_args_and_run_compile_fx_inner.
+    """
+
+    folder = "/tmp/inductor_saved_args"
+    if not os.path.exists(folder):
+        os.mkdir(folder)
+
+    def handle_tensor(x):
+        """
+        Pickle FakeTensor will result in error:
+        AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<locals>.remove'
+
+        Convert all Tensor to metadata. This may also makes pickle faster.
+        """
+        if isinstance(x, torch.Tensor):
+            return TensorMetadataHolder(_extract_tensor_metadata(x), x.device)
+        else:
+            return x
+
+    args_to_save, kwargs_to_save = tree_map(handle_tensor, (args, kwargs))
+
+    fn_name = "compile_fx_inner"
+    path = f"{folder}/{fn_name}_{next(save_args_cnt)}.pkl"
+    with open(path, "wb") as f:
+        pickle.dump((args_to_save, kwargs_to_save), f)
+
+    if log.isEnabledFor(logging.DEBUG):
+        message = f"""
+Arguments for a compile_fx_inner call is saved to {path}. To replay the call,
+run the following:
+
+from torch._inductor.debug import load_args_and_run_compile_fx_inner
+load_args_and_run_compile_fx_inner({path!r})
+        """
+        # call print rather than log.debug. log.debug will print message
+        # prefix for each line which makes the code snippet harder to be
+        # copied.
+        # Not a big deal since the code is already been guarded by checking
+        # the log level.
+        print(message)
+
+
+def load_args_and_run_compile_fx_inner(path):
+    from torch._inductor.compile_fx import compile_fx_inner
+
+    with open(path, "rb") as f:
+        args, kwargs = pickle.load(f)
+
+    def handle_tensor(x):
+        if isinstance(x, TensorMetadataHolder):
+            return torch._dynamo.testing.rand_strided(
+                x.tensor_metadata.shape,
+                x.tensor_metadata.stride,
+                x.tensor_metadata.dtype,
+                x.device,
+            )
+        else:
+            return x
+
+    fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
+    with fake_mode, config.patch("save_args", False):
+        args, kwargs = tree_map(handle_tensor, (args, kwargs))
+        return compile_fx_inner(*args, **kwargs)

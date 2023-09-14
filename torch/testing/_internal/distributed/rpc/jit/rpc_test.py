@@ -310,7 +310,7 @@ class FutureTypingTest:
             dst_rank: int, inputs: Tuple[Tensor, Tensor]
         ) -> Future[Tensor]:
             return rpc.rpc_async(
-                "worker{}".format(dst_rank), two_args_two_kwargs, inputs
+                f"worker{dst_rank}", two_args_two_kwargs, inputs
             )
 
         fut_res = future_return_to_python(dst_rank, inputs)
@@ -767,7 +767,7 @@ class JitRpcOpTest:
 
         # Notice, TorchScript always translates(emits) Python `raise` statement,
         # as the exception message string, "Exception",
-        # no matter what exception type and excetpion message are in the statement,
+        # no matter what exception type and exception message are in the statement,
         @torch.jit.script
         def rpc_async_call_remote_raising_torchscript_in_torchscript(
             dst_worker_name: str,

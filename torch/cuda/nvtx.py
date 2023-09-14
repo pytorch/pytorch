@@ -3,10 +3,13 @@ from contextlib import contextmanager
 try:
     from torch._C import _nvtx
 except ImportError:
+
     class _NVTXStub:
         @staticmethod
         def _fail(*args, **kwargs):
-            raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")
+            raise RuntimeError(
+                "NVTX functions not installed. Are you sure you have a CUDA build?"
+            )
 
         rangePushA = _fail
         rangePop = _fail
@@ -84,5 +87,7 @@ def range(msg, *args, **kwargs):
         msg (str): message to associate with the range
     """
     range_push(msg.format(*args, **kwargs))
-    yield
-    range_pop()
+    try:
+        yield
+    finally:
+        range_pop()

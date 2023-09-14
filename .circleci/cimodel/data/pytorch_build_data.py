@@ -1,8 +1,7 @@
 from cimodel.lib.conf_tree import ConfigNode
 
 
-CONFIG_TREE_DATA = [
-]
+CONFIG_TREE_DATA = []
 
 
 def get_major_pyver(dotted_version):
@@ -12,7 +11,7 @@ def get_major_pyver(dotted_version):
 
 class TreeConfigNode(ConfigNode):
     def __init__(self, parent, node_name, subtree):
-        super(TreeConfigNode, self).__init__(parent, self.modify_label(node_name))
+        super().__init__(parent, self.modify_label(node_name))
         self.subtree = subtree
         self.init2(node_name)
 
@@ -28,7 +27,7 @@ class TreeConfigNode(ConfigNode):
 
 class TopLevelNode(TreeConfigNode):
     def __init__(self, node_name, subtree):
-        super(TopLevelNode, self).__init__(None, node_name, subtree)
+        super().__init__(None, node_name, subtree)
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
@@ -96,6 +95,7 @@ class SlowGradcheckConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ExperimentalFeatureConfigNode
 
+
 class PureTorchConfigNode(TreeConfigNode):
     def modify_label(self, label):
         return "PURE_TORCH=" + str(label)
@@ -116,6 +116,7 @@ class XlaConfigNode(TreeConfigNode):
 
     def child_constructor(self):
         return ImportantConfigNode
+
 
 class MPSConfigNode(TreeConfigNode):
     def modify_label(self, label):
@@ -254,8 +255,11 @@ class XenialCompilerConfigNode(TreeConfigNode):
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
-
-        return XenialCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
+        return (
+            XenialCompilerVersionConfigNode
+            if self.props["compiler_name"]
+            else PyVerConfigNode
+        )
 
 
 class BionicCompilerConfigNode(TreeConfigNode):
@@ -267,8 +271,11 @@ class BionicCompilerConfigNode(TreeConfigNode):
 
     # noinspection PyMethodMayBeStatic
     def child_constructor(self):
-
-        return BionicCompilerVersionConfigNode if self.props["compiler_name"] else PyVerConfigNode
+        return (
+            BionicCompilerVersionConfigNode
+            if self.props["compiler_name"]
+            else PyVerConfigNode
+        )
 
 
 class XenialCompilerVersionConfigNode(TreeConfigNode):

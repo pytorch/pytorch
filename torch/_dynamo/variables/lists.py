@@ -1,17 +1,47 @@
+import collections
+import dataclasses
 import functools
+import inspect
 import operator
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.fx
+from torch.fx import _pytree as fx_pytree
+from torch.utils import _pytree as pytree
 
-from .. import config, variables
-from ..bytecode_transformation import create_instruction
+from .. import variables
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
+from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import namedtuple_fields, proxy_args_kwargs
+from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
+from .functions import UserFunctionVariable, UserMethodVariable
+
+
+def _listlike_contains_helper(items, search, tx, options):
+    if search.is_python_constant():
+        result = any(
+            x.as_python_constant() == search.as_python_constant() for x in items
+        )
+        return variables.ConstantVariable(result, **options)
+
+    from .builtin import BuiltinVariable
+
+    result = None
+    for x in items:
+        check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+        if result is None:
+            result = check
+        else:
+            result = BuiltinVariable(operator.or_).call_function(
+                tx, [check, result], {}
+            )
+    if result is None:
+        result = ConstantVariable(None)
+    return result
 
 
 class BaseListVariable(VariableTracker):
@@ -23,6 +53,8 @@ class BaseListVariable(VariableTracker):
             slice: SliceVariable,
             torch.Size: SizeVariable,
             tuple: TupleVariable,
+            set: SetVariable,
+            collections.deque: DequeVariable,
         }[obj]
 
     def __init__(
@@ -32,9 +64,7 @@ class BaseListVariable(VariableTracker):
         regen_guards=True,
         **kwargs,
     ):
-        super(BaseListVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
 
@@ -55,7 +85,13 @@ class BaseListVariable(VariableTracker):
         return self.python_type()(self._as_proxy())
 
     def getitem_const(self, arg: VariableTracker):
-        index = arg.as_python_constant()
+        from .tensor import SymNodeVariable
+
+        if isinstance(arg, SymNodeVariable):
+            index = arg.sym_num
+        else:
+            index = arg.as_python_constant()
+
         if isinstance(index, slice):
             if self.source is not None:
                 return self.clone(
@@ -69,7 +105,7 @@ class BaseListVariable(VariableTracker):
                     mutable_local=MutableLocal() if self.mutable_local else None,
                 ).add_options(arg, self)
         else:
-            assert isinstance(index, int)
+            assert isinstance(index, (int, torch.SymInt))
             return self.items[index].add_options(arg, self)
 
     def unpack_var_sequence(self, tx):
@@ -79,25 +115,29 @@ class BaseListVariable(VariableTracker):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
-            assert not kwargs and len(args) == 1
-            return self.getitem_const(args[0])
-        elif (
-            name == "__contains__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and all(x.is_python_constant() for x in self.items)
-        ):
-            assert not kwargs
-            search = args[0].as_python_constant()
-            result = any(x.as_python_constant() == search for x in self.items)
-            return variables.ConstantVariable(result, **options)
+            from .tensor import TensorVariable
 
-        return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
+            assert not kwargs and len(args) == 1
+            if isinstance(args[0], TensorVariable):
+                value = get_fake_value(args[0].as_proxy().node, tx)
+                if value.constant is not None and value.constant.numel() == 1:
+                    value = variables.ConstantVariable(value.constant.item())
+                else:
+                    unimplemented("__getitem__ with non-constant tensor")
+            else:
+                value = args[0]
+            return self.getitem_const(value)
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return _listlike_contains_helper(self.items, args[0], tx, options)
+
+        return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
     def list_compare(tx, op, left, right):
@@ -142,6 +182,25 @@ class BaseListVariable(VariableTracker):
             comps,
         ).add_options(options)
 
+    # List-like implementations for pytree
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            index = SliceVariable(
+                [
+                    ConstantVariable(index.start),
+                    ConstantVariable(index.stop),
+                    ConstantVariable(index.step),
+                ]
+            )
+        elif isinstance(index, int):
+            index = ConstantVariable(index)
+        else:
+            raise TypeError("Invalid index type. Must be int or slice.")
+        return self.getitem_const(index)
+
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
@@ -179,9 +238,9 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.append_output(codegen.create_load_python_module(range, True))
         codegen.foreach(self.items)
-        return [create_instruction("CALL_FUNCTION", 3)]
+        return create_call_function(3, False)
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -190,20 +249,17 @@ class RangeVariable(BaseListVariable):
         return self.items[fields.index(name)].add_options(self)
 
 
-class ListVariable(BaseListVariable):
-    def python_type(self):
-        return list
-
-    def reconstruct(self, codegen):
-        codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", len(self.items))]
+class CommonListMethodsVariable(BaseListVariable):
+    """
+    Implement methods common to List and other List-like things
+    """
 
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "append" and self.mutable_local:
@@ -214,7 +270,7 @@ class ListVariable(BaseListVariable):
                 new_rec_contains.add(arg.mutable_local)
             tx.replace_all(
                 self,
-                ListVariable(
+                type(self)(
                     self.items + [arg],
                     recursively_contains=new_rec_contains,
                     regen_guards=False,
@@ -232,7 +288,7 @@ class ListVariable(BaseListVariable):
             (arg,) = args
             return tx.replace_all(
                 self,
-                ListVariable(
+                type(self)(
                     list(self.items) + list(arg.unpack_var_sequence(tx)),
                     regen_guards=False,
                     **options,
@@ -245,7 +301,7 @@ class ListVariable(BaseListVariable):
             items.insert(idx.as_python_constant(), value)
             return tx.replace_all(
                 self,
-                ListVariable(items, regen_guards=False, **options),
+                type(self)(items, regen_guards=False, **options),
             )
         elif name == "pop" and self.mutable_local:
             assert not kwargs
@@ -253,14 +309,14 @@ class ListVariable(BaseListVariable):
             result = items.pop(*[a.as_python_constant() for a in args])
             tx.replace_all(
                 self,
-                ListVariable(items, regen_guards=False, **options),
+                type(self)(items, regen_guards=False, **options),
             )
             return result
         elif name == "clear" and self.mutable_local:
             assert not kwargs and not args
             return tx.replace_all(
                 self,
-                ListVariable([], regen_guards=False, **options),
+                type(self)([], regen_guards=False, **options),
             )
         elif (
             name == "__setitem__"
@@ -277,6 +333,123 @@ class ListVariable(BaseListVariable):
                 items[key.as_python_constant()] = value
             result = ListVariable(items, regen_guards=False, **options)
             return tx.replace_all(self, result)
+        elif name == "copy":
+            # List copy() doesn't have args and kwargs
+            assert not kwargs
+            assert not args
+            items = list(self.items)
+            return type(self)(
+                items, regen_guards=False, mutable_local=MutableLocal(), **options
+            )
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class ListVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return list
+
+    def reconstruct(self, codegen):
+        codegen.foreach(self.items)
+        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            items = list(self.items)
+            if isinstance(key, SliceVariable):
+                if not value.has_unpack_var_sequence(tx):
+                    unimplemented(
+                        f"Missing dynamo support for expanding {value} into a list for slice assignment."
+                    )
+                items[key.as_python_constant()] = value.unpack_var_sequence(tx)
+            else:
+                items[key.as_python_constant()] = value
+            result = ListVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+
+class DequeVariable(CommonListMethodsVariable):
+    def python_type(self):
+        return collections.deque
+
+    def reconstruct(self, codegen):
+        assert "deque" not in codegen.tx.f_globals
+        codegen.append_output(
+            codegen.create_load_python_module(collections.deque, True)
+        )
+        codegen.foreach(self.items)
+        return create_call_function(len(self.items), False)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        if (
+            name == "__setitem__"
+            and self.mutable_local
+            and args
+            and args[0].is_python_constant()
+        ):
+            assert not kwargs
+            key, value = args
+            assert key.is_python_constant() and isinstance(
+                key.as_python_constant(), int
+            )
+            items = list(self.items)
+            items[key.as_python_constant()] = value
+            result = DequeVariable(items, regen_guards=False, **options)
+            return tx.replace_all(self, result)
+        elif name == "extendleft" and self.mutable_local:
+            assert not kwargs
+            (arg,) = args
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    list(arg.unpack_var_sequence(tx)) + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
+        elif name == "popleft" and self.mutable_local:
+            assert not args
+            assert not kwargs
+            items = collections.deque(self.items)
+            result = items.popleft()
+            tx.replace_all(
+                self,
+                DequeVariable(list(items), regen_guards=False, **options),
+            )
+            return result
+        elif name == "appendleft" and self.mutable_local:
+            assert not kwargs
+            return tx.replace_all(
+                self,
+                DequeVariable(
+                    [args[0]] + list(self.items),
+                    regen_guards=False,
+                    **options,
+                ),
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -287,14 +460,14 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", len(self.items))]
+        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
 
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         return super().call_method(tx, name, args, kwargs)
 
@@ -351,7 +524,10 @@ class SizeVariable(TupleVariable):
 
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
         proxy.node.meta["example_value"] = torch.Size(
-            [p.node.meta["example_value"] for p in proxies]
+            [
+                p.node.meta["example_value"] if not isinstance(p, int) else p
+                for p in proxies
+            ]
         )
         return proxy
 
@@ -359,70 +535,66 @@ class SizeVariable(TupleVariable):
         codegen.load_import_from("torch", "Size")
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
+        ] + create_call_function(1, True)
         return build_torch_size
 
     def unpack_var_sequence(self, tx):
         return [x.add_options(self) for x in self.items]
 
+    def numel(self, tx):
+        from .builtin import BuiltinVariable
+        from .tensor import SymNodeVariable
+
+        const_result = 1
+        sym_sizes = []
+
+        for v in self.items:
+            if isinstance(v, ConstantVariable):
+                const_result *= v.value
+            else:
+                assert isinstance(v, SymNodeVariable), type(v)
+                # Delay proxy calls  until we know it will be necessary
+                sym_sizes.append(v)
+
+        result = ConstantVariable(const_result).add_options(self)
+        if sym_sizes and const_result == 1:
+            # Skip multiplying by 1
+            result, *sym_sizes = sym_sizes
+
+        if not sym_sizes or const_result == 0:
+            return result
+
+        mul = BuiltinVariable(operator.mul)
+        for v in sym_sizes:
+            result = mul.call_function(tx, [result, v], {})
+        return result
+
     def call_method(
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: List["VariableTracker"],
+        kwargs: Dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         options = VariableTracker.propagate(self, args, kwargs.values())
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
-            if config.dynamic_shapes:
-                out = self.get_item_dyn(tx, args[0])
-            else:
-                out = self.getitem_const(args[0])
+            out = self.get_item_dyn(tx, args[0])
             return out
-        return super(SizeVariable, self).call_method(tx, name, args, kwargs)
+        elif name == "numel":
+            assert not args and not kwargs
+            return self.numel(tx)
+
+        return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import DynamicShapeVariable
-
         index = arg.as_python_constant()
         if isinstance(index, slice):
-
-            def _dynamo_get_item_lambda(target, index):
-                return torch.Size.__getitem__(target, index)
-
-            parent_proxy = self.as_proxy()
-            proxy = tx.output.create_proxy(
-                "call_function",
-                _dynamo_get_item_lambda,
-                *proxy_args_kwargs([self, arg], {}),
-            )
-            items = self.items[index]
-
-            def _unpack_into_example(item):
-                if isinstance(item, DynamicShapeVariable):
-                    return item.dyn_shape
-                return item.as_python_constant()
-
-            # Mirror the indexing into example_value for downstream correctness
-            proxy.node.meta["example_value"] = parent_proxy.node.meta["example_value"][
-                index
-            ]
-            return SizeVariable(items, proxy=proxy).add_options(arg, self)
+            return SizeVariable(self.items[index]).add_options(arg, self)
         else:
             assert isinstance(index, int)
             return self.items[index].add_options(arg, self)
-
-
-class ShapeVariable(TupleVariable):
-    """
-    Represents tensor.shape(...) and helps differentiate between a constant
-    TupleVariable and ShapeVariable.
-    """
-
-    pass
 
 
 class NamedTupleVariable(TupleVariable):
@@ -441,14 +613,32 @@ class NamedTupleVariable(TupleVariable):
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
         return [
-            create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+            create_instruction("BUILD_TUPLE", arg=len(self.items)),
+        ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
+        def check_and_create_method():
+            options = VariableTracker.propagate(self)
+            method = inspect.getattr_static(self.tuple_cls, name, None)
+            if isinstance(method, classmethod):
+                # We need the unbounded cls method to avoid the inline __self__
+                return UserMethodVariable(
+                    method.__func__,
+                    variables.UserDefinedClassVariable(self.tuple_cls, **options),
+                )
+            elif isinstance(method, staticmethod):
+                return UserFunctionVariable(method.__func__, **options)
+            elif inspect.isfunction(method):
+                return UserMethodVariable(method, self, **options)
+            else:
+                return None
+
         fields = namedtuple_fields(self.tuple_cls)
         if name not in fields:
-            unimplemented(f"NamedTupleVariable.{name}")
+            method = check_and_create_method()
+            if not method:
+                unimplemented(f"NamedTupleVariable.{name}")
+            return method
         return self.items[fields.index(name)].add_options(self)
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
@@ -485,11 +675,11 @@ class SliceVariable(BaseListVariable):
         return slice
 
     def as_python_constant(self):
-        return slice(*[x.as_python_constant() for x in self.items])
+        return slice(*[guard_if_dyn(x) for x in self.items])
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", len(self.items))]
+        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -500,9 +690,7 @@ class SliceVariable(BaseListVariable):
 
 class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
-        super(ListIteratorVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492
@@ -535,6 +723,217 @@ class ListIteratorVariable(VariableTracker):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
         return [
-            create_instruction("BUILD_TUPLE", len(remaining_items)),
+            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
             create_instruction("GET_ITER"),
         ]
+
+
+class TupleIteratorVariable(ListIteratorVariable):
+    pass
+
+
+def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
+    return d.items, None
+
+
+def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the BaseListVariable constructor
+    return ListVariable(values, mutable_local=MutableLocal())
+
+
+def _register_dynamo_list_to_tree_spec():
+    pytree._register_pytree_node(
+        ListVariable,
+        _listvariable_flatten,
+        _listvariable_unflatten,
+    )
+
+    fx_pytree.register_pytree_flatten_spec(
+        ListVariable,
+        _listvariable_flatten,
+    )
+
+
+def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
+    return d.items, None
+
+
+def _tuplevariable_unflatten(
+    values: List[Any], context: pytree.Context
+) -> TupleVariable:
+    assert all(isinstance(x, VariableTracker) for x in values)
+
+    # Guard propagation happens in the BaseListVariable constructor
+    return TupleVariable(values)
+
+
+def _register_dynamo_tuple_to_tree_spec():
+    pytree._register_pytree_node(
+        TupleVariable,
+        _tuplevariable_flatten,
+        _tuplevariable_unflatten,
+    )
+
+    fx_pytree.register_pytree_flatten_spec(
+        TupleVariable,
+        _tuplevariable_flatten,
+    )
+
+
+class SetVariable(VariableTracker):
+    @dataclasses.dataclass
+    class SetElement:
+        vt: VariableTracker
+        underlying_value: Any
+
+        def __hash__(self) -> int:
+            return hash(self.underlying_value)
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, SetVariable.SetElement):
+                return False
+            if isinstance(self.vt, variables.TensorVariable):
+                return self.underlying_value is other.underlying_value
+            else:
+                return self.underlying_value == other.underlying_value
+
+    def __init__(
+        self,
+        tx,
+        items: List[VariableTracker],
+        recursively_contains=None,
+        regen_guards=True,
+        **kwargs,
+    ):
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
+        # Note - Set is still backed by a list, because we want set behavior over the contents,
+        assert isinstance(items, list)
+        assert all(isinstance(x, VariableTracker) for x in items)
+
+        self.items = []
+        self._add(tx, items)
+
+        # Sometimes, we know that we have passed in the guards from the items in the set
+        if regen_guards:
+            self.guards.update(VariableTracker.propagate(items)["guards"])
+
+        # Really annoying to store this here - but required because of how
+        # VariableTracker's clone works w/r/t attr setting from dict
+        self.tx = tx
+
+    def as_proxy(self):
+        return [x.as_proxy() for x in self.items]
+
+    def python_type(self):
+        return set
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "set")
+        codegen.foreach(self.items)
+        return [
+            create_instruction("BUILD_SET", arg=len(self.items))
+        ] + create_call_function(1, True)
+
+    # Note - this is only used for producing a set
+    def _as_set_element(self, tx, vt):
+        from .base import VariableTracker
+        from .tensor import TensorVariable
+
+        assert isinstance(vt, VariableTracker)
+
+        if isinstance(vt, TensorVariable):
+            tensor_node = vt.as_proxy().node
+            return SetVariable.SetElement(vt, tensor_node)
+        if isinstance(vt, ConstantVariable):
+            return SetVariable.SetElement(vt, vt.value)
+
+        unimplemented(f"Sets with {type(vt)} NYI")
+
+    @property
+    def _underlying_items(self):
+        underlying_items = set()
+        for current_item in self.items:
+            assert (
+                current_item not in underlying_items
+            ), "Items modeling set invariant violated"
+            underlying_items.add(self._as_set_element(self.tx, current_item))
+        return underlying_items
+
+    def _add(self, tx, item):
+        underlying_items = self._underlying_items
+
+        if isinstance(item, (list, set)):
+            items_to_add = item
+        else:
+            items_to_add = [item]
+
+        for item_to_add in items_to_add:
+            set_element = self._as_set_element(tx, item_to_add)
+            if set_element not in underlying_items:
+                underlying_items.add(set_element)
+                self.items.append(set_element.vt)
+            else:
+                for e in underlying_items:
+                    if hash(set_element) == hash(e):
+                        alias_guard = make_dupe_guard(
+                            e.vt.source, set_element.vt.source
+                        )
+                        if alias_guard:
+                            e.vt = e.vt.add_guards(
+                                {e.vt.source.make_guard(alias_guard)}
+                            )
+
+        return self.items
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+        # Somewhat duplicative of CommonListMethodsVariable - but better than to violate substitution
+        # principles and end up with things like direct item access attempts on a set, or
+        # getitem sources.
+        if name == "add" and args and self.mutable_local:
+            assert not kwargs
+            item = args[0]
+            result = SetVariable(
+                tx,
+                self._add(tx, item),
+                mutable_local=self.mutable_local,
+                regen_guards=False,
+                **options,
+            )
+            tx.replace_all(self, result)
+            return ConstantVariable(None)
+        elif name == "pop" and self.mutable_local:
+            assert not kwargs
+            assert not args
+            items = list(self.items)
+            result = items.pop()
+            tx.replace_all(
+                self,
+                SetVariable(tx, items, regen_guards=False, **options),
+            )
+            return result
+        elif name == "__len__":
+            return ConstantVariable(len(self.items)).add_options(options)
+        elif name == "__contains__":
+            assert len(args) == 1
+            assert not kwargs
+            return _listlike_contains_helper(self.items, args[0], tx, options)
+        else:
+            return super().call_method(tx, name, args, kwargs)
+
+    def getitem_const(self, arg: VariableTracker):
+        raise RuntimeError("Illegal to getitem on a set")
+
+    def as_python_constant(self):
+        return self.python_type()([x.as_python_constant() for x in self.items])
+
+    def unpack_var_sequence(self, tx):
+        return [x.add_options(self) for x in self.items]

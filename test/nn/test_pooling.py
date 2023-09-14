@@ -10,11 +10,11 @@ import random
 import itertools
 import math
 
-from torch._six import inf, nan
+from torch import inf, nan
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
-    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps
+    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
@@ -138,7 +138,7 @@ class TestPoolingNN(NNTestCase):
     def test_adaptive_pooling_size_none(self):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                cls_name = f'Adaptive{pool_type}Pool{numel}d'
                 module_cls = getattr(nn, cls_name)
                 output_size = (2,) * (numel - 1) + (None,)
                 module = module_cls(output_size)
@@ -273,6 +273,23 @@ class TestPoolingNN(NNTestCase):
         self.assertTrue(ref_out.is_contiguous())
         self.assertEqual(out, ref_out)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_adaptive_avg_pooling_nhwc_overflow(self):
+        input = torch.randint(-256, 256, (20, 32, 256, 256), dtype=torch.half, device='cuda')
+        input = input.contiguous(memory_format=torch.channels_last)
+        avg_pool = torch.nn.AdaptiveAvgPool2d((2, 2))
+        out = avg_pool(input)
+        self.assertFalse(torch.isinf(out).any())
+        self.assertFalse(torch.isnan(out).any())
+
     def test_MaxUnpool2d_output_size(self):
         m = nn.MaxPool2d(3, stride=2, return_indices=True)
         mu = nn.MaxUnpool2d(3, stride=2)
@@ -353,6 +370,10 @@ class TestPoolingNN(NNTestCase):
             self.assertEqual(F.max_unpool3d(output, indices, 2), F.max_unpool3d(output, indices, 2, stride=2))
             gradcheck(F.max_unpool3d, (output, indices, 2), check_forward_ad=True)
 
+    def test_max_unpool3d_input_check(self):
+        x = torch.ones(1, 3, 1, 1, 1)
+        with self.assertRaises(RuntimeError):
+            F.max_unpool3d(x, torch.zeros(x.shape, dtype=int), [1, 1])
 
 class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
@@ -526,17 +547,47 @@ class TestPoolingNNDeviceType(NNTestCase):
     @onlyNativeDeviceTypes
     @skipCUDAIfRocm
     @parametrize_test("module_name,module_size,output_size,test_index,should_error", [
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True), name='case1'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True), name='case2'),
-        subtest(('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False), name='case3'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True), name='case4'),
-        subtest(('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False), name='case5'),
-
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True), name='case6'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True), name='case7'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False), name='case8'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True), name='case9'),
-        subtest(('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False), name='case10'),
+        # Some tests are failing in trunk https://github.com/pytorch/pytorch/issues/103854
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), -1, True),
+            name='case1',
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), 2 * 2 * 4 * 5, True),
+            name='case2',
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 2), (1, 3, 4, 5), (2 * 2 * 4 * 5) - 1, False),
+            name='case3'
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), 2 * 3 * 4 * 2, True),
+            name='case4',
+        ),
+        subtest(
+            ('MaxUnpool2d', (2, 3), (2, 1, 4, 2), (2 * 3 * 4 * 2) - 1, False),
+            name='case5'
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), -1, True),
+            name='case6',
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), 2 * 2 * 2 * 3 * 4 * 5, True),
+            name='case7',
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (1, 3, 4, 5), (2 * 2 * 2 * 3 * 4 * 5) - 1, False),
+            name='case8'
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), 2 * 2 * 2 * 3 * 4 * 1, True),
+            name='case9',
+        ),
+        subtest(
+            ('MaxUnpool3d', (2, 2, 2), (2, 3, 4, 1), (2 * 2 * 2 * 3 * 4 * 1) - 1, False),
+            name='case10'
+        ),
     ])
     def test_MaxUnpool_index_errors(self, device, module_name, module_size, output_size, test_index, should_error):
         # NOTE: CUDA tests need to be run in a subprocess because they cause device asserts
@@ -698,7 +749,10 @@ torch.cuda.synchronize()
     def test_adaptive_pooling_no_suppot_input(self, device, dtype):
         for numel in (2, 3):
             for pool_type in ('Max', 'Avg'):
-                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                # adapative_avg_pool2d for int is implemented
+                if numel == 2 and pool_type == 'Avg':
+                    continue
+                cls_name = f'Adaptive{pool_type}Pool{numel}d'
                 module_cls = getattr(nn, cls_name)
                 output_size = (2,) * numel
                 module = module_cls(output_size)
@@ -707,6 +761,7 @@ torch.cuda.synchronize()
                     output = module(input)
 
     @onlyNativeDeviceTypes
+    @gcIfJetson
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
@@ -794,6 +849,7 @@ torch.cuda.synchronize()
         check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
 
     @onlyCUDA
+    @gcIfJetson
     def test_max_pool2d(self, device):
         def helper(n, c, h, w, ks):
             x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
@@ -815,8 +871,9 @@ torch.cuda.synchronize()
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
             if stride is None:
@@ -851,8 +908,9 @@ torch.cuda.synchronize()
         helper(1, 129, 8, 8, 3, stride=2)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.half, torch.float, torch.double)
-    @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @gcIfJetson
     def test_max_pool3d_ndhwc(self, device, dtype):
         def helper(n, c, h, w, d, kernel_size, stride=None):
             batch = n
@@ -916,11 +974,15 @@ torch.cuda.synchronize()
         helper(0, 79, 4, 4, 4, 3, stride=2)
 
     @onlyCPU
-    def test_max_pool2d_bfloat16(self, device):
-        def helper(n, c, h, w, kernel_size, stride, memory_format):
-            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).bfloat16()
+    @dtypes(torch.half, torch.bfloat16)
+    def test_max_pool_bfloat16_half(self, device, dtype):
+        def helper(shape, kernel_size, stride, memory_format, dtype):
+            input = torch.randn(shape, dtype=dtype, device=device)
             input = input.to(memory_format=memory_format).requires_grad_()
-            pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+            if len(shape) == 4:
+                pool = torch.nn.MaxPool2d(kernel_size, stride, return_indices=True).to(device)
+            else:
+                pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
 
             input2 = input.detach().clone().float().requires_grad_(True)
 
@@ -930,18 +992,25 @@ torch.cuda.synchronize()
             out2.sum().backward()
 
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2.bfloat16())
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype))
             self.assertEqual(ind, ind2)
-            self.assertEqual(input.grad, input2.grad.bfloat16())
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
 
-        helper(4, 30, 8, 8, 7, 1, torch.contiguous_format)
-        helper(4, 65, 8, 8, 7, 1, torch.channels_last)
-        helper(1, 19, 20, 10, 8, 2, torch.contiguous_format)
-        helper(1, 19, 20, 10, 8, 2, torch.channels_last)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format, dtype)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last, dtype)
+        helper((1, 19, 20, 10), 8, 2, torch.contiguous_format, dtype)
+        helper((1, 19, 20, 10), 8, 2, torch.channels_last, dtype)
+        helper((4, 30, 8, 8), 7, 1, torch.contiguous_format, dtype)
+        helper((4, 65, 8, 8), 7, 1, torch.channels_last, dtype)
+        helper((1, 19, 10, 10, 10), 8, 2, torch.contiguous_format, dtype)
+        helper((1, 19, 10, 9, 14), 8, 2, torch.channels_last_3d, dtype)
+        helper((4, 10, 3, 8, 8), 3, 1, torch.contiguous_format, dtype)
+        helper((4, 10, 8, 8, 8), 7, 1, torch.channels_last_3d, dtype)
 
     @onlyCUDA
+    @gcIfJetson
     def test_max_pool2d_indices(self, device):
         def helper(n, c, h, w, ks):
             if n is None:
@@ -1145,9 +1214,10 @@ torch.cuda.synchronize()
                 return torch.stack([col, col + 2], 1).view(2, 2, 2, 2)
 
         if adaptive:
-            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)
+            cls_name = 'AdaptiveMaxPool{}d'.format(num_dim)  # noqa: UP032
         else:
-            cls_name = 'MaxPool{}d'.format(num_dim)
+            # FIXME(#105716): Test fails when using f-string
+            cls_name = 'MaxPool{}d'.format(num_dim)  # noqa: UP032
         module_cls = getattr(nn, cls_name)
         module = module_cls(2, return_indices=True).to(device, dtype=dtype)
         numel = 4 ** (num_dim + 1)
@@ -1255,10 +1325,11 @@ torch.cuda.synchronize()
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyNativeDeviceTypes  # TODO: Fails on XLA
+    @gcIfJetson
     def test_max_pool_nan_inf(self, device, dtype):
         for adaptive in ['', 'adaptive_']:
             for num_dim in [1, 2, 3]:
-                fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
+                fn_name = f'{adaptive}max_pool{num_dim}d'
                 fn = getattr(F, fn_name)
 
                 x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
@@ -1358,7 +1429,7 @@ torch.cuda.synchronize()
     @onlyNativeDeviceTypes  # TODO: Fails on XLA
     def test_fractional_max_pool_nan_inf(self, device, dtype):
         for num_dim in [2, 3]:
-            fn_name = 'FractionalMaxPool{}d'.format(num_dim)
+            fn_name = f'FractionalMaxPool{num_dim}d'
             fn = getattr(nn, fn_name)(kernel_size=2, output_size=1)
             x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
             res = fn(x)
@@ -1374,13 +1445,13 @@ torch.cuda.synchronize()
     def test_pooling_zero_stride(self, device):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
-                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn_name = f'{op}_pool{num_dim}d'
                 fn = getattr(F, fn_name)
                 x = torch.ones([1, 2] + num_dim * [4], device=device, dtype=torch.float)
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn(x, kernel_size=2, stride=0))
 
-                fn_module_name = '{}Pool{}d'.format(op.title(), num_dim)
+                fn_module_name = f'{op.title()}Pool{num_dim}d'
                 fn_module = getattr(nn, fn_module_name)(kernel_size=2, stride=0)
                 self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
@@ -1391,7 +1462,7 @@ torch.cuda.synchronize()
     def test_pool_large_size(self, device, dtype):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
-                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn_name = f'{op}_pool{num_dim}d'
                 fn = getattr(F, fn_name)
                 # 16777217 is the smallest integer not expressible in float32
                 x = torch.ones([1, 1, 16777217] + (num_dim - 1) * [1],
@@ -1421,7 +1492,7 @@ torch.cuda.synchronize()
     def test_pool_invalid_size(self, device, dtype):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
-                fn_name = '{}_pool{}d'.format(op, num_dim)
+                fn_name = f'{op}_pool{num_dim}d'
                 if op == 'max':
                     # New implementation without indices supports empty tensors
                     # TODO(Heitor) change once with_indices code is updated

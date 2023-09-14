@@ -1,11 +1,10 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/python_headers.h>
 
+#include <array>
 #include <cstdarg>
 #include <exception>
-#include <sstream>
 #include <utility>
-#include <vector>
 
 #include <fmt/format.h>
 #include <torch/csrc/THP.h>
@@ -13,20 +12,25 @@
 #include <c10/util/StringUtil.h>
 
 PyObject *THPException_FatalError, *THPException_LinAlgError,
-    *THPException_OutOfMemoryError, *THPException_DistBackendError;
+    *THPException_OutOfMemoryError, *THPException_DistError,
+    *THPException_DistBackendError, *THPException_DistNetworkError,
+    *THPException_DistStoreError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
   return false
 bool THPException_init(PyObject* module) {
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_FatalError =
           PyErr_NewException("torch.FatalError", nullptr, nullptr));
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
 
   // Set the doc string here since _add_docstr throws malloc errors if tp_doc is
   // modified for an error class.
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_LinAlgError = PyErr_NewExceptionWithDoc(
           "torch._C._LinAlgError",
@@ -53,6 +57,7 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) ==
       0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_OutOfMemoryError = PyErr_NewExceptionWithDoc(
           "torch.cuda.OutOfMemoryError",
@@ -63,15 +68,48 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+  ASSERT_TRUE(
+      THPException_DistError = PyErr_NewExceptionWithDoc(
+          "torch.distributed.DistError",
+          "Exception raised when an error occurs in the distributed library",
+          PyExc_RuntimeError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(module, "_DistError", THPException_DistError) == 0);
+
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_DistBackendError = PyErr_NewExceptionWithDoc(
           "torch.distributed.DistBackendError",
           "Exception raised when a backend error occurs in distributed",
-          PyExc_RuntimeError,
+          THPException_DistError,
           nullptr));
   ASSERT_TRUE(
       PyModule_AddObject(
           module, "_DistBackendError", THPException_DistBackendError) == 0);
+
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+  ASSERT_TRUE(
+      THPException_DistNetworkError = PyErr_NewExceptionWithDoc(
+          "torch.distributed.DistNetworkError",
+          "Exception raised when a network error occurs in distributed",
+          THPException_DistError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "_DistNetworkError", THPException_DistNetworkError) == 0);
+
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
+  ASSERT_TRUE(
+      THPException_DistStoreError = PyErr_NewExceptionWithDoc(
+          "torch.distributed.DistStoreError",
+          "Exception raised when an error occurs in the distributed store",
+          THPException_DistError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "_DistStoreError", THPException_DistStoreError) == 0);
 
   return true;
 }
@@ -82,6 +120,7 @@ void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
   constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64>
       changes{{
+          // TODO: remove torch.(cuda.|)sparse.*Tensor items?
           {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
           {"Variable[SparseCUDACharType]", "torch.cuda.sparse.CharTensor"},
           {"Variable[SparseCUDADoubleType]", "torch.cuda.sparse.DoubleTensor"},
@@ -186,35 +225,42 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
 }
 
 IndexError::IndexError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 TypeError::TypeError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 ValueError::ValueError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
+NotImplementedError::NotImplementedError(const char* format, ...) {
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 AttributeError::AttributeError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 LinAlgError::LinAlgError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
@@ -250,8 +296,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   auto& warning_buffer = internal_handler_.warning_buffer_;
 
   if (!warning_buffer.empty()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject *type, *value, *traceback;
+    PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
     pybind11::gil_scoped_acquire gil;
     auto result = 0;
     if (in_exception_) {
@@ -275,22 +320,19 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
             /*category=*/map_warning_to_python_type(warning),
             /*message=*/msg.c_str(),
             /*filename=*/source_location.file,
-            /*lineno=*/source_location.line,
+            /*lineno=*/static_cast<int>(source_location.line),
             /*module=*/nullptr,
             /*registry=*/nullptr);
       } else {
         // Lets Python set the source location and puts the C++ warning
         // location into the message.
-        fmt::memory_buffer buf;
-        fmt::format_to(
-            buf,
-            FMT_STRING("{} (Triggered internally at {}:{}.)"),
+        auto buf = fmt::format(
+            "{} (Triggered internally at {}:{}.)",
             msg,
             source_location.file,
             source_location.line);
-        buf.push_back('\0');
         result =
-            PyErr_WarnEx(map_warning_to_python_type(warning), buf.data(), 1);
+            PyErr_WarnEx(map_warning_to_python_type(warning), buf.c_str(), 1);
       }
       if (result < 0) {
         if (in_exception_) {
@@ -309,7 +351,6 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       throw python_error();
     }
     if (in_exception_) {
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       PyErr_Restore(type, value, traceback);
     }
   }

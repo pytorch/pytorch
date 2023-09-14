@@ -17,7 +17,7 @@ _init_counter_lock = threading.Lock()
 
 __all__ = ["is_available"]
 
-def is_available():
+def is_available() -> bool:
     return hasattr(torch._C, "_rpc_init")
 
 
@@ -78,7 +78,7 @@ if is_available():
     rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
 
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
-    __all__ = __all__ + api.__all__ + backend_registry.__all__
+    __all__ = __all__ + api.__all__ + backend_registry.__all__  # noqa: PLE0605
 
     def init_rpc(
         name,
@@ -148,10 +148,11 @@ if is_available():
             # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
             if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    f"RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
-                    f"corresponding to {backend}, hence that backend will be used "
-                    f"instead of the default {BackendType.TENSORPIPE}. To silence this "
-                    f"warning pass `backend={backend}` explicitly."
+                    "RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
+                    "corresponding to %(backend)s, hence that backend will be used "
+                    "instead of the default BackendType.TENSORPIPE. To silence this "
+                    "warning pass `backend=%(backend)s` explicitly.",
+                    {'backend': backend}
                 )
 
         if backend is None:
@@ -183,7 +184,7 @@ if is_available():
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:
             global _init_counter
-            store = dist.PrefixStore(str("rpc_prefix_{}".format(_init_counter)), store)
+            store = dist.PrefixStore(str(f"rpc_prefix_{_init_counter}"), store)
             _init_counter += 1
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
@@ -211,9 +212,7 @@ if is_available():
         for arg, arg_type in type_mapping.items():
             if not isinstance(arg, arg_type):  # type: ignore[arg-type]
                 raise RuntimeError(
-                    "Argument {} must be of type {} but got type {}".format(
-                        arg, arg_type, type(arg)
-                    )
+                    f"Argument {arg} must be of type {arg_type} but got type {type(arg)}"
                 )
 
     def _init_rpc_backend(

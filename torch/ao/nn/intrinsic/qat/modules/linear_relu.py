@@ -30,14 +30,14 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):
-        super(LinearReLU, self).__init__(in_features, out_features, bias, qconfig)
+        super().__init__(in_features, out_features, bias, qconfig)
 
     def forward(self, input):
         return F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod):
-        return super(LinearReLU, cls).from_float(mod)
+        return super().from_float(mod)
 
     def to_float(self):
         linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)

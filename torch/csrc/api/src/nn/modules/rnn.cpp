@@ -28,7 +28,7 @@ namespace nn {
 /// https://docs.nvidia.com/deeplearning/sdk/cudnn-developer-guide/index.html#cudnnRNNMode_t
 enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
-CuDNNMode get_cudnn_mode_for_rnn(
+static CuDNNMode get_cudnn_mode_for_rnn(
     detail::RNNOptionsBase::rnn_options_base_mode_t mode) {
   if (c10::get_if<enumtype::kRNN_RELU>(&mode)) {
     return CuDNNMode::RNN_RELU;
@@ -43,7 +43,7 @@ CuDNNMode get_cudnn_mode_for_rnn(
   }
 }
 
-Tensor apply_permutation(
+static Tensor apply_permutation(
     const Tensor& tensor,
     const Tensor& permutation,
     int64_t dim = 1) {
@@ -79,6 +79,12 @@ void RNNImplBase<Derived>::reset() {
         "num_layers=",
         options_base.num_layers());
   }
+
+  TORCH_CHECK(
+      options_base.hidden_size() > 0, "hidden_size must be greater than zero");
+
+  TORCH_CHECK(
+      options_base.num_layers() > 0, "num_layers must be greater than zero");
 
   TORCH_CHECK(
       0 <= options_base.proj_size() &&
@@ -397,8 +403,8 @@ template class RNNImplBase<RNNImpl>;
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-detail::RNNOptionsBase::rnn_options_base_mode_t compute_rnn_options_base_mode(
-    RNNOptions::nonlinearity_t nonlinearity) {
+static detail::RNNOptionsBase::rnn_options_base_mode_t
+compute_rnn_options_base_mode(RNNOptions::nonlinearity_t nonlinearity) {
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
     return torch::kRNN_TANH;
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
@@ -864,37 +870,16 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
 }
 
 template <typename Derived>
-void RNNCellImplBase<Derived>::check_forward_input(const Tensor& input) const {
-  TORCH_CHECK(
-      input.size(1) == options_base.input_size(),
-      "input has inconsistent input_size: got ",
-      input.size(1),
-      " expected ",
-      options_base.input_size());
-}
-
-template <typename Derived>
-void RNNCellImplBase<Derived>::check_forward_hidden(
+void RNNCellImplBase<Derived>::check_forward_input(
     const Tensor& input,
-    const Tensor& hx,
-    std::string hidden_label) const {
+    const string name) const {
   TORCH_CHECK(
-      input.size(0) == hx.size(0),
-      "Input batch size ",
-      input.size(0),
-      " doesn't match hidden",
-      hidden_label,
-      " batch size ",
-      hx.size(0));
-
-  TORCH_CHECK(
-      hx.size(1) == options_base.hidden_size(),
-      "hidden",
-      hidden_label,
-      " has inconsistent hidden_size: got ",
-      hx.size(1),
-      ", expected ",
-      options_base.hidden_size());
+      input.dim() == 1 || input.dim() == 2,
+      "Expected ",
+      name.c_str(),
+      " to be 1D or 2D, got ",
+      input.dim(),
+      "D instead");
 }
 
 template <typename Derived>
@@ -919,26 +904,39 @@ RNNCellImpl::RNNCellImpl(const RNNCellOptions& options_)
       options(options_) {}
 
 Tensor RNNCellImpl::forward(const Tensor& input, Tensor hx) {
-  this->check_forward_input(input);
+  this->check_forward_input(input, "input");
+  this->check_forward_input(hx, "hidden");
+
+  Tensor r_hx, ret;
+
+  bool is_batched = input.dim() == 2;
+  Tensor r_input = is_batched ? input : input.unsqueeze(0);
+
   if (!hx.defined()) {
-    hx = torch::zeros(
+    r_hx = torch::zeros(
         {input.size(0), options.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
+  } else {
+    r_hx = is_batched ? hx : hx.unsqueeze(0);
   }
-  this->check_forward_hidden(input, hx, "");
-  Tensor ret;
+
   if (c10::get_if<enumtype::kTanh>(&options.nonlinearity())) {
-    ret =
-        torch::rnn_tanh_cell(input, hx, weight_ih, weight_hh, bias_ih, bias_hh);
+    ret = torch::rnn_tanh_cell(
+        r_input, r_hx, weight_ih, weight_hh, bias_ih, bias_hh);
   } else if (c10::get_if<enumtype::kReLU>(&options.nonlinearity())) {
-    ret =
-        torch::rnn_relu_cell(input, hx, weight_ih, weight_hh, bias_ih, bias_hh);
+    ret = torch::rnn_relu_cell(
+        r_input, r_hx, weight_ih, weight_hh, bias_ih, bias_hh);
   } else {
     TORCH_CHECK(
         false,
         "Unknown nonlinearity: ",
         torch::enumtype::get_enum_name(options.nonlinearity()));
   }
+
+  if (!is_batched) {
+    ret = ret.squeeze(0);
+  }
+
   return ret;
 }
 
@@ -960,28 +958,46 @@ LSTMCellImpl::LSTMCellImpl(const LSTMCellOptions& options_)
 std::tuple<Tensor, Tensor> LSTMCellImpl::forward(
     const Tensor& input,
     torch::optional<std::tuple<Tensor, Tensor>> hx_opt) {
-  this->check_forward_input(input);
+  this->check_forward_input(input, "input");
+  if (hx_opt.has_value()) {
+    this->check_forward_input(std::get<0>(hx_opt.value()), "hx[0]");
+    this->check_forward_input(std::get<1>(hx_opt.value()), "hx[1]");
+  }
 
-  std::tuple<Tensor, Tensor> hx;
+  std::tuple<Tensor, Tensor> r_hx, ret;
+
+  bool is_batched = input.dim() == 2;
+  Tensor r_input = is_batched ? input : input.unsqueeze(0);
+
   if (!hx_opt.has_value()) {
     auto zeros = torch::zeros(
         {input.size(0), options.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
-    hx = std::make_tuple(zeros, zeros);
+    r_hx = std::make_tuple(zeros, zeros);
   } else {
-    hx = hx_opt.value();
+    if (!is_batched) {
+      r_hx = std::make_tuple(
+          std::get<0>(hx_opt.value()).unsqueeze(0),
+          std::get<1>(hx_opt.value()).unsqueeze(0));
+    } else {
+      r_hx = hx_opt.value();
+    }
   }
 
-  this->check_forward_hidden(input, std::get<0>(hx), "[0]");
-  this->check_forward_hidden(input, std::get<1>(hx), "[1]");
-
-  return torch::lstm_cell(
-      input,
-      {std::get<0>(hx), std::get<1>(hx)},
+  ret = torch::lstm_cell(
+      r_input,
+      {std::get<0>(r_hx), std::get<1>(r_hx)},
       weight_ih,
       weight_hh,
       bias_ih,
       bias_hh);
+
+  if (!is_batched) {
+    ret = std::make_tuple(
+        std::get<0>(ret).squeeze(0), std::get<1>(ret).squeeze(0));
+  }
+
+  return ret;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRUCell
@@ -996,14 +1012,29 @@ GRUCellImpl::GRUCellImpl(const GRUCellOptions& options_)
       options(options_) {}
 
 Tensor GRUCellImpl::forward(const Tensor& input, Tensor hx) {
-  this->check_forward_input(input);
+  this->check_forward_input(input, "input");
+  this->check_forward_input(hx, "hidden");
+
+  Tensor r_hx, ret;
+
+  bool is_batched = input.dim() == 2;
+  Tensor r_input = is_batched ? input : input.unsqueeze(0);
+
   if (!hx.defined()) {
-    hx = torch::zeros(
+    r_hx = torch::zeros(
         {input.size(0), options.hidden_size()},
         torch::dtype(input.dtype()).device(input.device()));
+  } else {
+    r_hx = is_batched ? hx : hx.unsqueeze(0);
   }
-  this->check_forward_hidden(input, hx, "");
-  return torch::gru_cell(input, hx, weight_ih, weight_hh, bias_ih, bias_hh);
+
+  ret = torch::gru_cell(r_input, r_hx, weight_ih, weight_hh, bias_ih, bias_hh);
+
+  if (!is_batched) {
+    ret = ret.squeeze(0);
+  }
+
+  return ret;
 }
 
 } // namespace nn

@@ -1,13 +1,14 @@
 import math
 
 import torch
-from torch._six import inf
+from torch import inf
 from torch.distributions import constraints
-from torch.distributions.transforms import AbsTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import AbsTransform
 
-__all__ = ['HalfNormal']
+__all__ = ["HalfNormal"]
+
 
 class HalfNormal(TransformedDistribution):
     r"""
@@ -18,7 +19,7 @@ class HalfNormal(TransformedDistribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = HalfNormal(torch.tensor([1.0]))
         >>> m.sample()  # half-normal distributed with scale=1
         tensor([ 0.1046])
@@ -26,18 +27,17 @@ class HalfNormal(TransformedDistribution):
     Args:
         scale (float or Tensor): scale of the full Normal distribution
     """
-    arg_constraints = {'scale': constraints.positive}
+    arg_constraints = {"scale": constraints.positive}
     support = constraints.nonnegative
     has_rsample = True
 
     def __init__(self, scale, validate_args=None):
         base_dist = Normal(0, scale, validate_args=False)
-        super(HalfNormal, self).__init__(base_dist, AbsTransform(),
-                                         validate_args=validate_args)
+        super().__init__(base_dist, AbsTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(HalfNormal, _instance)
-        return super(HalfNormal, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def scale(self):

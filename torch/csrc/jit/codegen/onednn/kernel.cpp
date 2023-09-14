@@ -29,7 +29,7 @@ LlgaKernel::LlgaKernel(const Node* fusionNode)
       partitions.size() == 1,
       "LLGA subgraph should contain only one partition");
   partition_ = partitions[0];
-  nPartitionInputs_ = partition_.get_in_ports().size();
+  nPartitionInputs_ = partition_.get_input_ports().size();
 #ifdef GRAPH_DEBUG_ENABLED
   GRAPH_DEBUG("Initialized ", debugName(), "\n", graph_->toString());
 #endif
@@ -40,7 +40,7 @@ bool LlgaKernel::useOpaqueLayout(size_t offset) const {
 }
 
 void LlgaKernel::initializeConstantInputs() {
-  for (auto& lt : partition_.get_in_ports()) {
+  for (auto& lt : partition_.get_input_ports()) {
     auto inputId = lt.get_id();
     if (initializedInputIds_.find(inputId) == initializedInputIds_.end()) {
       TORCH_CHECK(
@@ -66,7 +66,7 @@ void LlgaKernel::initializeConstantInputs() {
 
 std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurence() const {
   std::map<size_t, int64_t> tensorIdToOccurence;
-  for (auto& lt : partition_.get_in_ports()) {
+  for (auto& lt : partition_.get_input_ports()) {
     auto inputId = lt.get_id();
     std::map<size_t, int64_t>::iterator it(tensorIdToOccurence.find(inputId));
     if (it != tensorIdToOccurence.end()) {
@@ -84,7 +84,7 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   GRAPH_DEBUG("Initializing graph input logical tensors");
   std::map<size_t, int64_t> tensorIdToOccurence =
       initializeTensorIdToOccurence();
-  for (size_t i = 0; i < nGraphInputs_; i++) {
+  for (const auto i : c10::irange(nGraphInputs_)) {
     auto spec = ArgSpec(graph_->inputs()[i]).supplementTensorInfo(inputs[i]);
     initializedInputIds_.insert(spec.tid());
     int64_t occurence = tensorIdToOccurence[spec.tid()];
@@ -95,7 +95,8 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   initializeConstantInputs();
 
   TORCH_CHECK(
-      inputSpecs.size() + constantValues_.size() == nPartitionInputs_,
+      inputSpecs.size() + constantValues_.size() ==
+          static_cast<size_t>(nPartitionInputs_),
       "Partition inputs are missing");
   GRAPH_DEBUG(
       "Concatenating constant input logical tensors to graph input "
@@ -111,7 +112,7 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
 ArgSpecs LlgaKernel::initializeOutputSpecs() const {
   ArgSpecs outputSpecs;
   outputSpecs.reserve(nOutputs_);
-  for (size_t i = 0; i < nOutputs_; i++) {
+  for (const auto i : c10::irange(nOutputs_)) {
     auto spec = ArgSpec(graph_->outputs()[i]);
     if (useOpaqueLayout(i)) {
       spec = spec.any();
@@ -126,7 +127,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
     TensorArgs& outputs) const {
   RunArgs runInputs, runOutputs;
   auto numInputs = runArgsIdx_.size();
-  for (size_t i = 0; i < numInputs; i++) {
+  for (const auto i : c10::irange(numInputs)) {
     auto spec = inputSpecs_[i];
     auto input = inputs[runArgsIdx_[i]];
     runInputs.push_back(
@@ -143,7 +144,7 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
          constantInputs_[i].data_ptr()});
   }
 
-  for (size_t i = 0; i < nOutputs_; i++) {
+  for (const auto i : c10::irange(nOutputs_)) {
     auto spec = outputSpecs_[i];
     auto opt = c10::TensorOptions(spec.aten_scalar_type()).device(device_);
 
@@ -215,7 +216,7 @@ compiled_partition LlgaKernel::compile(const partition& partition) {
 
   // Since layouts of opaque outputs would be known after compilation,
   // we need to query them out from compilation and update outputSpecs
-  for (size_t i = 0; i < nOutputs_; i++) {
+  for (const auto i : c10::irange(nOutputs_)) {
     auto tid = outputSpecs_[i].tid();
     outputSpecs_[i] = compilation.query_logical_tensor(tid);
   }

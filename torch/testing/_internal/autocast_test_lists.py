@@ -217,6 +217,7 @@ class AutocastTestLists:
             ("multi_margin_loss", mat0_fp16 + (torch.ones((n,), device=dev, dtype=torch.long),)),
         ]
         self.linalg_fp16 = [
+            ("linalg_vecdot", mat0_fp32 + mat0_fp32),
             ("linalg_multi_dot", (mat0_fp32 + mat1_fp32 + mat2_fp32,)),
         ]
         self.methods_fp16 = [
@@ -314,11 +315,12 @@ class AutocastCPUTestLists:
                           torch.randn((5, 3, 5), device=dev, dtype=torch.float32),
                           torch.randn(5, device=dev, dtype=torch.float32),
                           0)),
+            ("conv_transpose1d", conv_args_fp32[0]),
+            ("conv_transpose2d", conv_args_fp32[1]),
+            ("conv_transpose3d", conv_args_fp32[2]),
+            ("prelu", pointwise0_fp32 + element0_fp32),
         ]
         self.torch_fp32 = [
-            ("conv_transpose1d", conv_args_bf16[0]),
-            ("conv_transpose2d", conv_args_bf16[1]),
-            ("conv_transpose3d", conv_args_bf16[2]),
             ("poisson_nll_loss", mat0_bf16 + mat1_bf16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),
             ("cosine_embedding_loss", (torch.tensor([[1, 2, 3]], device=dev, dtype=torch.bfloat16),
                                        torch.tensor([[1, 3, 4]], device=dev, dtype=torch.bfloat16),

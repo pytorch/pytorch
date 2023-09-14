@@ -9,7 +9,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <gloo/rendezvous/store.h>
 #include <gloo/algorithm.h>
 #include <gloo/common/error.h>
 #include <gloo/context.h>
@@ -66,14 +65,16 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // operations using the new AsyncWork base class. Over time we will port
   // all operations and perform needed cleanup.
   //
-  // FIXME: This probably should be called WorkGloo since the work is executed in sync mode
-  // by a background thread.
+  // FIXME: This probably should be called WorkGloo since the work is executed
+  // in sync mode by a background thread.
   class TORCH_API AsyncWork : public Work {
    public:
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
+        OpType opType,
         const char* profilingTitle = nullptr,
-        const c10::optional<std::vector<at::Tensor>>& inputTensors = c10::nullopt);
+        const c10::optional<std::vector<at::Tensor>>& inputTensors =
+            c10::nullopt);
 
     ~AsyncWork() override = default;
 
@@ -125,14 +126,49 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 
     void wait(const std::vector<std::string>& keys) override {
-      store_->wait(keys, Store::kDefaultTimeout);
+      store_->wait(keys, ::c10d::Store::kDefaultTimeout);
     }
 
     void wait(
-      const std::vector<std::string>& keys,
-      const std::chrono::milliseconds& timeout) override {
+        const std::vector<std::string>& keys,
+        const std::chrono::milliseconds& timeout) override {
       store_->wait(keys, timeout);
     }
+
+#ifdef GLOO_STORE_HAS_STORE_V2
+    bool has_v2_support() override {
+      return store_->hasExtendedApi();
+    }
+
+    std::vector<std::vector<char>> multi_get(
+        const std::vector<std::string>& keys) override {
+      std::vector<std::vector<char>> res;
+      for (auto& value : store_->multiGet(keys)) {
+        res.emplace_back(std::vector<char>(value.begin(), value.end()));
+      }
+      return res;
+    }
+
+    void multi_set(
+        const std::vector<std::string>& keys,
+        const std::vector<std::vector<char>>& values) override {
+      std::vector<std::vector<uint8_t>> u_values;
+      for (auto& value : values) {
+        u_values.emplace_back(std::vector<uint8_t>(value.begin(), value.end()));
+      }
+      store_->multiSet(keys, u_values);
+    }
+
+    void append(const std::string& key, const std::vector<char>& value)
+        override {
+      std::vector<uint8_t> tmp(value.begin(), value.end());
+      return store_->append(key, tmp);
+    }
+
+    int64_t add(const std::string& key, int64_t value) override {
+      return store_->add(key, value);
+    }
+#endif
 
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
@@ -164,6 +200,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     explicit RecvWork(
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        OpType opType,
         const char* profilingTitle = nullptr);
 
     int sourceRank() const override;
@@ -216,10 +253,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   // Create ProcessGroupGloo instance.
   static c10::intrusive_ptr<ProcessGroupGloo> createProcessGroupGloo(
-    const c10::intrusive_ptr<Store>& store,
-    int rank,
-    int size,
-    std::chrono::milliseconds timeout);
+      const c10::intrusive_ptr<Store>& store,
+      int rank,
+      int size,
+      std::chrono::milliseconds timeout);
 
   explicit ProcessGroupGloo(
       const c10::intrusive_ptr<Store>& store,

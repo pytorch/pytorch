@@ -12,17 +12,16 @@
 // c10/cuda/CUDAGraphsC10Utils.h has utils used by both c10 and aten.
 // This file adds utils used by aten only.
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 using CaptureId_t = c10::cuda::CaptureId_t;
 using CaptureStatus = c10::cuda::CaptureStatus;
 
 // Use this version where you don't want to create a CUDA context if none exists.
 inline CaptureStatus currentStreamCaptureStatus() {
-#if !defined(USE_ROCM)
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   // don't create a context if we don't have to
-  if (at::cuda::detail::hasPrimaryContext(c10::cuda::current_device())) {
+  if (c10::cuda::hasPrimaryContext(c10::cuda::current_device())) {
     return c10::cuda::currentStreamCaptureStatusMayInitCtx();
   } else {
     return CaptureStatus::None;
@@ -55,5 +54,4 @@ inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
               "in which case capturing them is generally prohibited.");
 }
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

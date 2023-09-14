@@ -42,9 +42,15 @@ class LoadingNvfuserLibrary {
     library_name += "libnvfuser_codegen.so";
 #endif
     try {
-      nvfuserLib_ = std::make_shared<at::DynamicLibrary>(library_name.c_str());
+      // NOTE: we need to refactor this to a lazy load instead. We could end up
+      // with double de-allocation with our python API loading the library.
+      // Leaking the handle should solve the problem for now
+      nvfuserLib_ = std::make_shared<at::DynamicLibrary>(
+          library_name.c_str(), nullptr, true);
     } catch (const c10::DynamicLibraryError& e) {
+#if defined(BUILD_NVFUSER) || !defined(NDEBUG)
       TORCH_WARN("Loading nvfuser library failed with: ", e.msg());
+#endif
     }
   }
 
@@ -145,11 +151,8 @@ class NVFuserEnabler {
       return *getCachedFuserEnabledEnvVar();
     }
     // 3. default value
-#if defined(USE_ROCM) || defined(FBCODE_CAFFE2)
+    // default off since TorchScript integration isn't maintained any longer
     return false;
-#else
-    return nvfuserCanBeEnabled();
-#endif
   }
 
  public:
@@ -229,6 +232,7 @@ void fuseGraph(std::shared_ptr<Graph>& graph) {
     return;
   }
 
+  TORCH_WARN_ONCE("nvfuser integration in TorchScript is deprecated.");
   TORCH_CHECK(
       getFuserInterface()->fn_fuse_graph != nullptr,
       "Running the CUDA fuser requires a CUDA build.");

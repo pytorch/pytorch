@@ -48,7 +48,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
         # Dataset has been tested as `Sized`
         if isinstance(self.sampler, Sized):
             return len(self.sampler)
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
 
 @functional_datapipe('shuffle')
@@ -121,8 +121,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def __iter__(self) -> Iterator[T_co]:
         if not self._enabled:
-            for x in self.datapipe:
-                yield x
+            yield from self.datapipe
         else:
             for x in self.datapipe:
                 if len(self._buffer) == self.buffer_size:
@@ -138,7 +137,7 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
+        raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
 
     def reset(self) -> None:
         self._buffer = []

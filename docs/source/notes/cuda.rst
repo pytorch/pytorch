@@ -180,9 +180,9 @@ To toggle the reduced precision reduction flags in C++, one can do
 Reduced Precision Reduction in BF16 GEMMs
 -----------------------------------------
 
-A similar flag (as above) exists for BFloat16 GEMMs. Note that this switch is
-set to `False` by default for BF16 as we have observed numerical instability in
-PyTorch CI tests (e.g., test/test_matmul_cuda.py).
+A similar flag (as above) exists for BFloat16 GEMMs.
+Note that this switch is set to `True` by default for BF16, if you observe
+numerical instability in your workload, you may wish to set it to `False`.
 
 If reduced precision reductions are not desired, users can disable reduced
 precision reductions in bf16 GEMMs with:
@@ -365,6 +365,9 @@ releases all **unused** cached memory from PyTorch so that those can be used
 by other GPU applications. However, the occupied GPU memory by tensors will not
 be freed so it can not increase the amount of GPU memory available for PyTorch.
 
+To better understand how CUDA memory is being used over time,
+:ref:`torch_cuda_memory` describes tools for capturing and visualizing traces of memory use.
+
 For more advanced users, we offer more comprehensive memory benchmarking via
 :meth:`~torch.cuda.memory_stats`. We also offer the capability to capture a
 complete snapshot of the memory allocator state via
@@ -424,12 +427,6 @@ Available options:
   set the knob value to: [256:1,512:2,1024:4,>:8].
   ``roundup_power2_divisions`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``roundup_power2_divisions`` is ignored.
-* ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
-  for allocation requests larger than the threshold value (in MB). This can help
-  reduce the memory footprint when making large allocations that are expected to
-  be persistent or have a large lifetime.
-  ``roundup_bypass_threshold_mb`` is only meaningful with ``backend:native``.
-  With ``backend:cudaMallocAsync``, ``roundup_bypass_threshold_mb`` is ignored.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).
@@ -440,6 +437,39 @@ Available options:
   reused. The threshold value should be between greater than 0.0 and less than 1.0.
   ``garbage_collection_threshold`` is only meaningful with ``backend:native``.
   With ``backend:cudaMallocAsync``, ``garbage_collection_threshold`` is ignored.
+* ``expandable_segments`` (experimental, default: `False`) If set to `True`, this setting instructs
+  the allocator to create CUDA allocations that can later be expanded to better handle cases
+  where a job changing allocation sizes frequently, such as having a changing batch size.
+  Normally for large (>2MB) allocations, the allocator calls cudaMalloc to get allocations
+  that are the same size as what the user requests. In the future, parts of these
+  allocations can be reused for other requests if they are free. This works well
+  when the program makes many requests of exactly the same size or of sizes that
+  even multiples of that size. Many deep learning models follow this behavior.
+  However, one common exception is when the batch size changes slightly from one
+  iteration to the next, e.g. in batched inference. When the program runs
+  initially with batch size `N`, it will make allocations appropriate for that size.
+  If in the future, it runs at size `N - 1`, the existing allocations will still be
+  big enough. However, if it runs at size `N + 1`, then it will have to make new
+  allocations that are slightly larger. Not all the tensors are the same size.
+  Some might be `(N + 1)*A` and others `(N + 1)*A*B` where `A` and `B` are some non-batch
+  dimensions in the model. Because the allocator reuses existing allocations when
+  they are big enough, some number of `(N + 1)*A` allocations will actually fit in
+  the already existing `N*B*A` segments, though not perfectly. As the model runs it
+  will partially fill up all of these segments leaving unusable free slices of
+  memory at the end of these segments. The allocator at some point will need to
+  `cudaMalloc` a new `(N + 1)*A*B` segment. If there is not enough memory, there is
+  now no way to recover the slices of memory that are free at the end of existing
+  segments. With models 50+ layers deep, this pattern might repeat 50+ times
+  creating many slivers.
+
+  `expandable_segments` allows the allocator to create a segment initially and then
+  expand its size later when more memory is needed. Instead of making one segment
+  per allocation, it tries to make one segment (per stream) that grows as
+  necessary. Now when the `N + 1` case runs, the allocations will tile nicely into
+  the one large segment until it fills up. Then more memory is requested and
+  appended to the end of the segment. This process does not create as many slivers
+  of unusable memory, so it is more likely to succeed at finding this memory.
+
 
 .. note::
 
@@ -511,6 +541,19 @@ of the alloc/free functions that match the signatures specified above.
    # This will error since the current allocator was already instantiated
    torch.cuda.memory.change_current_allocator(new_alloc)
 
+.. cublas-workspaces:
+
+cuBLAS workspaces
+-----------------
+
+For each combination of cuBLAS handle and CUDA stream, a cuBLAS workspace will be allocated
+if that handle and stream combination executes a cuBLAS kernel that requires a workspace.
+In order to avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
+``torch._C._cuda_clearCublasWorkspaces()`` is called. The workspace size per allocation can be
+specified via the environment variable ``CUBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.
+As an example, the default workspace size per allocation is ``CUBLAS_WORKSPACE_CONFIG=:4096:2:16:8``
+which specifies a total size of ``2 * 4096 + 8 * 16 KiB``. To force cuBLAS to avoid using workspaces,
+set ``CUBLAS_WORKSPACE_CONFIG=:0:0``.
 
 .. _cufft-plan-cache:
 

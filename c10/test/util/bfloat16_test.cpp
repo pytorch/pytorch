@@ -180,8 +180,8 @@ TEST_P(BFloat16Test, BFloat16RNETest) {
   EXPECT_EQ(GetParam().rne, rounded);
 }
 
-INSTANTIATE_TEST_CASE_P(
-    BFloat16Test_Instantiation,
+INSTANTIATE_TEST_SUITE_P(
+    BFloat16TestInstantiation,
     BFloat16Test,
     ::testing::Values(
         BFloat16TestParam{0x3F848000, 0x3F84},

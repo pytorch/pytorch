@@ -7,18 +7,12 @@ import torch.nn as nn
 from torch.distributed._composable_state import _State
 
 
-# use state_slot as key for module.__dict__ to avoid coliding with other
-# properties.
-# TODO: since all composable distributed features can share the same slot.
-class _StateKey(str):
-    # Make _StateKey as str to satify the assumption that object.__dict__.keys()
-    # are strings.
-    def __new__(cls, string="__composable_api_state_key"):
-        return super().__new__(cls, f"{string}_{str(uuid.uuid4())}")
+def generate_state_key(string="__composable_api_state_key"):
+    return f"{string}_{str(uuid.uuid4())}"
 
 
-STATE_KEY = _StateKey()
-REGISTRY_KEY = _StateKey()
+STATE_KEY = generate_state_key()
+REGISTRY_KEY = generate_state_key()
 
 
 # TODO: we can add additional info to RegistryItem to share across APIs. E.g.,
@@ -128,7 +122,7 @@ def contract(state_cls: Type[_State] = _State):
                 f"nn.Module, but got {type(updated)}"
             )
 
-            def check_fqn(orig_fqns: List[str], new_fqns: List[str]):
+            def check_fqn(orig_fqns: List[str], new_fqns: List[str], check_key: str):
                 if orig_fqns == new_fqns:
                     return
 
@@ -137,6 +131,7 @@ def contract(state_cls: Type[_State] = _State):
                 new_only = new_fqn_set - orig_fqn_set
                 if len(orig_only) or len(new_only):
                     raise RuntimeError(
+                        f"{check_key}"
                         "Composable distributed API implementations cannot modify "
                         "FQNs.\n"
                         f"Only in original FQNs: {orig_only},\n"
@@ -144,15 +139,28 @@ def contract(state_cls: Type[_State] = _State):
                     )
                 else:
                     raise RuntimeError(
+                        f"{check_key}"
                         "Composable distributed API implementations cannot modify "
                         "the order of FQNs.\n"
                         f"Original FQNs: {orig_only}\n"
                         f"New FQNs: {new_only}"
                     )
 
-            check_fqn(list(orig_named_params.keys()), list(new_named_params.keys()))
-            check_fqn(list(orig_named_buffers.keys()), list(new_named_buffers.keys()))
-            check_fqn(list(orig_named_modules.keys()), list(new_named_modules.keys()))
+            check_fqn(
+                list(orig_named_params.keys()),
+                list(new_named_params.keys()),
+                "Check parameters, ",
+            )
+            check_fqn(
+                list(orig_named_buffers.keys()),
+                list(new_named_buffers.keys()),
+                "Check buffer, ",
+            )
+            check_fqn(
+                list(orig_named_modules.keys()),
+                list(new_named_modules.keys()),
+                "Check modules, ",
+            )
 
             # TODO: a stricter verification should also reject changing module
             # types and monkey-patching forward() method implementations.
@@ -182,5 +190,11 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name.
     """
-    default_registry: Dict[str, RegistryItem] = OrderedDict()
-    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
+    registry = getattr(module, REGISTRY_KEY, None)
+    if registry is None:
+        # https://github.com/pytorch/pytorch/issues/107054
+        default_registry: Dict[str, RegistryItem] = OrderedDict()
+        setattr(module, REGISTRY_KEY, default_registry)
+        return default_registry
+    else:
+        return registry

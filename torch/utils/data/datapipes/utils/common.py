@@ -1,4 +1,5 @@
 import fnmatch
+import functools
 import inspect
 import os
 import warnings
@@ -61,8 +62,6 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     else:
         input_col_size = 1
 
-    fn_name = str(fn)
-
     pos = []
     var_positional = False
     non_default_kw_only = []
@@ -77,6 +76,11 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                 non_default_kw_only.append(p)
         else:
             continue
+
+    if isinstance(fn, functools.partial):
+        fn_name = getattr(fn.func, "__name__", repr(fn.func))
+    else:
+        fn_name = getattr(fn, "__name__", repr(fn))
 
     if len(non_default_kw_only) > 0:
         raise ValueError(
@@ -209,8 +213,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: O
 
     for pathname in pathnames:
         if not isinstance(pathname, str):
-            raise TypeError("Expected string type for pathname, but got {}"
-                            .format(type(pathname)))
+            raise TypeError(f"Expected string type for pathname, but got {type(pathname)}")
         yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
@@ -301,7 +304,7 @@ class StreamWrapper:
         self.closed = False
         if parent_stream is not None:
             if not isinstance(parent_stream, StreamWrapper):
-                raise RuntimeError('Parent stream should be StreamWrapper, {} was given'.format(type(parent_stream)))
+                raise RuntimeError(f'Parent stream should be StreamWrapper, {type(parent_stream)} was given')
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
         if StreamWrapper.debug_unclosed_streams:
@@ -319,9 +322,9 @@ class StreamWrapper:
         else:
             # Traverse only simple structures
             if isinstance(v, dict):
-                for kk, vv in v.items():
+                for vv in v.values():
                     cls.close_streams(vv, depth=depth + 1)
-            elif isinstance(v, list) or isinstance(v, tuple):
+            elif isinstance(v, (list, tuple)):
                 for vv in v:
                     cls.close_streams(vv, depth=depth + 1)
 

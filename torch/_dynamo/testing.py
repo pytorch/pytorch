@@ -3,12 +3,16 @@ import dis
 import functools
 import logging
 import os.path
+import re
+import sys
 import types
 import unittest
+from typing import Sequence, Union
 from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
@@ -53,10 +57,7 @@ def named_buffers_for_optimized_module(mod):
 
 
 def remove_optimized_module_prefix(name):
-    prefix = "_orig_mod."
-    assert name.startswith(prefix)
-    name = name[len(prefix) :]
-    return name
+    return re.sub(r"^_orig_mod[.]", "", name)
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -103,8 +104,10 @@ def requires_bwd_pass(out):
     if isinstance(out, torch.Tensor):
         return out.requires_grad
     elif isinstance(out, (list, tuple)):
-        return any([requires_bwd_pass(x) for x in out])
+        return any(requires_bwd_pass(x) for x in out)
     elif out is None:
+        return False
+    elif isinstance(out, int):
         return False
     raise NotImplementedError("Don't know how to reduce", type(out))
 
@@ -145,7 +148,7 @@ def debug_dump(name, code: types.CodeType, extra=""):
         )
 
 
-def debug_insert_nops(frame, cache_size, hooks):
+def debug_insert_nops(frame, cache_size, hooks, _):
     """used to debug jump updates"""
 
     def insert_nops(instructions, code_options):
@@ -157,8 +160,20 @@ def debug_insert_nops(frame, cache_size, hooks):
 
     debug_checks(frame.f_code)
     code = transform_code_object(frame.f_code, insert_nops)
+    graph = OutputGraph(
+        code_options={},
+        compiler_fn=None,
+        root_tx=None,
+        export=False,
+        export_constraints=None,
+        frame_state={"_id": 0},
+        # TODO: shouldn't this be f_locals/f_globals from frame?
+        local_scope=locals(),
+        global_scope=globals(),
+        f_code=frame.f_code,
+    )
 
-    return GuardedCode(code, CheckFunctionManager().check_fn)
+    return GuardedCode(code, CheckFunctionManager(graph).check_fn)
 
 
 class CompileCounter:
@@ -183,6 +198,7 @@ class CompileCounterWithBackend:
         self.frame_count = 0
         self.op_count = 0
         self.backend = backend
+        self.graphs = []
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
         from .backends.registry import lookup_backend
@@ -191,11 +207,38 @@ class CompileCounterWithBackend:
         for node in gm.graph.nodes:
             if "call" in node.op:
                 self.op_count += 1
+        self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
 
 
+# Equivalent to backend="eager", but also records graphs that
+# we can assert on
+class EagerAndRecordGraphs:
+    def __init__(self):
+        self.graphs = []
+
+    def __call__(self, gm: torch.fx.GraphModule, example_inputs):
+        self.graphs.append(gm)
+        return gm
+
+
+def strip_comment(code):
+    code = str(code)
+    return re.sub(r"(?m)^ *#.*\n?", "", code)
+
+
+def remove_trailing_space(code):
+    return "\n".join([line.rstrip() for line in code.split("\n")])
+
+
+def normalize_gm(gm_str):
+    # strip comments as comments have path to files which may differ from
+    # system to system.
+    return remove_trailing_space(strip_comment(gm_str))
+
+
 def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None):
-    if config.dynamic_shapes and expected_ops_dynamic is not None:
+    if not config.assume_static_by_default and expected_ops_dynamic is not None:
         expected_ops = expected_ops_dynamic
 
     actual = CompileCounter()
@@ -242,17 +285,13 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     return f"{speedup:.3f}x p={pvalue:.2f}"
 
 
-def requires_static_shapes(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if config.dynamic_shapes:
-            raise unittest.SkipTest("requires static shapes")
-        return fn(*args, **kwargs)
-
-    return _fn
-
-
-def rand_strided(size, stride, dtype=torch.float32, device="cpu", extra_size=0):
+def rand_strided(
+    size: Sequence[int],
+    stride: Sequence[int],
+    dtype: torch.dtype = torch.float32,
+    device: Union[str, torch.device] = "cpu",
+    extra_size: int = 0,
+):
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(size, stride))
         + 1
@@ -277,20 +316,50 @@ def _make_fn_with_patches(fn, *patches):
     return _fn
 
 
-def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
-    class DummyTestClass(cls):
-        pass
-
-    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
+    DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
+    DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):
             fn = getattr(cls, name)
             if not callable(fn):
+                setattr(DummyTestClass, name, getattr(cls, name))
                 continue
             new_name = f"{name}{fn_suffix}"
-            fn = _make_fn_with_patches(fn, *patches)
-            fn.__name__ = new_name
-            setattr(DummyTestClass, new_name, fn)
+            new_fn = _make_fn_with_patches(fn, *patches)
+            new_fn.__name__ = new_name
+            if xfail_prop is not None and hasattr(fn, xfail_prop):
+                new_fn = unittest.expectedFailure(new_fn)
+            setattr(DummyTestClass, new_name, new_fn)
+        # NB: Doesn't handle slots correctly, but whatever
+        elif not hasattr(DummyTestClass, name):
+            setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
+
+
+# test Python 3.11+ specific features
+def skipIfNotPy311(fn):
+    if sys.version_info >= (3, 11):
+        return fn
+    return unittest.skip(fn)
+
+
+# Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
+# and test/dynamo/test_dynamic_shapes.py
+def expectedFailureDynamic(fn):
+    fn._expected_failure_dynamic = True
+    return fn
+
+
+# Controls tests generated in test/inductor/test_torchinductor_codegen_dynamic_shapes.py
+def expectedFailureCodegenDynamic(fn):
+    fn._expected_failure_codegen_dynamic = True
+    return fn
+
+
+# Controls test generated in test/inductor/test_cpp_wrapper.py
+def expectedFailureDynamicWrapper(fn):
+    fn._expected_failure_dynamic_wrapper = True
+    return fn

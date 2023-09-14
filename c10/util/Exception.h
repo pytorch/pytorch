@@ -2,14 +2,11 @@
 #define C10_UTIL_EXCEPTION_H_
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/variant.h>
 
 #include <cstddef>
 #include <exception>
-#include <ostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -275,10 +272,28 @@ class C10_API OutOfMemoryError : public Error {
   using Error::Error;
 };
 
+// Base error type for all distributed errors.
+// These turn into DistError when they cross into Python.
+class C10_API DistError : public Error {
+  using Error::Error;
+};
+
 // Used for collective communication library errors from the distributed module.
 // These turn into DistBackendError when they cross into Python.
-class C10_API DistBackendError : public Error {
-  using Error::Error;
+class C10_API DistBackendError : public DistError {
+  using DistError::DistError;
+};
+
+// Used for errors originating from the store.
+// These turn into DistStoreError when they cross into Python.
+class C10_API DistStoreError : public DistError {
+  using DistError::DistError;
+};
+
+// Used for errors originating from the TCP/IP stack and not from collective
+// libraries. These turn into DistNetworkError when they cross into Python.
+class C10_API DistNetworkError : public DistError {
+  using DistError::DistError;
 };
 
 // A utility function to return an exception std::string by prepending its

@@ -45,10 +45,6 @@ bool PrefixStore::deleteKey(const std::string& key) {
   return store_->deleteKey(joinKey(key));
 }
 
-void PrefixStore::watchKey(const std::string& key, WatchKeyCallback callback) {
-  return store_->watchKey(joinKey(key), std::move(callback));
-}
-
 int64_t PrefixStore::getNumKeys() {
   return store_->getNumKeys();
 }
@@ -76,6 +72,36 @@ const std::chrono::milliseconds& PrefixStore::getTimeout() const noexcept {
 
 void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
   store_->setTimeout(timeout);
+}
+
+void PrefixStore::append(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  store_->append(joinKey(key), value);
+}
+
+std::vector<std::vector<uint8_t>> PrefixStore::multiGet(
+    const std::vector<std::string>& keys) {
+  std::vector<std::string> prefixed_keys;
+  for (auto& key : keys) {
+    prefixed_keys.push_back(joinKey(key));
+  }
+  return store_->multiGet(prefixed_keys);
+}
+
+void PrefixStore::multiSet(
+    const std::vector<std::string>& keys,
+    const std::vector<std::vector<uint8_t>>& values) {
+  std::vector<std::string> prefixed_keys;
+  for (auto& key : keys) {
+    prefixed_keys.push_back(joinKey(key));
+  }
+  store_->multiSet(prefixed_keys, values);
+}
+
+// Returns true if this store support append, multiGet and multiSet
+bool PrefixStore::hasExtendedApi() const {
+  return store_->hasExtendedApi();
 }
 
 c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {

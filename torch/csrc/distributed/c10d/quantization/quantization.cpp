@@ -9,7 +9,7 @@ namespace quantization {
 
 // TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
 
-void FloatToBFloat16Quantized_ref(
+static void FloatToBFloat16Quantized_ref(
     const float* const input,
     const size_t nrows,
     const size_t ncols,
@@ -26,7 +26,7 @@ void FloatToBFloat16Quantized_ref(
   }
 }
 
-void BFloat16QuantizedToFloat_ref(
+static void BFloat16QuantizedToFloat_ref(
     const at::BFloat16* const input,
     const size_t nrows,
     const size_t ncols,
@@ -59,10 +59,10 @@ at::Tensor _float_to_bfloat16_cpu(const at::Tensor& input) {
       at::empty({nrows, output_columns}, input.options().dtype(at::kHalf));
 
   FloatToBFloat16Quantized_ref(
-      input.data_ptr<float>(),
+      input.const_data_ptr<float>(),
       nrows,
       ncols,
-      reinterpret_cast<uint16_t*>(output.data_ptr<at::Half>()));
+      reinterpret_cast<uint16_t*>(output.mutable_data_ptr<at::Half>()));
 
   return output;
 }
@@ -81,10 +81,10 @@ at::Tensor _bfloat16_to_float_cpu(const at::Tensor& input) {
       {nrows, output_columns}, // 4 = sizeof(float)
       input.options().dtype(at::kFloat)); //
   BFloat16QuantizedToFloat_ref(
-      reinterpret_cast<at::BFloat16*>(input.data_ptr<at::Half>()),
+      reinterpret_cast<const at::BFloat16*>(input.const_data_ptr<at::Half>()),
       nrows,
       ncols,
-      output.data_ptr<float>());
+      output.mutable_data_ptr<float>());
 
   return output;
 }

@@ -16,7 +16,7 @@ if TEST_SCIPY:
 
 class TestNNInit(TestCase):
     def setUp(self):
-        super(TestNNInit, self).setUp()
+        super().setUp()
         random.seed(123)
 
     def _is_normal(self, tensor, mean, std):
@@ -120,6 +120,20 @@ class TestNNInit(TestCase):
             init.trunc_normal_(input_tensor, mean=mean, std=std, a=a, b=b)
 
             assert self._is_trunc_normal(input_tensor, mean, std, a, b)
+
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
+    def test_trunc_normal_generator(self):
+        gen = torch.Generator()
+        gen.manual_seed(42)
+        input_tensor = torch.empty(5)
+        init.trunc_normal_(input_tensor, generator=gen)
+
+        ref = torch.empty(5)
+        torch.manual_seed(42)
+        init.trunc_normal_(ref)
+
+        self.assertEqual(input_tensor, ref)
+        assert self._is_trunc_normal(input_tensor, mean=0, std=1, a=0, b=1)
 
     def test_constant(self):
         for dims in [1, 2, 4]:

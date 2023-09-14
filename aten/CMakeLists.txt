@@ -93,9 +93,14 @@ else()
   set(AT_NNPACK_ENABLED 1)
 endif()
 
+if(NOT USE_CUSPARSELT)
+  set(AT_CUSPARSELT_ENABLED 0)
+else()
+  set(AT_CUSPARSELT_ENABLED 1)
+endif()
+
 list(APPEND ATen_CPU_INCLUDE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/catch/single_include)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src)
 add_subdirectory(src/ATen)
 
 # Pass source, includes, and libs to parent

@@ -36,11 +36,13 @@ from .planner import (
     WriteItemType,
 )
 
+from .utils import _create_file_view
+
 from torch.distributed._shard._utils import narrow_tensor_by_index
+from torch._utils import _get_device_module
 
 __all__ = [
     "FileSystemWriter",
-    "SlicedBufferedReader",
     "FileSystemReader",
 ]
 
@@ -84,6 +86,7 @@ class _TensorLoader(ABC):
     def add(self, size, obj):
         pass
 
+    @abstractmethod
     def start_loading(self):
         pass
 
@@ -124,9 +127,11 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
         self.started = False
-        self.stream = stream or torch.cuda.current_stream()
-        if self.stream != torch.cuda.current_stream():
-            self.stream.wait_stream(torch.cuda.current_stream())
+        self.device_type = stream.device_type if stream else torch.device("cuda").type
+        self.device_module = _get_device_module(self.device_type)
+        self.stream = stream or self.device_module.current_stream()
+        if self.stream != self.device_module.current_stream():
+            self.stream.wait_stream(self.device_module.current_stream())
 
     @property
     def _done(self):
@@ -143,7 +148,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         return drained
 
     def _refill(self):
-        with torch.cuda.stream(self.stream):
+        with self.device_module.stream(self.stream):
             while (
                 not self._done
                 and self.in_flight_data < self.inflight_threshhold
@@ -151,7 +156,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
-                if tensor.is_cuda:
+                if tensor.device.type == self.device_type:
                     tensor = tensor.to(device="cpu", non_blocking=True)
                 elif tensor.device == torch.device("cpu"):
                     if tensor.storage().size() != tensor.numel():
@@ -290,7 +295,7 @@ def _write_files_from_queue(
                     )
 
                 for tensor, write_item in loader.values():
-                    assert not tensor.is_cuda
+                    assert tensor.is_cpu
                     write_results.append(
                         _write_item(stream, tensor, write_item, storage_key)
                     )
@@ -319,7 +324,7 @@ class FileSystemWriter(StorageWriter):
     def __init__(
         self,
         path: Union[str, os.PathLike],
-        single_file_per_rank: bool = False,
+        single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
@@ -328,7 +333,7 @@ class FileSystemWriter(StorageWriter):
         Initialize the writer pointing to `path`
 
         Args:
-            path: diretory where the checkpoint will be writen to.
+            path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
@@ -438,26 +443,6 @@ class FileSystemWriter(StorageWriter):
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
 
-class SlicedBufferedReader(io.BufferedReader):
-    # TODO override read to handle (-1) correctly
-    def __init__(self, base_stream: io.RawIOBase, offset: int, len: int):
-        super().__init__(base_stream)
-        self.offset = offset
-        self.len = len
-        self.seek(0)
-
-    def seek(self, __offset: int, __whence: int = os.SEEK_SET) -> int:
-        if __whence == os.SEEK_SET:
-            __offset = self.offset + __offset
-        elif __whence == os.SEEK_END:
-            __whence = os.SEEK_SET
-            __offset = (self.offset + self.len) - __offset
-        return super().seek(__offset, __whence)
-
-    def tell(self) -> int:
-        return super().tell() - self.offset
-
-
 class FileSystemReader(StorageReader):
     def __init__(self, path: Union[str, os.PathLike]) -> None:
         super().__init__()
@@ -465,9 +450,7 @@ class FileSystemReader(StorageReader):
         self.storage_data: Dict[MetadataIndex, _StorageInfo] = dict()
 
     def _slice_file(self, file, sinfo: _StorageInfo):
-        return SlicedBufferedReader(
-            io.FileIO(file.fileno(), closefd=False), sinfo.offset, sinfo.length
-        )
+        return _create_file_view(file, sinfo.offset, sinfo.length)
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
@@ -506,7 +489,7 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
-    # Implementating the abstract function in StorageReader
+    # Implementing the abstract function in StorageReader
     def read_metadata(self) -> Metadata:
         with (self.path / ".metadata").open("rb") as metadata_file:
             return pickle.load(metadata_file)

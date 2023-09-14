@@ -49,7 +49,7 @@ class CreateCommonWorld final : public Operator<Context> {
     initialize();
   }
 
-  virtual ~CreateCommonWorld() {
+  ~CreateCommonWorld() override {
   }
 
   CommonWorld rendezvousWithMPI() {
@@ -176,7 +176,7 @@ class CloneCommonWorld final : public Operator<Context> {
     }
   }
 
-  virtual ~CloneCommonWorld() {}
+  ~CloneCommonWorld() override {}
 
   bool RunOnDevice() override {
     try {

@@ -5,7 +5,10 @@ import io
 import subprocess
 import json
 from functools import lru_cache
-from typing import List, Tuple
+from typing import Any
+from itertools import groupby
+import base64
+import warnings
 
 cache = lru_cache(None)
 
@@ -18,6 +21,58 @@ def _frame_fmt(f, full_filename=False):
         fname = fname.split('/')[-1]
     func = f['name']
     return f'{fname}:{i}:{func}'
+
+@cache
+def _frame_filter(name, filename):
+    omit_functions = [
+        "unwind::unwind",
+        "CapturedTraceback::gather",
+        "gather_with_cpp",
+        "_start",
+        "__libc_start_main",
+        "PyEval_",
+        "PyObject_",
+        "PyFunction_",
+    ]
+    omit_filenames = [
+        "core/boxing",
+        "/Register",
+        "/Redispatch",
+        "pythonrun.c",
+        "Modules/main.c",
+        "Objects/call.c",
+        "Objects/methodobject.c",
+        "pycore_ceval.h",
+        "ceval.c",
+        "cpython/abstract.h",
+    ]
+    for of in omit_functions:
+        if of in name:
+            return False
+    for of in omit_filenames:
+        if of in filename:
+            return False
+    return True
+
+def _frames_fmt(frames, full_filename=False, reverse=False):
+    if reverse:
+        frames = reversed(frames)
+    return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f['name'], f['filename'])]
+
+def _block_extra_legacy(b):
+    if 'history' in b:
+        frames = b['history'][0].get('frames', [])
+        real_size = b['history'][0]['real_size']
+    else:
+        real_size = b.get('requested_size', b['size'])
+        frames = []
+    return frames, real_size
+
+def _block_extra(b):
+    if 'frames' not in b:
+        # old snapshot format made it more complicated to get frames/allocated size
+        return _block_extra_legacy(b)
+    return b['frames'], b['requested_size']
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
@@ -41,23 +96,24 @@ def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     return result
 
 def _write_blocks(f, prefix, blocks):
+    def frames_fragment(frames):
+        if not frames:
+            return "<non-python>"
+        return ';'.join(_frames_fmt(frames, reverse=True))
     for b in blocks:
         if 'history' not in b:
-            f.write(f'{prefix};{b["state"]} {b["size"]}\n')
-            continue
-        accounted_for_size = 0
-        for h in b['history']:
-            sz = h['real_size']
-            accounted_for_size += sz
-            if 'frames' in h:
-                frames = h['frames']
-                if frames:
-                    frame_s = ';'.join([_frame_fmt(f) for f in reversed(frames)])
+            frames, accounted_for_size = _block_extra(b)
+            f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {accounted_for_size}\n')
+        else:
+            accounted_for_size = 0
+            for h in b['history']:
+                sz = h['real_size']
+                accounted_for_size += sz
+                if 'frames' in h:
+                    frames = h['frames']
+                    f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {sz}\n')
                 else:
-                    frame_s = "<non-python>"
-                f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
-            else:
-                f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
+                    f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
         gaps = b['size'] - accounted_for_size
         if gaps:
             f.write(f'{prefix};{b["state"]};<gaps> {gaps}\n')
@@ -85,11 +141,11 @@ def compare(before, after, format_flamegraph=format_flamegraph):
 
     f = io.StringIO()
 
-    before_segs = set(_seg_key(seg) for seg in before)
-    after_segs = set(_seg_key(seg) for seg in after)
+    before_segs = {_seg_key(seg) for seg in before}
+    after_segs = {_seg_key(seg) for seg in after}
 
-    print(f'only_before = {list(a for a,_ in (before_segs - after_segs))}')
-    print(f'only_after = {list(a for a,_ in (after_segs - before_segs))}')
+    print(f'only_before = {[a for a,_ in (before_segs - after_segs)]}')
+    print(f'only_after = {[a for a,_ in (after_segs - before_segs)]}')
 
     for seg in before:
         if _seg_key(seg) not in after_segs:
@@ -124,8 +180,10 @@ def calc_active(seg):
 
 def _report_free(free_external, free_internal):
     total = free_external + free_internal
-    pct = (free_internal / total) * 100
-    suffix = f' ({pct:.1f}% internal)'
+    suffix = ''
+    if total != 0:
+        pct = (free_internal / total) * 100
+        suffix = f' ({pct:.1f}% internal)'
     return f'{Bytes(total)}{suffix}'
 
 PAGE_SIZE = 1024 * 1024 * 20
@@ -167,19 +225,12 @@ def segsum(data):
         boffset = 0
         for b in seg['blocks']:
             active = b['state'] == 'active_allocated'
-            if 'history' in b:
-                # use the more accureate real_size to account for internal fragmenetation if we have it
-                for h in b['history']:
-                    if active:
-                        all_ranges.append((h['addr'] - seg['address'], h['real_size'], active))
-                        seg_allocated += h['real_size']
-                        assert len(b['history']) == 1
-                        seg_free_internal += b['size'] - h['real_size']
+            if active:
+                _, allocated_size = _block_extra(b)
+                all_ranges.append((boffset, allocated_size, True))
+                seg_allocated += allocated_size
+                seg_free_internal += b['size'] - allocated_size
             else:
-                if active:
-                    all_ranges.append((boffset, b['size'], True))
-                    seg_allocated += b['size']
-            if not active:
                 seg_free_external += b['size']
 
             boffset += b['size']
@@ -197,7 +248,7 @@ def segsum(data):
             finish_ = (start_ + size)
             start = start_ // PAGE_SIZE
             finish = (finish_ - 1) // PAGE_SIZE + 1
-            m = chr((ord('a' if active else 'A') + (i % 26)))
+            m = chr(ord('a' if active else 'A') + (i % 26))
             for j in range(start, finish):
                 s = max(start_, j * PAGE_SIZE)
                 e = min(finish_, (j + 1) * PAGE_SIZE)
@@ -310,106 +361,53 @@ def trace(data):
             format(d)
     return out.getvalue()
 
-class PlotWriter:
-    def __init__(self):
-        string_table: List[str] = []
-        suffix_table: List[Tuple[int, int]] = []
 
-        elements = []
-        actions: List[int] = []
+_memory_viz_template = r"""
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+<script type="module">
+import {add_local_files} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch@main/torch/utils/viz/MemoryViz.js"
+const local_files = $SNAPSHOT
+add_local_files(local_files, $VIZ_KIND)
+</script>
+</body>
+"""
 
-        initially_allocated: List[int] = []
+def _format_viz(data, viz_kind, device):
+    if device is not None:
+        warnings.warn('device argument is deprecated, plots now contain all device')
+    buffer = pickle.dumps(data)
+    buffer += b'\x00' * (3 - len(buffer) % 3)
+    # Encode the buffer with base64
+    encoded_buffer = base64.b64encode(buffer).decode('utf-8')
 
-        @cache
-        def intern_str(s):
-            string_table.append(s)
-            return len(string_table) - 1
-
-        @cache
-        def intern_suffix(sid, restid):
-            suffix_table.append((sid, restid))
-            return len(suffix_table) - 1
-
-
-        def intern_stack(frames):
-            sids = [intern_str(f) for f in frames]
-            next_id = None
-            for sid in reversed(sids):
-                next_id = intern_suffix(sid, next_id)
-            return next_id
-
-        def add_element(size, lines):
-            elements.append({'size': size, 'info': intern_stack(lines)})
-            return len(elements) - 1
-
-        def to_html():
-            r = {
-                'actions': actions,
-                'elements': elements,
-                'suffix_table': suffix_table,
-                'string_table': string_table,
-                'initially_allocated': list(reversed(initially_allocated)),
-            }
-            plot_data = json.dumps(r)
-            return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
-
-        self.add_element = add_element
-        self.allocate = actions.append
-        self.free = actions.append
-        self.initially_allocated = initially_allocated.append
-        self.to_html = to_html
+    json_format = json.dumps([{"name": 'snapshot.pickle', "base64": encoded_buffer}])
+    return _memory_viz_template.replace('$VIZ_KIND', repr(viz_kind)) \
+                               .replace('$SNAPSHOT', json_format)
 
 def trace_plot(data, device=None, plot_segments=False):
-    w = PlotWriter()
-    addr_to_alloc = {}
+    """Generate a visualization over time of the memory usage recorded by the trace as an html file.
 
-    if device is None:
-        for i, t in enumerate(data['device_traces']):
-            if len(t) > 0:
-                if device is not None:
-                    raise ValueError(f'Both device {device} and {i} have traces, use --device to specify which trace.')
-                device = i
-        if device is None:
-            raise ValueError('No trace information was recorded.')
+    Args:
+        data: Memory snapshot as generated from torch.cuda.memory._snapshot()
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
+        plot_segments (bool, optional): Plots memory returned from cudaMalloc, rather than individual allocations.
+                                        Defaults to False.
 
-    trace = data['device_traces'][device]
+    Returns:
+        str: HTML of visualization
+    """
+    return _format_viz(data, 'Active Memory Timeline' if not plot_segments else 'Active Cached Memory Timeline', device)
 
-    if plot_segments:
-        alloc = 'segment_alloc'
-        free = 'segment_free'
-    else:
-        alloc = 'alloc'
-        free = 'free_completed'
 
-    def add_element(size, frames, extra=()):
-        frames = [f"{_format_size(size)} allocation", *extra, *(_frame_fmt(f, full_filename=True) for f in frames)]
-        return w.add_element(size, frames)
-
-    for i, e in enumerate(trace):
-        if e['action'] == alloc:
-            elemid = add_element(e['size'], e['frames'])
-            addr_to_alloc[e['addr']] = elemid
-            w.allocate(elemid)
-        elif e['action'] == free:
-            idx = addr_to_alloc.pop(e['addr'], None)
-            if idx is None:
-                idx = add_element(e['size'], e['frames'], extra=('alloc not recorded, stack trace for free:',))
-                w.initially_allocated(idx)
-            w.free(idx)
-    return w.to_html()
-
-def profile_plot(memory_profile, device=None):
+def _profile_to_snapshot(profile):
     import torch
     from torch.profiler._memory_profiler import Action, TensorKey
     from torch._C._profiler import _EventType
-
-    if device is None:
-        if torch.cuda.is_available():
-            device = torch.device('cuda', torch.cuda.current_device())
-        else:
-            device = torch.device('cpu')
-    w = PlotWriter()
-
+    memory_profile = profile._memory_profile()
 
     allocation_stacks = {}
     for event in memory_profile._op_tree.sorted_nodes:
@@ -427,321 +425,105 @@ def profile_plot(memory_profile, device=None):
             if key and event.extra_fields.alloc_size > 0:
                 allocation_stacks[key] = python_parents
 
-    def add_element(size, tensor_key, version):
-        category = memory_profile._categories.get(tensor_key, version)
-        if category is None:
-            category = 'unknown'
+
+    device_count = torch.cuda.device_count()
+    snapshot = {
+        'device_traces': [[] for _ in range(device_count + 1)],
+        'segments': [{'device': device,
+                      'address': None,
+                      'total_size': 0,
+                      'stream': 0,
+                      'blocks': []} for device in range(device_count + 1)]
+    }
+
+    def to_device(device):
+        if device.type == 'cuda':
+            return device.index
         else:
-            category = category.name.lower()
+            return device_count
+
+    def allocate(size, tensor_key, version, during_trace=True):
+        device = to_device(tensor_key.device)
+        addr = tensor_key.storage.ptr
+
+        seg = snapshot['segments'][device]  # type: ignore[index]
+        if seg['address'] is None or seg['address'] > addr:
+            seg['address'] = addr
+        seg['total_size'] = max(seg['total_size'], addr + size)  # record max addr for now, we will make it the size later
+        category = memory_profile._categories.get(tensor_key, version)
+        category = category.name.lower() if category is not None else "unknown"
         stack = allocation_stacks.get(tensor_key, ())
-        return w.add_element(size, [f"{_format_size(size)} allocation ({category})", *(p.name for p in stack)])
+        stack = [{'filename': 'none', 'line': 0, 'name': p.name} for p in stack]
+        r = {'action': 'alloc', 'addr': addr, 'size': size, 'stream': 0, 'frames': stack, 'category': category}
+        if during_trace:
+            snapshot['device_traces'][device].append(r)  # type: ignore[index]
+        return r
+
+    def free(alloc, device):
+        for e in ('free_requested', 'free_completed'):
+            snapshot['device_traces'][device].append({'action': e,  # type: ignore[index]
+                                                      'addr': alloc['addr'],
+                                                      'size': alloc['size'],
+                                                      'stream': 0,
+                                                      'frames': alloc['frames']})
 
     kv_to_elem = {}
+
+
+
+    # create the device trace
     for time, action, (tensor_key, version), size in memory_profile.timeline:
-        if tensor_key.device != device:
+        if not isinstance(tensor_key, TensorKey):
             continue
         if action == Action.CREATE:
-            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
-            w.allocate(elemid)
+            kv_to_elem[(tensor_key, version)] = allocate(size, tensor_key, version)
         elif action == Action.DESTROY:
-            w.free(kv_to_elem.pop((tensor_key, version)))
+            free(kv_to_elem.pop((tensor_key, version)), to_device(tensor_key.device))
         elif action == Action.INCREMENT_VERSION:
-            w.free(kv_to_elem.pop((tensor_key, version)))
-            kv_to_elem[(tensor_key, version + 1)] = elemid = add_element(size, tensor_key, version + 1)
-            w.allocate(elemid)
+            free(kv_to_elem.pop((tensor_key, version)), to_device(tensor_key.device))
+            kv_to_elem[(tensor_key, version + 1)] = allocate(size, tensor_key, version + 1)
         elif action == Action.PREEXISTING:
-            kv_to_elem[(tensor_key, version)] = elemid = add_element(size, tensor_key, version)
-            w.initially_allocated(elemid)
-    return w.to_html()
-
-# note: this template should eventually move to its own file,
-# however, we first need to package _memory_viz.py so that it can be
-# pip-installed separately from pytorch so it is easy to run e.g.
-# on a laptop with downloaded snapshots. Currently this is
-# accomplished by downloading _memory_viz.py so the template
-# needs to be included
-_memory_over_time_template = r"""
-<!DOCTYPE html>
-<html>
-<head></head>
-<body>
-<script type="module">
-import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7.7.0/+esm";
-import {schemeTableau10} from "https://cdn.skypack.dev/d3-scale-chromatic@3";
-import {axisLeft} from "https://cdn.skypack.dev/d3-axis@3";
-import {scaleLinear} from "https://cdn.skypack.dev/d3-scale@4";
-import {zoom, zoomIdentity} from "https://cdn.skypack.dev/d3-zoom@3";
-import {brushX} from "https://cdn.skypack.dev/d3-brush@3";
-
-let alloc_data = $PLOT_DATA
-
-function process_alloc_data(fraction_of_memory_reported=1) {
-    let current = []
-    let current_data = []
-    let data = []
-    let max_size = 0
-
-    let total_mem = 0
-    let timestep = 0
-
-    let max_at_time = []
-    function advance(n, max) {
-        timestep += n
-        for (let i = 0; i < n; i++) {
-            max_at_time.push(max)
-        }
-    }
-
-    let mini_points = []
-
-    let sizes = alloc_data.elements.map(x => x.size).sort((x, y) => y - x)
-    let total_size = sizes.reduce((x, y) => x + y)
-    const memory_threshold = fraction_of_memory_reported * total_size
-    let total_seen = 0
-    let memory_threshold_size = 0
-
-    for (const [i, size] of sizes.entries()) {
-        total_seen += size
-        if (total_seen > memory_threshold) {
-            memory_threshold_size = size
-            break
-        }
-    }
-
-    function add_allocation(elem) {
-        let size = alloc_data.elements[elem].size
-        current.push(elem)
-        let e = {elem: elem, timesteps: [timestep], offsets: [total_mem], size: alloc_data.elements[elem].size}
-        current_data.push(e)
-        data.push(e)
-        total_mem += size
-    }
-
-    for (const elem of alloc_data.initially_allocated) {
-        add_allocation(elem)
-    }
-
-    for (const action of alloc_data.actions) {
-        const elem = action
-        const idx = current.findIndex(x => x === elem)
-        const size = alloc_data.elements[elem].size
-        if (size < memory_threshold_size) {
-            continue
-        }
-        // first time we see an action we add it
-        // second time we remove it
-        if (idx == -1) {
-            add_allocation(elem)
-            advance(1, total_mem)
-        } else {
-            advance(1, total_mem)
-            const removed = current_data[idx]
-            removed.timesteps.push(timestep)
-            removed.offsets.push(removed.offsets.at(-1))
-            current.splice(idx, 1)
-            current_data.splice(idx, 1)
-
-            if (idx < current.length) {
-                for (let j = idx; j < current.length; j++) {
-                    const e = current_data[j]
-                    e.timesteps.push(timestep)
-                    e.offsets.push(e.offsets.at(-1))
-                    e.timesteps.push(timestep + 3)
-                    e.offsets.push(e.offsets.at(-1) - size)
-                }
-                advance(3, total_mem)
-            }
-            total_mem -= size
-        }
-        max_size = Math.max(total_mem, max_size)
-    }
-
-    for (const elem of current_data) {
-        elem.timesteps.push(timestep)
-        elem.offsets.push(elem.offsets.at(-1))
-    }
-    return {
-        max_size: max_size,
-        allocations_over_time: data,
-        max_at_time: max_at_time,
-        context_for_id:  (elem) => {
-            let strings = []
-            let id = alloc_data.elements[elem].info
-            while (id !== null) {
-                const [sid, next_id] = alloc_data.suffix_table[id]
-                strings.push(alloc_data.string_table[sid])
-                id = next_id
-            }
-            return `${strings.join('\n')}\n`
-        }
-    }
-}
-
-function MemoryPlot(svg, data, left_pad, colors=schemeTableau10) {
-    function format_points(d) {
-        const size = d.size
-        const xs = d.timesteps.map(t => xscale(t))
-        const bottom = d.offsets.map(t => yscale(t))
-        const top = d.offsets.map(t => yscale(t + size))
-
-        const p0 = xs.map((x, i) => `${x},${bottom[i]}`)
-        const p1 = xs.map((x, i) => `${x},${top[i]}`).reverse()
-
-        return `${p0.join(' ')} ${p1.join(' ')}`
-    }
-
-    let max_timestep = data.max_at_time.length
-    let max_size = data.max_size
-
-    let width = svg.attr('width')
-    let height = svg.attr('height')
-    let plot_width = width - left_pad
-    let plot_height = height
-
-    let yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-    let heightscale = scaleLinear().domain([0, max_size]).range([0, plot_height]);
-    let yaxis = axisLeft(yscale).tickFormat(d3.format("~s"))
-    let xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width])
-    let plot_coordinate_space = svg.append("g").attr("transform", `translate(${left_pad}, ${0})`)
-    let plot_outer = plot_coordinate_space.append('g')
-
-    function view_rect(a) {
-        return a.append('rect').attr('x', 0).attr('y', 0)
-                .attr('width', plot_width).attr('height', plot_height)
-                .attr('fill', 'white')
-    }
-
-    view_rect(plot_outer)
-
-    let cp = svg.append("clipPath").attr("id", "clip")
-    view_rect(cp)
-    plot_outer.attr('clip-path', "url(#clip)")
+            kv_to_elem[(tensor_key, version)] = allocate(size, tensor_key, version, during_trace=False)
 
 
-    let zoom_group = plot_outer.append("g")
-    let scrub_group = zoom_group.append('g')
+    # create the final snapshot state
+    blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
+                     for (tensor_key, version), event in kv_to_elem.items()]
+    for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
+        seg = snapshot['segments'][device]  # type: ignore[index]
+        last_addr = seg['address']
+        for _, addr, size, frames in blocks:
+            if last_addr < addr:
+                seg['blocks'].append({'size': addr - last_addr, 'state': 'inactive'})
+            seg['blocks'].append({'size': size, 'state': 'active_allocated', 'requested_size': size, 'frames': frames})
+            last_addr = addr + size
+        if last_addr < seg['total_size']:
+            seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})
 
-    let plot = scrub_group.selectAll("polygon")
-    .data(data.allocations_over_time)
-    .enter()
-    .append("polygon")
-    .attr('points', format_points)
-    .attr('fill', d => colors[d.elem % colors.length])
+    snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]  # type: ignore[attr-defined]
+    for seg in snapshot['segments']:  # type: ignore[attr-defined, name-defined, no-redef]
+        seg['total_size'] -= seg['address']
+        if not seg['blocks']:
+            seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})
 
-    let axis = plot_coordinate_space.append('g').call(yaxis)
+    return snapshot
 
+def profile_plot(profile, device=None):
+    """Generate a visualization over time of the memory usage recorded by kineto memory profiling as an html file.
 
-    let scale_mini = 0
-    let translate_mini = 0
-    function handleZoom(e) {
-        const t = e.transform
-        zoom_group.attr("transform", t)
-        axis.call(yaxis.scale(e.transform.rescaleY(yscale)))
-    }
+    Args:
+        profile: profile as generated by `torch.profiler.profile(profile_memory=True)`
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
 
-    const thezoom = zoom().on('zoom', handleZoom)
-    plot_outer.call(thezoom)
-
-    return {
-        select_window: (stepbegin, stepend, max) => {
-            let begin = xscale(stepbegin)
-            let size = xscale(stepend) - xscale(stepbegin);
-            let scale = plot_width / size
-            let translate = -begin
-            let yscale =  max_size/max
-            scrub_group.attr("transform", `scale(${scale/yscale}, 1) translate(${translate}, 0)`)
-            plot_outer.call(thezoom.transform, zoomIdentity.scale(yscale).translate(0, -(plot_height - plot_height/yscale)))
-        },
-        set_delegate: (delegate) => {
-            plot.on('mouseover', function (e, d) { delegate.set_selected(d3.select(this)) } )
-            .on('mousedown', function(e, d) { delegate.default_selected = d3.select(this)})
-            .on('mouseleave', function (e, d) { delegate.set_selected(delegate.default_selected) } )
-        }
-    }
-}
-
-function ContextViewer(text, data) {
-    let current_selected = null
-
-    return {
-        default_selected: null,
-        set_selected: (d) => {
-            if (current_selected !== null) {
-                current_selected.attr('stroke', null).attr('stroke-width', null);
-            }
-            if (d === null) {
-                text.text("")
-            } else {
-                const dd = d.datum()
-                text.text(`${dd.elem} ${data.context_for_id(dd.elem)}`)
-                d.attr('stroke', 'black').attr('stroke-width', 1).attr('vector-effect', 'non-scaling-stroke')
-            }
-            current_selected = d
-        }
-    }
-}
+    Returns:
+        str: HTML of visualization
+    """
+    snapshot = _profile_to_snapshot(profile)
+    return _format_viz(snapshot, 'Active Memory Timeline', device)
 
 
-function MiniMap(mini_svg, plot, data, left_pad, height=70) {
-    let max_at_time = data.max_at_time
-    let width = mini_svg.attr('width')
-    let plot_width = width - left_pad
-    let yscale = scaleLinear().domain([0, data.max_size]).range([height, 0]);
-    let minixscale = scaleLinear().domain([0, max_at_time.length]).range([left_pad, width])
-
-    let mini_points = [[max_at_time.length, 0], [0, 0]]
-
-    for (const [i, m] of max_at_time.entries()) {
-        let [lastx, lasty] = mini_points[mini_points.length - 1]
-        if (m !== lasty) {
-            mini_points.push([i, lasty])
-            mini_points.push([i, m])
-        } else if (i === max_at_time.length - 1) {
-            mini_points.push([i, m])
-        }
-    }
-
-
-    let points = mini_points.map(([t, o]) => `${minixscale(t)}, ${yscale(o)}`)
-    points = points.join(' ')
-    mini_svg.append('polygon').attr('points', points).attr('fill', schemeTableau10[0])
-
-    let xscale = scaleLinear().domain([0, max_at_time.length]).range([0, plot_width])
-
-
-    const brush = brushX()
-    brush.extent([[left_pad, 0], [width, height]])
-    brush.on('brush', function({selection}) {
-        let [begin, end] = selection.map(x => x - left_pad)
-
-        let stepbegin = Math.floor(xscale.invert(begin))
-        let stepend = Math.floor(xscale.invert(end))
-        let max = 0
-        for (let i = stepbegin; i < stepend; i++) {
-            max = Math.max(max, max_at_time[i])
-        }
-        plot.select_window(stepbegin, stepend, max)
-    })
-    mini_svg.call(brush)
-    return {}
-}
-
-let left_pad = 70
-let width = 1024
-let height = 768
-let data = process_alloc_data()
-let body = d3.select("body")
-
-let plot = MemoryPlot(body.append("svg").attr('width', width).attr('height', height).attr('display', 'block'), data, left_pad)
-
-MiniMap(body.append("svg").attr('width', width).attr('height', 80).attr('display', 'block'), plot, data, left_pad)
-let delegate = ContextViewer(body.append("div").append("pre").text('none'), data)
-plot.set_delegate(delegate)
-
-</script>
-</body>
-</html>
-"""
+def segment_plot(data: Any, device=None):
+    return _format_viz(data, 'Allocator State History', device)
 
 if __name__ == "__main__":
     import os.path
@@ -785,15 +567,20 @@ if __name__ == "__main__":
     compare_a.add_argument('after', help=pickled)
     _output(compare_a)
 
-    description = "Generate a visualization over time of the memory usage recorded by the trace as an html file."
-    trace_plot_a = subparsers.add_parser('trace_plot', description=description)
-    trace_plot_a.add_argument('input', help=pickled)
-    help = 'visualize trace from this device (default: chooses the only device with trace info or errors)'
-    trace_plot_a.add_argument('-d', '--device', type=int, default=None, help=help)
-    help = 'path to save the visualization(default: output.html)'
-    trace_plot_a.add_argument('-o', '--output', default='output.html', help=help)
-    help = 'visualize change to segments rather than individual allocations'
-    trace_plot_a.add_argument('-s', '--segments', action='store_true', help=help)
+    plots = (
+        ("trace_plot", "Generate a visualization over time of the memory usage recorded by the trace as an html file."),
+        ("segment_plot", "Visualize how allocations are packed into allocator segments at each point in a trace as an html file.")
+    )
+    for cmd, description in plots:
+        trace_plot_a = subparsers.add_parser(cmd, description=description)
+        trace_plot_a.add_argument('input', help=pickled)
+        help = 'visualize trace from this device (default: chooses the only device with trace info or errors)'
+        trace_plot_a.add_argument('-d', '--device', type=int, default=None, help=help)
+        help = 'path to save the visualization(default: output.html)'
+        trace_plot_a.add_argument('-o', '--output', default='output.html', help=help)
+        if cmd == "trace_plot":
+            help = 'visualize change to segments rather than individual allocations'
+            trace_plot_a.add_argument('-s', '--segments', action='store_true', help=help)
 
 
     args = parser.parse_args()
@@ -831,3 +618,6 @@ if __name__ == "__main__":
     elif args.action == 'trace_plot':
         data = _read(args.input)
         _write(args.output, trace_plot(data, device=args.device, plot_segments=args.segments))
+    elif args.action == 'segment_plot':
+        data = _read(args.input)
+        _write(args.output, segment_plot(data, device=args.device))

@@ -185,7 +185,7 @@ class TestStorageBase:
 
 class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def __init__(self, fail_conf):
-        super(FaultyStorageWriter, self).__init__(fail_conf)
+        super().__init__(fail_conf)
 
     def set_up_storage_writer(self, is_coordinator: bool) -> None:
         self._fail_rank("fail_set_up_storage_writer")
@@ -212,7 +212,7 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
 
 class FaultyStorageReader(TestStorageBase, StorageReader):
     def __init__(self, metadata, fail_conf):
-        super(FaultyStorageReader, self).__init__(fail_conf)
+        super().__init__(fail_conf)
         self.metadata = metadata
 
     def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:

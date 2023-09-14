@@ -3,19 +3,19 @@ from typing import Dict, Union
 
 import torch
 import torch.nn as nn
+import torch.distributed._tensor.random as random
 from torch.distributed._tensor import (
     DeviceMesh,
-    DTensor,
     distribute_module,
     distribute_tensor,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.sharding_prop import _CachingPropagator
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
-from torch.distributed.tensor.parallel.multihead_attention_tp import (
-    TensorParallelMultiheadAttention,
+from torch.distributed._tensor.random import (
+    is_rng_supported_mesh,
+    TensorParallelRNGTracker,
 )
+from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
     PairwiseParallel,
@@ -28,9 +28,6 @@ __all__ = [
     "parallelize_module",
 ]
 
-# switch the DTensor propagator to use the caching propagator to speed up
-# the TP eager execution time.
-DTensor._propagator = _CachingPropagator(DTensor._propagator.op_to_rules)
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
@@ -40,9 +37,11 @@ def parallelize_module(  # type: ignore[return]
 ) -> nn.Module:
     """
     The API to apply Tensor Parallelism (TP) in PyTorch. We parallelize module
-    or sub_modules based on a parallelize_plan which contains the parallel_style
-    which indicates how user want the module or sub_module to be parallelized.
-    User can also specify different parallel_style per module fully qualifed name (FQN).
+    or sub_modules based on a parallelize_plan. The parallelize_plan contains
+    :class:`ParallelStyle`, which indicates how user wants the module or sub_module
+    to be parallelized.
+
+    User can also specify different parallel style per module fully qualified name (FQN).
     The API supports 2D parallelism natively by accepting an n-dimension device_mesh
     and users just need to specify the dimension where we perform tensor parallelism on.
 
@@ -66,7 +65,7 @@ def parallelize_module(  # type: ignore[return]
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
-        >>> from torch.distributed._tensor.parallel import parallelize_module, PairwiseParallel
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PairwiseParallel
         >>>
         >>> # Define the module.
         >>> m = Model(...)
@@ -78,20 +77,31 @@ def parallelize_module(  # type: ignore[return]
         granularity, you need to pass in a dict of module FQN and parallel style instead.
     """
 
+    torch._C._log_api_usage_once("torch.distributed.tensor.parallel.parallelize_module")
+
+    # instantiate a TP RNG state tracker if it's not there
+    if (
+        is_rng_supported_mesh(device_mesh) and
+        not isinstance(random._rng_tracker, TensorParallelRNGTracker)
+    ):
+        random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
+        # TODO: we should allow user to pass in the default seed from a config
+        random._rng_tracker._manual_seed(device_mesh, base_seed=1234, tp_dim=tp_mesh_dim)
+        # By default we execute random ops in non-tensor-parallel region. If users want
+        # to execute in tensor-parallel region, they can manually set this field to True
+        # after parallelizing the model.
+        random._rng_tracker.distribute_region_enabled = False
+
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
-        if isinstance(parallelize_plan, ColwiseParallel) or isinstance(
-            parallelize_plan, RowwiseParallel
-        ):
+        if isinstance(parallelize_plan, (ColwiseParallel, RowwiseParallel)):
             return _parallelize_linear(module, device_mesh, parallelize_plan)
         # PairwiseParallel
-        if _is_mha_for_pairwise_parallel(module):
-            return _parallelize_multihead_attn(module, device_mesh)
-        elif _is_mlp_for_pairwise_parallel(module):
-            return _parallelize_mlp(module, device_mesh)
+        if _is_mlp_for_pairwise_parallel(module):
+            return _parallelize_mlp(module, device_mesh, parallelize_plan)
         else:
             for n, m in module.named_children():
                 module.register_module(
@@ -118,22 +128,6 @@ def parallelize_module(  # type: ignore[return]
             "Expect Union[ParallelStyle, Dict[str, ParallelStyle]] for"
             f" parallelize_plan, {type(parallelize_plan)} found!"
         )
-
-
-def _is_mha_for_pairwise_parallel(module: nn.Module) -> bool:
-    """
-    Check whether the mha module is the one can be handled for Pairwise parallel.
-
-    Args:
-        module (:class:`nn.Module`):
-            Module to be checked.
-
-    Return:
-        A boolean object which specifies whether the module is MHA supported by Pairwise parallel or not.
-    """
-    return isinstance(module, TensorParallelMultiheadAttention) or isinstance(
-        module, nn.MultiheadAttention
-    )
 
 
 def _is_mlp_for_pairwise_parallel(module: nn.Module) -> bool:
@@ -265,7 +259,7 @@ def _parallelize_linear(
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
 
-    if isinstance(parallel_style, RowwiseParallel):
+    if isinstance(parallel_style, (RowwiseParallel)):
         distribute_module(
             module,
             device_mesh,
@@ -273,7 +267,7 @@ def _parallelize_linear(
             input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
             output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
         )
-    elif isinstance(parallel_style, ColwiseParallel):
+    elif isinstance(parallel_style, (ColwiseParallel)):
         distribute_module(
             module,
             device_mesh,
@@ -283,77 +277,6 @@ def _parallelize_linear(
         )
     else:
         raise RuntimeError(f"{type(parallel_style)} is not supported!")
-    return module
-
-
-def _parallelize_multihead_attn(
-    module: nn.Module,
-    device_mesh: DeviceMesh,
-    parallel_style: ParallelStyle = PairwiseParallel(),
-    tp_mesh_dim: int = 0,
-) -> nn.Module:
-    """
-    This function assumes the input module is a sequence of nn.Linear
-    and we parallelize the module based on the given parallel style.
-    We don't change the FQN of each sub-module and replace each parameter
-    in place.
-
-    Args:
-        module (:class:`nn.Module`):
-            Module to be parallelized.
-        device_mesh (:class:`DeviceMesh`):
-            Object which describes the mesh topology of devices.
-        parallel_style (:class:`ParallelStyle`):
-            Object which contains how we prepare input/output
-            for Tensor Parallelism.
-        tp_mesh_dim (int):
-            The dimension of `device_mesh` where we perform
-            Tensor Parallelism on.
-
-    Return:
-        A :class:`nn.Module` object parallelized.
-
-    .. warning::
-        We only support ``PairwiseParallel`` right now.
-    """
-
-    if not isinstance(parallel_style, PairwiseParallel):
-        raise NotImplementedError(
-            "Only support PairwiseParallel for Multihead Attention" " parallelization."
-        )
-
-    if device_mesh.ndim > 1:
-        device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
-
-    if isinstance(module, nn.MultiheadAttention):
-        tp_multi_head_attention = TensorParallelMultiheadAttention(
-            module.embed_dim,
-            module.num_heads,
-            device=torch.device(device_mesh.device_type),
-            tp_size=device_mesh.size(tp_mesh_dim),
-            add_bias_kv=module.bias_k is not None,
-        )
-        tp_multi_head_attention.copy(module)
-        module = tp_multi_head_attention
-
-    if isinstance(module, TensorParallelMultiheadAttention):  # shard TPMA
-        for n, m in module.named_children():
-            if n == "qkv":
-                # Col-wise Parallelize the qkv layer.
-                distribute_module(
-                    m,
-                    device_mesh,
-                    _colwise_parallelize_linear_fn,
-                    input_fn=parallel_style._prepare_input,  # type: ignore[arg-type, misc] # pyre-ignore[6]
-                )
-            elif n == "proj":
-                # Row-wise Parallelize the proj layer
-                distribute_module(
-                    m,
-                    device_mesh,
-                    _rowwise_parallelize_linear_fn,
-                    output_fn=parallel_style._prepare_output,  # type: ignore[arg-type, misc] # pyre-ignore[6]
-                )
     return module
 
 

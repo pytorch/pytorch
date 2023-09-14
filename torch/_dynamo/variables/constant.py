@@ -5,18 +5,35 @@ import torch
 
 from .. import variables
 from ..exc import unimplemented
-from ..utils import HAS_NUMPY, istype, np
+from ..utils import istype, np
 from .base import typestr, VariableTracker
+
+
+_type_to_assert_reason = {
+    # NB - We CAN have ConstantVariable(set) because of how sets interact with guards.
+    # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
+    # from somewhere else, or unsourced. An input set would imply sources derived from set contents. For example, an
+    # input list's contents will have a source like some_list[0], some_list[1][1], etc. For a set, arbitrary access is
+    # not possible. This is a solvable problem, but one we have not taken on yet. As such, input sets are not allowed to
+    # become SetVariables. The solution here is to create a ConstantSetVariable that is more like a ConstantVariable.
+    # As this does not exist, we cannot add sets to this invariant.
+    list: "List types must use ListVariable.",
+    dict: "Dict types must use ConstDictVariable.",
+    torch.Tensor: "Tensor types must use TensorVariable.",
+    torch.SymInt: "SymInts must use SymNodeVariable. "
+    "If the underlying value is static, we will create a ConstantVariable and specialize.",
+    torch.SymFloat: "SymInts must use SymNodeVariable",
+}
 
 
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(ConstantVariable, self).__init__(**kwargs)
-        assert not isinstance(value, torch.Tensor)
-        assert not isinstance(value, torch.SymInt)
-        assert not isinstance(value, torch.SymFloat)
+        super().__init__(**kwargs)
+        if not ConstantVariable.is_literal(value):
+            for disallowed_type, reason in _type_to_assert_reason.items():
+                assert not isinstance(value, disallowed_type), reason
 
-        if HAS_NUMPY and isinstance(value, np.number):
+        if isinstance(value, np.number):
             self.value = value.item()
         else:
             self.value = value
@@ -76,7 +93,7 @@ class ConstantVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from .tensor import DynamicShapeVariable
+        from .tensor import SymNodeVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
@@ -86,17 +103,22 @@ class ConstantVariable(VariableTracker):
                 items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
 
-        if any([isinstance(x, DynamicShapeVariable) for x in args]):
-            # Promote to DynamicShapeVariable for operations involving dynamic shapes.
-            return variables.DynamicShapeVariable(
-                self.as_proxy(), self.value
+        if istype(self.value, list):
+            return variables.ListVariable(
+                items=self.unpack_var_sequence(tx), source=self.source, **options
             ).call_method(tx, name, args, kwargs)
+
+        if any(isinstance(x, SymNodeVariable) for x in args):
+            # Promote to SymNodeVariable for operations involving dynamic shapes.
+            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
+                tx, name, args, kwargs
+            )
 
         try:
             const_args = [a.as_python_constant() for a in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
-            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)
 
         def has_arith_binop(num_ty):
             return (
@@ -107,23 +129,22 @@ class ConstantVariable(VariableTracker):
             )
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
-            assert not kwargs
             method = getattr(self.value, name)
             return ConstantVariable(method(*const_args, **const_kwargs), **options)
         elif has_arith_binop(int) or has_arith_binop(float):
             op = getattr(operator, name)
             add_target = const_args[0]
             if isinstance(add_target, (torch.SymInt, torch.SymFloat)):
-                from .tensor import DynamicShapeVariable
+                from .tensor import SymNodeVariable
 
                 # Addition between a non sym and sym makes a sym
-                # dyn_shape = tx.output.register_attr_or_module(
+                # sym_num = tx.output.register_attr_or_module(
                 #     add_target, f"sym_shape_{add_target}", source=None
                 # )
                 proxy = tx.output.create_proxy(
                     "call_function", op, (self.value, add_target), {}
                 )
-                return DynamicShapeVariable.create(tx, proxy, add_target, **options)
+                return SymNodeVariable.create(tx, proxy, add_target, **options)
             return ConstantVariable(op(self.value, add_target), **options)
         elif name == "__len__" and not (args or kwargs):
             return ConstantVariable(len(self.value), **options)
@@ -135,10 +156,14 @@ class ConstantVariable(VariableTracker):
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        result = hasattr(self.value, name)
+        return variables.ConstantVariable(result).add_options(self)
+
 
 class EnumVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(EnumVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def as_proxy(self):

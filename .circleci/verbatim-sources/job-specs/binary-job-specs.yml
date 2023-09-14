@@ -42,32 +42,3 @@ jobs:
           script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
           cat "$script"
           source "$script"
-
-  anaconda_prune:
-    parameters:
-      packages:
-        type: string
-        description: "What packages are we pruning? (quoted, space-separated string. eg. 'pytorch', 'torchvision torchaudio', etc.)"
-        default: "pytorch"
-      channel:
-        type: string
-        description: "What channel are we pruning? (eq. pytorch-nightly)"
-        default: "pytorch-nightly"
-    docker:
-      - image: continuumio/miniconda3
-    environment:
-      - PACKAGES: "<< parameters.packages >>"
-      - CHANNEL: "<< parameters.channel >>"
-    steps:
-      - checkout
-      - run:
-          name: Install dependencies
-          no_output_timeout: "1h"
-          command: |
-            conda install -yq anaconda-client
-      - run:
-          name: Prune packages
-          no_output_timeout: "1h"
-          command: |
-              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
-              scripts/release/anaconda-prune/run.sh

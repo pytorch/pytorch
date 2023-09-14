@@ -105,7 +105,7 @@ class Formatter(logging.Formatter):
         self.redactions[needle] = replace
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_base_dir() -> str:
     meta_dir = os.getcwd()
     base_dir = os.path.join(meta_dir, "nightly", "log")
@@ -113,17 +113,17 @@ def logging_base_dir() -> str:
     return base_dir
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_run_dir() -> str:
     cur_dir = os.path.join(
         logging_base_dir(),
-        "{}_{}".format(datetime.datetime.now().strftime(DATETIME_FORMAT), uuid.uuid1()),
+        f"{datetime.datetime.now().strftime(DATETIME_FORMAT)}_{uuid.uuid1()}",
     )
     os.makedirs(cur_dir, exist_ok=True)
     return cur_dir
 
 
-@functools.lru_cache()
+@functools.lru_cache
 def logging_record_argv() -> None:
     s = subprocess.list2cmdline(sys.argv)
     with open(os.path.join(logging_run_dir(), "argv"), "w") as f:
@@ -214,16 +214,15 @@ def check_branch(subcommand: str, branch: Optional[str]) -> Optional[str]:
     cmd = ["git", "status", "--untracked-files=no", "--porcelain"]
     p = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
-        universal_newlines=True,
+        text=True,
     )
     if p.stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + p.stdout
     # next check that the branch name doesn't already exist
     cmd = ["git", "show-ref", "--verify", "--quiet", "refs/heads/" + branch]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)  # type: ignore[assignment]
+    p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
     if not p.returncode:
         return f"Branch {branch!r} already exists"
     return None
@@ -234,7 +233,7 @@ def timer(logger: logging.Logger, prefix: str) -> Iterator[None]:
     """Timed context manager"""
     start_time = time.time()
     yield
-    logger.info(f"{prefix} took {time.time() - start_time:.3f} [s]")
+    logger.info("%s took %.3f [s]", prefix, time.time() - start_time)
 
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -314,7 +313,7 @@ def conda_solve(
     )
     cmd.extend(channel_args)
     cmd.extend(SPECS_TO_INSTALL)
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    p = subprocess.run(cmd, capture_output=True, check=True)
     # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
@@ -344,7 +343,7 @@ def deps_install(deps: List[str], existing_env: bool, env_opts: List[str]) -> No
 
 @timed("Installing pytorch nightly binaries")
 def pytorch_install(url: str) -> "tempfile.TemporaryDirectory[str]":
-    """ "Install pytorch into a temporary directory"""
+    """Install pytorch into a temporary directory"""
     pytdir = tempfile.TemporaryDirectory()
     cmd = ["conda", "create", "--yes", "--no-deps", "--prefix", pytdir.name, url]
     p = subprocess.run(cmd, check=True)
@@ -363,7 +362,7 @@ def _site_packages(dirname: str, platform: str) -> str:
 def _ensure_commit(git_sha1: str) -> None:
     """Make sure that we actually have the commit locally"""
     cmd = ["git", "cat-file", "-e", git_sha1 + "^{commit}"]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    p = subprocess.run(cmd, capture_output=True, check=False)
     if p.returncode == 0:
         # we have the commit locally
         return
@@ -390,10 +389,9 @@ def _nightly_version(spdir: str) -> str:
     cmd = ["git", "show", "--no-patch", "--format=%s", git_version]
     p = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
-        universal_newlines=True,
+        text=True,
     )
     m = SHA1_RE.search(p.stdout)
     if m is None:
@@ -544,9 +542,8 @@ def _available_envs() -> Dict[str, str]:
     p = subprocess.run(
         cmd,
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
+        capture_output=True,
+        text=True,
     )
     lines = p.stdout.splitlines()
     envs = {}
@@ -610,7 +607,8 @@ def install(
     pytdir.cleanup()
     logger.info(
         "-------\nPyTorch Development Environment set up!\nPlease activate to "
-        f"enable this environment:\n  $ conda activate {env_opts[1]}"
+        "enable this environment:\n  $ conda activate %s",
+        env_opts[1],
     )
 
 

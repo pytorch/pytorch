@@ -14,7 +14,7 @@ from collections import namedtuple
 class TestLiteScriptModule(TestCase):
 
     def test_typing_namedtuple(self):
-        myNamedTuple = NamedTuple('myNamedTuple', [('a', List[torch.Tensor])])
+        myNamedTuple = NamedTuple('myNamedTuple', [('a', List[torch.Tensor])])  # noqa: UP014
 
         class MyTestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor):
@@ -42,7 +42,7 @@ class TestLiteScriptModule(TestCase):
 
         class Bar(torch.nn.Module):
             def __init__(self):
-                super(Bar, self).__init__()
+                super().__init__()
                 self.foo = Foo(torch.tensor(1))
 
             def forward(self, a: torch.Tensor):
@@ -104,7 +104,7 @@ class TestLiteScriptModule(TestCase):
 
         class Bar(torch.nn.Module):
             def __init__(self):
-                super(Bar, self).__init__()
+                super().__init__()
                 self.foo = Foo(torch.tensor(1))
 
             def forward(self, a: torch.Tensor):
@@ -153,7 +153,7 @@ class TestLiteScriptModule(TestCase):
 
         class Bar(torch.nn.Module):
             def __init__(self):
-                super(Bar, self).__init__()
+                super().__init__()
                 self.foo = Foo(torch.tensor(1), Baz(torch.tensor(1)))
 
             def forward(self, a: torch.Tensor):

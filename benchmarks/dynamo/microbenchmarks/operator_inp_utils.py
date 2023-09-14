@@ -181,7 +181,7 @@ class OperatorInputsMode(TorchDispatchMode):
         return out
 
     def log_to_file(self, output_filename, *, skip_non_compute_operators=True):
-        sorted_operators = sorted(list(self.func_db.keys()))
+        sorted_operators = sorted(self.func_db.keys())
         with open(output_filename, "w") as f:
             for operator in sorted_operators:
                 if skip_non_compute_operators and non_compute_operator(eval(operator)):
@@ -240,7 +240,7 @@ class OperatorInputsLoader:
     def __init__(self, json_file_path):
         self.operator_db = defaultdict(Counter)
 
-        with open(json_file_path, "r") as f:
+        with open(json_file_path) as f:
             lines = f.readlines()
 
         i = 0
@@ -296,7 +296,7 @@ class OperatorInputsLoader:
             try:
                 op = eval(key)
             except AttributeError as ae:
-                log.warning(f"Evaluating an op name into an OpOverload: {ae}")
+                log.warning("Evaluating an op name into an OpOverload: %s", ae)
                 continue
             yield op
 
@@ -306,7 +306,7 @@ class OperatorInputsLoader:
         ), f"Could not find {op}, must provide overload"
 
         count = 0
-        for _, counter in self.operator_db[str(op)].items():
+        for counter in self.operator_db[str(op)].values():
             count += counter
         return count
 

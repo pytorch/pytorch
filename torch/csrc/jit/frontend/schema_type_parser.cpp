@@ -58,6 +58,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
                                           // use the custom class mechanism
                                           // instead. @jerryzh
       {"Device", c10::TypeFactory::get<DeviceObjType>()},
+      {"DeviceIndex", c10::TypeFactory::get<IntType>()},
       {"Stream", c10::TypeFactory::get<StreamObjType>()},
       {"Scalar", c10::TypeFactory::get<NumberType>()},
       {"str", c10::TypeFactory::get<StringType>()},
@@ -137,7 +138,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
     L.expect(')');
   } else if (L.nextIf('!')) {
     alias_info.addBeforeSet(
-        Symbol::fromQualString("alias::$" + c10::guts::to_string(next_id++)));
+        Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
   } else {
     return c10::nullopt;
@@ -175,7 +176,14 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       const std::string& num = L.expect(TK_NUMBER).text();
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
-      device_idx = c10::stoi(num, &num_len);
+      try {
+        device_idx = c10::stoi(num, &num_len);
+      } catch (const std::invalid_argument& e) {
+        throw ErrorReport(L.cur())
+            << "Device index cannot be converted to integer";
+      } catch (const std::out_of_range& e) {
+        throw ErrorReport(L.cur()) << "Device index is too long";
+      }
     }
     if (dev == "cuda") {
       return c10::Device(at::kCUDA, device_idx);
@@ -192,7 +200,15 @@ c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   const std::string& num = L.expect(TK_NUMBER).text();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string::size_type num_len;
-  return (bool)c10::stoi(num, &num_len);
+
+  try {
+    return (bool)c10::stoi(num, &num_len);
+  } catch (const std::invalid_argument& e) {
+    throw ErrorReport(L.cur())
+        << "Field requires_grad cannot be converted to integer";
+  } catch (const std::out_of_range& e) {
+    throw ErrorReport(L.cur()) << "Field requires_grad is too long";
+  }
 }
 
 TypePtr SchemaTypeParser::parseRefinedTensor() {
@@ -245,8 +261,15 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           const std::string& num = L.expect(TK_NUMBER).text();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          auto stride = c10::stoll(num, &num_len);
-          strides.push_back(stride);
+          try {
+            auto stride = c10::stoll(num, &num_len);
+            strides.push_back(stride);
+          } catch (const std::invalid_argument& e) {
+            throw ErrorReport(L.cur())
+                << "The stride value cannot be converted to int";
+          } catch (const std::out_of_range& e) {
+            throw ErrorReport(L.cur()) << "The stride is too big";
+          }
         });
         return;
       }
@@ -277,7 +300,14 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    int64_t dim = c10::stoll(num, &num_len);
+    int64_t dim = 0;
+    try {
+      dim = c10::stoll(num, &num_len);
+    } catch (const std::invalid_argument& e) {
+      throw ErrorReport(L.cur()) << "The number can't be converted to int";
+    } catch (const std::out_of_range& e) {
+      throw ErrorReport(L.cur()) << "Number is too big";
+    }
     if (shape_symbol) {
       L.expect(')');
       dim = -dim;

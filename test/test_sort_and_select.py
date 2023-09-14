@@ -4,11 +4,11 @@ import torch
 import numpy as np
 
 import random
-from torch._six import nan
+from torch import nan
 from itertools import permutations, product
 
 from torch.testing import make_tensor
-from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and
+from torch.testing._internal.common_dtype import all_types, all_types_and, floating_types_and, integral_types
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
@@ -33,12 +33,12 @@ class TestSortAndSelect(TestCase):
                 # see above
                 return ((b != b) | (a <= b)).all().item()
         else:
-            error('unknown order "{}", must be "ascending" or "descending"'.format(order))
+            error(f'unknown order "{order}", must be "ascending" or "descending"')
 
         are_ordered = True
         for k in range(1, SIZE):
             self.assertTrue(check_order(mxx[:, k - 1], mxx[:, k]),
-                            'torch.sort ({}) values unordered for {}'.format(order, task))
+                            f'torch.sort ({order}) values unordered for {task}')
 
         seen = set()
         indicesCorrect = True
@@ -51,7 +51,7 @@ class TestSortAndSelect(TestCase):
             seen.clear()
             for j in range(size):
                 self.assertEqual(x[k][ixx[k][j]], mxx[k][j],
-                                 msg='torch.sort ({}) indices wrong for {}'.format(order, task))
+                                 msg=f'torch.sort ({order}) indices wrong for {task}')
                 seen.add(ixx[k][j])
             self.assertEqual(len(seen), size)
 
@@ -249,6 +249,15 @@ class TestSortAndSelect(TestCase):
         values_cont, indices_cont = tensor.sort()
         self.assertEqual(indices, indices_cont)
         self.assertEqual(values, values_cont)
+
+    @slowTest
+    @onlyCPU
+    @dtypes(*integral_types())
+    def test_sort_1d_parallel(self, device, dtype):
+        low = 0 if dtype == torch.uint8 else -128
+        tensor = torch.randint(low=low, high=127, size=(100000, ), device=device, dtype=dtype)
+        vals, _ = torch.sort(tensor, stable=True)
+        self.assertEqual(True, torch.all(vals[:-1] <= vals[1:]))
 
     @dtypes(torch.float32)
     def test_topk_1d_output_discontiguous(self, device, dtype):
@@ -689,6 +698,21 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_y_inverse_nan, y_inverse)
                 self.assertEqual(expected_y_counts_nan, y_counts)
 
+            # Test dim is sorted same as NumPy with dims >= 3
+            x = torch.tensor([[[[1, 0, 1, 0, 1, 1],
+                                [0, 1, 1, 0, 1, 1]],
+                               [[0, 1, 1, 0, 0, 1],
+                                [0, 0, 0, 1, 0, 0]]],
+                              [[[0, 1, 0, 1, 1, 1],
+                                [0, 1, 1, 0, 1, 1]],
+                               [[0, 0, 1, 1, 0, 1],
+                                [1, 1, 0, 0, 0, 0]]]], dtype=dtype, device=device)
+            xn = x.cpu().numpy()
+            for d in range(x.dim()):
+                t = torch.unique(x, dim=d)
+                n = np.unique(xn, axis=d)
+                self.assertEqual(t.cpu().numpy(), n)
+
         run_test(device, torch.float)
         run_test(device, torch.double)
         run_test(device, torch.long)
@@ -826,7 +850,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypesIfCPU(*all_types_and(torch.bool, torch.bfloat16))
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.float16, torch.bfloat16))
     @dtypes(*all_types_and(torch.half, torch.bool))
     def test_unique(self, device, dtype):
         def ensure_tuple(x):
@@ -883,7 +907,7 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
-    @dtypesIfCPU(*all_types_and(torch.bool, torch.bfloat16))
+    @dtypesIfCPU(*all_types_and(torch.bool, torch.float16, torch.bfloat16))
     @dtypes(*all_types_and(torch.half, torch.bool))
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.bool:

@@ -24,7 +24,7 @@
 // The plumbing is responsible for wrapping a batching rule into a form that may
 // be registered as the kernel for the batched key.
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what);
 
@@ -42,7 +42,7 @@ TORCH_API std::vector<Tensor> makeBatchedVector(const std::vector<Tensor>& tenso
 
 // Returns True if ANY tensor in tensors is batched at level
 TORCH_API bool isBatchedAtLevel(ITensorListRef tensors, int64_t level);
-TORCH_API bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>> maybe_tensors, int64_t level);
+TORCH_API bool isBatchedAtLevel(const c10::List<c10::optional<Tensor>>& maybe_tensors, int64_t level);
 TORCH_API bool isBatchedAtLevel(const Tensor& tensor, int64_t level);
 TORCH_API bool isBatchedAtLevel(const c10::optional<Tensor>& maybe_tensor, int64_t level);
 
@@ -60,4 +60,4 @@ inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   return false;
 }
 
-}}
+} // namespace at::functorch

@@ -136,7 +136,7 @@ class GradInterpreter(FuncTorchInterpreter):
     # This logic is mirrored from C++ GradInterpreterPtr::sendToNextInterpreter
     def lower(self):
         prev_grad_mode = self.prev_grad_mode()
-        if not self.prev_grad_mode:
+        if not prev_grad_mode:
             return nested(torch.no_grad(), super().lower())
         return super().lower()
 
@@ -165,7 +165,7 @@ class JvpInterpreter(FuncTorchInterpreter):
     # This logic is mirrored from C++ JvpInterpreterPtr::sendToNextInterpreter
     def lower(self):
         prev_fwd_grad_mode = self.prev_fwd_grad_mode()
-        if not self.prev_fwd_grad_mode:
+        if not prev_fwd_grad_mode:
             return nested(_set_fwd_grad_enabled(False), super().lower())
         return super().lower()
 

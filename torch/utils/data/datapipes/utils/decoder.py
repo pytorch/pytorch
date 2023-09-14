@@ -137,7 +137,7 @@ class ImageHandler:
     - pilrgba: pil None rgba
     """
     def __init__(self, imagespec):
-        assert imagespec in list(imagespecs.keys()), "unknown image specification: {}".format(imagespec)
+        assert imagespec in list(imagespecs.keys()), f"unknown image specification: {imagespec}"
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
@@ -167,14 +167,14 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                assert result.dtype == np.uint8, f"numpy image array should be type uint8, but got {result.dtype}"
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, "numpy image array should be type uint8, but got {}".format(result.dtype)
+                assert result.dtype == np.uint8, f"numpy image array should be type uint8, but got {result.dtype}"
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))
@@ -287,7 +287,7 @@ class Decoder:
     @staticmethod
     def _is_stream_handle(data):
         obj_to_check = data.file_obj if isinstance(data, StreamWrapper) else data
-        return isinstance(obj_to_check, io.BufferedIOBase) or isinstance(obj_to_check, io.RawIOBase)
+        return isinstance(obj_to_check, (io.BufferedIOBase, io.RawIOBase))
 
     def decode1(self, key, data):
         if not data:

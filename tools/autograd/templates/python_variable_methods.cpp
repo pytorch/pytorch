@@ -34,7 +34,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 #include <ATen/FuncTorchTLS.h>
@@ -428,7 +428,7 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
 }
 
 static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 
@@ -875,7 +875,11 @@ static PyObject * THPVariable_item(PyObject* self, PyObject* args)
   }
   jit::tracer::warn("Converting a tensor to a Python number", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = THPVariable_Unpack(self);
-  return py::cast(self_.item()).release().ptr();
+  auto dispatch_item_ = [](const Tensor& self) -> at::Scalar {
+    pybind11::gil_scoped_release no_gil;
+    return self.item();
+  };
+  return py::cast(dispatch_item_(self_)).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 

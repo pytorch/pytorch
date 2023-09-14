@@ -17,7 +17,7 @@ must have the same shape and data type, and the output will have the same shape
 as the inputs.
 
 Github Link:
-- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/mean_op.cc
+- https://github.com/pytorch/pytorch/blob/main/caffe2/operators/mean_op.cc
 
 <details>
 

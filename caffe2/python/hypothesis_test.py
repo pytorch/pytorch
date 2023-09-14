@@ -1,15 +1,16 @@
-import numpy as np
 import copy
-import time
-from functools import partial, reduce
-from hypothesis import assume, given, settings, HealthCheck
-import hypothesis.strategies as st
-import unittest
 import threading
+import time
+import unittest
+from functools import partial, reduce
 
-from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
+import hypothesis.strategies as st
+import numpy as np
 from caffe2.proto import caffe2_pb2
+
+from caffe2.python import core, dyndep, tt_core, workspace
+from hypothesis import assume, given, HealthCheck, settings
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -84,7 +85,10 @@ def _test_binary(name, ref, filter_=None, gcs=hu.gcs,
                 elements=hu.elements_of_type(dtype, filter_=filter_))),
         out=st.sampled_from(('Y', 'X1', 'X2') if allow_inplace else ('Y',)),
         **gcs)
-    @settings(max_examples=20, deadline=None)
+    @settings(
+        max_examples=20,
+        deadline=None,
+        suppress_health_check=[HealthCheck.filter_too_much])
     def test_binary(self, inputs, out, gc, dc):
         op = core.CreateOperator(name, ["X1", "X2"], [out])
         X1, X2 = inputs
@@ -105,7 +109,10 @@ def _test_binary_broadcast(name, ref, filter_=None,
             elements=hu.elements_of_type(dtype, filter_=filter_))),
         in_place=(st.booleans() if allow_inplace else st.just(False)),
         **gcs)
-    @settings(max_examples=3, deadline=100)
+    @settings(
+        max_examples=3,
+        deadline=100,
+        suppress_health_check=[HealthCheck.filter_too_much])
     def test_binary_broadcast(self, inputs, in_place, gc, dc):
         op = core.CreateOperator(
             name, ["X1", "X2"], ["X1" if in_place else "Y"], broadcast=1)
@@ -207,6 +214,7 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
         _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
+    @settings(suppress_health_check=[HealthCheck.too_slow])
     def test_div(self):
         def ref(x, y):
             return (x / y, )
@@ -1623,8 +1631,8 @@ class TestOperators(hu.HypothesisTestCase):
         c0 = np.ones([10, 1, 2, 16]).astype(np.float32)
         c1 = np.ones([10, 16, 2, 16]).astype(np.float32)
         c2 = np.ones([10, 16, 2, 1]).astype(np.float32)
-        # index = np.array([0, 1, 2, 1, 4], dtype=np.int)
-        # lengths = np.array([3, 2], dtype=np.int)
+        # index = np.array([0, 1, 2, 1, 4], dtype=int)
+        # lengths = np.array([3, 2], dtype=int)
         index = np.array([0, 1, 2, 1, 4], np.int64)
         lengths = np.array([3, 2], np.int32)
 

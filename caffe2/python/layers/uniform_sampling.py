@@ -27,9 +27,7 @@ class UniformSampling(ModelLayer):
         name='uniform_sampling',
         **kwargs
     ):
-        super(UniformSampling, self).__init__(
-            model, name, input_record, **kwargs
-        )
+        super().__init__(model, name, input_record, **kwargs)
 
         assert num_elements > num_samples > 0
         assert isinstance(input_record, schema.Scalar)

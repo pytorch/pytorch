@@ -1,14 +1,12 @@
 import math
 
-from typing import Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
-
-from typing_extensions import Literal
+from typing import Iterable, List, Literal, NamedTuple, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims as prims
 import torch._prims_common as utils
 from torch._decomp import register_decomposition
-from torch._prims_common import check, DimsType, ShapeType, TensorLikeType
+from torch._prims_common import DimsType, ShapeType, TensorLikeType
 from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
 
 __all__ = [
@@ -45,7 +43,7 @@ def _apply_norm(
     x: TensorLikeType, norm: NormType, signal_numel: int, forward: bool
 ) -> TensorLikeType:
     """Apply normalization to the un-normalized FFT result"""
-    check(norm in _NORM_VALUES, lambda: f"Invalid normalization mode: {norm}")
+    torch._check(norm in _NORM_VALUES, lambda: f"Invalid normalization mode: {norm}")
 
     if norm == "ortho":
         return x * (1 / math.sqrt(signal_numel))
@@ -56,7 +54,9 @@ def _apply_norm(
     return x * (1 / signal_numel) if normalize else x
 
 
-def _promote_type_fft(dtype: torch.dtype, require_complex: bool) -> torch.dtype:
+def _promote_type_fft(
+    dtype: torch.dtype, require_complex: bool, device: torch.device
+) -> torch.dtype:
     """Helper to promote a dtype to one supported by the FFT primitives"""
     if dtype.is_complex:
         return dtype
@@ -64,6 +64,13 @@ def _promote_type_fft(dtype: torch.dtype, require_complex: bool) -> torch.dtype:
     # Promote integral to default float type
     if not dtype.is_floating_point:
         dtype = torch.get_default_dtype()
+
+    allowed_types = [torch.float32, torch.float64]
+    maybe_support_half = device.type in ["cuda", "meta"] and not torch.version.hip
+
+    if maybe_support_half:
+        allowed_types.append(torch.float16)
+    torch._check(dtype in allowed_types, lambda: f"Unsupported dtype {dtype}")
 
     if require_complex:
         dtype = utils.corresponding_complex_dtype(dtype)
@@ -76,7 +83,7 @@ def _maybe_promote_tensor_fft(
 ) -> TensorLikeType:
     """Helper to promote a tensor to a dtype supported by the FFT primitives"""
     cur_type = t.dtype
-    new_type = _promote_type_fft(cur_type, require_complex)
+    new_type = _promote_type_fft(cur_type, require_complex, t.device)
     return _maybe_convert_to_dtype(t, new_type)  # type: ignore[return-value]
 
 
@@ -118,7 +125,11 @@ def _fft_c2r(
     input = _maybe_promote_tensor_fft(input, require_complex=True)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
     last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
-    check(last_dim_size >= 1, lambda: f"Invalid number of data points ({n}) specified")
+    num_points = 0 if n is None else n
+    torch._check(
+        last_dim_size >= 1,
+        lambda: f"Invalid number of data points ({num_points}) specified",
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims=dims, sizes=(last_dim_size // 2 + 1,))
@@ -140,12 +151,18 @@ def _fft_r2c(
     onesided: bool,
 ) -> TensorLikeType:
     """Common code for performing any real to complex FFT (rfft or ihfft)"""
-    check(
+    torch._check(
         not input.dtype.is_complex,
         lambda: f"{func_name} expects a floating point input tensor, but got {input.dtype}",
     )
     input = _maybe_promote_tensor_fft(input)
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
+    last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
+    num_points = 0 if n is None else n
+    torch._check(
+        last_dim_size >= 1,
+        lambda: f"Invalid number of data points ({num_points}) specified",
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
@@ -164,11 +181,17 @@ def _fft_c2c(
     forward: bool,
 ) -> TensorLikeType:
     """Common code for performing any complex to complex FFT (fft or ifft)"""
-    check(
+    torch._check(
         input.dtype.is_complex,
         lambda: f"{func_name} expects a complex input tensor, but got {input.dtype}",
     )
     dims = (utils.canonicalize_dim(input.ndim, dim, wrap_scalar=False),)
+    last_dim_size = n if n is not None else 2 * (input.shape[dim] - 1)
+    num_points = 0 if n is None else n
+    torch._check(
+        last_dim_size >= 1,
+        lambda: f"Invalid number of data points ({num_points}) specified",
+    )
 
     if n is not None:
         input = _resize_fft_input(input, dims, (n,))
@@ -267,20 +290,22 @@ def _canonicalize_fft_shape_and_dim_args(
         ret_dims = utils.canonicalize_dims(input_dim, dim, wrap_scalar=False)
 
         # Check dims are unique
-        check(len(set(dim)) == len(dim), lambda: "FFT dims must be unique")
+        torch._check(
+            len(set(ret_dims)) == len(ret_dims), lambda: "FFT dims must be unique"
+        )
 
     if shape is not None:
         if not isinstance(shape, Sequence):
             shape = (shape,)
 
         # Has shape, might have dim
-        check(
+        torch._check(
             dim is None or len(dim) == len(shape),
             lambda: "When given, dim and shape arguments must have the same length",
         )
         transform_ndim = len(shape)
 
-        check(
+        torch._check(
             transform_ndim <= input_dim,
             lambda: f"Got shape with {transform_ndim} values but input tensor "
             f"only has {input_dim} dimensions.",
@@ -303,7 +328,7 @@ def _canonicalize_fft_shape_and_dim_args(
         ret_shape = tuple(input_sizes[d] for d in ret_dims)
 
     for n in ret_shape:
-        check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
+        torch._check(n > 0, lambda: f"Invalid number of data points ({n}) specified")
 
     return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
 
@@ -325,7 +350,7 @@ def _fftn_c2c(
     forward: bool,
 ) -> TensorLikeType:
     """Common code for n-dimensional complex to complex FFTs (fftn or ifftn)"""
-    check(
+    torch._check(
         input.dtype.is_complex,
         lambda: f"{function_name} expects a complex input tensor, "
         f"but got {input.dtype}",
@@ -369,7 +394,7 @@ def rfftn(
     dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    check(
+    torch._check(
         not input.dtype.is_complex,
         lambda: f"rfftn expects a real-valued input tensor, but got {input.dtype}",
     )
@@ -388,12 +413,12 @@ def ihfftn(
     dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
-    check(
+    torch._check(
         not input.dtype.is_complex,
         lambda: f"ihfftn expects a real-valued input tensor, but got {input.dtype}",
     )
     shape, dim = _canonicalize_fft_shape_and_dim_args(input, s, dim)
-    check(len(shape) > 0, lambda: "ihfftn must transform at least one axis")
+    torch._check(len(shape) > 0, lambda: "ihfftn must transform at least one axis")
     input = _maybe_promote_tensor_fft(input, require_complex=False)
     input = _resize_fft_input(input, dim, shape)
 
@@ -423,14 +448,14 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
     """Canonicalize shape and dim arguments for n-dimensional c2r transforms,
     as well as calculating the last_dim_size which is shape[dim[-1]] for the output"""
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
-    check(len(shape) > 0, lambda: f"{fname} must transform at least one axis")
+    torch._check(len(shape) > 0, lambda: f"{fname} must transform at least one axis")
 
     if s is None or s[-1] == -1:
         last_dim_size = 2 * (input.shape[dim[-1]] - 1)
     else:
         last_dim_size = shape[-1]
 
-    check(
+    torch._check(
         last_dim_size >= 1,
         lambda: f"Invalid number of data points ({last_dim_size}) specified",
     )

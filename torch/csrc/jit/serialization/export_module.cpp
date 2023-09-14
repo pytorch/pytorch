@@ -54,7 +54,7 @@ CompilationOptions getOptionsFromGlobal() {
   return compilation_options;
 }
 
-IValue to_tuple(std::initializer_list<IValue> ivalues) {
+static IValue to_tuple(std::initializer_list<IValue> ivalues) {
   return c10::ivalue::Tuple::create(ivalues);
 }
 
@@ -176,7 +176,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   // operators
   std::vector<IValue> operators;
   operators.reserve(mobile_code.op_names_.size());
-  for (int i = 0; i < mobile_code.op_names_.size(); ++i) {
+  for (const auto i : c10::irange(mobile_code.op_names_.size())) {
     const auto& opname = mobile_code.op_names_[i];
     const int size = mobile_code.operator_input_sizes_[i];
     if (BytecodeEmitMode::is_default_value_for_unspecified_arg_enabled()) {
@@ -481,6 +481,15 @@ void ScriptModuleSerializer::serialize(
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/");
   }
+  if (module.retrieve_traced_inputs().size() > 0) {
+    writeArchive(
+        module.retrieve_traced_inputs(),
+        /*archive_name=*/"traced_inputs",
+        /*archive_dir=*/"",
+        /*tensor_dir=*/"traced_inputs/",
+        /*use_storage_context*/ false,
+        /*skip_tensor_data*/ true);
+  }
   // Acquires and sets minimum (dynamic) version
   for (auto& item : file_streams_) {
     writer_.setMinVersion(item.value().minVersion());
@@ -492,7 +501,8 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool use_storage_context) {
+    bool use_storage_context,
+    bool skip_tensor_data) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
@@ -539,7 +549,7 @@ void ScriptModuleSerializer::writeArchive(
 
   for (const auto& td : data_pickle.tensorData()) {
     std::string tensor_name = tensor_names[i++];
-    if (td.is_meta()) {
+    if (td.is_meta() || skip_tensor_data) {
       writer_.writeRecord(tensor_dir + tensor_name, nullptr, 0);
       continue;
     }

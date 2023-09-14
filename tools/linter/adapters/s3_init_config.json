@@ -39,5 +39,15 @@
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/actionlint/1.6.21/Linux_arm64/actionlint",
             "hash": "025ac157db121b33971ef24af72d73d71cda3cb1e3a94795bb2708ef4032ca76"
         }
+    },
+    "bazel": {
+        "Darwin": {
+            "download_url": "https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py",
+            "hash": "1f6d76d023ddd5f1625f34d934418e7334a267318d084f31be09df8a8835ed16"
+        },
+        "Linux": {
+            "download_url": "https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py",
+            "hash": "1f6d76d023ddd5f1625f34d934418e7334a267318d084f31be09df8a8835ed16"
+        }
     }
 }

@@ -5,6 +5,7 @@ import numbers
 import operator
 import pickle
 import sys
+import sympy
 import tempfile
 import unittest
 from types import BuiltinFunctionType
@@ -48,7 +49,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -247,7 +248,7 @@ class TestFXExperimental(JitTestCase):
                 return layers
 
             def __init__(self):
-                super(MyRecommendationModule, self).__init__()
+                super().__init__()
                 layers = self.create_mlp(4, 4, 4)
                 self.bottom_layers = torch.nn.Sequential(*layers)
                 layers = self.create_mlp(3, 24, 24)
@@ -301,7 +302,7 @@ class TestFXExperimental(JitTestCase):
     def test_partition_latency(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
             def forward(self, a):
@@ -420,7 +421,7 @@ class TestFXExperimental(JitTestCase):
     def test_aot_based_partition(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.b = torch.rand(4)
                 self.c = torch.rand(4)
 
@@ -479,7 +480,7 @@ class TestFXExperimental(JitTestCase):
     def test_saturate_host(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
-                super(TestModule, self).__init__()
+                super().__init__()
                 self.linear = torch.nn.Linear(4, 4)
 
             def forward(self, a):
@@ -535,7 +536,7 @@ class TestFXExperimental(JitTestCase):
     def test_conv_bn_fusion_not_running_state(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
                 self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
 
@@ -553,6 +554,29 @@ class TestFXExperimental(JitTestCase):
         # bn need not be folded in conv
         self.assertTrue(
             any(isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
+        )
+        self.assertEqual(fused(inp), model(inp))
+
+    def test_conv_bn_fusion_mixed_dtype(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
+                self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        model = M().eval()
+
+        traced = symbolic_trace(model)
+        fused = optimization.fuse(traced)
+        inp = torch.randn(1, 3, 64, 64, dtype=torch.bfloat16)
+
+        self.assertTrue(
+            all(not isinstance(m, torch.nn.BatchNorm2d) for m in fused.modules())
         )
         self.assertEqual(fused(inp), model(inp))
 
@@ -762,6 +786,38 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_dead_code(self):
+        class ModWithDeadCode(torch.nn.Module):
+            def forward(self, x):
+                output = x * 2  # we want this
+                dead_line = x + 2  # this is dead
+                return output
+
+        mod = ModWithDeadCode()
+        traced = torch.fx.symbolic_trace(mod)
+
+        # split into before (0), target (1), and after(2)
+        saw_mul = False
+
+        def split_callback(n):
+            nonlocal saw_mul
+            if n.target == operator.mul:
+                saw_mul = True
+                return 1
+
+            if not saw_mul:
+                return 0
+            if saw_mul:
+                return 2
+
+        split = split_module(traced, mod, split_callback)
+
+        x = torch.randn((5,))
+        torch.testing.assert_close(
+            split(x), traced(x)
+        )
+
+
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
             def forward(self, x, **kwargs):
@@ -873,7 +929,7 @@ terrible spacing
             ) -> bool:
                 # `leaves` contains the set of standard `nn.Modules` that are not
                 # currently symbolically traceable. Ideally this set would be empty
-                leaves = set([torch.nn.BatchNorm2d])
+                leaves = {torch.nn.BatchNorm2d}
                 return type(m) in leaves
 
         traced = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
@@ -987,9 +1043,6 @@ class {test_classname}(torch.nn.Module):
 
     def test_normalize_args_preserve_meta(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, a):
                 return torch.add(a, 3)
 
@@ -1057,7 +1110,7 @@ class {test_classname}(torch.nn.Module):
             ) -> bool:
                 # `leaves` contains the set of standard `nn.Modules` that are not
                 # currently symbolically traceable. Ideally this set would be empty
-                leaves = set([torch.nn.BatchNorm2d])
+                leaves = {torch.nn.BatchNorm2d}
                 return type(m) in leaves
 
         traced_functionals = torch.fx.GraphModule(m, FunctionalTracer().trace(m))
@@ -1190,7 +1243,7 @@ class {test_classname}(torch.nn.Module):
     def test_to_folder(self):
         class Test(torch.nn.Module):
             def __init__(self):
-                super(Test, self).__init__()
+                super().__init__()
                 self.W = torch.nn.Parameter(torch.randn(2))
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
@@ -1393,13 +1446,13 @@ class {test_classname}(torch.nn.Module):
 
     def test_type_matches(self):
         should_be_equal = [
-            (int, type(5)),
-            (numbers.Number, type(5)),
-            (numbers.Number, type(5.0)),
+            (int, int),
+            (numbers.Number, int),
+            (numbers.Number, float),
             (int, type(torch.float)),
-            (Union[int, float], type(5)),
-            (Union[int, float], type(5.0)),
-            (List[int], type(5)),
+            (Union[int, float], int),
+            (Union[int, float], float),
+            (List[int], int),
             (List[int], create_type_hint([int, int])),
             (List[int], create_type_hint((int, int))),
             (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
@@ -1511,7 +1564,7 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
+        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         if isinstance(op.op, torch._ops.OpOverload):
             self.skipTest("normalize operator doesn't work on torch.ops")
@@ -1647,6 +1700,168 @@ class TestModule(torch.nn.Module):
             args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
             self.assertIs(kwargs["input"], inp1)
             self.assertIs(kwargs["the_template"], inp2)
+
+
+if TEST_Z3:
+    import z3
+
+    import torch._dynamo.config
+
+    from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
+    from torch.utils._sympy.functions import FloorDiv, Mod
+
+    class TestTranslationValidation(TestCase):
+        def _prepare_for_translation_validation(self):
+            validator = TranslationValidator()
+
+            # SymPy symbols.
+            s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
+
+            # Z3 symbols.
+            [validator.add_var(s, int) for s in (s0, s1, s2)]
+            z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
+
+            return (s0, s1, s2), (z0, z1, z2), validator
+
+        def test_sympy_to_z3(self):
+
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            test_cases = [
+                # Integer constants.
+                (sympy.S.Zero, z3.IntVal(0)),
+                (sympy.S.One, z3.IntVal(1)),
+                (sympy.S.NegativeOne, z3.IntVal(-1)),
+                (sympy.Integer(2), z3.IntVal(2)),
+                (
+                    s0,
+                    z0,
+                ),
+                # Arithmetic operations.
+                *[
+                    (op(s0, s1), op(z0, z1))
+                    for op in (
+                        operator.add,
+                        operator.mul,
+                        operator.pow,
+                    )
+                ],
+                # Logical operations.
+                *[
+                    (sympy_op(s0, s1), z3_op(z0, z1))
+                    for sympy_op, z3_op in (
+                        (sympy.Eq, operator.eq),
+                        (sympy.Ne, operator.ne),
+                        (sympy.Lt, operator.lt),
+                        (sympy.Le, operator.le),
+                        (sympy.Gt, operator.gt),
+                        (sympy.Ge, operator.ge),
+                    )
+                ],
+                # Other operations.
+                (
+                    s0 - s1,
+                    z0 + z3.IntVal(-1) * z1,
+                ),
+                (
+                    s0 / s1,
+                    z3.ToReal(z0) * (z1**-1),
+                ),
+                (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+                (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+                (
+                    Mod(s2, (s0 / s1)),
+                    z2
+                    - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                    * (z3.ToReal(z0) * z1**-1),
+                ),
+                (
+                    Mod(s2, s0**3),
+                    z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+                ),
+            ]
+
+            toZ3 = SympyToZ3(validator)
+            for sympy_expr, z3_expr in test_cases:
+                result = toZ3.run(sympy_expr)
+                self.assertTrue(
+                    z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+                )
+
+        def test_sat(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z0 > 5)
+            validator.add_source_expr(z1 / 2 > z0)
+
+            # Solutions for target is a subset of the solutions for the source.
+            validator.add_target_expr(s0 > 20)
+            validator.add_target_expr(s1 > s0**2)
+
+            validator.validate()
+
+        def test_unsat(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z0 > 5)
+            validator.add_source_expr(z1 / 2 > z0)
+
+            # Solutions for target is NOT a subset of the solutions for the source.
+            validator.add_target_expr(s0 > 20)
+            # This expression is less restrictive than its counterpart.
+            validator.add_target_expr(s1 > s0 + 2)
+
+            with self.assertRaisesRegex(ValidationException, "translation validation failed."):
+                validator.validate()
+
+        def test_z3str(self):
+            a = z3.Int("a")
+            b = z3.Int("b")
+            special = z3.Real("this.size()[2]")
+
+            test_cases = [
+                (z3.IntVal(42), "42"),
+                # Variable.
+                (a, "a"),
+                # Name with special characters.
+                (special, "this.size()[2]"),
+                # Renamed function fpplications.
+                (a != b, "(!= a b)"),
+                (a ** b, "(pow a b)"),
+                # Chain of associative operations.
+                *[
+                    (op(op(a, 5), b), f"({opstr} 5 a b)")
+                    for op, opstr in [
+                        (operator.add, "+"),
+                        (operator.mul, "*")
+                    ]
+                ],
+                # Revert 'Not' conversions.
+                (a != b, "(!= a b)"),
+                (a < b, "(> b a)"),
+                (a > b, "(> a b)"),
+                # Ignore 'ToInt' and 'ToReal' functions.
+                (z3.ToInt(special) + a, "(+ this.size()[2] a)"),
+                (z3.ToReal(a + b), "(+ a b)"),
+                # Convert to floor division: 'idiv'.
+                (z3.ToInt(z3.ToReal(a) / z3.ToReal(b)), "(idiv a b)"),
+            ]
+
+            for expr, expected in test_cases:
+                self.assertEqual(z3str(expr), expected)
+
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 

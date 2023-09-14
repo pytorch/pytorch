@@ -390,9 +390,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_simple_tensor_ops(self):
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = x + y
                 return z
@@ -433,9 +430,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     def test_nodes_before_cat(self):
         # verify that nodes before cat get matched
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)
@@ -468,9 +462,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     def test_dict_return_type(self):
         # verify that we can traverse up nodes which return dictionaries
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)
@@ -646,7 +637,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
         # 4. go through the ops mapped to each QuantizeHandler type, and verify
         # correctness.
         def _op_in_base_sets_of_related_ops(op):
-            for name, ops in base_name_to_sets_of_related_ops.items():
+            for ops in base_name_to_sets_of_related_ops.values():
                 if op in ops:
                     return True
             return False
@@ -1838,7 +1829,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             results, 'fp32', 'int8', compute_cosine_similarity,
             'cosine_similarity_int8_vs_fp32')
 
-        for layer_name, layer_results in results.items():
+        for layer_results in results.values():
             assert 'sqnr_int8_vs_fp32' in \
                 layer_results['weight']['int8'][0].keys()
             assert 'l2_error_int8_vs_fp32' in \

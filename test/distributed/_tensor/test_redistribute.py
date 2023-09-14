@@ -36,9 +36,7 @@ class RedistributeTest(DTensorTestBase):
             expected_tensor = torch.randn(
                 input_size, device=self.device_type, requires_grad=True
             )
-            dtensor = distribute_tensor(
-                expected_tensor.clone(), device_mesh, shard_spec
-            )
+            dtensor = distribute_tensor(expected_tensor, device_mesh, shard_spec)
             reshard_dtensor = dtensor.redistribute(device_mesh, replica_spec)
             self.assertEqual(reshard_dtensor.size(), torch.Size(input_size))
             self.assertEqual(expected_tensor, reshard_dtensor.to_local())
@@ -91,7 +89,10 @@ class RedistributeTest(DTensorTestBase):
             local_replica = torch.randn(
                 input_size, device=self.device_type, requires_grad=True
             )
-            splitted_list = local_replica.tensor_split(self.world_size, shard_dim)
+            splitted_list = list(
+                torch.chunk(local_replica, self.world_size, dim=shard_dim)
+            )
+
             # make local tensor as the element of the corresponding chunked list
             local_tensor = splitted_list[self.rank]
             replica_tensor = distribute_tensor(local_replica, device_mesh, replica_spec)
@@ -180,6 +181,7 @@ class RedistributeTest(DTensorTestBase):
     def test_partial_to_shard(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         partial_spec = [_Partial()]
+        my_rank = device_mesh.get_rank()
 
         input_sizes_and_shard_dim = [
             ((self.world_size * 3, 3), 0),
@@ -198,9 +200,21 @@ class RedistributeTest(DTensorTestBase):
                 partial_local, device_mesh, partial_spec, run_check=False
             )
 
-            quot, rem = divmod(input_size[shard_dim], self.world_size)
+            full_chunk_size = (
+                input_size[shard_dim] + self.world_size - 1
+            ) // self.world_size
+            chunk_sizes = [
+                max(
+                    min(input_size[shard_dim], full_chunk_size * (idx + 1))
+                    - full_chunk_size * idx,
+                    0,
+                )
+                for idx in range(self.world_size)
+            ]
+
             local_shape = list(input_size)
-            local_shape[shard_dim] = quot + (1 if self.rank < rem else 0)
+            local_shape[shard_dim] = chunk_sizes[my_rank]
+
             # test partial to shard, trigger reduce_scatter
             scatter_shard_tensor = partial_tensor.redistribute(device_mesh, shard_spec)
             self.assertEqual(scatter_shard_tensor.size(), partial_tensor.size())

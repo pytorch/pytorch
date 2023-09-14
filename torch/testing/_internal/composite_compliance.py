@@ -189,7 +189,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                 # then the first argument is being written to. Introspection please save us!
                 mutated_argument = args[0]
                 if not isinstance(mutated_argument, CompositeCompliantTensor) and \
-                        any([isinstance(a, CompositeCompliantTensor) for a in args[1:]]):
+                        any(isinstance(a, CompositeCompliantTensor) for a in args[1:]):
                     raise RuntimeError(
                         'Not composite compliant: performing in-place operation '
                         f'{func.__name__} where the Tensor being written to is '
@@ -220,7 +220,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
                     # 4. we set the storage (and sizes/strides/offset) of the wrapper
                     #    tensor results to be that of the tensors that alias the input
                     result = func(*args, **kwargs)
-                    if isinstance(result, tuple) or isinstance(result, list):
+                    if isinstance(result, (tuple, list)):
                         for a, b in zip(rs, result):
                             a.set_(b)
                     else:
@@ -249,10 +249,10 @@ def is_tensorlist(lst):
         return False
     if len(lst) == 0:
         return False
-    all_tensors = all([isinstance(elt, torch.Tensor) for elt in lst])
+    all_tensors = all(isinstance(elt, torch.Tensor) for elt in lst)
     if all_tensors:
         return True
-    exists_one_tensor = all([isinstance(elt, torch.Tensor) for elt in lst])
+    exists_one_tensor = all(isinstance(elt, torch.Tensor) for elt in lst)
     if exists_one_tensor:
         raise RuntimeError('This test assumes that PyTorch APIs cannot take '
                            'mixed lists of Tensor and other things')
@@ -507,7 +507,7 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
         if isinstance(t, torch.Tensor) and t.requires_grad:
             return torch.randn_like(t)
         elif is_tensorlist(t):
-            return list(torch.randn_like(e) if e.requires_grad else None for e in t)
+            return [torch.randn_like(e) if e.requires_grad else None for e in t]
         return None
 
     tangent_args = tuple(maybe_tangent(arg) for arg in args)
