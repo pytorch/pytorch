@@ -286,6 +286,14 @@ test_inductor_distributed() {
   # with if required # gpus aren't available
   python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
   assert_git_not_dirty
+
+  install_torchaudio cuda
+  install_torchtext
+  install_torchvision
+  checkout_install_torchbench
+
+  PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id" --multiprocess-models-only
+  assert_git_not_dirty
 }
 
 test_inductor() {
@@ -323,6 +331,10 @@ if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
+fi
+
+if [[ "${TEST_CONFIG}" == *distributed* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--multiprocess)
 fi
 
 test_perf_for_dashboard() {
