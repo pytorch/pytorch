@@ -8,6 +8,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/utils/numpy_stub.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -281,7 +282,10 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
     return false;
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  if (n > 1) {
+  if (n >= 32) {
+    return false;
+  }
+  if (PyArray_CheckExact(index)) {
     return false;
   }
   for (Py_ssize_t i = 0; i < n; i++) {
