@@ -3393,15 +3393,11 @@ class ShapeEnv:
         unbacked SymInts (leaving regular hinted integers alone).
         """
         expr = self.simplify(expr)
-        symbols = list(expr.free_symbols)
 
-        symbols_strs = [str(s) for s in symbols]
         dynamic_scalar_replace = {}
-        for ds in self.dynamic_scalars:
-            if ds in symbols_strs:
-                # TODO(yf225): add comment here
-                index = symbols_strs.index(ds)
-                dynamic_scalar_replace[symbols[index]] = 32
+        for s in expr.free_symbols:
+            if str(s) in self.shape_env.dynamic_scalars:
+                dynamic_scalar_replace[s] = sympy.Integer(32)
         expr = safe_expand(expr.xreplace(dynamic_scalar_replace))
 
         expr = self.simplify(expr)
