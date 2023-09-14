@@ -495,8 +495,6 @@ class TestOperators(TestCase):
         xfail('as_strided'),
         xfail('as_strided', 'partial_views'),
         xfail('as_strided_scatter'),
-        decorate('linalg.det', 'singular',
-                 decorator=expectedFailureIf(IS_MACOS and IS_X86)),
     }))
     @opsToleranceOverride('TestOperators', 'test_jvp', (
         tol1('nn.functional.conv_transpose3d',
@@ -701,8 +699,6 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.vander',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-        tol2('linalg.det', 'singular',
-             {torch.float32: tol(atol=2e-05, rtol=2e-05)}),
     ))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1051,9 +1047,6 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
-    @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail.union({
-        decorate('linalg.det', 'singular', decorator=expectedFailureIf(IS_MACOS and IS_X86)),
-    }))
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that corresponds to "batched forward-mode AD" testing in PyTorch core
