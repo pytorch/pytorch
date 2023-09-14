@@ -1204,7 +1204,6 @@ class TritonKernel(Kernel):
             )
         return mask
 
-
     @property
     def assert_function(self):
         return "tl.device_assert"
