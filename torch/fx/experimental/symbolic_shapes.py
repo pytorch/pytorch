@@ -66,8 +66,12 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool",
+    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
 ]
+
+# FX node metadata keys for symbolic shape FX graph.
+SHAPEENV_EVENT_KEY = "shapeenv_event"
+CURRENT_NODE_KEY = "current_node"
 
 # These are modules that contain generic code for interacting with ShapeEnv
 # which are unlikely to identify a particular interesting guard statement
@@ -2417,6 +2421,11 @@ class ShapeEnv:
             self.name_to_node.pop(node.name)
             self.graph.erase_node(node)
 
+    def add_fx_node_metadata(self, node: torch.fx.Node) -> None:
+        from torch._dynamo.utils import get_current_node
+        node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
+        node.meta[CURRENT_NODE_KEY] = get_current_node()
+
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
 
@@ -3775,6 +3784,14 @@ class ShapeEnv:
                 eql, _ = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
                 node, fresh = self.create_fx_call_function(torch._assert, (eql,))
 
+            assert node is not None
+            # If this is a fresh node, we have to remember the event index that
+            # corresponds to this assertion node.
+            # Reason: so that, given an assertion node, we can replay the ShapeEnv
+            # events until the point where this assertion node was freshly created.
+            if fresh:
+                self.add_fx_node_metadata(node)
+
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
         #
@@ -3813,9 +3830,12 @@ class ShapeEnv:
 
             self._check_frozen(expr, concrete_val)
 
-            if torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY and isinstance(hint, bool):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    expr = sympy.Not(expr)
+            if (
+                    torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
+                    and isinstance(hint, bool)
+                    and isinstance(expr, (sympy.Eq, sympy.Ne))
+            ):
+                expr = sympy.Not(expr)
 
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
                 self._maybe_guard_eq(expr, bool(concrete_val))
@@ -3895,7 +3915,10 @@ class ShapeEnv:
             and fx_node is not None
             and not self._suppress_guards_tls()
         ):
-            self.create_fx_call_function(torch._assert, (fx_node,))
+            node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
+            assert node is not None
+            if fresh:
+                self.add_fx_node_metadata(node)
 
         self._check_frozen(expr, sympy.true)
 
