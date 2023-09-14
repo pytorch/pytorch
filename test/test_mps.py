@@ -12,6 +12,7 @@ import tempfile
 import os
 import copy
 import gc
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9760,6 +9761,15 @@ class TestAdvancedIndexing(TestCaseMPS):
         x = torch.randn(10, requires_grad=True)
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
+
+    def test_nonzero_multi_threading(self):
+        # Test that MPS does not crash if nonzero called concurrently
+        # See https://github.com/pytorch/pytorch/issues/100285
+        x = torch.rand(3, 3, device="mps")
+        t1 = threading.Thread(target=torch.nonzero, args=(x,))
+        t2 = threading.Thread(target=torch.nonzero, args=(x,))
+        t1.start()
+        t2.start()
 
     def test_masked_select(self):
         x = torch.randn(3, 4)
