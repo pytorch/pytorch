@@ -21,7 +21,6 @@ from unittest.mock import patch
 
 import torch
 import torch._logging
-from torch._dynamo.utils import should_force_inline
 from torch._guards import Checkpointable, tracing, TracingContext
 
 from . import (
@@ -107,6 +106,7 @@ from .variables.tensor import (
 )
 from .variables.torch import TorchVariable
 from .variables.user_defined import (
+    RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
     UserDefinedVariable,
@@ -616,7 +616,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         inline_depth_str = (
             f" (inline depth: {self.inline_depth})" if self.inline_depth > 0 else ""
         )
-        return f"{self.f_code.co_name} {self.f_code.co_filename}:{lineno}{inline_depth_str}"
+        return f"{self.f_code.co_filename}:{lineno} in {self.f_code.co_name}{inline_depth_str}"
 
     def get_log_starts_line_log_str(self):
         log_str = f"TRACE starts_line {self.get_line_of_code_header()}\n"
@@ -867,6 +867,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         variable = self.output.side_effects.track_global_existing(
             source, self.symbolic_globals[name]
         )
+        if isinstance(value, RemovableHandleVariable):
+            unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
     def import_source(self, module_name):
@@ -2204,9 +2206,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @staticmethod
     def check_inlineable(func):
-        if should_force_inline(func):
-            return True
-
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2230,19 +2229,13 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if (
-                hasattr(func, "fn")
-                and hasattr(func.fn, "_origin")
-                and func.fn._origin
-                in [
-                    produce_trampoline_autograd_fwd,
-                    produce_trampoline_autograd_apply,
-                    produce_trampoline_autograd_bwd,
-                ]
-            ):
+            if hasattr(func.fn, "_origin") and func.fn._origin in [
+                produce_trampoline_autograd_fwd,
+                produce_trampoline_autograd_apply,
+                produce_trampoline_autograd_bwd,
+            ]:
                 # Known sound
                 return
-
             unimplemented(
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
