@@ -47,10 +47,7 @@ class _ExecOrderData:
         self._forward_prefetch_limit = forward_prefetch_limit
 
         # Data structures for execution order validation
-        self._checking_order: bool = debug_level in [
-            dist.DebugLevel.INFO,
-            dist.DebugLevel.DETAIL,
-        ]
+        self._checking_order: bool = debug_level == dist.DebugLevel.DETAIL
         self.process_group: Optional[dist.ProcessGroup] = None
         self.world_size: Optional[int] = None
         self.all_handles: List[FlatParamHandle] = []
@@ -175,20 +172,20 @@ class _ExecOrderData:
     def _check_order(self, handle: FlatParamHandle, is_training: bool) -> None:
         """
         Checks the forward execution order as long as ``is_training`` is
-        ``True`` since checking in eval mode is not supported.
+        ``True`` since checking in eval mode is not supported. This only checks
+        if the distributed debug level is DETAIL.
 
         - On the first iteration, this uses all-gathers to check that all ranks
         are all-gathering the same handles and hence ``FlatParameter`` s,
         raising an error if not.
-        - On subsequent iterations, if the distributed debug level is at least
-        INFO, then this checks that each rank is locally consistent with its
-        own forward order from the first iteration, issuing a warning if not.
-        This issues a warning on the first deviating iteration and stops
-        warning thereafter.
+        - On subsequent iterations, this checks that each rank is locally
+        consistent with its own forward order from the first iteration, issuing
+        a warning if not. This issues a warning on the first deviating
+        iteration and stops warning thereafter.
         """
         # Do not check order in eval mode since the post-backward callback does
         # not run so it cannot be used to mark the end of an iteration
-        if not is_training:
+        if not is_training or not self._checking_order:
             return
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
@@ -269,7 +266,7 @@ class _ExecOrderData:
                             f"for {r1_param_names} while rank {r2} is all-gathering "
                             f"parameters for {r2_param_names}"
                         )
-        elif self._checking_order:
+        else:
             # Only issue warnings on the first deviating iteration and stop
             # checking thereafter to avoid flooding the console
             if self.warn_status == _ExecOrderWarnStatus.WARNED:
