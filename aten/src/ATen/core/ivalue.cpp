@@ -144,6 +144,14 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
+
+  // This static_assert has to go into some IValue member function; I
+  // chose this one. It's not in the class body because that's in
+  // ivalue.h, which is a very high-fanout header file and we want to
+  // minimize build time.
+  static_assert(
+      kNumTags <= 32,
+      "IValue::isIntrusivePtr needs to be updated because it assumes there are at most 32 tags");
 }
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
@@ -1227,4 +1235,5 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
   }
   return ctx->dstFuture;
 }
+
 } // namespace c10
