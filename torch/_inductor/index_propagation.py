@@ -68,7 +68,7 @@ class SymPyOps:
 
     @staticmethod
     def to_dtype(
-        value: Any, dtype: torch.dtype, src_dtype: torch.dtype = None
+        value: Any, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
     ) -> Union[int, TypedExpr]:
         if isinstance(value.expr, (sympy.Integer, sympy.Float)):
             return SymPyOps.constant(value.expr, dtype)
