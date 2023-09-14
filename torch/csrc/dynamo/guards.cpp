@@ -1021,10 +1021,14 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       .def(py::init<>())
       .def("check", &GuardManager::check)
+      // return by reference because GuardManager has the ownership of child
+      // managers
       .def(
           "get_child_managers",
           &GuardManager::get_child_managers,
           py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of leaf
+      // guards
       .def(
           "get_leaf_guards",
           &GuardManager::get_leaf_guards,
@@ -1038,20 +1042,20 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(
                 std::make_unique<PythonLambdaGuard>(lambda1, lambda2));
           })
-      // the pointer is returned as a reference to avoid multiple deallocation
-      // of GuardManager
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
       .def(
           "__getattr__",
           &GuardManager::get_child_manager<AttrGuardAccessor>,
           py::return_value_policy::reference)
-      // the pointer is returned as a reference to avoid multiple deallocation
-      // of GuardManager
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
       .def(
           "__getitem__",
           &GuardManager::get_child_manager<ItemGuardAccessor>,
           py::return_value_policy::reference)
-      // the pointer is returned as a reference to avoid multiple deallocation
-      // of GuardManager
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
       .def(
           "lambda_accessor",
           &GuardManager::get_child_manager<PythonLambdaGuardAccessor>,
