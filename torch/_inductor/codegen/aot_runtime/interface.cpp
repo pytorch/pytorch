@@ -51,6 +51,7 @@ AOTInductorError AOTInductorModelContainerRun(
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
+    AOTInductorParamShape* output_shapes,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle) {
   auto* container =
@@ -75,8 +76,14 @@ AOTInductorError AOTInductorModelContainerRun(
 
   torch::aot_inductor::ProxyExecutor* proxy_executor = reinterpret_cast<torch::aot_inductor::ProxyExecutor*>(proxy_executor_handle);
 
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { container->run(input_tensors, output_tensors, stream, proxy_executor); })
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<std::vector<int64_t>> *shapes;
+    container->run(input_tensors, output_tensors, &shapes, stream, proxy_executor);
+    for (size_t i = 0; i < num_outputs; i++) {
+      output_shapes[i] =
+          AOTInductorParamShape((shapes->at(i)).data(), (shapes->at(i)).size());
+    }
+  })
 }
 
 AOTInductorError AOTInductorModelContainerGetNumInputs(
