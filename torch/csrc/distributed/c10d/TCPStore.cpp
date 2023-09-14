@@ -304,7 +304,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     C10D_DEBUG("The server has started on port = {}.", server_->port());
 
     std::ifstream maxconnFile("/proc/sys/net/core/somaxconn");
-    if (maxconnFile.good() and numWorkers_.has_value()) {
+    if (maxconnFile.good() && numWorkers_.has_value()) {
       try {
         std::string str(
             (std::istreambuf_iterator<char>(maxconnFile)),
