@@ -167,7 +167,9 @@ def generate_opcheck_tests(
                         # devices
                         if argnames != "device":
                             new_pytestmark.append(
-                                pytest.mark.parametrize(argnames, (next(iter(argvalues)),))
+                                pytest.mark.parametrize(
+                                    argnames, (next(iter(argvalues)),)
+                                )
                             )
                             continue
                     new_pytestmark.append(mark)
