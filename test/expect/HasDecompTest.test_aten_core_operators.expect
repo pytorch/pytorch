@@ -409,6 +409,13 @@ aten::prod
 aten::prod.dim_int
 aten::prod.int_out
 aten::prod.out
+aten::randint
+aten::randint.generator
+aten::randint.generator_out
+aten::randint.low_generator
+aten::randint.low_generator_out
+aten::randint.low_out
+aten::randint.out
 aten::randn
 aten::reciprocal
 aten::reciprocal.out
