@@ -39,16 +39,21 @@ class PT2EQATTestCase(QuantizationTestCase):
     """
     Base QuantizationTestCase for PT2E QAT with some helper methods.
     """
+
     def _verify_symmetric_xnnpack_qat_numerics(
         self,
         model: torch.nn.Module,
         example_inputs: Tuple[Any, ...],
     ):
         self._verify_symmetric_xnnpack_qat_numerics_helper(
-            model, example_inputs, is_per_channel=True,
+            model,
+            example_inputs,
+            is_per_channel=True,
         )
         self._verify_symmetric_xnnpack_qat_numerics_helper(
-            model, example_inputs, is_per_channel=False,
+            model,
+            example_inputs,
+            is_per_channel=False,
         )
 
     def _verify_symmetric_xnnpack_qat_numerics_helper(
@@ -105,7 +110,8 @@ class PT2EQATTestCase(QuantizationTestCase):
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
             model_fx = _convert_to_reference_decomposed_fx(
-                model_fx, backend_config=backend_config,
+                model_fx,
+                backend_config=backend_config,
             )
             quant_result_fx = model_fx(*example_inputs)
             self.assertEqual(quant_result_pt2e, quant_result_fx)
@@ -199,7 +205,9 @@ class PT2EQATTestCase(QuantizationTestCase):
         (conv_node, scale_factor_reshape_node) = div_scale_factor_node.args
         self.assertEqual(div_scale_factor_node.target, torch.ops.aten.div.Tensor)
         self.assertEqual(conv_node.target, torch.ops.aten.conv2d.default)
-        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.reshape.default)
+        self.assertEqual(
+            scale_factor_reshape_node.target, torch.ops.aten.reshape.default
+        )
 
         # Verify: conv literal args
         if expected_conv_literal_args is not None:
@@ -208,7 +216,9 @@ class PT2EQATTestCase(QuantizationTestCase):
             ), "wrong num conv args, bad test setup"
             for i in range(6):
                 if i + 3 < len(conv_node.args):
-                    self.assertEqual(conv_node.args[i + 3], expected_conv_literal_args[i])
+                    self.assertEqual(
+                        conv_node.args[i + 3], expected_conv_literal_args[i]
+                    )
 
         # Verify: conv input activation fake quantize
         conv_input_fq_node = conv_node.args[0]
@@ -257,7 +267,9 @@ class PT2EQATTestCase(QuantizationTestCase):
         else:
             self.assertTrue(zero_bias_node is None)
         self.assertEqual(mul_weight_scale_factor_node.target, torch.ops.aten.mul.Tensor)
-        self.assertEqual(scale_factor_reshape_node.target, torch.ops.aten.reshape.default)
+        self.assertEqual(
+            scale_factor_reshape_node.target, torch.ops.aten.reshape.default
+        )
 
         # Verify: scale_factor = bn_weight / sqrt(bn_running_var + eps)
         scale_factor_node = scale_factor_reshape_node.args[0]
@@ -324,6 +336,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             """
             Mixed conv + BN with and without conv bias.
             """
+
             def __init__(self):
                 super().__init__()
                 self.conv1 = torch.nn.Conv2d(3, 3, 3, bias=False)
@@ -341,7 +354,10 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m1 = TestHelperModules.ConvWithBNRelu(relu=False, bias=False)
         example_inputs = (torch.randn(3, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(
-            m1, example_inputs, has_relu=False, has_bias=False,
+            m1,
+            example_inputs,
+            has_relu=False,
+            has_bias=False,
         )
         self._verify_symmetric_xnnpack_qat_numerics(m1, example_inputs)
         self._verify_symmetric_xnnpack_qat_numerics(M2(), example_inputs)
@@ -356,7 +372,10 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=True, bias=False)
         example_inputs = (torch.randn(3, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(
-            m, example_inputs, has_relu=True, has_bias=False,
+            m,
+            example_inputs,
+            has_relu=True,
+            has_bias=False,
         )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
@@ -388,6 +407,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         the `unrelated_getitem` node, which is not part of the conv-bn pattern but
         is returned as part of the match anyway (as a placeholder).
         """
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -408,16 +428,21 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
             unrelated_getitem_node, conv_bn_getitem_node = None, None
             for node in m.graph.nodes:
                 if (
-                    node.target != operator.getitem or
-                    node.args[0].target != torch.ops.aten._native_batch_norm_legit.default
+                    node.target != operator.getitem
+                    or node.args[0].target
+                    != torch.ops.aten._native_batch_norm_legit.default
                 ):
                     continue
                 if node.args[0].args[0].op == "placeholder":
                     unrelated_getitem_node = node
                 else:
                     conv_bn_getitem_node = node
-            assert unrelated_getitem_node is not None, "did not find unrelated getitem node, bad test setup"
-            assert conv_bn_getitem_node is not None, "did not find conv bn getitem node, bad test setup"
+            assert (
+                unrelated_getitem_node is not None
+            ), "did not find unrelated getitem node, bad test setup"
+            assert (
+                conv_bn_getitem_node is not None
+            ), "did not find conv bn getitem node, bad test setup"
             return (unrelated_getitem_node, conv_bn_getitem_node)
 
         # Program capture
@@ -451,6 +476,7 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         Test the case where nodes used in SharedQuantizationSpec were replaced
         during QAT subgraph rewriting.
         """
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -463,17 +489,18 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
                 x = self.bn(x)
                 x = self.hardtanh(x)
                 return x
+
         example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_numerics(M(), example_inputs)
 
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQATModels(PT2EQATTestCase):
-
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
     def test_qat_resnet18(self):
         import torchvision
+
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.resnet18()
@@ -483,6 +510,7 @@ class TestQuantizePT2EQATModels(PT2EQATTestCase):
     @skipIfNoQNNPACK
     def test_qat_mobilenet_v2(self):
         import torchvision
+
         with override_quantized_engine("qnnpack"):
             example_inputs = (torch.randn(1, 3, 224, 224),)
             m = torchvision.models.mobilenet_v2()

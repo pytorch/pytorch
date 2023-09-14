@@ -88,8 +88,6 @@ try:
     from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
     from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
     from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFX  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_fx import TestQuantizePT2EFXModels  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT  # noqa: F401
     from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQATModels  # noqa: F401
 except ImportError as e:
