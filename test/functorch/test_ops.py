@@ -9,8 +9,8 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
-    IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, \
+     parametrize, TEST_WITH_ASAN, noncontiguous_like
 from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
 import torch
 from torch import Tensor
@@ -37,7 +37,6 @@ from common_utils import (
     is_valid_inplace_sample_input,
     loop,
     loop2,
-    expectedFailureIf,
 )
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
