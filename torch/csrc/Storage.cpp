@@ -110,7 +110,8 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
   }
   c10::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status;
+  c10::impl::PyInterpreterStatus status =
+      c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
