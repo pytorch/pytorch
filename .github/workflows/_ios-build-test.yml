@@ -25,9 +25,9 @@ on:
         description: |
           A JSON description of what configs to run later on.
     secrets:
-      AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID:
+      AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID:
         required: false
-      AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY:
+      AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY:
         required: false
       COCOAPODS_TRUNK_TOKEN:
         required: false
@@ -416,7 +416,7 @@ jobs:
           path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
 
       - name: Set DRY_RUN
-        # TODO: uncomment me
+        # TODO: uncomment me before pushing
         # if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
@@ -424,8 +424,8 @@ jobs:
 
       - name: Upload the artifact to S3
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY }}
           IS_NIGHTLY: ${{ github.event.ref == 'refs/heads/nightly' }}
         shell: bash
         working-directory: ${{ env.DEST_DIR }}
