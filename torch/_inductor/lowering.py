@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import functools
+import inspect
 import itertools
 import logging
 import os
@@ -177,16 +180,32 @@ def get_overloads(aten_fn):
     return aten_fn
 
 
-def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
+def transform_args(
+    args,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind,
+    type_promotion_candidates: list[str],
+    convert_input_to_bool,
+):
     indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     if (type_promotion_kind or convert_input_to_bool) and indices:
         if convert_input_to_bool:
             dtype = torch.bool
         else:
-            # FIXME that's a crude approximation for promoting args
-            promoting_args = [
-                a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
-            ]
+            if len(type_promotion_candidates) != 0:
+                # If there is an explicit list of promotion candidates, use that.
+                argnames = inspect.getfullargspec(decomp_fn).args
+                promoting_args = [
+                    a
+                    for (name, a) in zip(argnames, args)
+                    if name in type_promotion_candidates
+                ]
+            else:
+                # Otherwise, use a heuristic.
+                promoting_args = [
+                    a for a in args if isinstance(a, Number) or hasattr(a, "get_dtype")
+                ]
             dtype = get_promoted_dtype(
                 *promoting_args, type_promotion_kind=type_promotion_kind
             )
@@ -237,7 +256,12 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 
 def _register_lowering(
-    aten_fn, decomp_fn, broadcast, type_promotion_kind, convert_input_to_bool
+    aten_fn,
+    decomp_fn,
+    broadcast,
+    type_promotion_kind,
+    type_promotion_candidates: list[str],
+    convert_input_to_bool,
 ):
     """
     Add a lowering to lowerings dict
@@ -269,7 +293,12 @@ def _register_lowering(
         )
 
         args = transform_args(
-            args, broadcast, type_promotion_kind, convert_input_to_bool
+            args,
+            decomp_fn,
+            broadcast,
+            type_promotion_kind,
+            type_promotion_candidates,
+            convert_input_to_bool,
         )
 
         if unpacked:
@@ -290,16 +319,21 @@ def register_lowering(
     aten_fn,
     broadcast=False,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    type_promotion_candidates: Optional[list[str]] = None,
     convert_input_to_bool=False,
 ):
     """
     Shim to support decorator syntax.
     """
+    if type_promotion_candidates is None:
+        type_promotion_candidates = []
+
     return functools.partial(
         _register_lowering,
         aten_fn,
         broadcast=broadcast,
         type_promotion_kind=type_promotion_kind,
+        type_promotion_candidates=type_promotion_candidates,
         convert_input_to_bool=convert_input_to_bool,
     )
 
@@ -4545,7 +4579,7 @@ def reduce_any(x, dim=None, keepdim=False):
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
 
 
-@register_lowering(aten.max)
+@register_lowering(aten.max, type_promotion_candidates=["x"])
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
         return (
@@ -4556,7 +4590,7 @@ def reduce_max(x, dim=None, keepdim=False):
     return reduce_amax(x, axis=None, keepdims=keepdim)
 
 
-@register_lowering(aten.min)
+@register_lowering(aten.min, type_promotion_candidates=["x"])
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
         return (
