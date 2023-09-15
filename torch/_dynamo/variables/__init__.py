@@ -76,6 +76,7 @@ __all__ = [
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
+    "GetAttrFunctionVariable",
     "GradModeVariable",
     "InspectSignatureVariable",
     "LambdaVariable",

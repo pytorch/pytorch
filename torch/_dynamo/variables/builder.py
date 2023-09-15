@@ -717,6 +717,15 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif (
+            str(type(value)) == "<class 'method-wrapper'>"
+            and value.__self__.__objclass__ == torch._C._TensorBase
+        ):
+            from .torch_function import GetAttrFunctionVariable
+
+            return GetAttrFunctionVariable(
+                value, value.__self__.__name__, source=self.source
+            )
         else:
             var_cls = UserDefinedObjectVariable
             if is_torch_function_user_object(value):

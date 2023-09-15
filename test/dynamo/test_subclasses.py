@@ -18,6 +18,24 @@ from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.utils._pytree import tree_map_only
 
 
+class SigmoidToExpSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
+class IgnoreShapeSubclass(torch.Tensor):
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        if kwargs is None:
+            kwargs = {}
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 class PassthroughLeftAddSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -95,6 +113,8 @@ GLOBAL_TEST_SUBCLASSES = {
     PassthroughRightAddSubclassLeft,
     PassthroughMulSubclass,
     MockSubclass,
+    SigmoidToExpSubclass,
+    IgnoreShapeSubclass,
 }
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
@@ -284,25 +304,33 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
 
-    def test_disable_torch_function_context(self):
-        import logging
+    def test_torch_function_call_on_method(self):
+        x = torch.ones(2, 2)
+        wrapped = x.as_subclass(SigmoidToExpSubclass)
 
-        torch._logging.set_logs(dynamo=logging.DEBUG)
+        def fn(w):
+            return w.sigmoid()
 
-        @compile_full_eager
-        def fn(x, y, z):
-            with torch._C.DisableTorchFunctionSubclass(), torch.no_grad():
-                return torch.sqrt(z), torch.add(x, y)
+        fn_opt = compile_full_eager(fn)
 
-        input0 = torch.ones(2, 2)
-        input1 = torch.ones(2, 2).as_subclass(PassthroughLeftAddSubclass)
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
 
-        _, res = fn(input0, input1, torch.ones(2, 2))
+        self.assertEqual(res_exp, res_act)
 
-        with torch._C.DisableTorchFunctionSubclass():
-            exp = torch.add(input0, input1)
+    def test_torch_function_call_on_attr(self):
+        x = torch.ones(2, 2)
+        wrapped = x.as_subclass(IgnoreShapeSubclass)
 
-        self.assertEqual(exp, res)
+        def fn(w):
+            return w.dtype
+
+        fn_opt = compile_full_eager(fn)
+
+        res_exp = fn(wrapped)
+        res_act = fn_opt(wrapped)
+
+        self.assertEqual(res_exp, res_act)
 
     def test_compile_with_fake_tensor_dynamic_dim(self):
         x = torch.randn([3, 4])

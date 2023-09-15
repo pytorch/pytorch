@@ -1,4 +1,4 @@
-from torch.overrides import _get_overloaded_args
+from torch.overrides import _get_overloaded_args, get_default_nowrap_functions
 from torch.utils._pytree import tree_flatten
 from ..exc import unimplemented
 from ..source import AttrSource
@@ -23,6 +23,9 @@ from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 # To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
 
+banned_attrs = [fn.__name__ for fn in get_default_nowrap_functions()]
+
+
 def is_torch_function_user_object(obj):
     return hasattr(obj, "__torch_function__") and hasattr(
         type(obj), "__torch_function__"
@@ -34,6 +37,7 @@ def call_torch_function(
 ):
     # signature:
     # def __torch_function__(cls, func, types, args=(), kwargs=None):
+    print(torch_function_var)
     tf_args = (torch_function_type, fn, types, TupleVariable(list(args)))
     return tx.inline_user_function_return(torch_function_var, tf_args, kwargs)
 
@@ -72,6 +76,25 @@ class TorchFunctionObjectVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
+
+
+class GetAttrFunctionVariable(VariableTracker):
+    def __init__(self, get_fn, name, **kwargs):
+        super().__init__(**kwargs)
+        self.get_fn = get_fn
+        self.name = name
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        assert len(args) == 1 and len(kwargs) == 0
+        return args[0].var_getattr(tx, self.name)
+
+    def is_python_constant(self):
+        return True
+
+    def as_python_constant(self):
+        return self.get_fn
 
 
 class TensorWithTFOverrideVariable(VariableTracker):
@@ -130,7 +153,27 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return UserDefinedClassVariable(self.subclass_type)
 
     def var_getattr(self, tx, name):
-        return self.tensor_variable.var_getattr(tx, name)
+        # [Note: __torch_function__] We currently only support attributes that are defined on
+        # base tensors, custom attribute accesses will graph break. We will need to track setting
+        # attrs on this object.
+        import torch
+
+        if name in banned_attrs:
+            unimplemented(
+                f"Accessing method {name} on a tensor subclass with a __torch_function__ override is not supported"
+            )
+
+        if tx.output.torch_function_enabled:
+            get_fn = getattr(torch.Tensor, name).__get__
+            return self.call_torch_function(
+                tx,
+                GetAttrFunctionVariable(get_fn, name),
+                TupleVariable([self.subclass_type_var()]),
+                [self],
+                {},
+            )
+        else:
+            return self.tensor_variable.var_getattr(tx, name)
 
     def global_class_name(self):
         return f"__subclass_{self.subclass_type.__name__}"
@@ -160,8 +203,21 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
             options = VariableTracker.propagate(self, args, kwargs.values())
             args = list(args)
-            func_var = GetAttrVariable(self, name)
-            return dispatch_torch_function(tx, func_var, args, kwargs)
+            # [Note: __torch_function__] Currently we only support methods that are defined on tensor
+            # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
+            func_var = GetAttrVariable(self, name, **options)
+            all_args = args + tree_flatten(kwargs)[0]
+            types = TupleVariable(
+                [
+                    a.subclass_type_var()
+                    for a in all_args
+                    if isinstance(
+                        a, (TorchFunctionObjectVariable, TensorWithTFOverrideVariable)
+                    )
+                ]
+            )
+
+            return self.call_torch_function(tx, func_var, types, args, kwargs)
         else:
             return self.tensor_variable.call_method(tx, name, args, kwargs)
 
@@ -181,14 +237,6 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
     all_args = args + tree_flatten(kwargs)[0]
-
-    # FIXME: need a better way to detect methods
-    # self should not be in args since it gets handled at the method call
-    from .misc import GetAttrVariable
-
-    if isinstance(fn, GetAttrVariable):
-        all_args = [fn.obj] + all_args
-
     overloaded_args = _get_overloaded_args(
         [
             arg

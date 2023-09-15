@@ -2262,7 +2262,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(
         parent, func: VariableTracker, args: List[VariableTracker], kwargs
     ):
-        print(func)
         assert isinstance(
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
