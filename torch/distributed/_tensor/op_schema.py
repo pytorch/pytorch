@@ -138,10 +138,12 @@ class RuntimeSchemaInfo:
     whether to re-run sharding prop or not 2. to determine if we need pytree
     """
 
-    # This static_argnum records static arg starting index for ops that have non-tensor
-    # args/kwargs which would affect sharding propagation results.
-    # only a few ops need this information, e.g. view, transpose, var.dim, etc.
+    # This static_argnum records static arg "starting index" for ops that have non-tensor
+    # args/kwargs which would affect sharding propagation results. All args after this
+    # index would be hashed to our sharding cache.
+    # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
     static_argnum: int = -1
+    # This static_kwargkey records static kwarg names which would affect sharding prop
     static_kwargkey: Optional[List[str]] = None
     # TODO: make use of this field
     needs_pytree: bool = True
