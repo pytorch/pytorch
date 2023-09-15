@@ -705,7 +705,6 @@ class {module_name}(torch.nn.Module):
             self._out_spec = self._graph._codegen.pytree_info.out_spec
         python_code = self._graph.python_code(root_module="self")
         self._code = python_code.src
-        self._lineno_map = python_code._lineno_map
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
