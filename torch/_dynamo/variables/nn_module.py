@@ -241,6 +241,14 @@ class NNModuleVariable(VariableTracker):
 
         return variables.GetAttrVariable(self, name, **options)
 
+    def var_setattr(self, tx, name, val):
+        assert name.is_python_constant() and val.is_python_constant()
+
+        options = VariableTracker.propagate(self)
+        mod = tx.output.get_submodule(self.module_key)
+        setattr(mod, name.as_python_constant(), val.as_python_constant())
+        return val
+
     def call_function(
         self,
         tx,

@@ -4080,6 +4080,40 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
 
+    def test_constant_mutation(self):
+        class M(torch.nn.Module):
+            def __init__(self, config: str):
+                super().__init__()
+                self.config = config
+                self.type = None
+
+            def forward(self, x):
+                if self.type is None:
+                    if self.config == "add":
+                        self.type = self.config
+                    else:
+                        self.type = "other"
+
+                if self.config == "add":
+                    return x + x
+
+                assert self.type == "other"
+                return x * x
+
+        gm = torch._dynamo.export(M("add"), aten_graph=True)(
+            torch.zeros(1),
+        ).graph_module
+        op_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
+        self.assertEqual(len(op_nodes), 1)
+        self.assertEqual(op_nodes[0].target, torch.ops.aten.add.Tensor)
+
+        gm = torch._dynamo.export(M("mul"), aten_graph=True)(
+            torch.zeros(1),
+        ).graph_module
+        op_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
+        self.assertEqual(len(op_nodes), 1)
+        self.assertEqual(op_nodes[0].target, torch.ops.aten.mul.Tensor)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

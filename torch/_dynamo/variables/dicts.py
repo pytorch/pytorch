@@ -587,3 +587,9 @@ class HFPretrainedConfigVariable(VariableTracker):
         return variables.ConstantVariable.create(hasattr(self.obj, name)).add_options(
             self
         )
+
+    def var_setattr(self, tx, name, val):
+        assert name.is_python_constant() and val.is_python_constant()
+        setattr(self.obj, name.as_python_constant(), val.as_python_constant())
+        return val
+

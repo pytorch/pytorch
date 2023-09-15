@@ -1221,8 +1221,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         prior = self.copy_graphstate()
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable):
-            # We don't allow side effects during export
+        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+            # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert (
                 not self.export
