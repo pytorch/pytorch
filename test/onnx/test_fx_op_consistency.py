@@ -137,6 +137,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.embedding_bag",
         "nn.functional.max_pool1d",
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
@@ -188,10 +189,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
     xfail(
-        "all",
-        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
-    ),
-    xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -203,10 +200,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
-    ),
-    xfail(
-        "any",
-        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
     ),
     xfail(
         "arange",
@@ -355,10 +348,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
-        "nn.functional.adaptive_avg_pool1d",
-        reason=onnx_test_common.reason_onnx_script_does_not_support("aten::div.Tensor_mode needs type promotion"),
-    ),
-    xfail(
         "nn.functional.adaptive_avg_pool2d",
         reason=onnx_test_common.reason_onnx_script_does_not_support("RecursionError: \
             maximum recursion depth exceeded while calling a Python object"),
@@ -404,6 +393,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.max_pool2d",
         dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
+    ),
+    xfail(
+        "nn.functional.max_pool3d",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool3d"),
     ),
     xfail(
         "nonzero",
@@ -493,12 +487,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
     xfail(
-        "div",
-        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None
-        and sample.input.dtype in onnx_test_common.INT_TYPES,
-        reason="rounding_mode is not yet supported",
-    ),
-    xfail(
         "index_put",
         matcher=lambda sample: (sample.args[0][0].dtype == torch.bool)
         and (sample.kwargs.get("accumulate") is False),
@@ -560,6 +548,19 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.cross_entropy",
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
+    ),
+    xfail(
+        "nn.functional.embedding_bag",
+        matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
+        reason="Torchlib does not support aten::embedding_renorm, emitted when 'max_norm' is not None",
+    ),
+    xfail(
+        "nn.functional.embedding_bag",
+        matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
+        reason=(
+            "Torchlib does not support 'padding_idx' overload for _embedding_bag and _embedding_bag_forward_only. "
+            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided."
+        ),
     ),
     skip(
         "nn.functional.max_pool3d",

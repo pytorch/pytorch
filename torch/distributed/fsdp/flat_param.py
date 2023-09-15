@@ -27,7 +27,6 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
@@ -80,6 +79,7 @@ or a submodule chosen by the provided wrapping policy.
 # special cases such as for high CPU overhead or for intentionally bypassing
 # checks in the overrides, we may use 'unsafe'.
 _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
+
 # Environment variable toggling whether to check for parameter/gradient
 # writeback in case their storages change after FSDP initialization
 # We should check by default since it prevents silent correctness errors, but
@@ -1797,6 +1797,8 @@ class FlatParamHandle:
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
         views = self._get_unflat_views()
+        from torch.distributed._tensor import DTensor
+
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, flat_param._param_infos)
         ):

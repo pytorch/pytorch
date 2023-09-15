@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import operator
 import re
 from collections import namedtuple
 from itertools import chain
@@ -18,8 +19,8 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .. import metrics
 from ..utils import (
     DeferredLineBase,
+    do_bench_using_profiling,
     free_symbol_startswith,
-    get_sympy_Expr_dtype,
     IndentedBuffer,
     sympy_dot,
     sympy_subs,
@@ -196,6 +197,9 @@ class DataTypePropagation:
             buf_name = node.args[1]
             return V.graph.get_dtype(buf_name)
 
+        if node.target == operator.getitem:
+            return self.deduce_node_dtype(node.args[0])
+
         assert isinstance(node.target, str)
 
         if node.target == "reduction":
@@ -310,6 +314,12 @@ class ExprPrinter(Printer):
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)  # type: ignore[attr-defined]
 
+    def _print_GreaterThan(self, expr):
+        # GreaterThan:          >=
+        # StrictlyGreaterThan:  >
+        # Go figure...
+        return " >= ".join(map(self.paren, map(self._print, expr.args)))
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -412,8 +422,13 @@ class DeferredLine(DeferredLineBase):
         self.name = name
 
     def __call__(self):
+        # V.kernel may be null since this method may be called for the
+        # wrapper codegen where there is no specific kernel.
         if (
-            self.name not in V.graph.removed_buffers
+            self.name
+            not in (
+                V.graph.removed_buffers | getattr(V.kernel, "removed_buffers", set())
+            )
             and self.name not in V.graph.inplaced_to_remove
         ):
             return self.line
@@ -477,6 +492,9 @@ class KernelArgs:
                 )
             )
         )
+
+    def _buffer_is_marked_removed(self, name):
+        return isinstance(name, str) and name.startswith("REMOVED")
 
     def input(self, name):
         if V.graph.scheduler:
@@ -542,26 +560,15 @@ class KernelArgs:
     def cpp_argdefs(self):
         from .cpp import DTYPE_TO_CPP, INDEX_TYPE
 
-        # TODO(jansel): replace this with data from scheduler
-        buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
-        for name, val in V.graph.graph_inputs.items():
-            if isinstance(val, sympy.Expr):
-                buffer_types[name] = get_sympy_Expr_dtype(val)
-            else:
-                buffer_types[name] = val.get_dtype()
-        buffer_types.update(
-            {name: val.dtype for name, val in V.graph.constants.items()}
-        )
-
         call_args = []
         arg_defs = []
         arg_types = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
-            dtype = buffer_types[outer]
+            dtype = V.graph.get_dtype(outer)
             cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
@@ -569,15 +576,15 @@ class KernelArgs:
         for outer, inner in self.input_buffers.items():
             if outer in self.inplace_buffers:
                 continue
-            dtype = buffer_types[outer]
+            dtype = V.graph.get_dtype(outer)
             cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
-            dtype = buffer_types[outer]
+            dtype = V.graph.get_dtype(outer)
             cpp_dtype = DTYPE_TO_CPP[dtype]
             arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
@@ -593,7 +600,7 @@ class KernelArgs:
         call_args = []
         precompile_args: List[Union[TensorArg, SizeArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
@@ -607,7 +614,7 @@ class KernelArgs:
         for outer, inner in chain(
             self.input_buffers.items(), self.output_buffers.items()
         ):
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
@@ -621,7 +628,7 @@ class KernelArgs:
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             for other in inplaced.other_names:
                 if other in V.graph.inplaced_to_remove:
@@ -633,7 +640,7 @@ class KernelArgs:
 
     def is_removed(self, name):
         def _is_removed(name, buffers):
-            return name not in buffers or buffers[name] == "REMOVED"
+            return name not in buffers or self._buffer_is_marked_removed(buffers[name])
 
         return _is_removed(name, self.output_buffers) and _is_removed(
             name, self.inplace_buffers
@@ -645,11 +652,11 @@ class KernelArgs:
     def live_output_buffers(self):
         live_outs = set()
         for inplaced in unique(self.inplace_buffers.values()):
-            if inplaced == "REMOVED":
+            if self._buffer_is_marked_removed(inplaced):
                 continue
             live_outs.add(inplaced.other_names[-1])
         for outer, inner in self.output_buffers.items():
-            if outer in self.inplace_buffers or inner == "REMOVED":
+            if outer in self.inplace_buffers or self._buffer_is_marked_removed(inner):
                 continue
             live_outs.add(outer)
         return live_outs
@@ -798,9 +805,10 @@ class Kernel(CodeGen):
     load_format = None
     store_format = None
 
-    def __init__(self, args=None):
+    def __init__(self, args=None, increase_kernel_count=True):
         super().__init__()
-        metrics.generated_kernel_count += 1
+        if increase_kernel_count:
+            metrics.generated_kernel_count += 1
         self.args = args or KernelArgs()
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
@@ -811,6 +819,12 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges]] = None
+
+        self.removed_buffers = set()
+        # key: the buffer to write
+        # value: the buffer to read and whose memory can be reused for
+        #   the buffer specified by key
+        self.inplace_update_buffers = dict()
 
     @contextlib.contextmanager
     def set_current_node(self, node):
@@ -981,6 +995,10 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        Note that V.graph.scheduler can be None when codegening triton template
+        kernels.
+        """
         if V.graph.scheduler:
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
@@ -1016,3 +1034,96 @@ class OptimizationContext:
 
     # Load uint8 value as float32
     is_load_uint8_as_float: bool = False
+
+
+@functools.lru_cache(None)
+def jinja2_env():
+    try:
+        import jinja2
+
+        return jinja2.Environment(
+            undefined=jinja2.StrictUndefined,
+        )
+    except ImportError:
+        return None
+
+
+class ChoiceCaller:
+    """
+    Represents a possible choice used in autotune_process.py.
+    During autotuning, self.benchmark() is first called to get benchmark result,
+    and if this choice is selected, self.output_node() is called to get the output_node.
+
+    Children classes: TritonTemplateCaller, CUDATemplateCaller.
+    """
+
+    def __init__(self, name, input_nodes, layout):
+        super().__init__()
+        self.name = name
+        self.layout = layout
+        self.input_nodes = input_nodes
+
+    def benchmark(self, *args, out) -> float:
+        algo = self.to_callable()
+        return do_bench_using_profiling(lambda: algo(*args, out=out))
+
+    def call_name(self) -> str:
+        raise NotImplementedError()
+
+    def to_callable(self):
+        raise NotImplementedError()
+
+    def hash_key(self) -> str:
+        raise NotImplementedError()
+
+    def output_node(self) -> "TensorBox":  # type: ignore[name-defined]
+        raise NotImplementedError()
+
+
+class KernelTemplate:
+    """
+    Base class for defining kernel templates.
+
+    Children classes: TritonTemplate, CUDATemplate
+    """
+
+    @staticmethod
+    def _template_from_string(source):
+        env = jinja2_env()
+        if env is not None:
+            return env.from_string(source)
+        return None
+
+    @staticmethod
+    def _fake_get_dtype(fake_out):
+        _get_dtype_real = V.graph.get_dtype
+
+        def get_dtype(name):
+            if name == fake_out.get_name():
+                return fake_out.get_dtype()
+            return _get_dtype_real(name)
+
+        return get_dtype
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def maybe_append_choice(self, choices, **kwargs):
+        """
+        Maybe generates a new ChoiceCaller and appends it into existing choices.
+
+        choices: A list of ChoiceCallers.
+        kwargs: Additional kwargs to be passed to self.generate() to generate a new ChoiceCaller.
+        """
+
+        try:
+            choices.append(self.generate(**kwargs))
+        except NotImplementedError:
+            pass
+
+    def generate(self, **kwargs) -> ChoiceCaller:
+        """
+        Generates a ChoiceCaller instance from the given arguments.
+        """
+
+        raise NotImplementedError()

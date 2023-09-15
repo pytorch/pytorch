@@ -266,7 +266,7 @@ def impl_save_for_backward(qualname, *, func=None):
     """
 
     def inner(func):
-        custom_op = _find_custom_op(qualname)
+        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
         custom_op.impl_save_for_backward(_stacklevel=3)(func)
         return func
 
@@ -313,7 +313,7 @@ def impl_backward(qualname, output_differentiability=None, *, func=None):
     """
 
     def inner(func):
-        custom_op = _find_custom_op(qualname)
+        custom_op = _find_custom_op(qualname, also_check_torch_library=True)
         custom_op.impl_backward(output_differentiability, _stacklevel=3)(func)
         return func
 

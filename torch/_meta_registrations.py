@@ -4,7 +4,7 @@ from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch._prims_common as utils
-from torch import Tensor
+from torch import SymBool, SymFloat, Tensor
 from torch._decomp import (
     _add_op_to_registry,
     _convert_out_params,
@@ -29,8 +29,11 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch._refs import _broadcast_shapes
-from torch.fx.experimental.symbolic_shapes import constrain_range
+from torch._refs import _broadcast_shapes, _maybe_broadcast
+from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
+    constrain_range,
+)
 from torch.utils._pytree import tree_map
 
 
@@ -66,6 +69,64 @@ def check_inplace_broadcast(self_shape, *args_shape):
     torch._check(
         broadcasted_shape == self_shape,
         lambda: f"output with shape {self_shape} doesn't match the broadcast shape {broadcasted_shape}",
+    )
+
+
+@register_meta([aten.linspace, aten.logspace])
+@out_wrapper()
+def meta_linspace_logspace(
+    start,
+    end,
+    steps,
+    base=None,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+    requires_grad=False,
+):
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+
+    if any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            torch._check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
+
+    # steps does not participate in the computation of the dtype
+    torch._check_type(
+        isinstance(steps, IntLike),
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
+    )
+    assert isinstance(steps, IntLike)  # for mypy
+    torch._check(steps >= 0, lambda: "number of steps must be non-negative")
+
+    return torch.empty(
+        (steps,),  # type: ignore[arg-type]
+        dtype=dtype,
+        layout=layout,
+        device="meta",
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
 
 
@@ -286,6 +347,12 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+
+    if torch._debug_has_internal_overlap(self) == 1:  # 1 == MemOverlap::Yes
+        raise RuntimeError(
+            "more than one element of the written-to tensor refers to a single memory location"
+        )
+
     intermediate = src.to(self, non_blocking)
     if self.size() != intermediate.size():
         aten.expand_copy.default(intermediate, self.size())
@@ -424,12 +491,27 @@ def make_dep_token(
 
 @register_meta(aten.sym_constrain_range.default)
 def sym_constrain_range(size, min=None, max=None):
+    if isinstance(size, (SymFloat, SymBool)):
+        raise ValueError("Constraining SymFloat or Symbool is nyi")
     constrain_range(size, min=min, max=max)
 
 
 @register_meta(aten._functional_sym_constrain_range.default)
 def functional_sym_constrain_range(size, min=None, max=None, dep_token=None):
     aten.sym_constrain_range(size, min=min, max=max)
+    return dep_token
+
+
+@register_meta(aten.sym_constrain_range_for_size.default)
+def sym_constrain_range_for_size(size, min=None, max=None):
+    if isinstance(size, (SymFloat, SymBool)):
+        raise ValueError("Constraining SymFloat or Symbool is nyi")
+    _constrain_range_for_size(size, min=min, max=max)
+
+
+@register_meta(aten._functional_sym_constrain_range_for_size.default)
+def functional_sym_constrain_range_for_size(size, min, max, dep_token):
+    aten.sym_constrain_range_for_size(size, min=min, max=max)
     return dep_token
 
 
@@ -1765,27 +1847,6 @@ def meta__fused_moving_avg_obs_fq_helper(
     return (torch.empty_like(self), mask)
 
 
-def dot_check(self, other):
-    torch._check(
-        self.dim() == 1 and other.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
-    )
-
-    def numel_error():
-        return (
-            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
-            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
-        )
-
-    torch._check(self.numel() == other.numel(), numel_error)
-
-
-@register_meta(aten.dot.default)
-def meta_dot(self, tensor):
-    dot_check(self, tensor)
-    return self.new_empty(())
-
-
 @register_meta([aten.mm.default])
 def meta_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be 2D")
@@ -2010,6 +2071,65 @@ if torch._C._has_mkldnn:
             return input_tensor.new_empty(
                 (*input_tensor.shape[:-1], orig_weight.shape[0])
             )
+
+    _meta_lib_dont_use_me_use_register_meta_for_onednn = torch.library.Library(
+        "onednn", "IMPL", "Meta"
+    )
+
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
+    def meta_qconv2d_pointwise(
+        x,
+        x_scale,
+        x_zp,
+        w,  # prepacked_weight
+        w_scale,
+        w_zp,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups,
+        output_scale,
+        output_zero_point,
+        fp32_output,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        shape_out = calc_conv_nd_return_shape(
+            x,
+            w,
+            stride,
+            padding,
+            dilation,
+            False,
+            groups,
+            None,
+        )
+        out = x.new_empty(shape_out, dtype=(torch.float32 if fp32_output else None))
+        out = out.to(memory_format=torch.channels_last)
+        return out
+
+    @register_meta(torch.ops.onednn.qlinear_pointwise.default)
+    def meta_qlinear_pointwise(
+        x,
+        x_scale,
+        x_zp,
+        w,
+        w_scale,
+        w_zp,
+        bias,
+        output_scale,
+        output_zero_point,
+        fp32_output,
+        post_op_name,
+        post_op_args,
+        post_op_algorithm,
+    ):
+        output_shape = list(x.shape)
+        output_shape[-1] = w.shape[0]
+        out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
+        return out
 
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
@@ -2586,28 +2706,6 @@ def meta_complex(real, imag):
     return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
 
 
-@register_meta(aten.view.dtype)
-def view_dtype(self, dtype):
-    return utils.clone_preserve_strides(self).to(dtype)
-
-
-@register_meta(aten.vdot.default)
-def vdot(self, other):
-    if not self.is_complex:
-        return torch.dot(self, other)
-
-    if self.is_conj():
-        if other.is_conj():
-            return torch.vdot(other.conj(), self.conj())
-        else:
-            return torch.dot(self.conj(), other)
-    elif other.is_conj():
-        return torch.dot(self, other.conj()).conj()
-
-    dot_check(self, other)
-    return self.new_empty(())
-
-
 @register_meta([aten.nonzero_static.default, aten.nonzero_static.out])
 def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
@@ -2852,6 +2950,7 @@ def meta__foreach_binop__list(self, other, alpha=1):
         aten._foreach_mul_.Scalar,
         aten._foreach_sub_.Scalar,
         aten._foreach_div_.Scalar,
+        aten._foreach_maximum_.Scalar,
     ]
 )
 def meta__foreach_binop__scalar(self, scalar=1):
@@ -2956,27 +3055,9 @@ def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
     )
 
 
-@register_meta([aten._foreach_clamp.default])
-def meta__foreach_clamp(self, min, max):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"self must be a tensor list but got {type(self)}",
-    )
-    torch._check(
-        min is not None or max is not None, lambda: "`min` or `max` must be specified"
-    )
-    return [torch.empty_like(t) for t in self]
-
-
-@register_meta([aten._foreach_clamp_.default])
-def meta__foreach_clamp_(self, min, max):
-    torch._check(
-        isinstance(self, List),
-        lambda: f"self must be a tensor list but got {type(self)}",
-    )
-    torch._check(
-        min is not None or max is not None, lambda: "`min` or `max` must be specified"
-    )
+@register_meta([aten._foreach_copy_])
+def meta__foreach_copy_inplace(self, src, non_blocking=False):
+    _check_foreach_binop_tensor_lists(self, src)
 
 
 @register_meta([aten._fused_adam_.default])
@@ -3428,6 +3509,26 @@ def meta_index_put(self, indices, values, accumulate=False):
 def meta_masked_fill_(self, mask, value):
     check_inplace_broadcast(self.shape, mask.shape)
     return self
+
+
+@register_meta(aten.masked_scatter_)
+def meta_masked_scatter_(self, mask, source):
+    torch._check(
+        mask.dtype in (torch.bool, torch.uint8), lambda: "Mask must be bool or uint8"
+    )
+    torch._check(
+        self.dtype == source.dtype,
+        lambda: "masked_scatter: expected self and source to have same "
+        "dtypes but got {self.dtype} and {source.dtype}",
+    )
+    return self
+
+
+@register_meta(aten.masked_scatter)
+def meta_masked_scatter(self, mask, source):
+    self, mask = _maybe_broadcast(self, mask)
+    output = torch.empty_like(self, memory_format=torch.contiguous_format)
+    return meta_masked_scatter_(output, mask, source)
 
 
 @register_meta(aten.index_put_.default)
@@ -4708,18 +4809,40 @@ def meta__scaled_dot_product_flash(
     head_dim = query.size(3)
 
     max_seqlen_batch_k = key.size(2)
-    Nnz_q = batch_size * max_seqlen_batch_q
+    if device_hint(query) == "cpu":
+        Nnz_q = batch_size * max_seqlen_batch_q
+        query_t = query.transpose(1, 2)
+        query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
+        attention = torch.empty_like(query_reshaped, device=query.device)
+        attention = attention.view(
+            batch_size, max_seqlen_batch_q, num_heads, head_dim
+        ).transpose(1, 2)
+        logsumexp = torch.empty(
+            (
+                batch_size,
+                max_seqlen_batch_q,
+                num_heads,
+            ),
+            dtype=torch.float,
+            device=query.device,
+        ).transpose(1, 2)
+        return (
+            attention,
+            logsumexp,
+            torch.empty((), dtype=torch.int32, device="meta"),
+            torch.empty((), dtype=torch.int32, device="meta"),
+            0,
+            0,
+            torch.empty((), dtype=torch.long, device="meta"),
+            torch.empty((), dtype=torch.long, device="meta"),
+            torch.empty((), dtype=query.dtype, device=query.device),
+        )
 
+    # Cuda Path
     query_t = query.transpose(1, 2)
-    query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
-    attention = torch.empty_like(query_reshaped, device=query.device)
-    attention = attention.view(
-        batch_size, max_seqlen_batch_q, num_heads, head_dim
-    ).transpose(1, 2)
-
-    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
+    attention = torch.empty_like(query_t).transpose(1, 2)
     logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_q),
+        (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
         device=query.device,
     )
@@ -4738,7 +4861,7 @@ def meta__scaled_dot_product_flash(
         elif max_seqlen_batch_k <= 256:
             max_seqlen_k = 256
         debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
             dtype=query.dtype,
             device=query.device,
         )
@@ -4753,8 +4876,8 @@ def meta__scaled_dot_product_flash(
     return (
         attention,
         logsumexp,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_k,
+        None,
+        None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
         torch.empty((), dtype=torch.long, device="meta"),
@@ -4788,21 +4911,23 @@ def meta__scaled_dot_product_flash_backward(
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
+    len_q = query.size(2) if device_hint(query) == "cpu" else max_q
+    len_k = key.size(2) if device_hint(query) == "cpu" else max_k
 
     grad_q = torch.empty_permuted(
-        (batch_size, num_heads, max_q, head_dim),
+        (batch_size, num_heads, len_q, head_dim),
         (0, 2, 1, 3),
         dtype=query.dtype,
         device=query.device,
     )
     grad_k = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads, len_k, head_dim),
         (0, 2, 1, 3),
         dtype=key.dtype,
         device=key.device,
     )
     grad_v = torch.empty_permuted(
-        (batch_size, num_heads, max_k, head_dim),
+        (batch_size, num_heads, len_k, head_dim),
         (0, 2, 1, 3),
         dtype=value.dtype,
         device=value.device,
@@ -5495,6 +5620,77 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
+def _create_unary_float_meta_func(func):
+    @register_meta(func)
+    @out_wrapper()
+    def _f(x):
+        return _elementwise_meta(
+            x, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    return _f
+
+
+def _create_binary_float_meta_func(func):
+    @register_meta(func)
+    @out_wrapper()
+    def _f(x, y):
+        x, y = _maybe_broadcast(x, y)
+        return _elementwise_meta(
+            x, y, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    return _f
+
+
+_create_unary_float_meta_func(aten.special_airy_ai)
+_create_unary_float_meta_func(aten.special_bessel_y0)
+_create_unary_float_meta_func(aten.special_bessel_y1)
+_create_unary_float_meta_func(aten.special_modified_bessel_i0)
+_create_unary_float_meta_func(aten.special_modified_bessel_i1)
+_create_unary_float_meta_func(aten.special_modified_bessel_k0)
+_create_unary_float_meta_func(aten.special_modified_bessel_k1)
+_create_unary_float_meta_func(aten.special_scaled_modified_bessel_k0)
+_create_unary_float_meta_func(aten.special_scaled_modified_bessel_k1)
+
+
+_create_binary_float_meta_func(
+    [
+        aten.special_chebyshev_polynomial_t.default,
+        aten.special_chebyshev_polynomial_t.out,
+        aten.special_chebyshev_polynomial_t.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_chebyshev_polynomial_u.default,
+        aten.special_chebyshev_polynomial_u.out,
+        aten.special_chebyshev_polynomial_u.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_hermite_polynomial_h.default,
+        aten.special_hermite_polynomial_h.out,
+        aten.special_hermite_polynomial_h.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_hermite_polynomial_he.default,
+        aten.special_hermite_polynomial_he.out,
+        aten.special_hermite_polynomial_he.n_scalar_out,
+    ]
+)
+_create_binary_float_meta_func(
+    [
+        aten.special_laguerre_polynomial_l.default,
+        aten.special_laguerre_polynomial_l.out,
+        aten.special_laguerre_polynomial_l.n_scalar_out,
+    ]
+)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -5515,6 +5711,12 @@ def activate_meta():
                 activate_meta_table[opo] = registry[opo]
 
     for op_overload, fn in activate_meta_table.items():
+        # Don't register meta for HigherOrderOp's decomp.
+        # We can reconsider this in the future, but in general,
+        # the way you do a meta for a HigherOrderOp is different from
+        # OpOverload.
+        if isinstance(op_overload, torch._ops.HigherOrderOperator):
+            continue
         assert isinstance(op_overload, OpOverload)
 
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
@@ -5553,6 +5755,8 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkldnn.impl(op_overload, fn)
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
+            elif "onednn::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_onednn.impl(op_overload, fn)
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
