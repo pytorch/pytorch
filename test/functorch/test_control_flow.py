@@ -2,6 +2,7 @@
 import functools
 import unittest
 
+from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO
 import torch
 import torch.utils._pytree as pytree
 from torch._functorch.aot_autograd import from_fun, to_fun
@@ -267,7 +268,6 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
-    @unittest.expectedFailure
     def test_cond_functionalized(self):
         def true_fn(x):
             y = x.sin()
@@ -313,7 +313,6 @@ class TestControlFlowTraced(TestCase):
         gm_functional = make_fx(torch.func.functionalize(gm_non_functional), tracing_mode="real")(inp)
         self.assertEqual(gm_functional(torch.zeros(1, 2)), f(torch.zeros(1, 2)))
 
-    @unittest.expectedFailure
     def test_cond_functionalized_nested(self):
         def true_true_fn(x):
             y = x.cos()
@@ -1216,7 +1215,6 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res, main(p, pred, xs, y))
         self.check_map_count(gm, 2)
 
-    @unittest.expectedFailure
     def test_cond_with_sym_pred(self):
         def true_fn(x):
             return x + x
@@ -1228,9 +1226,26 @@ class TestControlFlowTraced(TestCase):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
+        # The symbols in make_fx's shape_env should not be speciliazed.
+        self.assertEqual(len(gm.shape_env.guards), 0)
+
+        exp_code = """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
+eq = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional
+"""
+        self._expected_inline_normalized(gm.code, exp_code)
+
+        # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
         self.assertEqual(gm(x), true_fn(x))
         self.assertEqual(foo(x), true_fn(x))
+
 
     def _check_closure_correctly_lifted(self, f, *, args, exp_res, exp_arg_num):
         assert isinstance(args, (tuple, list))
@@ -1465,6 +1480,24 @@ def forward(self, arg0_1, arg1_1):
         all_source_fns = collect_meta_for_filtered_nodes(gm, checked_ops, checked_meta)
         new_source_fns = collect_meta_for_filtered_nodes(new_gm, checked_ops, checked_meta)
         self.assertEqual(all_source_fns, new_source_fns)
+
+    @unittest.skipIf(TEST_WITH_TORCHDYNAMO, "triggers cache limit for foo and changes unique_graphs count.")
+    def test_cond_no_dynamo_cache_limit(self):
+        torch._dynamo.reset()
+        counters = torch._dynamo.utils.counters
+        counters.clear()
+
+        def foo(x, true_fn, false_fn):
+            return cond(x.shape[0] == 4, true_fn, false_fn, (x,))
+
+        inp = torch.ones(3, 4)
+        exp_out = inp.sin()
+        iter_n = torch._dynamo.config.cache_size_limit + 1
+        for _ in range(iter_n):
+            # each lambda has a different object id thus fails the guard
+            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
+        self.assertEqual(counters["stats"]["calls_captured"], iter_n)
+        self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
 if __name__ == '__main__':
     run_tests()
