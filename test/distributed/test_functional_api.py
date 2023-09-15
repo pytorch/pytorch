@@ -516,6 +516,8 @@ class TestOpWaitiness(MultiThreadedTestCase):
         foo.trigger_wait()
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
+        self.assertEqual(foo.tolist(), [[1.0, 1.0], [1.0, 1.0]])
+
     def test_dead_wrapper_triggers_wait(self):
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
 
