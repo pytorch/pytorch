@@ -32,6 +32,12 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   if (!tensor.defined()) {
     return tensor;
   }
+  // We don't want to re-enter the DynamicLayerFrontMode **while** we are creating a TensorWrapper.
+  // This can only really happen if we happen to call dispatcher ops while creating the TensorWrapper.
+  // Unfortunately, sym_storage_offset (and friends) are dispatcher ops,
+  // and can enter the dispatcher when our inner tensor is a tensor subclass with custom size/strides
+  // (example: FunctionalTensor)
+  c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
     return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
