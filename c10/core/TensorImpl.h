@@ -578,6 +578,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_;
   }
 
+ private:
+  [[noreturn]] void throw_cannot_call_with_symbolic(const char* meth) const;
+
   // NOTE: The general recipe for customizable methods is that the fastpath
   // function (e.g., sizes()) does an unlikely policy test, and if doesn't
   // trigger, it does the fast path implementation with no checks and going
@@ -613,10 +616,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef sizes_default() const {
-    // TODO: force backtrace to be printed on this error
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call sizes() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("sizes");
+    }
     return sizes_and_strides_.sizes_arrayref();
   }
 
@@ -695,9 +697,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t numel_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call numel() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("numel");
+    }
     return numel_;
   }
 
@@ -751,9 +753,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t storage_offset_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call storage_offset() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("storage_offset");
+    }
     return storage_offset_;
   }
 
@@ -784,9 +786,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   IntArrayRef strides_default() const {
-    TORCH_CHECK(
-        !has_symbolic_sizes_strides_,
-        "Cannot call strides() on tensor with symbolic sizes/strides");
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      throw_cannot_call_with_symbolic("strides");
+    }
     return sizes_and_strides_.strides_arrayref();
   }
 
