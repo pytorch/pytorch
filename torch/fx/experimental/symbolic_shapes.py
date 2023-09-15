@@ -982,11 +982,13 @@ class SymNode:
             self.expr, self.hint, fx_node=self.fx_node,
             return_expr_if_has_unbacked_symint_and_concrete_val_is_int=True
         )
-        try:
-            return int(r)
-        except Exception:
-            log.warning("Failed to convert to int: %s", r)
+        if isinstance(r, sympy.Expr):
             return r
+        else:
+            try:
+                return int(r)
+            except Exception:
+                log.warning("Failed to convert to int: %s", r)
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
