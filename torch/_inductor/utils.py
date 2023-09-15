@@ -399,10 +399,10 @@ def get_origin_op_info(node_schedule, descriptive_names):
             if origin.op == "call_function" and "original_aten" in origin.meta:
                 op_name = origin.meta["original_aten"]._overloadpacket.__name__
                 mod_name, torch_op = get_module_name_from_meta(origin.meta)
-                aot_seq_nr = origin.meta.get("seq_nr", 0)
+                seq_nr = origin.meta.get("seq_nr", -1)
                 if op_name not in unique_op_names:
                     sources.oi_list.append(
-                        OriginOpInfo(op_name, mod_name, torch_op, aot_seq_nr)
+                        OriginOpInfo(op_name, mod_name, torch_op, seq_nr)
                     )
                     unique_op_names[op_name] = mod_name
     elif descriptive_names == "torch":
@@ -414,10 +414,10 @@ def get_origin_op_info(node_schedule, descriptive_names):
                     op_name = origin.meta["source_fn"][1]
                 else:
                     op_name = origin.meta["source_fn"][1].__name__
-                aot_seq_nr = origin.meta.get("seq_nr", -1)
+                seq_nr = origin.meta.get("seq_nr", -1)
                 if op_name not in unique_op_names:
                     sources.oi_list.append(
-                        OriginOpInfo(op_name, mod_name, torch_op, aot_seq_nr)
+                        OriginOpInfo(op_name, mod_name, torch_op, seq_nr)
                     )
                     unique_op_names[op_name] = mod_name
     elif descriptive_names == "inductor_node":
@@ -858,7 +858,7 @@ class OriginOpInfo:
     op_type: str
     mod_name: str
     torch_op: str
-    aot_seq_nr: int
+    seq_nr: int
 
     def __repr__(self):
         return str(self.__dict__)
@@ -874,9 +874,11 @@ class OriginOpList:
     def codegen(self, code: IndentedBuffer, cm_stack: contextlib.ExitStack, line: str):
         with cm_stack as k_stack:
             marker_string = str(self)
-            code.writeline(f'with record_function("triton_info: {marker_string}"):')
-            k_stack.enter_context(code.indent())
+            code.writeline(
+                f'torch.cuda.nvtx.range_push("triton_info: {marker_string}")'
+            )
             code.writeline(line)
+            code.writeline("torch.cuda.nvtx.range_pop()")
         return
 
 

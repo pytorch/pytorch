@@ -7720,10 +7720,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 seq_nr_set = bwd_seq_nr_set if idx > 0 else fwd_seq_nr_set
                 prefix = "BWD" if idx > 0 else "FWD"
                 for line in code.split("\n"):
-                    if "seq_nr" in line:
-                        res = re.search(r"seq_nr:(\d+)", line)
-                        if res:
-                            seq_nr_set.add(int(res.group(1)))
+                    res = re.search(r"seq_nr:(\d+)", line)
+                    if res:
+                        seq_nr_set.add(int(res.group(1)))
 
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 

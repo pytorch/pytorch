@@ -168,7 +168,7 @@ class ForeachKernel(Kernel):
             1,
         )
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(self, name=None, node_schedule=None):
         code = IndentedBuffer()
 
         code.splice(
