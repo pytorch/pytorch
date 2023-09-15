@@ -223,6 +223,13 @@ y = TensorVariable()
             'obj_weakref': None
             'guarded_class': None
         }
+        global '' BACKEND_MATCH
+        {
+            'guard_types': None,
+            'code': None,
+            'obj_weakref': None
+            'guarded_class': None
+        }
         shape_env '' SHAPE_ENV
         {
             'guard_types': None,

@@ -58,8 +58,8 @@ class BoundVars:
 
     def swap_submodules(
         self, submodules: Dict[str, Callable[..., Any]]
-    ) -> Dict[str, Callable[..., Any]]:
-        result: Dict[str, Callable[..., Any]] = {}
+    ) -> Dict[str, Callable[..., ValueRanges]]:
+        result: Dict[str, Callable[..., ValueRanges]] = {}
         for key in submodules.keys():
             if key == "get_index":
                 result[key] = self.get_index
@@ -86,7 +86,7 @@ class BoundVars:
         mask: Any,
         value: Any,
         submodules: Dict[str, Callable[..., Any]],
-    ):
+    ) -> ValueRanges:
         interp = InterpreterShim(subblock.graph, submodules)
         interp.run(V.get_ops_handler(), initial_env=env)
         output = [node for node in subblock.graph.nodes if node.target == "output"]
