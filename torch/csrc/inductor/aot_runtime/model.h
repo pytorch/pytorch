@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -38,10 +39,12 @@ class AOTInductorModelBase {
   AOTInductorModelBase(
       size_t num_inputs,
       size_t num_outputs,
-      size_t num_constants)
+      size_t num_constants,
+      std::optional<std::string> cubin_dir)
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
-        constants_info_(num_constants) {
+        constants_info_(num_constants),
+        cubin_dir_(cubin_dir) {
     C10_CUDA_CHECK(cudaEventCreate(&run_finished_));
   }
 
@@ -271,6 +274,9 @@ class AOTInductorModelBase {
 
   std::shared_ptr<ConstantMap> constants_;
 
+  // A directory with CUDA binary files, e.g. compiled kernels, etc.
+  const std::optional<std::string> cubin_dir_;
+
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
   cudaEvent_t run_finished_;
@@ -309,7 +315,7 @@ class AOTInductorModelBase {
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
-  AOTInductorModel(std::shared_ptr<ConstantMap>);
+  AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
 
   void run_impl(
       const std::vector<at::Tensor>& inputs,
@@ -318,8 +324,9 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       ProxyExecutor* proxy_executor = nullptr);
 
   static std::unique_ptr<AOTInductorModel> Create(
-      std::shared_ptr<ConstantMap> constants) {
-    return std::make_unique<AOTInductorModel>(constants);
+      std::shared_ptr<ConstantMap> constants,
+      std::optional<std::string> cubin_dir) {
+    return std::make_unique<AOTInductorModel>(constants, cubin_dir);
   }
 };
 

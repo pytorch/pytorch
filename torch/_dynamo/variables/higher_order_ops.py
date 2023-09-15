@@ -452,16 +452,26 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # false_fn(x, a_true, b_true, c_true, a, b, d)
         # https://github.com/pytorch/pytorch/issues/103530
         def fixup_branch_inps(graph, add_after, new_args, suffix) -> None:
-            inp_count = 0
-            for node in graph.nodes:
-                if node.op == "placeholder":
-                    if inp_count == add_after:
-                        with graph.inserting_after(node):
-                            for inp_node in new_args:
-                                new_node_name = inp_node.node.name + suffix
-                                graph.placeholder(new_node_name)
-                        break
-                    inp_count += 1
+            original_phs = [node for node in graph.nodes if node.op == "placeholder"]
+            assert add_after < len(
+                original_phs
+            ), f"Invalid index for inserting lifted arguments {add_after}."
+
+            # When operands is empty, add_after can be -1 for false graph. In that case, we need to insert new
+            # nodes before the first node in the graph since placeholders precede normal nodes.
+            def _add_phs():
+                for inp_node in new_args:
+                    new_node_name = inp_node.node.name + suffix
+                    graph.placeholder(new_node_name)
+
+            if add_after == -1:
+                first_node = next(iter(graph.nodes))
+                with graph.inserting_before(first_node):
+                    _add_phs()
+            else:
+                insertion_node = original_phs[add_after]
+                with graph.inserting_after(insertion_node):
+                    _add_phs()
 
         fixup_branch_inps(
             true_graph,
