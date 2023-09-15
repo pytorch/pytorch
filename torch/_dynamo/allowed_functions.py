@@ -108,6 +108,7 @@ def _disallowed_function_ids():
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
+        torch.jit.isinstance,
         torch.set_anomaly_enabled,
         torch.set_autocast_cache_enabled,
         torch.set_autocast_cpu_dtype,
