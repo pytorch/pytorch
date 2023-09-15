@@ -5,11 +5,11 @@ import torch._C
 from torch._guards import Guard, GuardSource
 
 from .. import variables
-from ..stream import StreamMethodContainer
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
+from ..stream import StreamMethodContainer
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -363,7 +363,10 @@ class StreamContextVariable(ContextWrappingVariable):
     @staticmethod
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
-        current_stream_method = StreamMethodContainer().get_method_by_device('current_stream', target_value.device)
+
+        current_stream_method = StreamMethodContainer().get_method_by_device(
+            "current_stream", target_value.device
+        )
         current_stream = wrap_fx_proxy_cls(
             StreamVariable,
             tx,
@@ -386,7 +389,9 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_func = StreamMethodContainer().get_method_by_device('set_stream', self.device)
+        self.set_stream_func = StreamMethodContainer().get_method_by_device(
+            "set_stream", self.device
+        )
 
     def enter(self, tx):
         # stream generated inside of traced function
@@ -402,11 +407,15 @@ class StreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                StreamMethodContainer().get_method_by_device('set_stream_by_id', self.device),
+                StreamMethodContainer().get_method_by_device(
+                    "set_stream_by_id", self.device
+                ),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        StreamMethodContainer().get_method_by_device('set_stream', self.device)(self.target_values[0].value)
+        StreamMethodContainer().get_method_by_device("set_stream", self.device)(
+            self.target_values[0].value
+        )
 
     def exit(self, tx, *args):
         tx.output.create_proxy(
@@ -428,7 +437,9 @@ class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
-        assert value.device.type == device, "stream value is not equal to the passed device"
+        assert (
+            value.device.type == device
+        ), "stream value is not equal to the passed device"
         super().__init__(**kwargs)
         self.proxy = proxy
         self.value = value

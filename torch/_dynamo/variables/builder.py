@@ -25,8 +25,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-
-from ..stream import StreamMethodContainer
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
@@ -43,6 +41,8 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
+
+from ..stream import StreamMethodContainer
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -67,7 +67,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import StreamVariable, NullContextVariable
+from .ctx_manager import NullContextVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -567,7 +567,10 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif any(
-            [isinstance(value, stream_instance) for stream_instance in StreamMethodContainer().get_all_methods('stream_class')]
+            isinstance(value, stream_instance)
+            for stream_instance in StreamMethodContainer().get_all_methods(
+                "stream_class"
+            )
         ):
             return StreamVariable(
                 None,
@@ -1336,10 +1339,13 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
-    elif proxy.node.target in StreamMethodContainer().get_all_methods('stream_class') or \
-            proxy.node.target in StreamMethodContainer().get_all_methods('current_stream'):
+    elif proxy.node.target in StreamMethodContainer().get_all_methods(
+        "stream_class"
+    ) or proxy.node.target in StreamMethodContainer().get_all_methods("current_stream"):
         proxy.node.meta["example_value"] = example_value
-        return StreamVariable(proxy, example_value, example_value.device.type, **options)
+        return StreamVariable(
+            proxy, example_value, example_value.device.type, **options
+        )
     elif isinstance(example_value, int) and proxy.node.target in [
         torch.sym_int,
         getattr,

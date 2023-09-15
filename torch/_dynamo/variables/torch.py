@@ -13,10 +13,10 @@ import torch.onnx.operators
 from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
-from ..stream import StreamMethodContainer
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..source import GeneratorStateSource
+from ..stream import StreamMethodContainer
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -208,11 +208,11 @@ class TorchVariable(VariableTracker):
     ) -> "VariableTracker":
         from . import (
             ConstantVariable,
-            StreamContextVariable,
-            StreamVariable,
             DeterministicAlgorithmsVariable,
             DisabledSavedTensorsHooksVariable,
             GradModeVariable,
+            StreamContextVariable,
+            StreamVariable,
             SymNodeVariable,
             TensorVariable,
             UserDefinedObjectVariable,
@@ -331,18 +331,24 @@ class TorchVariable(VariableTracker):
             assert not (args or kwargs)
             return TorchFunctionDisableVariable.create(tx, **options)
         elif any(
-            [self.value is method for method in
-             StreamMethodContainer().get_all_methods('create_stream_context')]
+            self.value is method
+            for method in StreamMethodContainer().get_all_methods(
+                "create_stream_context"
+            )
         ):
             log.warning(
-                str(StreamMethodContainer().get_method_by_device('create_stream_context', args[0].device)) +
-                "not fully supported, streams may be ignored"
+                str(
+                    StreamMethodContainer().get_method_by_device(
+                        "create_stream_context", args[0].device
+                    )
+                )
+                + "not fully supported, streams may be ignored"
             )
             assert len(args) == 1
             return StreamContextVariable.create(tx, args[0], **options)
         elif any(
-            [self.value is method for method in
-             StreamMethodContainer().get_all_methods('stream_class')]
+            self.value is method
+            for method in StreamMethodContainer().get_all_methods("stream_class")
         ):
             match_device = None
             for device, method in StreamMethodContainer().stream_class_method.items():
@@ -353,7 +359,9 @@ class TorchVariable(VariableTracker):
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    StreamMethodContainer().get_method_by_device('stream_class', match_device),
+                    StreamMethodContainer().get_method_by_device(
+                        "stream_class", match_device
+                    ),
                     (),
                     {},
                 ),

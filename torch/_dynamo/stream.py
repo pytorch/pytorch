@@ -1,6 +1,7 @@
+import warnings
+
 import torch
 import torch.cuda
-import warnings
 
 
 def __singleton(cls):
@@ -10,10 +11,11 @@ def __singleton(cls):
         if cls not in instance:
             instance[cls] = cls(*args, **kwargs)
         return instance[cls]
+
     return get_instance
 
 
-# This class is used to contain the provided stream methods for dynamo to 
+# This class is used to contain the provided stream methods for dynamo to
 # capture the stream usage.
 @__singleton
 class StreamMethodContainer:
@@ -24,19 +26,14 @@ class StreamMethodContainer:
         self.set_stream_method = {}
         self.set_stream_by_id_method = {}
 
-
     def __init_subclass__(cls):
-        raise TypeError("class StreamMethodContainer can not be inherited")
-
+        raise TypeError("class StreamMethodContainer can not be inherit from")
 
     def __get(self, container: str, device: str):
         assert device in getattr(self, container).keys(), "unknown device {device}"
         if getattr(self, container)[device] is None:
-            warnings.warn(
-                "no method is found for " + container + " and " + device
-            )
+            warnings.warn("no method is found for " + container + " and " + device)
         return getattr(self, container)[device]
-
 
     def __get_all(self, container: str) -> list:
         ret_method = []
@@ -44,33 +41,36 @@ class StreamMethodContainer:
             ret_method.append(getattr(self, container)[device_key])
         return ret_method
 
-
     def register_stream_method(self, container: str, device: str, method):
         getattr(self, container)[device] = method
 
-
     def get_all_methods(self, container: str):
         if container in [
-            'set_stream', 'set_stream_by_id', 'current_stream', 'stream_class', 'create_stream_context'
+            "set_stream",
+            "set_stream_by_id",
+            "current_stream",
+            "stream_class",
+            "create_stream_context",
         ]:
-            return self.__get_all(container + '_method')
+            return self.__get_all(container + "_method")
         else:
             raise RuntimeError(f"Unknown stream method '{container}'")
 
-
     def get_method_by_device(self, container: str, device: str):
-        return self.__get(container + '_method', device)
+        return self.__get(container + "_method", device)
 
 
 # the global instance to contain the stream methods
 StreamMethodObject = StreamMethodContainer()
 
 
-# Here are some APIs for developers to resgiter their stream methods, which are needed to 
+# Here are some APIs for developers to resgiter their stream methods, which are needed to
 # align with the specific semantics.
 def register_stream_method(device: str, method_args_dict: dict):
     for key in method_args_dict.keys():
-        StreamMethodObject.register_stream_method(key + '_method', device, method_args_dict[key])
+        StreamMethodObject.register_stream_method(
+            key + "_method", device, method_args_dict[key]
+        )
 
 
 # A dict with specific semantics and associated method is required for register.
@@ -88,11 +88,13 @@ def register_stream_method(device: str, method_args_dict: dict):
 #
 # * torch._dynamo.stream.register_stream_method(device_name, device_stream_method)
 #
-# Below is the cuda register:
+# Below is the cuda steam method register:
 if torch.cuda.is_available():
-    cuda_stream_method = {'current_stream': torch.cuda.current_stream,
-                          'stream_class': torch.cuda.streams.Stream,
-                          'create_stream_context': torch.cuda.stream,
-                          'set_stream': torch.cuda.set_stream,
-                          'set_stream_by_id': torch.cuda.set_stream_by_id}
-    register_stream_method('cuda', cuda_stream_method)
+    cuda_stream_method = {
+        "current_stream": torch.cuda.current_stream,
+        "stream_class": torch.cuda.streams.Stream,
+        "create_stream_context": torch.cuda.stream,
+        "set_stream": torch.cuda.set_stream,
+        "set_stream_by_id": torch.cuda.set_stream_by_id,
+    }
+    register_stream_method("cuda", cuda_stream_method)

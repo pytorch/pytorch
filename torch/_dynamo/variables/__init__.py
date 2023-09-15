@@ -3,11 +3,11 @@ from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     ContextWrappingVariable,
-    StreamContextVariable,
-    StreamVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     GradModeVariable,
+    StreamContextVariable,
+    StreamVariable,
     WithExitFunctionVariable,
 )
 from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
