@@ -244,15 +244,16 @@ void createTensorFromList(Stack& stack) {
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]"),
+            "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0, bool drop_remainder=False) -> Tensor(a)[]"),
         [](Stack& stack) {
-          RECORD_FUNCTION("split_with_sizes", last(stack, 3));
+          RECORD_FUNCTION("split_with_sizes", last(stack, 4));
 
           auto result = at::split_with_sizes(
-              (std::move(peek(stack, 0, 3))).toTensor(),
-              (std::move(peek(stack, 1, 3))).toDimVector(),
-              (std::move(peek(stack, 2, 3))).toInt());
-          drop(stack, 3);
+              (std::move(peek(stack, 0, 4))).toTensor(),
+              (std::move(peek(stack, 1, 4))).toDimVector(),
+              (std::move(peek(stack, 2, 4))).toInt(),
+              (std::move(peek(stack, 3, 4))).toBool());
+          drop(stack, 4);
           pack(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),

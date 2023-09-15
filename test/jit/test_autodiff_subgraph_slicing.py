@@ -403,7 +403,8 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         %b : Tensor = aten::relu(%a)
         %0 : int[] = prim::Constant[value=[2, 2, 1]]()
         %1 : int = prim::Constant[value=0]()
-        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        %4 : bool = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1, %4)
         %3 : (Tensor[], Tensor[]) = prim::TupleConstruct(%b, %2)
         return (%3)
 """
@@ -424,8 +425,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         %s1 : int[] = prim::Constant[value=[2, 2, 1]]()
         %s2 : int[] = prim::Constant[value=[3, 1]]()
         %1 : int = prim::Constant[value=0]()
-        %2 : Tensor[] = aten::split_with_sizes(%b, %s1, %1)
-        %3 : Tensor[] = aten::split_with_sizes(%b, %s2, %1)
+        %5 : bool = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %s1, %1, %5)
+        %3 : Tensor[] = aten::split_with_sizes(%b, %s2, %1, %5)
         %4 : (Tensor, Tensor[]) = prim::TupleConstruct(%b, %2, %3)
         return (%4)
 """

@@ -717,23 +717,25 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
-          "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
+          "aten::split(Tensor(a -> *) self, int split_size, int dim=0, bool drop_remainder=False) -> Tensor(a)[]"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto split_size = p_node->Input(1).toInt();
       const auto dim = p_node->Input(2).toInt();
-      p_node->Output(0) = at::native::split(self, split_size, dim);
+      const auto drop_remainder = p_node->Input(3).toBool();
+      p_node->Output(0) = at::native::split(self, split_size, dim, drop_remainder);
     };
   }
 
   if (n->matches(torch::schema(
-          "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+          "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0, bool drop_remainder=False) -> (Tensor[])"))) {
     return [](ProcessedNode* p_node) {
       const auto& self = p_node->Input(0).toTensor();
       const auto& split_sizes = p_node->Input(1).toIntList();
       const auto dim = p_node->Input(2).toInt();
+      const auto drop_remainder = p_node->Input(3).toBool();
       p_node->Output(0) =
-          at::native::split_with_sizes(self, split_sizes.vec(), dim);
+          at::native::split_with_sizes(self, split_sizes.vec(), dim, drop_remainder);
     };
   }
 
@@ -746,9 +748,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten_split_with_sizes,
     [](Node* n) -> SROperator {
       if (!n->matches(torch::schema(
-              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]")) &&
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0, bool drop_remainder=False) -> Tensor(a)[]")) &&
           !n->matches(torch::schema(
-              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> (Tensor[])"))) {
+              "aten::split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0, bool drop_remainder=False) -> (Tensor[])"))) {
         LogAndDumpSchema(n);
         return nullptr;
       }
@@ -756,8 +758,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& self = p_node->Input(0).toTensor();
         const auto& split_sizes = p_node->Input(1).toIntList();
         const auto dim = p_node->Input(2).toInt();
+        const auto drop_remainder = p_node->Input(3).toBool();
         p_node->Output(0) =
-            at::native::split_with_sizes(self, split_sizes.vec(), dim);
+            at::native::split_with_sizes(self, split_sizes.vec(), dim, drop_remainder);
       };
     });
 

@@ -70,9 +70,9 @@ def frobenius_norm(g: jit_utils.GraphContext, self, dim=None, keepdim=False):
 
 
 @_onnx_symbolic("aten::split")
-@symbolic_helper.parse_args("v", "v", "i", "i")
+@symbolic_helper.parse_args("v", "v", "i", "b", "i")
 @_beartype.beartype
-def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None):
+def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, drop_remainder, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
@@ -121,7 +121,7 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
             )
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
-    if leftover:
+    if leftover and not drop_remainder:
         splits.append(leftover)
     splits = g.op("Constant", value_t=torch.tensor(splits))
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
@@ -129,8 +129,8 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
 
 @_onnx_symbolic("aten::split_with_sizes")
 @_beartype.beartype
-def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs=None):
-    return split(g, self, split_sizes, dim, _outputs)
+def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, drop_remainder, _outputs=None):
+    return split(g, self, split_sizes, dim, drop_remainder, _outputs)
 
 
 @_onnx_symbolic("aten::unsafe_split")
@@ -138,7 +138,7 @@ def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs
 def unsafe_split(
     g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None
 ):
-    return split(g, self, split_size_or_sizes, dim, _outputs)
+    return split(g, self, split_size_or_sizes, dim, False, _outputs)
 
 
 @_onnx_symbolic("aten::unsafe_split_with_sizes")
@@ -146,7 +146,7 @@ def unsafe_split(
 def unsafe_split_with_sizes(
     g: jit_utils.GraphContext, self, split_sizes, dim, _outputs=None
 ):
-    return split_with_sizes(g, self, split_sizes, dim, _outputs)
+    return split_with_sizes(g, self, split_sizes, dim, False, _outputs)
 
 
 @_onnx_symbolic("aten::tensor_split")
