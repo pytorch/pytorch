@@ -122,6 +122,15 @@ struct C10_API ForceDispatchKeyGuard {
       : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
     c10::impl::_force_tls_local_dispatch_key_set(key_set);
   }
+  ForceDispatchKeyGuard(
+      c10::DispatchKeySet include,
+      c10::DispatchKeySet exclude)
+      : saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+    auto updated_set = saved_keyset_;
+    updated_set.included_ = include;
+    updated_set.excluded_ = exclude;
+    c10::impl::_force_tls_local_dispatch_key_set(updated_set);
+  }
   ~ForceDispatchKeyGuard() {
     c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
   }

@@ -162,6 +162,21 @@ class FunctionalTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
 
+        self._tls_guard_keys = (
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            .add(torch._C.DispatchKey.ZeroTensor)
+            .add(torch._C.DispatchKey.Conjugate)
+            .add(torch._C.DispatchKey.Negative)
+        )
+
+        # We want several of the dispatcher functionalities (zero / neg / conj)
+        # to run **underneath** our FunctionalTensor.
+        # We do this by exluding keys when a user enters the mode,
+        # and re-including them during __torch_dispatch__
+        self._tls_exclude_guard = torch._C._ExcludeDispatchKeyGuard(
+            self._tls_guard_keys
+        )
+
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         if (
@@ -169,6 +184,8 @@ class FunctionalTensorMode(TorchDispatchMode):
             is None
         ):
             self.enter_stack.append(True)
+
+            self._tls_exclude_guard.__enter__()
             return super().__enter__()
         else:
             self.enter_stack.append(False)
@@ -177,6 +194,7 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __exit__(self, a, b, c):
         is_on_stack = self.enter_stack.pop()
         if is_on_stack:
+            self._tls_exclude_guard.__exit__(a, b, c)
             super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -227,15 +245,16 @@ class FunctionalTensorMode(TorchDispatchMode):
             torch._C.DispatchKey.Functionalize
         )
         assert is_excluded or not is_included
+        include_to_set = (
+            torch._C._dispatch_tls_local_include_set()
+            | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        exclude_to_set = (
+            torch._C._dispatch_tls_local_exclude_set() - self._tls_guard_keys
+        )
         # All we want to do here is re-use the existing C++ functionalization logic.
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
-        with torch._C._SetExcludeDispatchKeyGuard(
-            torch._C.DispatchKey.Functionalize, False
-        ), torch._C._SetExcludeDispatchKeyGuard(
-            torch._C.DispatchKey.ZeroTensor, False
-        ), torch._C._IncludeDispatchKeyGuard(
-            torch._C.DispatchKey.Functionalize
-        ):
+        with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 old_apply_views = torch._functionalize_enable_reapply_views(True)
