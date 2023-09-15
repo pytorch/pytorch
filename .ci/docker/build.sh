@@ -354,14 +354,11 @@ if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
 fi
 
 # Build image
-# TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
-# it's no longer needed.
 docker build \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
-       --build-arg "THRIFT=${THRIFT:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
        --build-arg "DB=${DB:-}" \
        --build-arg "VISION=${VISION:-}" \
