@@ -567,7 +567,7 @@ class WrapperCodeGen(CodeGen):
 
         @functools.lru_cache(None)
         def strideof(name):
-            self.codegen_input_size_var_decl(code, name)
+            self.codegen_input_stride_var_decl(code, name)
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
