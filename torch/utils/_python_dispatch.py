@@ -342,15 +342,20 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         # Assumption: we have a very small number of inplace_view ops that follow a strict schema:
         # there is only a single argument that gets its metadata mutated.
         assert len(mutated_args) == 1
-        with torch.utils._mode_utils.no_dispatch():
-            # See Note: [Fake Tensor Dispatch Keys]
-            # we're borrowing the way it modifies dispatch key TLS.
-            meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-            torch._C._set_meta_in_tls_dispatch_include(True)
-            try:
-                func(*args, **kwargs)
-            finally:
-                torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+        # This check exists because we generally *do* want to update the metadata of any wrapper subclasses,
+        # but FunctionalTensor is special: it overrides all size/stride calls to plumb to the inner tensor.
+        # so we don't actually need to update the metadata (and attempting to do so causes errors)
+        from torch._subclasses.functional_tensor import FunctionalTensor
+        if not isinstance(mutated_args[0], FunctionalTensor):
+            with torch.utils._mode_utils.no_dispatch():
+                # See Note: [Fake Tensor Dispatch Keys]
+                # we're borrowing the way it modifies dispatch key TLS.
+                meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+                torch._C._set_meta_in_tls_dispatch_include(True)
+                try:
+                    func(*args, **kwargs)
+                finally:
+                    torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
