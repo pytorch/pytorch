@@ -275,3 +275,8 @@ z3-solver==4.12.2.0
 #Description: The Z3 Theorem Prover Project
 #Pinned versions:
 #test that import:
+
+tensorboard==2.13.0
+#Description: Also included in .ci/docker/requirements-docs.txt
+#Pinned versions:
+#test that import: test_tensorboard
