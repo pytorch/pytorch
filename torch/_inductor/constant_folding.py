@@ -172,7 +172,6 @@ def constant_fold(gm, filter_fn: Optional[Callable[[torch.fx.Node], bool]] = Non
     cf.run()
 
     for node, constant in cf.node_replacements.items():
-        print("node:", node.format_node(), constant)
         if filter_fn is not None and not filter_fn(node):
             continue
         replace_node_with_constant(gm, node, constant)

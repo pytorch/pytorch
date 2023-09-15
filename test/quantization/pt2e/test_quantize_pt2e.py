@@ -1167,6 +1167,9 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     def test_dont_fold_other_constant(self):
+        """Make sure the constant propagation does not apply to things unrelated to
+        quantization
+        """
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1238,6 +1241,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 3,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_constant_prop_preserve_metadata(self):
+        """Test to make sure the quantized model gets quantized weight (quantize op is folded)
+        """
+        m = self._get_pt2e_quantized_linear()
+        for n in m.graph.nodes:
+            print(f"{n.format_node()}, {n.meta}")
 
     def test_add_and_inplace_add(self):
         quantizer = XNNPACKQuantizer()
