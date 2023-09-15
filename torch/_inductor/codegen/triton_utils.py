@@ -57,7 +57,11 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
             if x.name.startswith("load_seed_offset"):
                 return False
             else:
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
+                try:
+                    # TODO(yf225): we should let this return False for unbacked symint case
+                    return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
+                except Exception as e:
+                    return False
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
@@ -73,4 +77,5 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
         for i, arg in enumerate(args)
         if is_aligned(arg, alignment=8, include_tensor=False)
     )
+
     return instance_descriptor(divisible_by_16, (), (), divisible_by_8)

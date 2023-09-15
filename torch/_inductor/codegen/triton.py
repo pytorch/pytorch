@@ -723,6 +723,7 @@ class IterationRangesEntry(IterationRanges):
             V.kernel.body.writeline(line)
 
     def _codegen(self):
+        V.kernel.unbacked_symints.update([s for s in self.expr.free_symbols if str(s).startswith("i")])
         self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
@@ -775,6 +776,7 @@ class TritonKernel(Kernel):
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
+        self.unbacked_symints = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         # Upper bounds for indirect_indexing and their str representation
@@ -1096,9 +1098,10 @@ class TritonKernel(Kernel):
             elif var.name.startswith(("s", "ps")):
                 pass
             else:
-                # var is one of xN, yN or rN
-                assert var.name[0] in "xyri", var.name
-                mask_vars.add(f"{var.name[0]}mask")
+                if var.name[0] != "i":
+                    # var is one of xN, yN or rN
+                    assert var.name[0] in "xyr", var.name
+                    mask_vars.add(f"{var.name[0]}mask")
 
         need_dense = (
             config.triton.dense_indexing
@@ -1297,6 +1300,7 @@ class TritonKernel(Kernel):
         return sympy_symbol(str(var))
 
     def load(self, name: str, index: sympy.Expr):
+        self.unbacked_symints.update([s for s in index.free_symbols if str(s).startswith("i")])
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
@@ -1368,6 +1372,7 @@ class TritonKernel(Kernel):
         return result_var
 
     def store(self, name, index, value, mode=None):
+        self.unbacked_symints.update([s for s in index.free_symbols if str(s).startswith("i")])
         var = self.args.output(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
@@ -1924,6 +1929,17 @@ class TritonKernel(Kernel):
                     arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
                 )
 
+        print(f"sorted(self.unbacked_symints)): {sorted(self.unbacked_symints, key=str)}")
+
+        # NOTE: pass all unbacked symints used by the kernel into the kernel
+        # TODO(yf225): need a way to pass only the unbacked symints actually used by the kernel, to reduce recompilation and encourage cache lookup
+        # TODO(yf225): remove need to increment the count
+        for k in sorted(self.unbacked_symints, key=str):
+            arg = str(k)
+            sizearg = SizeArg(arg, arg)  # TODO(yf225): maybe we should actually pass in the unbacked symint symbol here
+            signature.append(sizearg)
+            argdefs.append(arg)
+
         mutated_args = set()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
@@ -2098,9 +2114,11 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
 
+        call_args.extend(sorted(self.unbacked_symints, key=str))
+
         wrapper.generate_kernel_call(
             name,
-            call_args,
+            call_args,  # TODO(yf225): hack here
             grid,
             V.graph.scheduler.current_device.index,
             cuda=True,

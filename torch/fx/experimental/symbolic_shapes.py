@@ -3872,7 +3872,6 @@ class ShapeEnv:
             elif concrete_val is sympy.false:
                 g = sympy.Not(expr)
             else:
-                print(f"expr: {expr}, concrete_val: {concrete_val}")
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if not self._suppress_guards_tls():
