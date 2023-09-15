@@ -122,7 +122,7 @@ class TestForeach(TestCase):
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_lerp_op_db,
         dtypes=(torch.float32,)
     )
-    def test_zero_size_tensor_inputs(self, device, dtype, op):
+    def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
         wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
 
         for sample in op.sample_zero_size_inputs(device, dtype):
