@@ -2230,6 +2230,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
+          .def("_init_comm", &::c10d::ProcessGroupNCCL::initComm)
           .def("_group_start", &::c10d::ProcessGroupNCCL::groupStart)
           .def("_group_end", &::c10d::ProcessGroupNCCL::groupEnd)
           .def_property_readonly(

@@ -1285,6 +1285,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // [Note 1] Create the NCCL communicators for each GPU
   C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 
+  LOG(INFO) << "after nccl group start() " << singleP2POp;
+
   for (const auto i : c10::irange(devices.size())) {
     // GPU world size and GPU rank
     int numRanks, rank;
@@ -1312,6 +1314,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 #else
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 #endif
+    LOG(INFO) << "ncclComms are created ";
+
 
     // Creates the NCCL streams
     streamVal.push_back(
@@ -1327,10 +1331,15 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
 #else
+  LOG(INFO) << nccl_use_nonblocking();
   if (!nccl_use_nonblocking()) {
+    LOG(INFO) << "before group end";
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+    LOG(INFO) << "finish group end";
   } else {
+    LOG(INFO) << "before group end";
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), ncclComms, c10::nullopt);
+    LOG(INFO) << "finish group end";
   }
 #endif
 
@@ -1361,6 +1370,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   std::lock_guard<std::mutex> lock(mutex_);
 
   // Record the communicators based on ncclUniqueId.
+  LOG(INFO) << "before emplace";
   ncclIdToCommMap_.emplace(buildNcclUniqueIdStr(ncclID), ncclComms);
 
   // Move the NCCL resource to cache
@@ -1372,9 +1382,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     inInitializationCommMap_.erase(devicesKey);
   }
 
+  LOG(INFO) << "a";
   it = devNCCLCommMap_.find(devicesKey);
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
+  LOG(INFO) << it->second;
   return it->second;
 }
 
@@ -1839,6 +1851,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     PreProcess pre,
     PostProcess post,
     const char* profilingTitle) {
+  LOG(INFO) << "in point to point";
+  LOG(INFO) << "test log";
   // avoidRecordStreams_ note:
   // send, recv, and irecv should be ok with avoidRecordStreams,
   // However, for isend, I don't think the API requires the user
@@ -1851,6 +1865,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       "TORCH_NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
       "collectives.");
 
+  LOG(INFO) << "get device list";
   const auto devices = getDeviceList(tensors);
   std::string key;
   int p2pRank = 0, p2pTargetRank = 0;
@@ -1871,7 +1886,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     isSendRecvSelf = rank_ == peer;
     p2pTargetRank = isSendRecvSelf ? 0 : 1 - p2pRank;
   }
+  LOG(INFO) << "getting nccl comms";
   auto& ncclComms = getNCCLComm(key, devices, opType, p2pRank, isSendRecvSelf);
+  LOG(INFO) << "after getnccl comms";
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalP2P;
@@ -1909,6 +1926,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   pre(ncclStreams_[key], work);
+  LOG(INFO) << "after pre";
 
   for (const auto i : c10::irange(tensors.size())) {
     gpuGuard.set_index(devices[i].index());
@@ -1929,6 +1947,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       comms_.push_back((void*)ncclComms[i]->getNcclComm());
     }
   }
+  LOG(INFO) << "pushed back comms";
   {
     torch::cuda::nccl::AutoNcclGroup nccl_group_guard(
         comms_, nccl_use_nonblocking());
@@ -1955,6 +1974,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   post(ncclStreams_[key]);
+  LOG(INFO) << "after post";
 
   // End event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(tensors.size())) {
@@ -1991,7 +2011,77 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     });
   }
 
+  // Enqueue P2P op so that it can be cancelled by NCCL watchdog
+  c10::cuda::CaptureStatus capture_status =
+      c10::cuda::currentStreamCaptureStatusMayInitCtx();
+  if (!coalescing_state_ && capture_status == c10::cuda::CaptureStatus::None) {
+    LOG(INFO) << "enqueuing work";
+    workEnqueue(work);
+  }
+
   return work;
+}
+
+// Manually initialize NCCL communicators for the entire process group
+bool initComm(int numDevices) {
+  // // Sanity check
+  // if (devicesKey.empty()) {
+  //   TORCH_CHECK(
+  //       false,
+  //       "Not able to create/get the NCCL Communicator since "
+  //       "the GPU devices are not known");
+  // }
+
+  // for (auto& device : devices) {
+  //   usedDeviceIdxs_.insert(device.index());
+  // }
+
+  // {
+  //   std::lock_guard<std::mutex> lock(mutex_);
+  //   if (devNCCLCommMap_.find(devicesKey) != devNCCLCommMap_.end()) {
+  //     // Reuse the cached communicator if there is one.
+  //     return devNCCLCommMap_[devicesKey];
+  //   }
+  // }
+
+  // // Initialize NCCL
+  // ncclUniqueId ncclId;
+  // ncclResult_t ncclResult;
+
+  // // NCCL communicator not cached, create a new entry
+  // std::vector<std::shared_ptr<NCCLComm>> ncclComms;
+  // ncclComms.resize(devices.size());
+
+  // // Create the unique NCCL ID and broadcast it
+  // ncclUniqueId ncclID;
+
+  // // Broadcast so that each process can have a unique NCCL ID
+  // broadcastUniqueNCCLID(&ncclID, singleP2POp, devicesKey, p2pRank);
+
+  // // Generate a unique ID for NCCL initialization (usually done by rank 0)
+  // if (processGroup.rank == 0) {
+  //     ncclResult = ncclGetUniqueId(&ncclId);
+  //     if (ncclResult != ncclSuccess) {
+  //         std::cerr << "NCCL error: Failed to generate unique ID." << std::endl;
+  //         return false;
+  //     }
+  // }
+
+  // // Broadcast the unique ID to all processes
+  // ncclResult = ncclBcast(&ncclId, sizeof(ncclUniqueId), ncclInt, 0, processGroup.comm, nullptr);
+  // if (ncclResult != ncclSuccess) {
+  //     std::cerr << "NCCL error: Failed to broadcast unique ID." << std::endl;
+  //     return false;
+  // }
+
+  // // Create NCCL communicator
+  // ncclResult = ncclCommInitRank(&processGroup.comm, numDevices, ncclId, processGroup.rank);
+  // if (ncclResult != ncclSuccess) {
+  //     std::cerr << "NCCL error: Failed to create communicator." << std::endl;
+  //     return false;
+  // }
+
+  return true;
 }
 
 template <typename Fn>

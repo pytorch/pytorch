@@ -2845,6 +2845,60 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             except Exception as e:
                 raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}") from e
 
+class NCCLTimeoutTest(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def op_timeout_sec(self):
+        return 1
+
+    @property
+    def world_size(self):
+        return 2
+
+    @property
+    def blocking_wait_error_msg(self):
+        return "timeout"
+
+    @requires_nccl()
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_timeout_p2p_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+
+        # Initialize process_group.
+        torch.cuda.set_device(self.rank)
+        process_group = c10d.ProcessGroupNCCL(
+            store, self.rank, self.world_size, timeout=timedelta(seconds=2)
+        )
+
+        # Control gloo pg used as go-ahead signal/barrier
+        # to coordinate btwn ranks.
+        pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size, timeout=timedelta(seconds=10))
+        failed_collective_timeout = timedelta(milliseconds=100)
+
+        # initial allreduce will create communicators
+        # process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=5))
+        # process_group.barrier().wait()
+
+        if self.rank == 0:
+            process_group.send([torch.rand(10).cuda(self.rank)], 1, tag=0)
+        else:
+            process_group.recv([torch.rand(10).cuda(self.rank)], 0, tag=0)
+            # pg_gloo.barrier().wait()
+            pass
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @property
