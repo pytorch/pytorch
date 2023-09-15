@@ -188,20 +188,12 @@ def _annotate_linear(
                 act_node,
                 input_act_qspec,
             )
-            if _is_annotated([weight_node]):
-                raise RuntimeError(
-                    f"{weight_node} is already annotated for linear {node}"
-                )
             _annotate_input_qspec_map(
                 node,
                 weight_node,
                 weight_qspec,
             )
             nodes_to_mark_annotated = [node, weight_node]
-            if bias_node and _is_annotated([bias_node]):
-                raise RuntimeError(
-                    f"{bias_node} is already annotated for linear {node}"
-                )
             if bias_node:
                 _annotate_input_qspec_map(
                     node,
