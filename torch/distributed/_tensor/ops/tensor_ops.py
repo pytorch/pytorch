@@ -10,6 +10,7 @@ from torch.distributed._tensor.op_schema import (
     OpStrategy,
     OutputSharding,
     PlacementStrategy,
+    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
@@ -104,7 +105,8 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         aten.new_ones.default,
         aten.new_zeros.default,
         aten.new_empty_strided.default,  # TODO: re-think new_empty_strided
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(1, ["dtype"]),
 )
 def new_factory_strategy(mesh: DeviceMesh, _) -> StrategyType:
     # TODO: maybe we should generate all possible shardings intead of just stay
@@ -133,7 +135,7 @@ def gen_bucketize_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyTyp
     return bucketize_strategy
 
 
-@register_op_strategy(aten.slice.Tensor)
+@register_op_strategy(aten.slice.Tensor, schema_info=RuntimeSchemaInfo(1))
 def gen_slice_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     """
     forwards all shardings except the slice dimension.
@@ -205,7 +207,7 @@ def replicate_tensor_dim(
     )
 
 
-@register_op_strategy(aten.slice_scatter.default)
+@register_op_strategy(aten.slice_scatter.default, schema_info=RuntimeSchemaInfo(2))
 def gen_slice_scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
@@ -257,7 +259,7 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     return OpStrategy([PlacementStrategy(replicate_spec)])
 
 
-@register_prop_rule(aten.index_select.default)
+@register_prop_rule(aten.index_select.default, schema_info=RuntimeSchemaInfo(1))
 def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     values_spec, dim, indices_spec = op_schema.args_schema
 
@@ -411,7 +413,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         return result
 
 
-@register_prop_rule(aten.cat.default)
+@register_prop_rule(aten.cat.default, schema_info=RuntimeSchemaInfo(1))
 def cat_rule(op_schema: OpSchema) -> OutputSharding:
     # torch.cat requires all tensors must either have the same shape (except
     # in the concatenating dimension) or be "empty". "Empty" here strictly means
@@ -549,7 +551,9 @@ def cat_rule(op_schema: OpSchema) -> OutputSharding:
         )
 
 
-@register_prop_rule([aten.split.Tensor, aten.split_with_sizes.default])
+@register_prop_rule(
+    [aten.split.Tensor, aten.split_with_sizes.default], schema_info=RuntimeSchemaInfo(1)
+)
 def split_rule(op_schema: OpSchema) -> OutputSharding:
     output_spec_list: List[DTensorSpec] = []
     input_spec = cast(DTensorSpec, op_schema.args_schema[0])
