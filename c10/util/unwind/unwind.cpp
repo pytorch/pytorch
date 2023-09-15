@@ -1,5 +1,5 @@
 #include <c10/util/Exception.h>
-#include <torch/csrc/profiler/unwind/unwind.h>
+#include <c10/util/unwind/unwind.h>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -38,12 +38,12 @@ Stats stats() {
 #include <vector>
 
 #include <c10/util/irange.h>
-#include <torch/csrc/profiler/unwind/communicate.h>
-#include <torch/csrc/profiler/unwind/dwarf_enums.h>
-#include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
-#include <torch/csrc/profiler/unwind/fde.h>
-#include <torch/csrc/profiler/unwind/lexer.h>
-#include <torch/csrc/profiler/unwind/unwinder.h>
+#include <c10/util/unwind/communicate.h>
+#include <c10/util/unwind/dwarf_enums.h>
+#include <c10/util/unwind/eh_frame_hdr.h>
+#include <c10/util/unwind/fde.h>
+#include <c10/util/unwind/lexer.h>
+#include <c10/util/unwind/unwinder.h>
 #include <shared_mutex>
 
 struct UpgradeExclusive {

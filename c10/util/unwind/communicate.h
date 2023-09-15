@@ -1,7 +1,7 @@
 #pragma once
 #include <ext/stdio_filebuf.h>
 #include <sys/wait.h>
-#include <torch/csrc/profiler/unwind/unwind_error.h>
+#include <c10/util/unwind/unwind_error.h>
 #include <unistd.h>
 #include <memory>
 

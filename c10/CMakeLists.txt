@@ -33,6 +33,7 @@ file(GLOB C10_SRCS
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
+        util/unwind/*.cpp
         )
 file(GLOB C10_HEADERS
         *.h
@@ -42,6 +43,7 @@ file(GLOB C10_HEADERS
         mobile/*.h
         macros/*.h
         util/*.h
+        util/unwind/*.h
         )
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 if(HAVE_SOVERSION)

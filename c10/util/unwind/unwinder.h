@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
-#include <torch/csrc/profiler/unwind/action.h>
-#include <torch/csrc/profiler/unwind/unwind_error.h>
+#include <c10/util/unwind/action.h>
+#include <c10/util/unwind/unwind_error.h>
 #include <iostream>
 #include <limits>
 

@@ -10,7 +10,7 @@
 #include <cstddef>
 #include <vector>
 
-#include <torch/csrc/profiler/unwind/unwind.h>
+#include <c10/util/unwind/unwind.h>
 
 namespace torch::cuda::python {
 void initCommMethods(PyObject* module) {

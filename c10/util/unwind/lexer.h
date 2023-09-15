@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#include <torch/csrc/profiler/unwind/dwarf_enums.h>
-#include <torch/csrc/profiler/unwind/unwind_error.h>
+#include <c10/util/unwind/dwarf_enums.h>
+#include <c10/util/unwind/unwind_error.h>
 
 struct Lexer {
   Lexer(void* data, void* base = nullptr)

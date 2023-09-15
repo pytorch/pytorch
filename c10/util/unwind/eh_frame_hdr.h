@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include <iostream>
 
-#include <torch/csrc/profiler/unwind/lexer.h>
-#include <torch/csrc/profiler/unwind/unwind_error.h>
+#include <c10/util/unwind/lexer.h>
+#include <c10/util/unwind/unwind_error.h>
 
 // Overview of the format described in
 // https://refspecs.linuxfoundation.org/LSB_1.3.0/gLSB/gLSB/ehframehdr.html

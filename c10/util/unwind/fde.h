@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/util/irange.h>
-#include <torch/csrc/profiler/unwind/action.h>
-#include <torch/csrc/profiler/unwind/lexer.h>
+#include <c10/util/unwind/action.h>
+#include <c10/util/unwind/lexer.h>
 #include <array>
 #include <sstream>
 #include <vector>
