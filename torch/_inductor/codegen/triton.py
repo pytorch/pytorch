@@ -730,7 +730,9 @@ class IterationRangesEntry(IterationRanges):
             V.kernel.body.writeline(line)
 
     def _codegen(self):
-        V.kernel.unbacked_symints.update([s for s in self.expr.free_symbols if str(s).startswith("i")])
+        V.kernel.unbacked_symints.update(
+            [s for s in self.expr.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
+        )
         self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
@@ -1097,7 +1099,7 @@ class TritonKernel(Kernel):
             elif var.name.startswith(("s", "ps")):
                 pass
             else:
-                if not var.name.startswith("i"):
+                if not V.graph.sizevars.shape_env.is_unbacked_symint(var):
                     # var is one of xN, yN or rN
                     assert var.name[0] in "xyr", var.name
                     mask_vars.add(f"{var.name[0]}mask")
@@ -1299,7 +1301,9 @@ class TritonKernel(Kernel):
         return sympy_symbol(str(var))
 
     def load(self, name: str, index: sympy.Expr):
-        self.unbacked_symints.update([s for s in index.free_symbols if str(s).startswith("i")])
+        self.unbacked_symints.update(
+            [s for s in index.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
+        )
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
@@ -1371,7 +1375,9 @@ class TritonKernel(Kernel):
         return result_var
 
     def store(self, name, index, value, mode=None):
-        self.unbacked_symints.update([s for s in index.free_symbols if str(s).startswith("i")])
+        self.unbacked_symints.update(
+            [s for s in index.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
+        )
         var = self.args.output(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
