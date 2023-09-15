@@ -346,6 +346,15 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return onCompletionHook_ != nullptr;
   }
 
+  // Do not call this directly, use ProcessGroup::setGroupName instead.
+  void setGroupName(const std::string& name) {
+    pg_name_ = name;
+  }
+
+  const std::string& getGroupName() const {
+    return pg_name_;
+  }
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.
@@ -358,6 +367,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
   DebugLevel dist_debug_level_;
+  std::string pg_name_;
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 };

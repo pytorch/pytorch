@@ -1783,6 +1783,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_multiprocess_models(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -2968,7 +2972,7 @@ def parse_args(args=None):
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
-        args.use_distributed,
+        args.multiprocess,
         rank=rank,
         world_size=args.world_size,
         port=args.distributed_master_port,
@@ -3000,7 +3004,6 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    args.use_distributed = (args.ddp or args.fsdp) and args.only
     if args.multiprocess:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
@@ -3203,6 +3206,9 @@ def run(runner, args, original_dir=None):
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
+    if not args.multiprocess:
+        runner.skip_models.update(runner.skip_multiprocess_models)
+
     if args.no_skip:
         runner.skip_models.clear()
 
@@ -3384,6 +3390,15 @@ def run(runner, args, original_dir=None):
             else:
                 try:
                     with tqdm(desc="loading model"):
+                        extra_args = []
+                        if hasattr(args, "rank") and hasattr(args, "world_size"):
+                            extra_args += [
+                                "--rank",
+                                str(args.rank),
+                                "--world_size",
+                                str(args.world_size),
+                            ]
+
                         if args.part:
                             (
                                 device,
@@ -3396,6 +3411,7 @@ def run(runner, args, original_dir=None):
                                 model_name,
                                 batch_size=batch_size,
                                 part=args.part,
+                                extra_args=extra_args,
                             )
                         else:
                             if args.fsdp:
@@ -3408,7 +3424,10 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    "cpu", model_name, batch_size=batch_size
+                                    "cpu",
+                                    model_name,
+                                    batch_size=batch_size,
+                                    extra_args=extra_args,
                                 )
                             else:
                                 (
@@ -3418,7 +3437,10 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    device, model_name, batch_size=batch_size
+                                    device,
+                                    model_name,
+                                    batch_size=batch_size,
+                                    extra_args=extra_args,
                                 )
                 except NotImplementedError as e:
                     print(e)

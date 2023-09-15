@@ -355,10 +355,21 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = texpr(call_args[i])
 
         if V.graph.cpp_wrapper:
+            # In the cpp_wrapper case, we have to compute CUDA launch grid at runtime
+            # if any dynamic dimension is involved. We rely on the Python version
+            # of the grid function to generate those grid configs, which may contain
+            # symbolic values. The wrapper will use cexpr to print out C++ code
+            # appropriately for the grid configs.
+            grid_args = [V.graph.sizevars.simplify(s) for s in self.call_sizes] + [
+                self.meta
+            ]
+            grid = self.grid_fn(*grid_args)
+
             wrapper.generate_kernel_call(
                 name,
                 call_args,
                 device_index=V.graph.scheduler.current_device.index,
+                grid=grid,
             )
         else:
             call_args = ", ".join(call_args)  # type: ignore[assignment]

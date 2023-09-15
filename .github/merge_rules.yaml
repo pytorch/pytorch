@@ -10,6 +10,7 @@
   - docs/source/_static/img/onnx/**
   - scripts/onnx/**
   - test/onnx/**
+  - test/onnx_caffe2/**
   - tools/onnx/**
   - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
