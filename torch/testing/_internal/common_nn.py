@@ -1785,14 +1785,14 @@ new_module_tests = [
     dict(
         fullname='EmbeddingBag_sparse',
         constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True, dtype=torch.double),
-        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).sparse(true)',
+        cpp_constructor_args='torch::nn::EmbeddingBagOptions(4, 3).sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))',
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         check_gradgrad=False,
         has_sparse_gradients=True,
     ),
     dict(
         constructor=lambda: nn.Embedding(4, 3, dtype=torch.double, sparse=True),
-        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3).sparse(true)',
+        cpp_constructor_args='torch::nn::EmbeddingOptions(4, 3).sparse(true)._weight(torch::rand({4, 3}).to(torch::kFloat64))',
         input_fn=lambda: torch.randperm(2).repeat(1, 2),
         fullname='Embedding_sparse',
         check_gradgrad=False,
@@ -3168,7 +3168,7 @@ criterion_tests = [
     ),
     dict(
         module_name='MSELoss',
-        input_size=(2, 3, 4, 5),
+        input_fn=lambda: torch.rand((2, 3, 4, 5), dtype=torch.double),
         target_fn=lambda: torch.randn((2, 3, 4, 5), dtype=torch.double, requires_grad=True),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() / (i.numel()
                                       if get_reduction(m) == 'mean' else 1)),
@@ -3314,9 +3314,9 @@ criterion_tests = [
     dict(
         module_name='MultiMarginLoss',
         constructor_args=(1, 1., torch.rand(10, dtype=torch.double)),
-        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
+        cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10).to(torch::kFloat64))',
         legacy_constructor_args=(1, torch.rand(10, dtype=torch.double)),
-        input_size=(5, 10),
+        input_fn=lambda: torch.rand(5, 10, dtype=torch.double),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
             multimarginloss_reference(i, t, weight=get_weight(m), reduction=get_reduction(m)),
@@ -3403,7 +3403,7 @@ criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
         constructor_args=(torch.rand(10, dtype=torch.double),),
-        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand(10))',
+        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand(10).to(torch::kFloat64))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
         desc='weights',
@@ -3412,7 +3412,7 @@ criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
         constructor_args=(torch.rand((), dtype=torch.double),),
-        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand({}))',
+        cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand({}).to(torch::kFloat64))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(()).gt(0).to(torch.get_default_dtype()),
         desc='scalar_weights',
@@ -3826,7 +3826,7 @@ criterion_tests = [
     ),
     dict(
         module_name='MSELoss',
-        input_size=(),
+        input_fn=lambda: torch.rand((), dtype=torch.double),
         target_fn=lambda: torch.randn((), requires_grad=True, dtype=torch.double),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),

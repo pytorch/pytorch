@@ -784,7 +784,7 @@ class TestCond(CondCases):
             linalg.cond(A, p)
 
     @pytest.mark.xfail(
-        True, run=False, reason="Platform/LAPACK-dependent failure, " "see gh-18914"
+        True, run=False, reason="Platform/LAPACK-dependent failure, see gh-18914"
     )
     def test_nan(self):
         # nans should be passed through, not converted to infs
@@ -2217,3 +2217,9 @@ def test_blas64_geqrf_lwork_smoketest():
     # Should result to an integer of a reasonable size
     lwork = int(work.item())
     assert_(2**32 < lwork < 2**42)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

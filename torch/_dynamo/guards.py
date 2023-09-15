@@ -88,12 +88,20 @@ CLOSURE_VARS = collections.OrderedDict(
     [
         ("___check_type_id", check_type_id),
         ("___check_obj_id", check_obj_id),
-        ("___is_grad_enabled", torch.is_grad_enabled),
         (
-            "___are_deterministic_algorithms_enabled",
-            torch.are_deterministic_algorithms_enabled,
+            "___current_backend",
+            lambda: torch._dynamo.eval_frame.guarded_backend_cache.current_backend,
         ),
-        ("___is_torch_function_enabled", torch._C._is_torch_function_enabled),
+        (
+            "___lookup_backend",
+            lambda backend_obj_id: torch._dynamo.eval_frame.guarded_backend_cache.cached_backends[
+                backend_obj_id
+            ],
+        ),
+        (
+            "___skip_backend_check",
+            lambda: torch._dynamo.eval_frame.guarded_backend_cache.skip_backend_check_for_run_only_mode,
+        ),
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
@@ -430,22 +438,40 @@ class GuardBuilder(GuardBuilderBase):
             self.EQUALS_MATCH(guard)
 
     def NN_MODULE(self, guard: Guard):
+        # TODO(janimesh) - This id_match can be removed because nn_module_guard
+        # checks this in C. However, we need this redundant check to allow
+        # flexible cache size policy when we guard on self of nn module
+        # instances. See Note in torch/_dynamo/cache_size.py
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
-        def setup_guard():
-            assert istype(val.training, bool)
-            # TODO: Why doesn't this use produce_guard_code?
-            self.code.append(
-                GuardCodeList([f"{ref}.training == {val.training}"], guard)
-            )
-
-        if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
-        else:
+        # The module guard checks for modifications to the Module's type, __dict__,
+        # and various nested OrderedDicts, such as _parameters, _buffers, and _modules.
+        # This subsumes the check for Module.training.
+        if not hasattr(val, "training"):
             unimplemented(f"Guard setup for uninitialized class {type(val)}")
+        if config.allow_rnn and isinstance(
+            val, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
+        ):
+            # TorchDynamo graph breaks on LSTMs, but this is a way if user wants
+            # to override it. LSTMs change the module state in every invocation,
+            # leading to recompilations.
+            log.warning("Skipping nn module guard on LSTMs")
+            return
+        try:
+            g = torch._C._dynamo.guards.nn_module_guard(val)
+        except AttributeError:
+            # We get an attribute error if the module is partially initialized. For example,
+            # we might be trying to install a guard before a super().__init__() call when
+            # the module is missing _parameters, _modules, and other attributes.
+            # For now, we skip installing the guard.
+            log.warning(
+                "Skipping nn module guard because the module could be partially initialized"
+            )
+            return
+        name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
+        self._produce_guard_code(guard, [f"{name}({ref})"])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -537,34 +563,13 @@ class GuardBuilder(GuardBuilderBase):
         mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
-        """Guard on the initial grad state"""
-        assert guard.name == ""
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_grad_state:
-            code = "___is_grad_enabled()"
-        else:
-            code = "not ___is_grad_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard):
-        """Guard on the initial determinism algorithms state"""
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_deterministic_algorithms_state:
-            code = "___are_deterministic_algorithms_enabled()"
-        else:
-            code = "not ___are_deterministic_algorithms_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def TORCH_FUNCTION_STATE(self, guard: Guard):
-        assert guard.source is GuardSource.GLOBAL
-        code = None
-        if convert_frame.initial_torch_function_state:
-            code = "___is_torch_function_enabled()"
-        else:
-            code = "not ___is_torch_function_enabled()"
-        self._produce_guard_code(guard, [code])
+        pass  # we always guard on this via GlobalStateGuard()
 
     def DEFAULT_DEVICE(self, guard: Guard):
         """Guard on CURRENT_DEVICE per torch.utils._device"""
@@ -574,6 +579,17 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(
             guard, [f"utils_device.CURRENT_DEVICE == {m.CURRENT_DEVICE!r}"]
         )
+
+    def BACKEND_MATCH(self, guard: Guard):
+        """Guard on backend matching based on id of current_backend"""
+        assert guard.source is GuardSource.GLOBAL
+        backend_id = (
+            f"{id(torch._dynamo.eval_frame.guarded_backend_cache.current_backend)}"
+        )
+        code = [
+            f"___skip_backend_check() or ___current_backend() == ___lookup_backend({backend_id})"
+        ]
+        self._produce_guard_code(guard, code)
 
     def SHAPE_ENV(self, guard: Guard):
         # Let's handle ShapeEnv guards.  To do this, we will resolve
@@ -596,22 +612,27 @@ class GuardBuilder(GuardBuilderBase):
         if output_graph.export_constraints:
             source_pairs: List[Tuple[Source, Source]] = []
             for constraint in output_graph.export_constraints:
-                source, *other_sources = get_sources(constraint.t_id, constraint.dim)
-                # When t.size()[dim] maps to src0, src1, ..., srcN, we add
-                # constraints that make src0 "equal" to src1, ..., srcN.
-                source_pairs.extend(
-                    (source, other_source) for other_source in other_sources
-                )
-                if constraint.shared is not None:
-                    # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
-                    # and t'.size()[dim'] maps to src1', ..., srcN', we add
-                    # constraints that also make src0 "equal" to src1', ..., srcN'.
-                    other_sources = get_sources(
-                        constraint.shared.t_id, constraint.shared.dim
+                if constraint.t_id in output_graph.tracked_fakes_id_to_source:
+                    source, *other_sources = get_sources(
+                        constraint.t_id, constraint.dim
                     )
+                    # When t.size()[dim] maps to src0, src1, ..., srcN, we add
+                    # constraints that make src0 "equal" to src1, ..., srcN.
                     source_pairs.extend(
                         (source, other_source) for other_source in other_sources
                     )
+                    if constraint.shared is not None:
+                        # Moreover, when t.size()[dim] is specified equal to t'.size()[dim']
+                        # and t'.size()[dim'] maps to src1', ..., srcN', we add
+                        # constraints that also make src0 "equal" to src1', ..., srcN'.
+                        other_sources = get_sources(
+                            constraint.shared.t_id, constraint.shared.dim
+                        )
+                        source_pairs.extend(
+                            (source, other_source) for other_source in other_sources
+                        )
+                else:
+                    log.warning("Untracked tensor used in export constraints")
             equalities_inputs = EqualityConstraint(
                 source_pairs=source_pairs,
                 warn_only=False,
@@ -898,7 +919,9 @@ class CheckFunctionManager:
         guards = output_graph.guards if output_graph else None
         self.valid = True
         self._weakrefs: Dict[int, ReferenceType[object]] = {}
+        self._extra_closure_vars: Dict[str, object] = {}
         self.output_graph = output_graph
+        self.extra_closure_vars_count = 0
 
         # Note: right overrides left
         def combine_scopes(left, right):
@@ -952,7 +975,8 @@ class CheckFunctionManager:
                 # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
                 and "__defaults__" not in guard.name
                 and "__kwdefaults__" not in guard.name
-                and (config.skip_nnmodule_hook_guards or "hooks" not in guard.name)
+                # Force-enable NN_MODULE checks
+                and guard.create_fn is not GuardBuilder.NN_MODULE
             ):
                 continue
             guard.create(local_builder, global_builder)
@@ -977,13 +1001,11 @@ class CheckFunctionManager:
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = local_builder.argnames
         largs += ["**___kwargs_ignored"]
-        args = ",".join(largs)
 
         guards_log.debug("GUARDS:")
 
         # Don't report this guard, it's always the same, useless!
-        code_parts = ["___guarded_code.valid"]
-        base = os.path.dirname(__file__)
+        code_parts = ["___guarded_code.valid", "___check_global_state()"]
 
         def add_code_part(code, guard, log_only=False):
             if guards_log.isEnabledFor(logging.DEBUG):
@@ -1045,8 +1067,6 @@ class CheckFunctionManager:
                 local_builder.tensor_check_examples
                 + global_builder.tensor_check_examples
             )
-            dynamic_dims_sizes = None
-            dynamic_dims_strides = None
 
             def convert(size_or_stride):
                 converted: List[Optional[int]] = []
@@ -1132,17 +1152,22 @@ class CheckFunctionManager:
                 add_code_part(code, gcl.guard)
 
         assert not global_builder.shape_env_code
-
+        global_state = convert_frame.initial_global_state
+        if global_state is None:
+            # we should only hit this case in NopTests()
+            global_state = convert_frame.GlobalStateGuard()
         closure_vars = collections.OrderedDict(
             [
                 ("___guarded_code", self),
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
+                ("___check_global_state", global_state.check),
                 ("tensor_check_names", tensor_check_names),
             ]
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
+        closure_vars.update(self._extra_closure_vars)
 
         unique_code_parts = list(unique(code_parts))
         make_guard_fn_args = ", ".join(closure_vars.keys())
@@ -1197,6 +1222,12 @@ class CheckFunctionManager:
         if id(obj) in self._weakrefs:
             return self._weakrefs[id(obj)]
         return None
+
+    def add_extra_closure_var(self, name_hint, obj):
+        name = f"{name_hint}_{self.extra_closure_vars_count}"
+        self.extra_closure_vars_count += 1
+        self._extra_closure_vars[name] = obj
+        return name
 
 
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:

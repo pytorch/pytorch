@@ -1,4 +1,5 @@
 import functools
+import inspect
 import logging
 import math
 
@@ -343,6 +344,28 @@ def _sfdp_scale_factor_check(scale_factor_op):
     return fn
 
 
+def partialize_and_update_signature(func, **kwargs):
+    """
+    Equivalent to functools.partial but also updates the signature on returned function
+    """
+    original_sig = inspect.signature(func)
+    parameters = original_sig.parameters
+
+    new_parameters = {
+        key: value for key, value in parameters.items() if key not in kwargs
+    }
+    new_sig = inspect.Signature(parameters=list(new_parameters.values()))
+
+    partial_func = functools.partial(func, **kwargs)
+
+    def wrapper(*args, **kwargs):
+        return partial_func(*args, **kwargs)
+
+    wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+
+    return wrapper
+
+
 @functools.lru_cache(None)
 def _sfdp_init():
     from .joint_graph import patterns
@@ -451,16 +474,25 @@ def _sfdp_init():
             _sfdp_scale_factor_check(aten.div.Tensor),
         ),
     ]:
-        args = [*args, *workaround.values()]
+        training_args = [*args, *workaround.values()]  # type: ignore[attr-defined]
         register_replacement(
             pattern,
             replacement,
-            args,
+            training_args,
             training_graph,
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
+
+        if workaround:
+            assert isinstance(workaround, dict)
+            assert len(workaround) == 1 and "dropout_p" in workaround
+            # functools.partial insufficient because we look at signature downstream
+            pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
+            replacement = partialize_and_update_signature(replacement, dropout_p=0.0)
+            workaround = {}
+
         register_replacement(
             pattern,
             replacement,

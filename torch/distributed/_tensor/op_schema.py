@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.utils._pytree import tree_map_only, TreeSpec
 
@@ -23,8 +24,21 @@ def _rebuild_tensor_from_dtensor_meta(arg) -> object:
         arg.tensor_meta.shape,
         arg.tensor_meta.stride,
         dtype=arg.tensor_meta.dtype,
-        requires_grad=arg.tensor_meta.requires_grad,
     )
+
+
+def _is_inplace_op(op: torch._ops.OpOverload):
+    # simple analysis of function schema to determine
+    # if this is an inplace variant, it might not
+    # be entirely correct, but it's good enough for now.
+    return op._schema.name[-1] == "_"
+
+
+def _is_out_variant_op(op: torch._ops.OpOverload):
+    # simple analysis of function schema to determine
+    # if this is an out variant, it might not
+    # be entirely correct, but it's good enough for now.
+    return "out" in op._schema.overload_name
 
 
 @dataclass
@@ -82,6 +96,14 @@ class OpStrategy(StrategyType):
         """
         return max([strategy.output_spec.num_shards for strategy in self.strategies])
 
+    @property
+    def output_shape(self):
+        return self.strategies[0].output_spec.shape
+
+    @property
+    def output_ndim(self):
+        return self.strategies[0].output_spec.ndim
+
 
 class TupleStrategy(StrategyType):
     """
@@ -109,6 +131,25 @@ class TupleStrategy(StrategyType):
 
 
 @dataclass
+class RuntimeSchemaInfo:
+    """
+    RuntimeSchemaInfo stores the operator schema related information for runtime (eager)
+    execution. This is mainly used for two ways: 1. to generate hash for args to determine
+    whether to re-run sharding prop or not 2. to determine if we need pytree
+    """
+
+    # This static_argnum records static arg "starting index" for ops that have non-tensor
+    # args/kwargs which would affect sharding propagation results. All args after this
+    # index would be hashed to our sharding cache.
+    # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
+    static_argnum: int = -1
+    # This static_kwargkey records static kwarg names which would affect sharding prop
+    static_kwargkey: Optional[List[str]] = None
+    # TODO: make use of this field
+    needs_pytree: bool = True
+
+
+@dataclass
 class OpSchema:
     """
     OpSchema is a data class that describes an operator input schemas, it
@@ -116,47 +157,22 @@ class OpSchema:
     preserved). It is mainly used by the dispatching logic below to run things like
     sharding propagation.
 
-    Sharding propagation rules registered could utilize this data class and
-    do inplace update some fields (when necessary, i.e shape related ops) to make
-    sure the args/kwargs are legit before passing to the local tensor operator.
-    This is the main reason that we don't freeze this dataclass.
-
-    NOTE: greater access to the operator inputs comes with greater responsibility.
-    Here are some basic rules about what can be used and what can be changed.
+    NOTE: this should be used as a read only data class
+    TODO: make this a frozen dataclass
 
     Args:
-        func_schema: the function schema of the operator
+        op: the operator overload we are intercepting
         args_schema: contains args except that the DTensor args have been replaced
             with its DTensorSpec
         kwargs_schema: contains kwargs except that the DTensor kwargs have been replaced
             with its DTensorSpec
-
-    What can be used:
-        - every attribute within this class could be read to conduct
-          sharding propagation.
-    What can be changed:
-        - only the args_schema and kwargs_schema could be changed.
-        - every non-tensor args could be changed to accomodate for local tensor
-          operations (i.e. for ops like view/reshape/...)
-        - every "DTensorSpec" attribute inside `args_schema`, `kwargs_schema` and
-          `args_spec` SHOULD NOT be updated! DTensorSpec are read only and sharding
-          propagation shouldn't inplace update them, otherwise the input DTensor
-          placements will get implicitly changed and it's error-prone.
     """
 
-    func_schema: torch._C.FunctionSchema
+    op: torch._ops.OpOverload
     args_schema: ArgsType
     kwargs_schema: KwargsType
 
-    is_inplace: bool = False
-    is_out_variant: bool = False
-
-    def __post_init__(self) -> None:
-        # simple analysis of function schema to determine
-        # if this is an inplace/out variant, it might not
-        # be entirely correct, but it's good enough for now.
-        self.is_inplace = self.func_schema.name[-1] == "_"
-        self.is_out_variant = "out" in self.func_schema.overload_name
+    schema_info: Optional[RuntimeSchemaInfo] = None
 
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
@@ -171,30 +187,85 @@ class OpSchema:
 
     def __repr__(self) -> str:
         return (
-            f"OpSchema(func_schema={self.func_schema},"
+            f"OpSchema(op={self.op},"
             f" args_schema={self.args_schema},"
             f" kwargs_schema={self.kwargs_schema})"
         )
 
-    def __hash__(self) -> int:
-        # NOTE: we turn kwargs_schema into a frozenset to hash as it would not be nested dict
-        frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
-        return hash(
-            (
-                self.func_schema,
-                tuple(tuple(e) if isinstance(e, list) else e for e in self.args_schema),
-                frozen_set_kwargs_schema,
-            )
+    def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
+        op_arg_type = self.op._schema.arguments[arg_idx].type
+        is_tensor = isinstance(op_arg_type, torch.TensorType)
+        if is_tensor:
+            return True
+
+        is_list_like = isinstance(op_arg_type, torch.ListType)
+        if not is_list_like:
+            return False
+
+        elem_type = op_arg_type.getElementType()
+        return isinstance(elem_type, torch.TensorType) or (
+            isinstance(elem_type, torch.OptionalType)
+            and isinstance(elem_type.getElementType(), torch.TensorType)
         )
 
+    def __hash__(self) -> int:
+        # Only hash args and kwargs that op indicates to hash
+        if not self.schema_info:
+            static_argnum = len(self.args_schema)
+            static_kwargkey = None
+        else:
+            static_argnum = self.schema_info.static_argnum
+            static_kwargkey = self.schema_info.static_kwargkey
+
+        args_to_hash = tuple(
+            tuple(e) if isinstance(e, list) else e
+            for i, e in enumerate(self.args_schema)
+            if self.arg_type_tensor_or_tensor_list_like(i) or i >= static_argnum
+        )
+        if static_kwargkey is not None:
+            kwargs_to_hash = tuple(
+                self.kwargs_schema.get(k, None) for k in static_kwargkey
+            )
+            return hash((self.op, args_to_hash, kwargs_to_hash))
+        else:
+            return hash((self.op, args_to_hash))
+
     def __eq__(self, other: object) -> bool:
+        # early return checks
         if not isinstance(other, OpSchema):
             return False
-        return (
-            self.func_schema == other.func_schema
-            and self.args_schema == other.args_schema
-            and self.kwargs_schema == other.kwargs_schema
-        )
+
+        if self.op != other.op:
+            return False
+
+        if len(self.args_schema) != len(other.args_schema):
+            return False
+
+        # compare each element and early return if any of them is different
+        if not self.schema_info:
+            static_argnum = len(self.args_schema)
+            static_kwargkey = None
+        else:
+            static_argnum = self.schema_info.static_argnum
+            static_kwargkey = self.schema_info.static_kwargkey
+
+        for i, (self_arg, other_arg) in enumerate(
+            zip(self.args_schema, other.args_schema)
+        ):
+            if isinstance(self_arg, DTensorSpec) and self_arg != other_arg:
+                return False
+            elif i >= static_argnum and self_arg != other_arg:
+                return False
+
+        # check kwarg equality when there's a static kwarg key
+        if static_kwargkey:
+            for key in static_kwargkey:
+                if self.kwargs_schema.get(key, None) != other.kwargs_schema.get(
+                    key, None
+                ):
+                    return False
+
+        return True
 
     def gen_fake_args(self) -> ArgsType:
         """
@@ -254,7 +325,7 @@ class OpInfo:
     All Runtime Op execution info are packed here
     """
 
-    op_call: torch._ops.OpOverload
+    mesh: DeviceMesh
     schema: OpSchema
     flat_args_schema: List[object]
     flat_kwargs_schema: List[object]
