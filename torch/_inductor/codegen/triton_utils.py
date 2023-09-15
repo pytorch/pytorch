@@ -73,5 +73,4 @@ def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
         for i, arg in enumerate(args)
         if is_aligned(arg, alignment=8, include_tensor=False)
     )
-
     return instance_descriptor(divisible_by_16, (), (), divisible_by_8)

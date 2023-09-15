@@ -3569,10 +3569,6 @@ class ShapeEnv:
             )
             if r is not None:
                 return r
-            # # if unbacked symint exists, replace it with a reasonable size hint and evaluate again
-            # r = self._maybe_evaluate_static(result_expr, unbacked_only=True, replace_unbacked_with_default_size_hint=True)
-            # if r is not None:
-            #     return r
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3654,7 +3650,7 @@ class ShapeEnv:
                 return
         free = list(expr.free_symbols)
 
-        assert len(free) > 0, f"The expression should not be static by this point: {expr}, free: {free}"
+        assert len(free) > 0, f"The expression should not be static by this point: {expr}"
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return

@@ -374,11 +374,13 @@ class SizeVarAllocator:
 
     def size_hint(self, expr: Expr) -> int:
         out = self.symbolic_hint(expr)
-        try:
-            return int(out)
-        except Exception:
-            log.debug("failed on: %s", out)
+        if isinstance(out, sympy.Expr):
             return out
+        else:
+            try:
+                return int(out)
+            except Exception:
+                log.debug("failed on: %s", out)
 
     def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
         return tuple(self.size_hint(x) for x in exprs)
