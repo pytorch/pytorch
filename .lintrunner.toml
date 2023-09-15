@@ -199,7 +199,6 @@ exclude_patterns = [
     'torch/_inductor/bounds.py',
     'torch/_inductor/ir.py',
     'torch/_inductor/scheduler.py',
-    'torch/_inductor/exc.py',
     'torch/_inductor/sizevars.py',
     'torch/_inductor/freezing.py',
     'torch/_inductor/pattern_matcher.py',
