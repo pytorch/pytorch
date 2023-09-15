@@ -389,8 +389,9 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
       (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
       (weight_memory_format == at::MemoryFormat::ChannelsLast);
 
-  // TODO: add channels last 3d support
-  bool can_use_mkldnn_channels_last_3d = false;
+  bool can_use_mkldnn_channels_last_3d =
+      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
 
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }

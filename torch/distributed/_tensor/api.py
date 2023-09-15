@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
 import warnings
 from typing import Callable, cast, Optional, Sequence, Tuple
 
@@ -8,6 +7,7 @@ import torch
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
+from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
 from torch.distributed._tensor.placement_types import (
@@ -15,6 +15,7 @@ from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    TensorMeta,
 )
 from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
@@ -22,8 +23,6 @@ from torch.distributed._tensor.random import (
 )
 from torch.distributed._tensor.redistribute import Redistribute
 from torch.distributed._tensor.sharding_prop import ShardingPropagator
-from torch.fx.passes.shape_prop import TensorMetadata
-from torch.utils._pytree import tree_flatten
 
 
 __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
@@ -86,7 +85,7 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+        placements: Tuple[Placement, ...],
         run_check: bool,
     ) -> "DTensor":
         ctx.previous_placement = placements
@@ -112,7 +111,7 @@ class _FromTorchTensor(torch.autograd.Function):
                     # broadcast rank 0 tensor to all ranks
                     # only broadcast if run_check is True
                     input = input.contiguous()
-                    device_mesh.broadcast(input, mesh_dim=idx)
+                    mesh_broadcast(input, device_mesh, mesh_dim=idx)
 
         # We want a fresh Tensor object that shares memory with the input tensor
         dist_tensor = DTensor(
@@ -161,7 +160,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         cls,
         local_tensor: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+        placements: Tuple[Placement, ...],
         *,
         shape: torch.Size,
         dtype: torch.dtype,
@@ -196,15 +195,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             requires_grad=requires_grad,
         )
 
-        # TODO: populate all tensor meta fields properly
-        # NOTE: memory_format is non-pickable so we intentionally skip it
-        tensor_meta = TensorMetadata(
-            shape, dtype, requires_grad, stride, None, False, {}
-        )
+        tensor_meta = TensorMeta(shape, stride, dtype)
         # deepcopy and set spec
-        r._spec = DTensorSpec(
-            device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta
-        )
+        r._spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
         r._local_tensor = local_tensor
         return r
 
@@ -219,20 +212,22 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
-        return self._local_tensor, self._spec
+        return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
-    def __tensor_unflatten__(local_tensor, spec):
+    def __tensor_unflatten__(inner_tensors, flatten_spec):
         assert (
-            spec is not None
+            flatten_spec is not None
         ), "Expecting spec to be not None from `__tensor_flatten__` return value!"
+        local_tensor = inner_tensors["_local_tensor"]
+        spec, requires_grad = flatten_spec
         return DTensor(
             local_tensor,
             spec.mesh,
             spec.placements,
             shape=spec.tensor_meta.shape,
             dtype=spec.tensor_meta.dtype,
-            requires_grad=spec.tensor_meta.requires_grad,
+            requires_grad=requires_grad,
             stride=spec.tensor_meta.stride,
         )
 
@@ -240,21 +235,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # check that we are not getting mixed vanilla and Distributed tensors
-        arg_list, _ = tree_flatten(args)
-        for arg in arg_list:
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                raise RuntimeError(
-                    f"{func}: got mixed distributed and non-distributed tensors."
-                )
-
-        if kwargs is None:
-            kwargs = {}
-
         return op_dispatch.operator_dispatch(
             func,
             args,
-            kwargs,
+            kwargs or {},
             DTensor._propagator,
         )
 
@@ -312,7 +296,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # created should flow back the gradients to the local_tensor, so we call an autograd
         # function to construct the dist tensor instead.
         return _FromTorchTensor.apply(  # pyre-ignore[16]: autograd func
-            local_tensor, device_mesh, placements, run_check
+            local_tensor, device_mesh, tuple(placements), run_check
         )
 
     def to_local(self) -> torch.Tensor:
@@ -457,7 +441,7 @@ def distribute_tensor(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
                 f"to a different device mesh {device_mesh}."
             )
-        if tensor.placements != placements:
+        if tensor.placements != tuple(placements):
             raise ValueError(
                 f"Cannot distribute a DTensor with placements {tensor.placements} "
                 f"to a different placements {placements}. do you want to call "
@@ -471,12 +455,7 @@ def distribute_tensor(
     for idx, placement in enumerate(placements):
         if placement.is_shard():
             placement = cast(Shard, placement)
-            output = placement._shard_tensor(local_tensor, device_mesh, idx)
-            # scatter call could not return a tensor with correct requires_grad
-            # field, as ProcessGroupNCCL refuse to take a tensor with requires_grad
-            # to do inplace update! So we manually set it here
-            output.requires_grad_(tensor.requires_grad)
-            local_tensor = output
+            local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
             local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
@@ -489,9 +468,9 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach(),
+        local_tensor.detach().requires_grad_(tensor.requires_grad),
         device_mesh,
-        placements,
+        tuple(placements),
         shape=tensor.size(),
         dtype=tensor.dtype,
         requires_grad=tensor.requires_grad,

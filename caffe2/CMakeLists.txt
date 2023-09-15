@@ -400,6 +400,7 @@ set(GENERATED_CXX_PYTHON
 
 set(GENERATED_H_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.h"
   )
 
 set(GENERATED_TESTING_PYTHON
@@ -971,6 +972,9 @@ elseif(USE_CUDA)
   endif()
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+  endif()
+  if(USE_MEM_EFF_ATTENTION)
+    target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
   if(BUILD_LAZY_CUDA_LINALG)
     add_library(torch_cuda_linalg ${ATen_CUDA_LINALG_SRCS})
@@ -1564,7 +1568,9 @@ if(BUILD_SHARED_LIBS)
   if(USE_MPI)
       target_link_libraries(torch_global_deps ${MPI_CXX_LIBRARIES})
   endif()
-  target_link_libraries(torch_global_deps ${MKL_LIBRARIES})
+  if(CAFFE2_USE_MKL)
+    target_link_libraries(torch_global_deps caffe2::mkl)
+  endif()
   # The CUDA libraries are linked here for a different reason: in some
   # cases we load these libraries with ctypes, and if they weren't opened
   # with RTLD_GLOBAL, we'll do the "normal" search process again (and
@@ -1733,6 +1739,9 @@ if(BUILD_TEST)
       get_filename_component(test_name ${test_src} NAME_WE)
       add_executable(${test_name} "${test_src}")
       target_link_libraries(${test_name} torch_library gtest_main)
+      if(USE_CUDNN AND ${test_name} MATCHES "cudnn")
+        target_link_libraries(${test_name} torch::cudnn)
+      endif()
       target_include_directories(${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${Caffe2_CPU_INCLUDE})
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)

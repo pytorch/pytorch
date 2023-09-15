@@ -26,7 +26,7 @@ from torch.utils._pytree import tree_any, tree_all_only
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch import set_default_device
 from torch.utils._device import set_device
-from torch.utils._traceback import report_compile_source_on_error, format_traceback_short
+from torch.utils._traceback import report_compile_source_on_error, format_traceback_short, CapturedTraceback
 import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
@@ -962,6 +962,21 @@ def f(x):
             raise RuntimeError()
         except RuntimeError as e:
             self.assertRegex(format_traceback_short(e.__traceback__), r'.*test_utils.py:\d+ in test_format_traceback_short')
+
+    def test_captured_traceback(self):
+        self.assertIn('test_captured_traceback', ''.join(CapturedTraceback.extract().format()))
+
+    def test_captured_traceback_format_all(self):
+        rs = CapturedTraceback.format_all([CapturedTraceback.extract(), CapturedTraceback.extract()])
+        self.assertEqual(len(rs), 2)
+        self.assertIn('test_captured_traceback_format_all', ''.join(rs[0]))
+
+    def test_captured_traceback_format_all_cached(self):
+        tb = CapturedTraceback.extract()
+        tb.format()  # cached
+        rs = CapturedTraceback.format_all([tb, CapturedTraceback.extract()])
+        self.assertEqual(len(rs), 2)
+        self.assertIn('test_captured_traceback_format_all', ''.join(rs[0]))
 
 
 if __name__ == '__main__':
