@@ -192,7 +192,9 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         # plain tensors, we could remove the assert and just not perform the aliasing,
         # but it seems safer to learn more about this case first.
         if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
-            assert type(arg) == type(ret), f"""Called {str(func)} with input of type {type(arg)}
+            ret_list = ret if isinstance(ret, list) else [ret]
+            for r in ret_list:
+                assert type(arg) == type(r), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""
         # Need to run under no_dispatch, because we explicitly do **not**
         # want our subclass to intercept the set_() call.
@@ -211,7 +213,12 @@ and output of type {type(ret)}. But expected types to match."""
                 # Example: out = inp.expand(inp.shape[0], inp.shape[0])
                 #     This requires swapping the storage of out to be the same as inp,
                 #     but we do *not* want it to change the sizes/strides that were compute for out.
-                torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
+                if isinstance(ret, list):
+                    for r in ret:
+                        torch.ops.aten.set_.source_Storage_storage_offset(r, arg.untyped_storage(), r.storage_offset(), r.shape)
+                else:
+                    assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
+                    torch.ops.aten.set_.source_Storage_storage_offset(ret, arg.untyped_storage(), ret.storage_offset(), ret.shape)
             finally:
                 torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
 
@@ -225,23 +232,6 @@ and output of type {type(ret)}. But expected types to match."""
         for return_idx in range(num_returns):
             if is_read_only_alias_match(schema_info.args[arg_idx], schema_info.outs[return_idx]):
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
-
-    # Sigh... the torchscript parser has a bug where alias annotations for Tensor[](a) don't show up properly
-    # See https://github.com/pytorch/pytorch/issues/106173
-    if func.overloadpacket in [
-        torch.ops.aten.chunk,
-        torch.ops.aten.tensor_split,
-        torch.ops.aten.split,
-        torch.ops.aten.split_with_sizes,
-        torch.ops.aten.hsplit,
-        torch.ops.aten.vsplit,
-        torch.ops.aten.dsplit,
-        torch.ops.aten.unbind,
-    ]:
-        assert isinstance(outs, list) and all(isinstance(x, torch.Tensor) for x in outs)
-        for o in outs:
-            # For lists of outputs, need to alias every individual tensor to the input
-            alias_non_inplace_storage(args[0], o)
 
 # This abstracts over the fact that in return_and_correct_aliasing,
 # we sometimes use torchgen schema parsing (for aten ops, since torchscript's schema parsing is sometimes buggy),
@@ -267,7 +257,19 @@ def get_alias_info(func) -> SchemaInfo:
     # For ATen ops: use torchgen (since torchscript parser doesn't handle alias annotations
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
-        torchgen_schema = torchgen.model.FunctionSchema.parse(str(func._schema))
+        torchgen_schema_str = str(func._schema)
+        assert torchgen_schema_str.startswith("aten::")
+        # remove the aten:: namespace, which is added by the torchscript parser,
+        # and torchgen doesn't know how to handle
+        torchgen_schema_str = torchgen_schema_str[6:]
+        import re
+        # the torchscript parser ends up converting int[2]=1 into int[2]=[1, 1],
+        # which torchgen chokes on.
+        torchgen_schema_str = re.sub(r'=\[[0, ]+\]', '=0', torchgen_schema_str)
+        torchgen_schema_str = re.sub(r'=\[[1, ]+\]', '=1', torchgen_schema_str)
+        # for aten::rot90
+        torchgen_schema_str = torchgen_schema_str.replace("=[0, 1]", "=[0,1]")
+        torchgen_schema = torchgen.model.FunctionSchema.parse(torchgen_schema_str)
         arg_schemas = [AliasInfo(
             alias_set=set() if a.annotation is None else set(a.annotation.alias_set),
             is_write=a.annotation is not None and a.annotation.is_write
@@ -331,7 +333,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Fix up the storages of any outs so that they point to the same storage as the input,
     # if func is a view op.
-    _correct_storage_aliasing(func, schema_info, args, [out] if not isinstance(out, (list, tuple)) else out)
+    _correct_storage_aliasing(func, schema_info, args, (out,) if not isinstance(out, tuple) else out)
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
     # metadata is set correctly.
