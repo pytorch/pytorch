@@ -2711,6 +2711,10 @@ class ShapeEnv:
         return symbol.name.startswith("i")
 
     @record_shapeenv_event()
+    def has_unbacked_symint(self, expr: sympy.Expr) -> bool:
+        return any(self.is_unbacked_symint(s) for s in expr.free_symbols)
+
+    @record_shapeenv_event()
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
@@ -3769,7 +3773,7 @@ class ShapeEnv:
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if any(str(x).startswith("i") for x in orig_expr.free_symbols):
+        if self.has_unbacked_symint(orig_expr):
             concrete_val = self.size_hint(orig_expr, replace_unbacked_with_default_size_hint=True)
         elif hint is None:
             concrete_val = self.size_hint(orig_expr)
@@ -3827,12 +3831,6 @@ class ShapeEnv:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
-            def has_unbacked_symint(expr):
-                for sym in expr.free_symbols:
-                    if str(sym).startswith("i"):
-                        return True
-                return False
-
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
@@ -3856,7 +3854,7 @@ class ShapeEnv:
                 if isinstance(expr, (sympy.Eq, sympy.Ne)):
                     expr = sympy.Not(expr)
 
-            if not any(str(x).startswith("i") for x in orig_expr.free_symbols):
+            if not self.has_unbacked_symint(orig_expr):
                 if isinstance(expr, (sympy.Eq, sympy.Ne)):
                     self._maybe_guard_eq(expr, bool(concrete_val))
                     # TODO: If we successfully eliminate a symbol via equality, it
