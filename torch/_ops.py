@@ -127,6 +127,109 @@ class OperatorBase:
 
         return inner
 
+    # Registers an implementation to all **3** variants of functionalization that we have:
+    # - DispatchKey.Functionalize
+    # - functorch.TransformType.FuncTorchFunctionalize
+    # - FunctionalTensorMode
+    def py_functionalize_impl(self):
+        from torch._C import _functionalization_reapply_views_tls as _reapply_views
+        from torch._functorch.eager_transforms import (
+            _unwrap_all_tensors_from_functional,
+            _wrap_all_tensors_to_functional,
+        )
+        from torch._subclasses.functional_tensor import (
+            dispatch_functionalize,
+            FunctionalTensor,
+            FunctionalTensorMode,
+            unset_functional_temporarily,
+        )
+
+        class _DictToClass:
+            def __init__(self, d):
+                for k, v in d.items():
+                    setattr(self, k, v)
+
+        functionalize_dk_methods = {
+            "unwrap": lambda args: _unwrap_all_tensors_from_functional(
+                args, reapply_views=_reapply_views()
+            ),
+            "wrap": lambda args: _wrap_all_tensors_to_functional(args, level=0),
+            "wrap_function": lambda f: torch.func.functionalize(
+                f, remove="mutations_and_views" if _reapply_views() else "mutations"
+            ),
+            "redispatch": lambda: torch._C._ExcludeDispatchKeyGuard(
+                torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+            ),
+        }
+
+        functionalize_dispatch_mode_methods = {
+            "unwrap": lambda args: torch.utils._pytree.tree_map_only(
+                FunctionalTensor, FunctionalTensor.from_functional, args
+            ),
+            "wrap": lambda args: torch.utils._pytree.tree_map_only(
+                FunctionalTensor, FunctionalTensor.to_functional, args
+            ),
+            "wrap_function": dispatch_functionalize,
+            "redispatch": unset_functional_temporarily,
+        }
+
+        def inner(fn):
+            # Construct our three flavors of functionalization,
+            # each of which have slightly different wrap/unwrap/redispatch policies
+            def functionalize_dk_fn(*args, **kwargs):
+                return fn(_DictToClass(functionalize_dk_methods), *args, **kwargs)
+
+            def functionalize_dispatch_mode_fn(*args, **kwargs):
+                return fn(
+                    _DictToClass(functionalize_dispatch_mode_methods), *args, **kwargs
+                )
+
+            # The functorch flavor is a bit annoying, since the wrap/unwrap functions rely on the Interpreter object
+            # that functorch passes us, but we don't want the user-authored (generic) functionalization rule
+            # to have to know about it.
+            def functionalize_functorch_fn(interpreter, *args, **kwargs):
+                functionalize_functorch_methods = {
+                    "unwrap": lambda xs: _unwrap_all_tensors_from_functional(
+                        xs, reapply_views=interpreter.functionalize_add_back_views()
+                    ),
+                    "wrap": lambda xs: _wrap_all_tensors_to_functional(
+                        xs, level=interpreter.level()
+                    ),
+                    "wrap_function": lambda f: torch.func.functionalize(
+                        f,
+                        remove="mutations_and_views"
+                        if interpreter.functionalize_add_back_views()
+                        else "mutations",
+                    ),
+                    "redispatch": interpreter.lower,
+                }
+                ctx = _DictToClass(functionalize_functorch_methods)
+                return fn(ctx, *args, **kwargs)
+
+            assert FunctionalTensorMode not in self.python_key_mode_table
+            self.python_key_mode_table[
+                FunctionalTensorMode
+            ] = functionalize_dispatch_mode_fn
+
+            assert (
+                torch._C._functorch.TransformType.Functionalize
+                not in self.functorch_table
+            )
+            self.functorch_table[
+                torch._C._functorch.TransformType.Functionalize
+            ] = functionalize_functorch_fn
+
+            if torch._C.DispatchKey.Functionalize in self.py_kernels:
+                raise RuntimeError(
+                    f"Trying to override a python impl for DispatchKey.Functionalize on operator {self.name()}"
+                )
+            self.py_kernels[torch._C.DispatchKey.Functionalize] = functionalize_dk_fn
+
+            self._dispatch_cache.clear()
+            return fn
+
+        return inner
+
     def name(self):
         raise NotImplementedError()
 
