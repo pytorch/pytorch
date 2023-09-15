@@ -1471,8 +1471,9 @@ def interface(obj):
     r"""
     This decorator can be used to define an interface that can be used to annotate
     classes or modules of different types. This can be used for to annotate a submodule
-    or attribute class that could have different values, or which could be swapped
-    at runtime; or to store a list of modules or classes of varying types.
+    or attribute class that could have different types that implement the same
+    interface, or which could be swapped at runtime; or to store a list of modules or
+    classes of varying types.
 
     It is sometimes used to implement "Callables" - functions or modules that implement
     an interface but whose implementations differ and which can be swapped out.
