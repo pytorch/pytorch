@@ -1128,6 +1128,9 @@ def adaptive_max_pool2d_with_indices(
         return handle_torch_function(
             adaptive_max_pool2d_with_indices, (input,), input, output_size, return_indices=return_indices
         )
+    if not isinstance(output_size, int) and len(output_size) != 2:
+        raise ValueError("output_size must be of type int (for square output)" 
+                         f" or have size 2, but has size {len(output_size)}")
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
@@ -1172,6 +1175,9 @@ def adaptive_max_pool3d_with_indices(
         return handle_torch_function(
             adaptive_max_pool3d_with_indices, (input,), input, output_size, return_indices=return_indices
         )
+    if not isinstance(output_size, int) and len(output_size) != 3:
+        raise ValueError("output_size must be of type int (for square output)" 
+                         f" or have size 3, but has size {len(output_size)}")
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
@@ -1224,10 +1230,9 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
-    if not isinstance(output_size, int):
-        if len(output_size) != 2:
-            raise ValueError("output_size must be of type int (for square output)" 
-                             f" or have size 2, but has size {len(output_size)}")
+    if not isinstance(output_size, int) and len(output_size) != 2:
+        raise ValueError("output_size must be of type int (for square output)" 
+                         f" or have size 2, but has size {len(output_size)}")
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
@@ -1245,8 +1250,12 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
-    _output_size = _list_with_default(output_size, input.size())
-    return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
+    if not isinstance(output_size, int):
+        if len(output_size) != 3:
+            raise ValueError("output_size must be of type int (for square output)" 
+                             f" or have size 3, but has size {len(output_size)}")
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
 
 
 # Activation functions
