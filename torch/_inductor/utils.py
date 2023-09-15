@@ -39,7 +39,7 @@ import torch
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
 from .cuda_properties import current_device, get_device_capability
@@ -210,7 +210,11 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(numer: int, denom: int) -> int:
+def ceildiv(
+    numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
+) -> Union[int, sympy.Expr]:
+    if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
+        return CeilDiv(numer, denom)
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -1191,6 +1195,8 @@ aot_inductor_launcher = """
             reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
         AOTInductorTensorHandle outputs_handle =
             reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
+        std::vector<AOTInductorParamShape> output_shapes(
+            output_tensors.size(), AOTInductorParamShape());
         AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
@@ -1199,6 +1205,7 @@ aot_inductor_launcher = """
             input_tensors.size(),
             outputs_handle,
             output_tensors.size(),
+            output_shapes.data(),
             stream_handle,
             proxy_executor_handle));
 
