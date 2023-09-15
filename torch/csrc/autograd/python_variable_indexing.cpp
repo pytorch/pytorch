@@ -272,6 +272,9 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   if (THPVariable_Check(index)) {
     return false;
   }
+  //  Allow indexing with ndarray if numpy compilation is enabled. An ndarray
+  //  index should not be treated as a tuple since the indexing has a different
+  //  syntax.
 #ifdef USE_NUMPY
   if (::torch::utils::is_numpy_available() && PyArray_CheckExact(index)) {
     return false;
