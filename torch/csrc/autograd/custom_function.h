@@ -26,7 +26,7 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
     const at::TensorBase& result,
-    std::string hook_name);
+    const std::string& hook_name);
 
 // Get the return type of the forward function of the custom Function class X
 template <typename X, typename... Args>
