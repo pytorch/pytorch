@@ -362,31 +362,52 @@ static PyObject* THPVariable__to_functional_tensor(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_to_functional_tensor(Tensor t, *, bool mirror_autograd_meta=False)"},
+      {"_to_functional_tensor(Tensor t)"},
       /*traceable=*/true);
 
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
-  auto mirror_autograd_meta = r.toBool(1);
   auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
-  if (mirror_autograd_meta) {
-    // Here, we unsafely set the grad function on the wrapper to be the same as
-    // the inner. We expect this grad_fn to NEVER be used. It's needed so that
-    // .is_leaf metadata is accurate on the wrapper
-    auto inner_autograd_meta = impl::get_autograd_meta(self_);
-    if (inner_autograd_meta) {
-      wrapped.set_requires_grad(self_.requires_grad());
-      if (wrapped.requires_grad()) {
-        auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
-            new torch::autograd::Error(
-                "Cannot backprop through mirrored meta, file a bug in PyTorch"),
-            torch::autograd::deleteNode);
-        torch::autograd::set_history(wrapped, new_grad_fn);
-      }
+  return wrap(std::move(wrapped));
+  END_HANDLE_TH_ERRORS
+}
+
+// Given source and dest tensors,
+// Sets **some** (but not all) autograd metadata on dest, according to source:
+// - requires_grad
+// - grad_fn
+//   (If src has a grad_fn, we install an error grad_fn on dest to avoid
+//   difficult bugs.
+//    The main purpose is to ensure that dst.is_leaf == src.is_leaf)
+static PyObject* THPVariable__mirror_autograd_meta_to(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_mirror_autograd_meta_to(Tensor source, Tensor dest)"},
+      /*traceable=*/true);
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto src_ = r.tensor(0);
+  auto dst_ = r.tensor(1);
+  // Here, we unsafely set the grad function on the wrapper to be the same as
+  // the inner. We expect this grad_fn to NEVER be used. It's needed so that
+  // .is_leaf metadata is accurate on the wrapper
+  auto inner_autograd_meta = impl::get_autograd_meta(src_);
+  if (inner_autograd_meta) {
+    dst_.set_requires_grad(src_.requires_grad());
+    if (dst_.requires_grad()) {
+      auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
+          new torch::autograd::Error(
+              "Cannot backprop through mirrored meta, file a bug in PyTorch"),
+          torch::autograd::deleteNode);
+      torch::autograd::set_history(dst_, new_grad_fn);
     }
   }
-  return wrap(std::move(wrapped));
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -489,6 +510,31 @@ static PyObject* THPVariable__enable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPVariable__functionalize_enable_reapply_views(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_functionalize_enable_reapply_views(bool reapply_views=False)"},
+      /*traceable=*/true);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  const auto reapply_views = r.toBool(0);
+  auto old = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  if (reapply_views) {
+    at::functionalization::impl::setFunctionalizationReapplyViewsTLS(true);
+  } else {
+    at::functionalization::impl::setFunctionalizationReapplyViewsTLS(false);
+  }
+  if (old) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable__disable_functionalization(
     PyObject* self,
     PyObject* args,
@@ -501,12 +547,13 @@ static PyObject* THPVariable__disable_functionalization(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__sync(
+static PyObject* THPVariable__functionalize_sync(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+  static PythonArgParser parser(
+      {"_functionalize_sync(Tensor t)"}, /*traceable=*/true);
 
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -543,6 +590,10 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__to_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
+    {"_mirror_autograd_meta_to",
+     castPyCFunctionWithKeywords(THPVariable__mirror_autograd_meta_to),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
     {"_from_functional_tensor",
      castPyCFunctionWithKeywords(THPVariable__from_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
@@ -551,8 +602,8 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__freeze_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_sync",
-     castPyCFunctionWithKeywords(THPVariable__sync),
+    {"_functionalize_sync",
+     castPyCFunctionWithKeywords(THPVariable__functionalize_sync),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",
@@ -566,6 +617,11 @@ static PyMethodDef torch_functions_manual[] = {
     {"_functionalize_has_metadata_mutation",
      castPyCFunctionWithKeywords(
          THPVariable__functionalize_has_metadata_mutation),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"_functionalize_enable_reapply_views",
+     castPyCFunctionWithKeywords(
+         THPVariable__functionalize_enable_reapply_views),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"nonzero",

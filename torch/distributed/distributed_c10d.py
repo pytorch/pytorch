@@ -1130,7 +1130,7 @@ def init_process_group(
             )
 
         default_pg, _ = _new_process_group_helper(
-            -1, -1, [], backend, None, group_name=group_name, timeout=timeout
+            -1, -1, [], backend, None, group_name, timeout=timeout
         )
         _update_default_pg(default_pg)
     else:
@@ -1152,8 +1152,8 @@ def init_process_group(
             [],
             backend,
             store,
+            group_name,
             pg_options=pg_options,
-            group_name=group_name,
             timeout=timeout
         )
         _update_default_pg(default_pg)
@@ -1190,8 +1190,8 @@ def _new_process_group_helper(
     global_ranks_in_group,
     backend,
     store,
+    group_name,
     pg_options=None,
-    group_name=None,
     timeout=default_pg_timeout,
     pg_tag=None
 ):
@@ -1352,8 +1352,11 @@ def _new_process_group_helper(
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
     # update global state
+    assert group_name is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
+    pg._set_group_name(group_name)
+
     _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
@@ -3948,7 +3951,7 @@ def _new_group_with_tag(
         ranks,
         backend,
         default_store,
-        group_name=group_name,
+        group_name,
         pg_options=pg_options,
         timeout=timeout,
         pg_tag=pg_tag
