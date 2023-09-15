@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import expecttest
 import io
 import numpy as np
 import os
@@ -7,7 +8,6 @@ import shutil
 import sys
 import tempfile
 import unittest
-import expecttest
 
 TEST_TENSORBOARD = True
 try:
@@ -43,7 +43,14 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TestCase,
+    run_tests,
+    TEST_WITH_ASAN,
+    TEST_WITH_CROSSREF,
+)
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -80,7 +87,7 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from tensorboard.compat.proto.types_pb2 import DataType
-    from torch.utils.tensorboard.summary import tensor_proto
+    from torch.utils.tensorboard.summary import int_to_half, tensor_proto
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
@@ -865,6 +872,25 @@ class TestTensorBoardNumpy(BaseTestCase):
         compare_proto(graph, self)
 
 class TestTensorProtoSummary(BaseTestCase):
+    @parametrize(
+        "tensor_type,proto_type",
+        [
+            (torch.float16, DataType.DT_HALF),
+            (torch.bfloat16, DataType.DT_BFLOAT16),
+        ],
+    )
+    def test_half_tensor_proto(self, tensor_type, proto_type):
+        float_values = [1.0, 2.0, 3.0]
+        actual_proto = tensor_proto(
+            "dummy",
+            torch.tensor(float_values, dtype=tensor_type),
+        ).value[0].tensor
+        self.assertSequenceEqual(
+            [int_to_half(x) for x in actual_proto.half_val],
+            float_values,
+        )
+        self.assertTrue(actual_proto.dtype == proto_type)
+
     def test_float_tensor_proto(self):
         float_values = [1.0, 2.0, 3.0]
         actual_proto = (
@@ -901,6 +927,8 @@ class TestTensorProtoSummary(BaseTestCase):
     def test_empty_tensor_proto(self):
         actual_proto = tensor_proto("dummy", torch.empty(0)).value[0].tensor
         self.assertEqual(actual_proto.float_val, [])
+
+instantiate_parametrized_tests(TestTensorProtoSummary)
 
 if __name__ == '__main__':
     run_tests()
