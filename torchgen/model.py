@@ -89,8 +89,6 @@ class DispatchKey(Enum):
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
     ZeroTensor = auto()
-    Conjugate = auto()
-    Negative = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()

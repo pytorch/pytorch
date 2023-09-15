@@ -1,5 +1,3 @@
-from contextlib import nullcontext
-
 import torch
 import torch.utils._pytree as pytree
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
@@ -18,12 +16,6 @@ from torch._higher_order_ops.cond import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch._subclasses.functional_tensor import (
-    dispatch_functionalize,
-    FunctionalTensor,
-    FunctionalTensorMode,
-    unset_functional_temporarily,
-)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
@@ -35,23 +27,6 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-
-
-# TODO: pull these helpers from AOTAutograd later
-def to_fun(t):
-    if isinstance(t, torch.Tensor):
-        return FunctionalTensor.to_functional(t)
-    return t
-
-
-def from_fun(t):
-    if not isinstance(t, FunctionalTensor):
-        # quick sanity assert
-        if isinstance(t, torch.Tensor):
-            assert not torch._is_functional_tensor(t)
-        return t
-    torch._sync(t)
-    return torch._from_functional_tensor(t.elem)
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
@@ -94,10 +69,10 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     # when creating the output node, it fails to associate the wrapped tensor with its proxy.
     # Instead, it will create _tensor_constant as output.
 
-    with suspend_functionalization(), unset_functional_temporarily():
+    with suspend_functionalization():
         with disable_proxy_modes_tracing():
 
-            def _from_fun(t):
+            def from_fun(t):
                 if isinstance(t, torch.Tensor):
                     if t.dtype != torch.bool:
                         return torch.empty_strided(
@@ -109,27 +84,17 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     else:
                         # clone of a functional tensor produces a functional tensor
                         # but we want to avoid it so we clone a non-functional version
-                        maybe_unfunc_t = t
-                        if isinstance(t, FunctionalTensor):
-                            torch._sync(t)
-                            maybe_unfunc_t = from_fun(t)
-                        elif torch._is_functional_tensor(t):
-                            # need to handle both types of functionalization here:
-                            # these are the tensors that came from the user,
-                            # which could be either FunctionalTensorWrapper or FunctionalTensor
-                            torch._sync(t)
-                            maybe_unfunc_t = torch._from_functional_tensor(t)
+                        maybe_unfunc_t = torch._functorch.aot_autograd.from_fun(t)
                         return maybe_unfunc_t.clone()
                 return t
 
-            example_xs = [_from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
-
+            example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
             example_pos_args = [
-                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
+                from_fun(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in pos_args
             ]
             example_flat_out = pytree.tree_map(
-                _from_fun, f(*example_xs, *example_pos_args)
+                from_fun, f(*example_xs, *example_pos_args)
             )
             if any(
                 not isinstance(out, torch.Tensor)
@@ -140,7 +105,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     "Expect outputs of map only contains tensors or None. "
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
-            example_grad = [_from_fun(out) for out in example_flat_out]
+            example_grad = [from_fun(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
 
@@ -300,14 +265,7 @@ def _unstack_pytree(xs):
             f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
         )
 
-    ctx = (
-        FunctionalTensorMode
-        if any(isinstance(x, FunctionalTensor) for x in flat_xs)
-        else nullcontext
-    )
-    with ctx():
-        a = zip(*flat_xs)
-
+    a = zip(*flat_xs)
     pytrees = []
     for tuple in a:
         pytrees.append(pytree.tree_unflatten(tuple, inspec))
@@ -366,17 +324,6 @@ def map_proxy_torch_dispatch_mode(f, num_mapped, *args):
 @map_impl.py_impl(FakeTensorMode)
 def map_fake_tensor_mode(f, num_mapped, *args):
     return map_dense(f, num_mapped, *args)
-
-
-@map_impl.py_impl(FunctionalTensorMode)
-def map_functional_tensor_mode(f, num_mapped, *args):
-    unwrapped_args = pytree.tree_map_only(FunctionalTensor, from_fun, args)
-
-    functional_map_fn = dispatch_functionalize(f)
-
-    with unset_functional_temporarily():
-        map_return = map_impl(functional_map_fn, num_mapped, *unwrapped_args)
-        return pytree.tree_map_only(torch.Tensor, to_fun, map_return)
 
 
 @map_impl.py_impl(DispatchKey.Functionalize)

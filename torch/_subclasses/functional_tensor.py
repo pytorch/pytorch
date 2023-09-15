@@ -28,28 +28,6 @@ class FunctionalTensor(torch.Tensor):
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
-
-        # In general, we'd like our functional tensor subclass to only be in charge of functionalization,
-        # and defer to the inner subclass for all other functionality.
-        # Example: If our inner tensor is a ZeroTensor, we would want to defer running the ZeroTensor fallback
-        # until after we redispatch to our inner ZeroTensor.
-        # However, there are a few keys that we need to mirror between the inner and outer tensors.
-        #   Conjugate
-        #   Negative
-        # Why? These keys are used to test metadata queries, like `.is_conj()` and `.is_neg()`.
-        # We **need** calls to is_conj() to return the same thing on the outer and inner tensors,
-        # Because user code / framework code that branches like so needs to do the same thing
-        # when it sees the outer FunctionalTensor:
-        #     if (x.is_conj()) {
-        #         return at::view_as_real(x.resolve_conj());
-        #     } else {
-        #         return at::view_as_real(x);
-        #     }
-        extra_dispatch_keys = torch._C.DispatchKeySet(
-            torch._C.DispatchKey.Conjugate
-        ).add(torch._C.DispatchKey.Negative)
-        extra_dispatch_keys = extra_dispatch_keys & torch._C._dispatch_keys(elem)
-
         out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
@@ -66,9 +44,6 @@ class FunctionalTensor(torch.Tensor):
             False,  # pin_memory
             elem.requires_grad,  # requires_grad
             "sizes",  # dispatch_sizes_strides_policy
-            False,  # dispatch_device
-            False,  # dispatch_layout
-            extra_dispatch_keys,  # _extra_dispatch_keys
         )
         out.elem = elem
         return out
@@ -231,11 +206,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
         with torch._C._SetExcludeDispatchKeyGuard(
             torch._C.DispatchKey.Functionalize, False
-        ), torch._C._SetExcludeDispatchKeyGuard(
-            torch._C.DispatchKey.ZeroTensor, False
-        ), torch._C._IncludeDispatchKeyGuard(
-            torch._C.DispatchKey.Functionalize
-        ):
+        ), torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Functionalize):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
                 old_apply_views = torch._functionalize_enable_reapply_views(True)
@@ -283,46 +254,3 @@ def unset_functional_temporarily():
     finally:
         if old is not None:
             torch._C._set_dispatch_mode(old)
-
-
-# This is similar to torch.func.functionalize, but:
-# - It uses FunctionalTensorMode, and FunctionalTensor (a python subclass).
-#   One important advantage to using this mode is that it will let us
-#   run functionalization underneath __torch_dispatch__,
-#   which we need in AOTAutograd.
-# - Doing so means that it does not automatically compose with other
-#   functorch transforms, since these transforms always run above __torch_dispatch__.
-#   That's why this util lives here, and not in functorch.
-def dispatch_functionalize(func):
-    # TODO: pull these from aot autograd
-    def to_fun(t):
-        if isinstance(t, torch.Tensor):
-            return FunctionalTensor.to_functional(t)
-        return t
-
-    def from_fun(t):
-        if not isinstance(t, FunctionalTensor):
-            # quick sanity assert
-            if isinstance(t, torch.Tensor):
-                assert not torch._is_functional_tensor(t)
-            return t
-        torch._sync(t)
-        return torch._from_functional_tensor(t.elem)
-
-    def inner(*args, **kwargs):
-        func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
-        func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
-
-        flattened_wrapped_args, _ = pytree.tree_flatten(func_args)
-        flattened_wrapped_kwargs, _ = pytree.tree_flatten(func_kwargs)
-
-        disable_above = torch._C._ExcludeDispatchKeyGuard(
-            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-        )
-        with disable_above, FunctionalTensorMode():
-            func_outputs = func(*func_args, **func_kwargs)
-            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
-
-            return outputs
-
-    return inner
