@@ -1045,7 +1045,8 @@ struct to_ir {
     TypePtr declared_return_type =
         def_stack_.back().declared_return_type_; // nullptr if not annotated
     auto actual_return = emitExpr(stmt.expr(), declared_return_type);
-
+    std::cout << "original stmt: " << actual_return->type()->repr_str() << std::endl;
+    std::cout << "actual_returnA: " << actual_return->type()->repr_str() << std::endl;
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1060,7 +1061,7 @@ struct to_ir {
             actual_return,
             /*allow_conversions=*/true);
       }
-      std::cout << "original stmt: " << actual_return->type()->repr_str() << std::endl;
+    std::cout << "original stmt: " << actual_return->type()->repr_str() << std::endl;
     std::cout << "actual_returnA: " << actual_return->type()->repr_str() << std::endl;
     std::cout << "declared_return_type: " << declared_return_type->repr_str() << std::endl;
       if (!actual_return->type()->isSubtypeOf(*declared_return_type)) {
@@ -4075,6 +4076,25 @@ struct to_ir {
         "reverseComparision: unsupported NodeKind. File a bug");
   }
 
+  void _flatten_union(const Expr& node, std::vector<Expr>* result) {
+  // flatten possibly nested union expressions like (int | (float | str))
+  // into a flat list of expressions like [int, float, str]
+  if (node.kind() == '|') {
+    auto as_binop = BinOp(node);
+    _flatten_union(as_binop.lhs(), result);
+    _flatten_union(as_binop.rhs(), result);
+  } else {
+    result->push_back(node);
+  }
+}
+
+std::vector<Expr> flatten_union(const Expr& node) {
+  std::vector<Expr> result;
+  _flatten_union(node, &result);
+  return result;
+}
+
+
   // any expression that can produce a SugaredValue is handled here
   // expressions that only return a single Value* are handled in emitSimpleExpr
   // type_hint is set if there is a type that this value is expected to be
@@ -4086,6 +4106,22 @@ struct to_ir {
       const Expr& tree,
       size_t n_binders,
       const TypePtr& type_hint = nullptr) {
+  if (tree.kind() == '|') {
+    // transform to equivalent union
+    auto binop = BinOp(tree);
+    // NOTE: in order to support unions with more than 2 operands, we need to
+    // recursively flatten the tree of | expressions.
+    auto members = flatten_union(tree);
+
+    auto synthesised_union = Subscript::create(
+        tree.range(),
+        Var::create(tree.range(), Ident::create(tree.range(), "Union")),
+        List<Expr>::create(tree.range(), members));
+    //    std::cout << "\n <EXPR> synthesised_union:" << synthesised_union << "
+    //    <KIND> " << kindToString(synthesised_union.kind()) << "\n";
+    return emitSugaredExpr(synthesised_union, n_binders, type_hint);
+  }
+
     switch (tree.kind()) {
       case TK_VAR: {
         return environment_stack->getSugaredVar(Var(tree).name());

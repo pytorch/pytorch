@@ -264,43 +264,46 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
  * <KIND> |
  */
 
-void _flatten_union(const Expr& node, std::vector<Expr>* result) {
+inline void _flatten_pep604_union(const Expr& node, std::vector<Expr>* result) {
   // flatten possibly nested union expressions like (int | (float | str))
   // into a flat list of expressions like [int, float, str]
   if (node.kind() == '|') {
     auto as_binop = BinOp(node);
-    _flatten_union(as_binop.lhs(), result);
-    _flatten_union(as_binop.rhs(), result);
+    _flatten_pep604_union(as_binop.lhs(), result);
+    _flatten_pep604_union(as_binop.rhs(), result);
   } else {
     result->push_back(node);
   }
 }
 
-std::vector<Expr> flatten_union(const Expr& node) {
+std::vector<Expr> flattened_pep604_union(const Expr& node) {
   std::vector<Expr> result;
-  _flatten_union(node, &result);
+  _flatten_pep604_union(node, &result);
   return result;
 }
 
-TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
-//  std::cout << "\n\nparseTypeFromExprImpl"
-//            << "\n";
-//  std::cout << "<EXPR> expr:" << expr << " <KIND> " << kindToString(expr.kind())
-//            << "\n";
-  if (expr.kind() == '|') {
-    // transform to equivalent union
-    auto binop = BinOp(expr);
-    // NOTE: in order to support unions with more than 2 operands, we need to
-    // recursively flatten the tree of | expressions.
-    auto members = flatten_union(expr);
+Expr flatten_if_pep604union(const Expr& expr){
+  // Flattens a PEP 604 union into a classical union.
+  // For example, ((x | y) | z) is transformed into Union[x, y, z].
 
-    auto synthesised_union = Subscript::create(
-        expr.range(),
-        Var::create(expr.range(), Ident::create(expr.range(), "Union")),
-        List<Expr>::create(expr.range(), members));
-    //    std::cout << "\n <EXPR> synthesised_union:" << synthesised_union << "
-    //    <KIND> " << kindToString(synthesised_union.kind()) << "\n";
-    return parseTypeFromExpr(synthesised_union);
+  // noop if not a pep604 union
+  if (expr.kind() != '|')
+    return expr;
+
+  // In order to support unions with more than 2 operands ((x|y)|z), we need to
+  // recursively flatten the tree of | expressions.
+  auto members = flattened_pep604_union(expr);
+  auto synthesised_union = Subscript::create(
+      expr.range(),
+      Var::create(expr.range(), Ident::create(expr.range(), "Union")),
+      List<Expr>::create(expr.range(), members)
+      );
+  return synthesised_union;
+}
+
+TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  if (expr.kind() == '|'){
+    return parseTypeFromExpr(flatten_if_pep604union(expr));
   }
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
