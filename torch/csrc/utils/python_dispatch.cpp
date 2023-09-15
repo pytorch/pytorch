@@ -211,7 +211,7 @@ static py::object ophandle_call_boxed(
 // exclude set.
 class SetExcludeDispatchKeyGuard {
  public:
-  SetExcludeDispatchKeyGuard(DispatchKey k, bool set_excluded)
+  SetExcludeDispatchKeyGuard(at::DispatchKey k, bool set_excluded)
       : k(k), old(c10::impl::tls_is_dispatch_key_excluded(k)) {
     c10::impl::tls_set_dispatch_key_excluded(k, set_excluded);
   }
@@ -225,7 +225,7 @@ class SetExcludeDispatchKeyGuard {
   SetExcludeDispatchKeyGuard operator=(SetExcludeDispatchKeyGuard&&) = delete;
 
  private:
-  DispatchKey k;
+  at::DispatchKey k;
   bool old;
 };
 
