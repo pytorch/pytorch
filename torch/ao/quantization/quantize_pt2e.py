@@ -11,9 +11,7 @@ from .pt2e.utils import (
     _disallow_eval_train,
 )
 from .pt2e.representation import reference_representation_rewrite
-from .fx.prepare import prepare as fx_prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
-from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.quantizer import (  # noqa: F401
     Quantizer,
     QuantizationSpecBase,
@@ -23,10 +21,6 @@ from torch.ao.quantization.quantizer import (  # noqa: F401
     DerivedQuantizationSpec,
     QuantizationAnnotation,
 )
-from torch.ao.quantization.backend_config import BackendConfig
-
-from typing import Any, Tuple
-
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
 from torch.ao.quantization.pt2e.port_metadata_pass import PortNodeMetaForQDQ
@@ -37,27 +31,6 @@ __all__ = [
     "convert_pt2e",
 ]
 
-def _prepare_pt2e_deprecated(
-    model: GraphModule,
-    qconfig_mapping: QConfigMapping,
-    example_inputs: Tuple[Any, ...],
-    backend_config: BackendConfig,
-) -> GraphModule:
-    node_name_to_scope = _get_node_name_to_scope(model)
-
-    # TODO: check qconfig_mapping to make sure conv and bn are both configured
-    # to be quantized before fusion
-    # TODO: (maybe) rewrite this with subgraph_rewriter
-    _fuse_conv_bn_(model)
-    model = fx_prepare(
-        model,
-        qconfig_mapping,
-        False,  # is_qat
-        node_name_to_scope,
-        example_inputs,
-        backend_config=backend_config
-    )
-    return model
 
 def prepare_pt2e(
     model: GraphModule,
