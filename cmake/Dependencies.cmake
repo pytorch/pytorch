@@ -238,6 +238,7 @@ elseif(BLAS STREQUAL "Generic")
   find_library(APL_LIB NAMES armpl_ilp64 PATHS ${APL_LIB_SEARCH_PATHS})
   find_library(APL_FortranRuntime NAMES FortranRuntime PATHS ${APL_LIB_SEARCH_PATHS})
   find_library(APL_FortranDecimal NAMES FortranDecimal PATHS ${APL_LIB_SEARCH_PATHS})
+  
   set(APL_LIBRARIES ${APL_LIB} ${APL_FortranRuntime} ${APL_FortranDecimal})
   set(BLAS_LIBRARIES  ${APL_LIBRARIES})
   message("-- Using BLAS: ${BLAS_LIBRARIES}")
