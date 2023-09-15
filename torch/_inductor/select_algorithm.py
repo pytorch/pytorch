@@ -123,6 +123,7 @@ class TritonTemplateKernel(TritonKernel):
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
+            "origin_ops": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         triton_meta["kernel_name"] = str(Placeholder.DESCRIPTIVE_NAME)

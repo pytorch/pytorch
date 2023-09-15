@@ -860,10 +860,17 @@ class OriginOpInfo:
     torch_op: str
     aot_seq_nr: int
 
+    def __repr__(self):
+        return str(self.__dict__)
+
 
 @dataclass
 class OriginOpList:
     oi_list: List[OriginOpInfo]
+
+    def __repr__(self):
+        op_list = [op for op in self.oi_list]
+        return str(op_list)
 
     def codegen(self, code: IndentedBuffer, cm_stack: contextlib.ExitStack, line: str):
         with cm_stack as k_stack:

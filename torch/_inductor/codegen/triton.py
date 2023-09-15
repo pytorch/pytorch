@@ -1858,7 +1858,7 @@ class TritonKernel(Kernel):
 
         return result
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(self, name=None, node_schedule=None):
         from triton import next_power_of_2
 
         code = IndentedBuffer()
@@ -1922,6 +1922,9 @@ class TritonKernel(Kernel):
                 mutated_args.add(self.args.output_buffers[mutation])
         mutated_args = sorted(mutated_args)
 
+        op_info = None
+        if node_schedule:
+            op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
             "device": V.graph.scheduler.current_device.index,
@@ -1930,6 +1933,7 @@ class TritonKernel(Kernel):
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            "origin_ops":  str(op_info)
         }
 
         for tree in self.range_trees:
@@ -2456,9 +2460,6 @@ class TritonScheduling(BaseScheduling):
             # This will cause a with record_function to be emitted on the
             # next line
             op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
-            origin_ops = [
-                (op.op_type, op.mod_name, op.torch_op) for op in op_info.oi_list
-            ]
             wrapper.writeline(op_info)
 
     def codegen_comment(self, node_schedule):
@@ -2503,7 +2504,7 @@ class TritonScheduling(BaseScheduling):
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
         with V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
+            src_code = kernel.codegen_kernel(node_schedule=node_schedule)
 
             for node in node_schedule:
                 if node not in (EnableReduction, DisableReduction):
@@ -2512,7 +2513,6 @@ class TritonScheduling(BaseScheduling):
         kernel_name = self.define_kernel(src_code, node_schedule)
 
         self.codegen_comment(node_schedule)
-        self.codegen_insert_marker(node_schedule)
         kernel.call_kernel(kernel_name)
         V.graph.removed_buffers |= kernel.removed_buffers
 
@@ -2632,7 +2632,6 @@ class TritonScheduling(BaseScheduling):
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule)
         self.codegen_comment(node_schedule)
-        self.codegen_insert_marker(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
@@ -2673,10 +2672,9 @@ class TritonScheduling(BaseScheduling):
                             node.mark_run()
                 V.graph.removed_buffers |= subkernel.removed_buffers
 
-            src_code = kernel.codegen_kernel()
+            src_code = kernel.codegen_kernel(node_schedule=[foreach_node])
             kernel_name = self.define_kernel(src_code, [foreach_node])
             self.codegen_comment([foreach_node])
-            self.codegen_insert_marker([foreach_node])
             kernel.call_kernel(V.graph.wrapper_code, kernel_name)
 
         self.scheduler.free_buffers()
