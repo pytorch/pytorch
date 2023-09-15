@@ -448,7 +448,7 @@ template <typename scalar_t>
 inline scalar_t _nan_to_num_replace(
     scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
   if (at::_isnan(a)) {
-    return a;
+    return nan_replacement;
   } else if (a == std::numeric_limits<scalar_t>::infinity()) {
     return pos_inf_replacement;
   } else if (a == -std::numeric_limits<scalar_t>::infinity()) {
@@ -484,7 +484,7 @@ inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
 #if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
   return {_nan_to_num_replace(Vectorized<scalar_t>(a), nan, posinf, neginf)};
 #else
-  __at_align__ scalar_t buffer[a.size()];
+  __at_align__ c10::complex<scalar_t> buffer[a.size()];
   a.store(buffer);
   auto asreal = Vectorized<scalar_t>::loadu(buffer);
   _nan_to_num_replace(asreal, nan, posinf, neginf).store(buffer);
