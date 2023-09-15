@@ -1264,7 +1264,12 @@ unary_magic_methods = {
     'sym_not',
 }
 
-bool_magic_methods = {"and", "or", "sym_not"}
+# Most methods are only registered on SymInt and SymFloat
+# Some methods are only be registered on SymBool
+only_bool_magic_methods = {"and", "or", "sym_not"}
+# Methods that are also on SymBool, in addition to on SymInt and SymFloat
+also_bool_magic_methods = {"eq"}
+bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
@@ -1545,11 +1550,13 @@ def _make_user_magic(method, user_type):
             setattr(user_type, f"__r{method}__", rbinary_magic_impl)
 
 for method, func in magic_methods.items():
-    if method in bool_magic_methods:
+    if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
-    else:
-        _make_user_magic(method, SymInt)
-        _make_user_magic(method, SymFloat)
+        continue
+    if method in also_bool_magic_methods:
+        _make_user_magic(method, SymBool)
+    _make_user_magic(method, SymInt)
+    _make_user_magic(method, SymFloat)
 
 del method
 del func

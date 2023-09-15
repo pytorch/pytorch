@@ -389,22 +389,17 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __eq__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
         return str(self.node)
-
-    def __eq__(self, other):
-        if self.node.is_constant():
-            if isinstance(other, builtins.bool):
-                return self.node.bool_() == other
-            elif isinstance(other, SymBool) and other.node.is_constant():
-                return self.node.bool_() == other.node.bool_()
-        return self is other
 
     def __hash__(self):
         if self.node.is_constant():
             return hash(self.node.bool_())
         else:
-            return object.__hash__(self)
+            raise TypeError("unhashable type: SymBool")
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.
