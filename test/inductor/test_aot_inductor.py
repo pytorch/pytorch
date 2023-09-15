@@ -9,6 +9,7 @@ import torch._inductor
 
 import torch.fx._pytree as fx_pytree
 from torch._dynamo.testing import same
+from torch._inductor import config
 from torch._inductor.utils import aot_inductor_launcher
 
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
@@ -17,6 +18,16 @@ from torch.utils import _pytree as pytree
 
 aten = torch.ops.aten
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+try:
+    try:
+        from . import test_torchinductor
+    except ImportError:
+        import test_torchinductor
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 
 class AOTInductorModelRunner:
@@ -104,7 +115,39 @@ class AOTInductorModelRunner:
         return list_output_tensors
 
 
-class AotInductorTests(TestCase):
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+    options=None,
+    constraints=None,
+):
+    expected = model(*example_inputs)
+    with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+        actual = AOTInductorModelRunner.run(
+            model, example_inputs, expected, options, constraints
+        )
+    self.assertTrue(same(actual, expected))
+
+
+def check_model_with_multiple_inputs(
+    self: TestCase,
+    model,
+    list_example_inputs,
+    options=None,
+    constraints=None,
+):
+    list_expected = [
+        (model(*example_inputs),) for example_inputs in list_example_inputs
+    ]
+    with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+        list_actual = AOTInductorModelRunner.run_multiple(
+            model, list_example_inputs, list_expected, options, constraints
+        )
+    self.assertTrue(same(list_actual, list_expected))
+
+
+class AOTInductorTestsTemplate:
     def test_simple(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -114,14 +157,11 @@ class AotInductorTests(TestCase):
             def forward(self, x, y):
                 return x + torch.nn.functional.linear(y, self.weight)
 
-        model = Repro()
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(Repro(), example_inputs)
 
     def test_large(self):
         class Repro(torch.nn.Module):
@@ -132,14 +172,11 @@ class AotInductorTests(TestCase):
             def forward(self, x, y):
                 return x + torch.nn.functional.linear(y, self.weight)
 
-        model = Repro()
         example_inputs = (
             torch.randn(1, 250112, device="cuda"),
             torch.randn(1, 512, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(Repro(), example_inputs)
 
     def test_with_offset(self):
         class Repro(torch.nn.Module):
@@ -155,14 +192,11 @@ class AotInductorTests(TestCase):
                     + self.tensor
                 )
 
-        model = Repro()
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(Repro(), example_inputs)
 
     def test_missing_output(self):
         class Repro(torch.nn.Module):
@@ -175,14 +209,11 @@ class AotInductorTests(TestCase):
                 c = torch.cos(b)
                 return c
 
-        model = Repro()
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(Repro(), example_inputs)
 
     def test_output_misaligned(self):
         class Repro(torch.nn.Module):
@@ -198,14 +229,11 @@ class AotInductorTests(TestCase):
                 x_sigmoid = torch.sigmoid(x_getitem)
                 return x_sigmoid, y_getitem
 
-        model = Repro()
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(Repro(), example_inputs)
 
     def test_dynamic_smem_above_default_limit(self):
         class Repro(torch.nn.Module):
@@ -253,6 +281,46 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    def test_aliased_buffer_reuse(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x = 2 * x
+                y = 2 * y
+                c = torch.cat([x, y], dim=-1)
+                d = 1 + c
+                m = torch.mm(d, d)
+                return m[:, :2] + x
+
+        example_inputs = (
+            torch.randn(4, 2, device="cuda"),
+            torch.randn(4, 2, device="cuda"),
+        )
+        self.check_model(Repro(), example_inputs)
+
+    def test_buffer_reuse(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.sin(x)
+                b = torch.cos(y)
+                c = torch.mm(a, b)
+                d = torch.relu(c)
+                e = torch.sigmoid(d)
+                f = torch.mm(x, y)
+                g = e + f
+                return g
+
+        example_inputs = (
+            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device="cuda"),
+        )
+        self.check_model(Repro(), example_inputs)
+
     def test_duplicated_params(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -278,7 +346,6 @@ class AotInductorTests(TestCase):
                 add_0 = x + y
                 return torch.nn.functional.relu(input=add_0, inplace=False)
 
-        model = Model()
         a = torch.randn(128, 2048, device="cuda")
         b = torch.randn(128, 2048, device="cuda")
         constraints = [
@@ -287,11 +354,7 @@ class AotInductorTests(TestCase):
             torch._export.dynamic_dim(a, 0) == torch._export.dynamic_dim(b, 0),
         ]
         example_inputs = (a, b)
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(
-            model, example_inputs, expected, constraints=constraints
-        )
-        self.assertTrue(same(actual, expected))
+        self.check_model(Model(), example_inputs, constraints=constraints)
 
     def test_poi_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -302,7 +365,6 @@ class AotInductorTests(TestCase):
                 add_0 = x + y
                 return torch.nn.functional.relu(input=add_0, inplace=False)
 
-        model = Model()
         a = torch.randn(128, 2048, device="cuda")
         b = torch.randn(128, 2048, device="cuda")
         constraints = [
@@ -323,13 +385,9 @@ class AotInductorTests(TestCase):
                 torch.randn(211, 2048, device="cuda"),
             ),
         )
-        list_expected = [
-            (model(*example_inputs),) for example_inputs in list_example_inputs
-        ]
-        list_actual = AOTInductorModelRunner.run_multiple(
-            model, list_example_inputs, list_expected, constraints=constraints
+        self.check_model_with_multiple_inputs(
+            Model(), list_example_inputs, constraints=constraints
         )
-        self.assertTrue(same(list_actual, list_expected))
 
     def test_addmm_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -360,20 +418,15 @@ class AotInductorTests(TestCase):
         list_example_inputs.append(
             (torch.randn(batch, M, K, device="cuda"),),
         )
-        list_expected = [
-            (model(*example_inputs),) for example_inputs in list_example_inputs
-        ]
-        list_actual = AOTInductorModelRunner.run_multiple(
+        self.check_model_with_multiple_inputs(
             model,
             list_example_inputs,
-            list_expected,
             constraints=constraints,
             options={
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
-        self.assertTrue(same(list_actual, list_expected))
 
     def test_bmm_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -410,20 +463,15 @@ class AotInductorTests(TestCase):
                 torch.randn(batch, K, N, device="cuda"),
             ),
         )
-        list_expected = [
-            (model(*example_inputs),) for example_inputs in list_example_inputs
-        ]
-        list_actual = AOTInductorModelRunner.run_multiple(
+        self.check_model_with_multiple_inputs(
             model,
             list_example_inputs,
-            list_expected,
             options={
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
             constraints=constraints,
         )
-        self.assertTrue(same(list_actual, list_expected))
 
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
@@ -457,13 +505,33 @@ class AotInductorTests(TestCase):
                 torch.randn(211, 2048, device="cuda"),
             ),
         )
-        list_expected = [
-            (model(*example_inputs),) for example_inputs in list_example_inputs
-        ]
-        list_actual = AOTInductorModelRunner.run_multiple(
-            model, list_example_inputs, list_expected, constraints=constraints
+        self.check_model_with_multiple_inputs(
+            model,
+            list_example_inputs,
+            constraints=constraints,
         )
-        self.assertTrue(same(list_actual, list_expected))
+
+
+class AOTInductorTestABICompatibile(TestCase):
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+
+
+test_torchinductor.copy_tests(
+    AOTInductorTestsTemplate, AOTInductorTestABICompatibile, "abi_compatible"
+)
+
+
+class AOTInductorTestNonABICompatible(TestCase):
+    abi_compatible = False
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+
+
+test_torchinductor.copy_tests(
+    AOTInductorTestsTemplate, AOTInductorTestNonABICompatible, "non_abi_compatible"
+)
 
 
 if __name__ == "__main__":

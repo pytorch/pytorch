@@ -834,6 +834,12 @@ def get_include_and_linking_paths(
                 )
             else:
                 macros = f"-D{macros}"
+
+        if aot_mode and cuda:
+            if macros is None:
+                macros = ""
+            macros += " -D USE_CUDA"
+
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]

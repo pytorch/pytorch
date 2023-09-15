@@ -141,7 +141,7 @@ class AOTInductorModelContainer {
   }
 
   void run(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<int64_t>>** output_shapes,
       cudaStream_t stream,
