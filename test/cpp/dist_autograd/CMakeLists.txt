@@ -10,12 +10,6 @@ if(USE_DISTRIBUTED AND NOT WIN32)
   target_link_libraries(test_dist_autograd PRIVATE torch gtest)
 
   if(USE_CUDA)
-    target_link_libraries(test_dist_autograd PRIVATE
-      ${CUDA_LIBRARIES}
-      ${CUDA_NVRTC_LIB}
-      ${CUDA_CUDA_LIB}
-      ${TORCH_CUDA_LIBRARIES})
-
     target_compile_definitions(test_dist_autograd PRIVATE "USE_CUDA")
   endif()
 

@@ -253,7 +253,7 @@ class AggregatedHeuristics:
         }
         heuristics = []
 
-        # Figure out which heuristic gave this test the highest priority
+        # Figure out which heuristic gave this test the highest priority (if any)
         highest_ranking_heuristic = None
         highest_ranking_heuristic_order: int = sys.maxsize
 
@@ -265,15 +265,19 @@ class AggregatedHeuristics:
             metrics["heuristic_name"] = heuristic_name
             heuristics.append(metrics)
 
-            if metrics[METRIC_ORDER_OVERALL] < highest_ranking_heuristic_order:
-                highest_ranking_heuristic = heuristic_name
-                highest_ranking_heuristic_order = metrics[METRIC_ORDER_OVERALL]
-
             if heuristic_results._get_test_relevance_group(test) in [
                 Relevance.HIGH,
                 Relevance.PROBABLE,
             ]:
                 num_heuristics_prioritized_by += 1
+
+                # "highest_ranking_heuristic" should only consider heuristics that actually prioritize the test.
+                # Sometimes an UNRANKED heuristic could be have an overall order above a PRIORITIZED heuristic
+                # because it was randomly sorted higher initially, while the heuristic that actually prioritized it
+                # used other data to determined it to be slighlty less relevant than other tests.
+                if metrics[METRIC_ORDER_OVERALL] < highest_ranking_heuristic_order:
+                    highest_ranking_heuristic = heuristic_name
+                    highest_ranking_heuristic_order = metrics[METRIC_ORDER_OVERALL]
 
         stats["heuristics"] = heuristics
 
