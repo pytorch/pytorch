@@ -978,10 +978,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(
-            self.expr, self.hint, fx_node=self.fx_node,
-            return_expr_if_has_unbacked_symint_and_concrete_val_is_int=True
-        )
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         if isinstance(r, sympy.Expr):
             return r
         else:
@@ -989,6 +986,7 @@ class SymNode:
                 return int(r)
             except Exception:
                 log.warning("Failed to convert to int: %s", r)
+                raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
@@ -1004,6 +1002,10 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        if isinstance(r, sympy.core.relational.Relational):
+            # NOTE: we do this unbacked symint replacement only to resolve bool guard,
+            # so any default value > 1 would work.
+            r = safe_expand(r.xreplace({s: sympy.Integer(2) for s in r.free_symbols}))
         try:
             return bool(r)
         except Exception:
@@ -3396,7 +3398,8 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(
-        self, expr: "sympy.Expr", *, unbacked_only: bool = False, replace_unbacked_with_default_size_hint: bool = False, compute_hint: bool = False
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False,
+        compute_hint: bool = False
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3490,13 +3493,6 @@ class ShapeEnv:
         if out.is_singleton():
             return out.lower
 
-        if replace_unbacked_with_default_size_hint:
-            unbacked_replace = {}
-            for s in new_expr.free_symbols:
-                # TODO(yf225): we do this only to resolve guard, so usually any default value > 1 would work
-                unbacked_replace[s] = sympy.Integer(32)
-            new_expr = safe_expand(new_expr.xreplace(unbacked_replace))
-
         return new_expr if unbacked_only else None
 
     @_lru_cache
@@ -3553,7 +3549,7 @@ class ShapeEnv:
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: "sympy.Expr", replace_unbacked_with_default_size_hint: bool = False):
+    def size_hint(self, expr: "sympy.Expr"):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
         Does not introduce a guard, so only use this when you can guarantee that
@@ -3564,12 +3560,9 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(
                 result_expr,
                 compute_hint=True,
-                unbacked_only=replace_unbacked_with_default_size_hint,
-                replace_unbacked_with_default_size_hint=replace_unbacked_with_default_size_hint,
             )
             if r is not None:
                 return r
-            raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
     # NB: keep in sync with size_hint
@@ -3765,13 +3758,14 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None, return_expr_if_has_unbacked_symint_and_concrete_val_is_int=False):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):  # , return_expr_if_has_unbacked_symint_and_concrete_val_is_int=False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if self.has_unbacked_symint(orig_expr):
-            concrete_val = self.size_hint(orig_expr, replace_unbacked_with_default_size_hint=True)
-        elif hint is None:
+        # if self.has_unbacked_symint(orig_expr):
+        #     concrete_val = self.size_hint(orig_expr, replace_unbacked_with_default_size_hint=True)
+        # elif hint is None:
+        if hint is None:
             concrete_val = self.size_hint(orig_expr)
         else:
             concrete_val = sympy.sympify(hint)
@@ -3829,19 +3823,12 @@ class ShapeEnv:
 
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
-                # Attempt to eliminate the unbacked SymInt
-                new_expr = self._maybe_evaluate_static(
-                    expr,
-                    unbacked_only=True,
-                    # NOTE: only replace unbacked SymInt with default size when we are evaluating a guard
-                    replace_unbacked_with_default_size_hint=(concrete_val in [sympy.true, sympy.false]),
-                )
-                # new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                    # NOTE: in guard_int case, instead of raising "data-dependent" error, we pass if concrete_val is int
-                    if isinstance(concrete_val, sympy.Integer) and return_expr_if_has_unbacked_symint_and_concrete_val_is_int:
+                    if torch._dynamo.config.capture_scalar_outputs:
                         return new_expr
-                    raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+                    else:
+                        raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
                 expr = new_expr
 
             self._check_frozen(expr, concrete_val)

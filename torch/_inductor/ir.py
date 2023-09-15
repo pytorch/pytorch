@@ -5488,8 +5488,7 @@ class StorageBox(MutableBox):
             return any((op + "(") in fn_str for op in heavy_ops)
 
         if (
-            # NOTE: it can be i8 * i9, so need to evaluate the expression
-            V.graph.sizevars.shape_env.evaluate_expr(sympy.Gt(users, 1))
+            V.graph.sizevars.shape_env._maybe_evaluate_static(sympy.Gt(users, 1))
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold
