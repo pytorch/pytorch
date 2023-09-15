@@ -23,7 +23,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
-#include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <memory>
 #include <numeric>

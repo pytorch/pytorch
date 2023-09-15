@@ -22,14 +22,20 @@ extern "C" {
 
 AOTInductorError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
-    size_t num_models) {
+    size_t num_models,
+    bool is_cpu,
+    const char* cubin_dir) {
   if (num_models == 0) {
-    LOG(ERROR) << "num_models must be positive, but got 0";
+    std::cerr << "Error: num_models must be positive, but got 0" << std::endl;
     return AOTInductorError::Failure;
   }
   CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::optional<std::string> cubin_dir_opt;
+    if (cubin_dir != nullptr) {
+      cubin_dir_opt.emplace(cubin_dir);
+    }
     auto* container =
-        new torch::aot_inductor::AOTInductorModelContainer(num_models);
+        new torch::aot_inductor::AOTInductorModelContainer(num_models, is_cpu, cubin_dir_opt);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
@@ -51,6 +57,7 @@ AOTInductorError AOTInductorModelContainerRun(
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
+    AOTInductorParamShape* output_shapes,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle) {
   auto* container =
@@ -75,8 +82,14 @@ AOTInductorError AOTInductorModelContainerRun(
 
   torch::aot_inductor::ProxyExecutor* proxy_executor = reinterpret_cast<torch::aot_inductor::ProxyExecutor*>(proxy_executor_handle);
 
-  CONVERT_EXCEPTION_TO_ERROR_CODE(
-      { container->run(input_tensors, output_tensors, stream, proxy_executor); })
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::vector<std::vector<int64_t>> *shapes;
+    container->run(input_tensors, output_tensors, &shapes, stream, proxy_executor);
+    for (size_t i = 0; i < num_outputs; i++) {
+      output_shapes[i] =
+          AOTInductorParamShape((shapes->at(i)).data(), (shapes->at(i)).size());
+    }
+  })
 }
 
 AOTInductorError AOTInductorModelContainerGetNumInputs(

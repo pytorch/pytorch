@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo.exc import CondOpArgsMismatchError
+from torch._dynamo.utils import disable_cache_limit
 
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -25,10 +26,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
-)
+from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
 @contextmanager
@@ -127,7 +125,7 @@ def cond(pred, true_fn, false_fn, operands):
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
-        if not isinstance(pred, (bool, torch.Tensor)):
+        if not isinstance(pred, (bool, torch.Tensor, torch.SymBool)):
             raise RuntimeError(f"Expected pred to be bool or tensor, but got {pred}.")
 
         if isinstance(pred, torch.Tensor) and pred.numel() != 1:
@@ -151,9 +149,10 @@ def cond(pred, true_fn, false_fn, operands):
         raise RuntimeError("torch.cond requires dynamo support.")
 
     with _set_compilation_env():
-        return torch.compile(cond_op, backend="eager", fullgraph=True)(
-            pred, true_fn, false_fn, operands
-        )
+        with disable_cache_limit():
+            return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                pred, true_fn, false_fn, operands
+            )
 
 
 """
@@ -279,35 +278,19 @@ cond_op.py_impl(DispatchKey.Autograd)(
 
 
 @cond_op.py_impl(ProxyTorchDispatchMode)
-def inner(pred, true_fn, false_fn, operands):
-    # TODO Move this to proper utility function
-    from torch._ops import mode_stack_per_key, temporarily_pop_mode
-
-    # torch.cond expects ProxyTorchDispatchMode to **still** be on the stack
-    # at the time that its proxy implementation is called.
-    # However, the mode can live in one of two places, depending on
-    # whether we're doing pre_dispatch tracing or normal tracing.
-    pre_dispatch_modes = mode_stack_per_key().get(DispatchKey.PreDispatch, [])  # type: ignore[attr-defined]
-    if len(pre_dispatch_modes) > 0:
-        with temporarily_pop_mode(pre_dispatch_modes) as mode:
-            if mode.enable_tracing:
-                return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
-            else:
-                return cond_op(pred, true_fn, false_fn, operands)
-    mode = _get_current_dispatch_mode()
-    assert mode is not None, "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
-        else:
-            return cond_op(pred, true_fn, false_fn, operands)
+def inner(mode, pred, true_fn, false_fn, operands):
+    if mode.enable_tracing:
+        return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
+    else:
+        return cond_op(pred, true_fn, false_fn, operands)
 
 
 @cond_op.py_impl(FakeTensorMode)
-def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
-    true_outs = true_fn(*operands)
-    flat_true_outs, _ = pytree.tree_flatten(true_outs)
-    flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
+def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
+    with mode:
+        true_outs = true_fn(*operands)
+        flat_true_outs, _ = pytree.tree_flatten(true_outs)
+        flat_false_outs, _ = pytree.tree_flatten(false_fn(*operands))
     if len(flat_true_outs) != len(flat_false_outs):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
