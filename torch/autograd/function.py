@@ -542,11 +542,12 @@ class Function(_SingleLevelFunction):
             return bound_args.args
 
         is_setup_ctx_defined = cls.setup_context != _SingleLevelFunction.setup_context
+        if is_setup_ctx_defined:
+            args = bind_default_args(cls.forward, *args, **kwargs)
+
         if not torch._C._are_functorch_transforms_active():
             # See NOTE: [functorch vjp and autograd interaction]
             args = _functorch.utils.unwrap_dead_wrappers(args)
-            if is_setup_ctx_defined:
-                args = bind_default_args(cls.forward, *args, **kwargs)
             return super().apply(*args, **kwargs)  # type: ignore[misc]
 
         if not is_setup_ctx_defined:
