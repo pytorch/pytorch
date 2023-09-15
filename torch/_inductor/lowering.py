@@ -4501,7 +4501,7 @@ def reduce_any(x, dim=None, keepdim=False):
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
 
 
-@register_lowering(aten.max)
+@register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
         return (
@@ -4512,7 +4512,7 @@ def reduce_max(x, dim=None, keepdim=False):
     return reduce_amax(x, axis=None, keepdims=keepdim)
 
 
-@register_lowering(aten.min)
+@register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
         return (
