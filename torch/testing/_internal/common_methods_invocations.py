@@ -4274,6 +4274,7 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad, **kwargs
         align_corners_options = (True, False, None)
     ranks_for_mode = {
         'nearest': [1, 2, 3],
+        'nearest-exact': [1, 2, 3],
         'linear': [1],
         'bilinear': [2],
         'bicubic': [2],
@@ -8119,7 +8120,10 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
 
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype)
-    make_prob = partial(make, low=0, high=1)
+    # Lower bounds must be greater than 'eps' defined in gradcheck.py::gradgradcheck() -> eps
+    # otherwise perturbation calculation causes Tensor value to become negative triggering
+    # a device-side hardware assertion
+    make_prob = partial(make, low=1e-6, high=1)
 
     reductions = ("mean", "sum", "none")
 
@@ -12951,6 +12955,34 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
+           variant_test_name='nearest-exact',
+           supports_autograd=True,
+           supports_fwgrad_bwgrad=True,
+           supports_forward_ad=True,
+           dtypes=floating_types_and(torch.uint8),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16, torch.uint8),
+           sample_inputs_func=partial(sample_inputs_interpolate, 'nearest-exact'),
+           skips=(
+               # RuntimeError: false
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
+               # please report a bug to PyTorch.
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: aten::_upsample_nearest_exact*d hit the vmap fallback which is currently disabled
+               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
+               # MissingOperatorWithoutDecomp: missing lowering
+               DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+               # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.expectedFailure, 'TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive'),
+               # NotImplementedError: The operator 'aten::_upsample_nearest_exact3d.out' is not currently implemented
+               # for the MPS device.
+               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
+           ),
+           supports_out=False),
+    OpInfo('nn.functional.interpolate',
+           aten_name="interpolate",
            variant_test_name='linear',
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
@@ -14015,15 +14047,6 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
                 "TestJit",
                 "test_variant_consistency_jit",
-            ),
-            # https://github.com/pytorch/pytorch/issues/98431
-            # ROCM fails with Device-side assertion `target_val >= zero && target_val <= one' failed
-            # even though sample inputs for target are generated with low=0 and high=1
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestFwdGradients",
-                "test_fn_fwgrad_bwgrad",
-                active_if=TEST_WITH_ROCM,
             ),
             DecorateInfo(
                 unittest.skip("Skipped!"),

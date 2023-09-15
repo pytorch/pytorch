@@ -57,8 +57,6 @@ def handlers():
         sympy.Min: "minimum",
         sympy.Max: "maximum",
         ModularIndexing: "modular_indexing",
-        sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
-        sympy.Piecewise: "piecewise",
     }
     return HANDLERS
 
