@@ -19,7 +19,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .. import metrics
 from ..utils import (
     DeferredLineBase,
-    do_bench_using_profiling,
+    do_bench,
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
@@ -1065,7 +1065,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench_using_profiling(lambda: algo(*args, out=out))
+        return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
         raise NotImplementedError()

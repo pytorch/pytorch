@@ -26,7 +26,7 @@ from .codegen.triton import texpr, TritonKernel, TritonPrinter, TritonScheduling
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
 from .utils import (
-    do_bench_using_profiling,
+    do_bench,
     Placeholder,
     sympy_dot,
     sympy_product,
@@ -645,7 +645,7 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench_using_profiling(lambda: algo(*args))
+            return do_bench(lambda: algo(*args))
 
     def to_callable(self):
         fn = self.choice.to_callable()
