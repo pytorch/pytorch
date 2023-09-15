@@ -50,6 +50,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
+    IS_WINDOWS,
+    IS_MACOS,
 )
 
 def tensor_N(shape, dtype=float):
@@ -413,6 +415,7 @@ class TestTensorBoardSummary(BaseTestCase):
         summary.video('dummy', np.random.rand(16, 48, 1, 28, 28))
         summary.video('dummy', np.random.rand(20, 7, 1, 8, 8))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_audio(self):
         self.assertTrue(compare_proto(summary.audio('dummy', tensor_N(shape=(42,))), self))
 
@@ -784,6 +787,7 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
 class TestTensorBoardNumpy(BaseTestCase):
+    @unittest.skipIf(IS_WINDOWS, "Skipping on windows, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
