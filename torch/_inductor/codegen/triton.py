@@ -2096,6 +2096,9 @@ class TritonKernel(Kernel):
     def call_kernel(self, name: str, node: IRNode = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
+
+        call_args.extend(sorted(self.unbacked_symints, key=str))
+
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -2112,8 +2115,6 @@ class TritonKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
-
-        call_args.extend(sorted(self.unbacked_symints, key=str))
 
         wrapper.generate_kernel_call(
             name,

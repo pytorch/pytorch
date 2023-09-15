@@ -341,9 +341,9 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if lv == rv:
+        if self.shape_env.evaluate_expr(sympy.Eq(lv, rv)):
             return self.guard_equals(left, right)
-        elif lv < rv:
+        elif self.shape_env.evaluate_expr(sympy.Lt(lv, rv)):
             self.guard_lt(left, right)
             return left
         else:
