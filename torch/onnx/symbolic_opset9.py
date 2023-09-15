@@ -6152,13 +6152,14 @@ def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = N
         raise errors.SymbolicValueError(
             f"Unsupported indexing: {indexing}", tensor_list
         )
+    unpacked_tensor_list = symbolic_helper._unpack_list(tensor_list)
     if indexing == "xy":
-        tensor_list[0], tensor_list[1] = tensor_list[1], tensor_list[0]
+        unpacked_tensor_list[:2] = unpacked_tensor_list[1::-1]
     tensors = [
         symbolic_helper._reshape_helper(
             g, t, g.op("Constant", value_t=torch.LongTensor([-1]))
         )
-        for t in symbolic_helper._unpack_list(tensor_list)
+        for t in unpacked_tensor_list
     ]
     tensors_shape = [g.op("Shape", t) for t in tensors]
     out_shape = g.op("Concat", *tensors_shape, axis_i=0)
