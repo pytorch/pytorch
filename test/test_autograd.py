@@ -9989,6 +9989,27 @@ class TestAutogradDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 s1.mul_(s2)
 
+    def test_inplace_on_view_undefined_grad_output(self, device):
+        a = torch.tensor([1.], requires_grad=True)
+        c = a.clone()
+        v = c[:]
+        b = torch.tensor(1., requires_grad=True)
+
+        class InplaceFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, other):
+                ctx.mark_dirty(x)
+                return x.mul_(2)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2, None
+
+        out = InplaceFunc.apply(v, b)
+        out.backward()
+        self.assertIsNone(b.grad)
+        self.assertEqual(a.grad.item(), 2)
+
     @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_mv_grad_stride_0(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/38315

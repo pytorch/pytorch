@@ -927,3 +927,9 @@ class TestUnique:
         not_unq = np.unique(a, equal_nan=False)
         assert_array_equal(unq, np.array([1, np.nan]))
         assert_array_equal(not_unq, np.array([1, np.nan, np.nan, np.nan]))
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

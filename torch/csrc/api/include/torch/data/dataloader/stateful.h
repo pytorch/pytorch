@@ -38,7 +38,7 @@ class StatefulDataLoader : public DataLoaderBase<
   StatefulDataLoader(Dataset dataset, DataLoaderOptions options)
       : super(
             std::move(options),
-            torch::make_unique<Dataset>(std::move(dataset))) {
+            std::make_unique<Dataset>(std::move(dataset))) {
     for (const auto w : c10::irange(this->options_.workers)) {
       // As opposed to the stateless case, here all worker threads access the
       // same underlying dataset.
