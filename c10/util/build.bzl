@@ -17,6 +17,7 @@ def define_targets(rules):
         name = "base",
         srcs = rules.glob(
             ["*.cpp"],
+            ["unwind/*.cpp"],
             exclude = [
                 "TypeCast.cpp",
                 "typeid.cpp",
@@ -24,6 +25,7 @@ def define_targets(rules):
         ),
         hdrs = rules.glob(
             ["*.h"],
+            ["unwind/*.h"],
             exclude = [
                 "TypeCast.h",
                 "typeid.h",
