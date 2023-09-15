@@ -98,7 +98,7 @@ class MultiUserConvOp(nn.Module):
 
 class EfficientConvBNEvalTemplate(TestCase):
     def test_basic(self):
-        def test_conv_bn_eval(test_class, use_bias, module):
+        def test_conv_bn_eval(test_class, use_bias, module, sync_bn):
             mod_eager = test_class(
                 module[0],
                 module[1],
@@ -109,6 +109,8 @@ class EfficientConvBNEvalTemplate(TestCase):
                 kernel_size=3,
                 stride=2,
             ).eval()
+            if sync_bn:
+                mod_eager = nn.SyncBatchNorm.convert_sync_batchnorm(mod_eager).eval()
             torch._dynamo.reset()
             mod_optimized = torch.compile(mod_eager)
 
@@ -137,10 +139,11 @@ class EfficientConvBNEvalTemplate(TestCase):
             (nn.Conv3d, nn.BatchNorm3d),
         ]
         test_classes = [ConvOp, MultiUserConvOp]
-        for test_class, use_bias, module in itertools.product(
-            test_classes, conv_bias, modules
+        sync_bns = [True, False]
+        for test_class, use_bias, module, sync_bn in itertools.product(
+            test_classes, conv_bias, modules, sync_bns
         ):
-            test_conv_bn_eval(test_class, use_bias, module)
+            test_conv_bn_eval(test_class, use_bias, module, sync_bn)
 
 
 if HAS_CPU and not torch.backends.mps.is_available():
