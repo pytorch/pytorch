@@ -377,10 +377,8 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
-            print(f"out: {out}")
-            return out
             log.debug("failed on: %s", out)
-            raise
+            return out
 
     def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
         return tuple(self.size_hint(x) for x in exprs)

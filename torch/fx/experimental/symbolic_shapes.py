@@ -987,7 +987,6 @@ class SymNode:
         except Exception:
             log.warning("Failed to convert to int: %s", r)
             return r
-            raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
@@ -2132,7 +2131,6 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
-        self.dynamic_scalars: Set[str] = set()
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -3765,8 +3763,6 @@ class ShapeEnv:
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        print(f"orig_expr: {orig_expr}")
-
         if any(str(x).startswith("i") for x in orig_expr.free_symbols):
             concrete_val = self.size_hint(orig_expr, replace_unbacked_with_default_size_hint=True)
         elif hint is None:

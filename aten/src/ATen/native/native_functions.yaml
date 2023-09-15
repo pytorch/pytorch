@@ -7478,7 +7478,6 @@
   tags: [core, data_dependent_output]
   dispatch:
     CPU: _local_scalar_dense_cpu
-    # Meta: _local_scalar_dense_meta
     CUDA: _local_scalar_dense_cuda
     MPS: _local_scalar_dense_mps
   variants: function

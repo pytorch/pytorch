@@ -3756,7 +3756,6 @@ class DynamicScalar(ExternKernelAlloc):
         self.symint = V.graph.sizevars.shape_env.create_unbacked_symint()
         # TODO(yf225): we are assuming all .item / .tolist are passed in as sizes and not values (since for values, they can be <1)
         torch.fx.experimental.symbolic_shapes.constrain_range(self.symint, min=1, max=sys.maxsize - 1)
-        # V.graph.sizevars.shape_env.dynamic_scalars.add(str(self.symint))
 
     def should_allocate(self):
         return False

@@ -4619,8 +4619,6 @@ def zeros(
     if dtype is None:
         dtype = torch.get_default_dtype()
 
-    print(f"size: {size}")
-
     return torch.full(
         size,
         False if dtype == torch.bool else 0,
