@@ -352,7 +352,7 @@ if HAS_PYDOT:
                 if buf_meta is not None and buf_meta.n_origin > 1:
                     buf_name = buf_meta.name
                     if buf_name not in buf_name_to_subgraph:
-                        buf_name_to_subgraph[buf_name] = pydot.Cluster(buf_name)
+                        buf_name_to_subgraph[buf_name] = pydot.Cluster(buf_name, label=buf_name)
                     current_graph = buf_name_to_subgraph.get(buf_name)
 
                 current_graph.add_node(dot_node)
@@ -397,6 +397,12 @@ else:
     if not TYPE_CHECKING:
         @compatibility(is_backward_compatible=False)
         class FxGraphDrawer:
-            def __init__(self, graph_module: torch.fx.GraphModule, name: str, ignore_getattr: bool = False):
+            def __init__(
+                self,
+                graph_module: torch.fx.GraphModule,
+                name: str,
+                ignore_getattr: bool = False,
+                parse_stack_trace: bool = False,
+            ):
                 raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
                                    'pydot through your favorite Python package manager.')
