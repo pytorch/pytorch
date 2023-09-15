@@ -219,6 +219,8 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
+# TODO(janimesh) - Remove as once internal is not reliant on this flag. This
+# flag has no meaning now after nn_module_guard is introduced.
 skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
@@ -226,9 +228,6 @@ raise_on_ctx_manager_usage = True
 
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
-
-# Throw an error if backend changes without reset
-raise_on_backend_change = False
 
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.

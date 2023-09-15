@@ -5,13 +5,13 @@ import operator
 import sympy
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
-from torch._dynamo.exc import TorchDynamoException
 import torch.fx
 import torch.fx.traceback as fx_traceback
 
+from torch._dynamo.exc import TorchDynamoException
 from torch.fx.node import Argument, Target
 from torch.utils._sympy.interp import sympy_interp
 
@@ -144,7 +144,7 @@ try:
     # Python. Therefore, in order to get it right, we need to implement
     # the (Python) semantics we are relying on in Z3.
     @dataclass
-    class Z3Ops:
+    class _Z3Ops:
         # Validator used for adding assertions as needed.
         # e.g. div(a, b) requires b != 0.
         validator: "TranslationValidator"
@@ -165,20 +165,20 @@ try:
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
-            return Z3Ops.to_real(numerator) / Z3Ops.to_real(denominator)
+            return _Z3Ops.to_real(numerator) / _Z3Ops.to_real(denominator)
 
         def floor(self, number: z3.ArithRef) -> z3.ArithRef:
             # Z3 ToInt function rounds a real number towards negative infinity.
-            return Z3Ops.to_int(number)
+            return _Z3Ops.to_int(number)
 
         # Python semantics for 'FloorDiv' states that before applying the floor
         # function, the operands are converted to their common type.
         def floordiv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             cast_result_to_real = numerator.is_real() or denominator.is_real()
-            result = Z3Ops.to_int(self.div(numerator, denominator))
+            result = _Z3Ops.to_int(self.div(numerator, denominator))
             # Since the 'result' is already an integer, we just have to check
             # whether we should cast it to real.
-            return Z3Ops.to_real(result) if cast_result_to_real else result
+            return _Z3Ops.to_real(result) if cast_result_to_real else result
 
         def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.If(
@@ -206,7 +206,7 @@ try:
         def sqrt(self, number: z3.ArithRef) -> z3.ArithRef:
             # Square-root:
             # 1. Only work with reals
-            number = Z3Ops.to_real(number)
+            number = _Z3Ops.to_real(number)
             # 2. The number should be positive or zero.
             #    Otherwise, Z3 returns 'unknown'.
             self.validator.add_assertion(number >= 0)
@@ -254,7 +254,7 @@ try:
 
             return wrapper
 
-        ops = Z3Ops(validator)
+        ops = _Z3Ops(validator)
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
@@ -325,7 +325,7 @@ try:
                 validator: "TranslationValidator",
         ) -> None:
             self._validator = validator
-            self._ops = Z3Ops(self._validator)
+            self._ops = _Z3Ops(self._validator)
 
         def constant(self, value: Any, dtype: torch.dtype) -> z3.ExprRef:
             if dtype is torch.int64:
@@ -526,15 +526,27 @@ try:
 
 except ImportError:
     _HAS_Z3 = False
+
+    __all__ = [
+        "translation_validation_enabled", "translation_validation_timeout",
+        "ValidationException", "BisectValidationException",
+    ]
+
 else:
     _HAS_Z3 = True
+
+    __all__ = [
+        "z3str", "z3op", "PopulateValidator", "SympyToZ3", "TranslationValidator",
+        "translation_validation_enabled", "translation_validation_timeout",
+        "ValidationException", "BisectValidationException",
+    ]
 
 from torch._dynamo import config
 
 def translation_validation_enabled() -> bool:
     # Checks everytime this function is called, in case the Dynamo
     # option is set, but Z3 is not installed.
-    assert_z3_installed_if_tv_set()
+    _assert_z3_installed_if_tv_set()
     return _HAS_Z3 and config.translation_validation
 
 
@@ -542,7 +554,7 @@ def translation_validation_timeout() -> int:
     return config.translation_validation_timeout
 
 
-def assert_z3_installed_if_tv_set():
+def _assert_z3_installed_if_tv_set():
     assert _HAS_Z3 or not config.translation_validation, (
         "translation validation requires Z3 package. Please, either install "
         "z3-solver or disable translation validation."
@@ -559,18 +571,167 @@ class ValidationException(TorchDynamoException):
         def joinlines(xs) -> str:
             return "\n".join(f"  ==> {x}" for x in xs)
 
-        model_str = joinlines(map(symbolstr, model))
-        assertions_str = joinlines(map(z3str, assertions))
-        target_exprs_str = joinlines(map(z3str, target_exprs))
-        failed_source_exprs_str = joinlines(map(z3str, failed_source_exprs))
+        model_str = joinlines(sorted(map(symbolstr, model)))
+        assertions_str = joinlines(sorted(map(z3str, assertions)))
+        target_exprs_str = joinlines(sorted(map(z3str, target_exprs)))
+        failed_source_exprs_str = joinlines(sorted(map(z3str, failed_source_exprs)))
 
-        super().__init__(
-            "translation validation failed.\n\n"
-            "Model:\n" + model_str + "\n\n"
-            "Assertions:\n" + assertions_str + "\n\n"
-            "Target Expressions:\n" + target_exprs_str + "\n\n"
-            "Failed Source Expressions:\n" + failed_source_exprs_str
-        )
+        self.msg = "translation validation failed."
+        self.details = f"""\
+Model:
+{model_str}
+
+Assertions:
+{assertions_str}
+
+Target Expressions:
+{target_exprs_str}
+
+Failed Source Expressions:
+{failed_source_exprs_str}"""
+
+    def __str__(self):
+        return f"{self.msg}\n\n{self.details}"
+
+
+class BisectValidationException(TorchDynamoException):
+    def __init__(self, validation_exc, expr, failed_action, traced_node):
+        self.msg = f"translation validation failed when {failed_action}: {expr}"
+        self.details = f"""\
+Failure ocurred while running node:
+    {traced_node.format_node()}
+
+{validation_exc.details}"""
+
+    def __str__(self):
+        return f"{self.msg}\n\n{self.details}"
 
 # Checks when this module is loaded.
-assert_z3_installed_if_tv_set()
+_assert_z3_installed_if_tv_set()
+
+# Translation validation bisection.
+#
+# Bisect into the torch._assert nodes recorded in the shape_env FX graph, and raise
+# the earliest ValidationException.
+#
+# As guards are added by ShapeEnv.evaluate_expr calls, some simplification errors
+# might be silently happening. This function tries to nail down exactly at which
+# point things went wrong from a validation perspective.
+def bisect(shape_env):
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv, SHAPEENV_EVENT_KEY, CURRENT_NODE_KEY
+    from torch.fx.experimental.recording import FakeTensorMeta, ShapeEnvEvent, replay_shape_env_events
+
+    events = shape_env.events
+
+    # Retrieves the ShapeEnvEvent associated with node.
+    def get_node_event(node: torch.fx.Node) -> ShapeEnvEvent:
+        assert SHAPEENV_EVENT_KEY in node.meta
+        return events[node.meta[SHAPEENV_EVENT_KEY]]
+
+    # Creates a new instance of fake, but updating every symbolic value's ShapeEnv
+    # reference to the one given as argument.
+    #
+    # This is needed so as not to simplify a symbolic expression using a ShapeEnv
+    # "from the future", where it may have a different set of replacements.
+    def new_with_shape_env(shape_env: ShapeEnv, fake) -> Any:
+        if isinstance(fake, int):
+            return fake
+        if isinstance(fake, torch.SymInt):
+            return torch.SymInt(fake.node.with_shape_env(shape_env))
+        assert isinstance(fake, FakeTensorMeta)
+        return FakeTensorMeta(
+            tuple(new_with_shape_env(shape_env, s) for s in fake.size()),
+            tuple(new_with_shape_env(shape_env, s) for s in fake.stride()),
+            new_with_shape_env(shape_env, fake.storage_offset()),
+        )
+
+    # Checks whether the given shape_env fails when produce_guards is called.
+    def check_shapeenv_fails(shape_env: ShapeEnv, tracked_fakes: Optional[List[Any]]) -> Optional[ValidationException]:
+        assert tracked_fakes is not None
+        try:
+            # This produce_guards call is a best-effort replication, since we
+            # don't populate EqualityConstraint list. Reason: we would also have
+            # to save OutputGraph.tracked_fakes_id_to_source.
+            shape_env.produce_guards(
+                [new_with_shape_env(shape_env, a.fake) for a in tracked_fakes],
+                [a.source for a in tracked_fakes],
+                constraint_inputs=[a.constraint_dims for a in tracked_fakes],
+            )
+            return None
+        except ValidationException as e:
+            return e
+
+    # Checks whether the ShapeEnv reconstructed by replaying the events until
+    # node is created fails when produce_guards is called.
+    def check_node_fails(node: torch.fx.Node) -> Optional[ValidationException]:
+        number = node.meta[SHAPEENV_EVENT_KEY]
+        # Reconstruct shape_env until the event at event_number.
+        shape_env = replay_shape_env_events(events[:number + 1])
+        shape_env.graph.lint()
+        return check_shapeenv_fails(shape_env, events[number].tracked_fakes)
+
+    last_exception = check_shapeenv_fails(shape_env, shape_env.snapshot_tracked_fakes())
+
+    if not last_exception:
+        # We don't actually fail due to a produce_guards call.
+        # Stop and don't bisect.
+        log.info("translation validation succeeded: no errors found.")
+        return
+
+    if not shape_env.should_record_events or torch._dynamo.config.translation_validation_no_bisect:
+        # Bisection is off.
+        # Return the last ValidationException we got.
+        raise last_exception
+
+    # Cache the raised exception (if any) at each bisection point.
+    exception = {}
+
+    # Bisection happens on the assertion nodes of the recorded FX graph for
+    # dynamic shapes.
+    assert_nodes = [node for node in shape_env.graph.nodes if node.target == torch._assert]
+
+    # Preparing the indices for binary search.
+    left, mid, right = 0, 0, len(assert_nodes) - 1
+
+    while left < right:
+        mid = (left + right) // 2
+
+        node = assert_nodes[mid]
+        log.debug("bisecting at %s: %s", mid, get_node_event(node))
+
+        # Check whether the new shape_env raises a ValidationException or not.
+        exception[mid] = check_node_fails(node)
+
+        if exception[mid]:
+            right = mid
+        else:
+            left = mid + 1
+
+    assert left in exception and isinstance(exception[left], ValidationException)
+
+    node = assert_nodes[left]
+    event = get_node_event(node)
+
+    if event.is_evaluate_expr():
+        failed_action = "evaluating"
+    else:
+        assert event.is_defer_runtime_assert(), f"unexpected event type: {event}"
+        failed_action = "adding runtime assert"
+
+    args = event.args
+    assert args is not None
+    assert len(args) >= 2, (
+        f"bisecting expects {event.name} to have at least 2 positional arguments. "
+        f"Got: {len(args)}"
+    )
+    assert isinstance(args[1], sympy.Basic), (
+        f"bisecting expects {event.name} to have a SymPy expression as its second argument. "
+        f"Got: {type(args[1])}"
+    )
+
+    raise BisectValidationException(
+        exception[left],
+        expr=args[1],
+        failed_action=failed_action,
+        traced_node=node.meta[CURRENT_NODE_KEY],
+    )
