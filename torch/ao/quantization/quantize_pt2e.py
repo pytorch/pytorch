@@ -1,4 +1,6 @@
+import torch
 from torch.fx import GraphModule
+from torch.fx import Node
 
 from .pt2e.prepare import prepare
 from .pt2e.qat_utils import (
@@ -67,6 +69,22 @@ def prepare_qat_pt2e(
     model = _disallow_eval_train(model)
     return model
 
+_QUANT_OPS = [
+    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+    torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+]
+def _quant_node_filter(n: Node) -> bool:
+    """If there is any pure ops between get_attr and quantize op they will be const propagated
+    e.g. get_attr(weight) -> transpose -> quantize -> dequantize*
+    (Note: dequantize op is not going to be constant propagated)
+
+    Note: this filter does not handle the case when there are any additional ops after quantize:
+    e.g. get_attr(weight) -> transpose1 -> quantize -> transpose2 -> dequantize*
+    this filter will filter out the above example since the last op in the sequence and we'll not
+    do constant propagation for  the above case.
+    """
+    return n.op == "call_function" and n.target in _QUANT_OPS
+
 def convert_pt2e(
     model: GraphModule,
     use_reference_representation: bool = False,
@@ -79,7 +97,7 @@ def convert_pt2e(
 
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
-    constant_fold(model)
+    constant_fold(model, _quant_node_filter)
     if use_reference_representation:
         model = reference_representation_rewrite(model)
 

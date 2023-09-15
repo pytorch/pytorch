@@ -1,5 +1,5 @@
 import collections
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -167,11 +167,14 @@ class ConstantFolder(torch.fx.Interpreter):
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def constant_fold(gm):
+def constant_fold(gm, filter_fn: Optional[Callable[[torch.fx.Node], bool]] = None):
     cf = ConstantFolder(gm, skip_constructors=True)
     cf.run()
 
     for node, constant in cf.node_replacements.items():
+        print("node:", node.format_node(), constant)
+        if filter_fn is not None and not filter_fn(node):
+            continue
         replace_node_with_constant(gm, node, constant)
 
     erased_params = []
