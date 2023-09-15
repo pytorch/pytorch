@@ -204,6 +204,16 @@ def sympy_dot(seq1, seq2):
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
+def compare_sympy_expr(a, b):
+    from .virtualized import V
+    if V.graph.sizevars.evaluate_expr(sympy.Lt(a, b)):
+        return -1
+    elif V.graph.sizevars.evaluate_expr(sympy.Gt(a, b)):
+        return 1
+    else:
+        return 0
+
+
 def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 

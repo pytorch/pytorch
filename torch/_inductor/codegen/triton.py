@@ -37,6 +37,7 @@ from ..utils import (
     sympy_symbol,
     unique,
     yellow_text,
+    compare_sympy_expr,
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -619,7 +620,13 @@ class IterationRangesRoot(IterationRanges):
         """Figure out vars from this tree used in index"""
         nodes = [V.kernel.range_tree_nodes.get(s) for s in index.free_symbols]
         nodes = [n for n in nodes if n and n.prefix == self.prefix]
-        nodes.sort(key=lambda x: V.graph.sizevars.size_hint(x.divisor))
+        nodes.sort(
+            key=functools.cmp_to_key(
+                lambda n1, n2: compare_sympy_expr(
+                    V.graph.sizevars.size_hint(n1.divisor), V.graph.sizevars.size_hint(n2.divisor)
+                )
+            )
+        )
         divisor = sympy.Integer(1)
         index_vars = []
         sizes = []
@@ -1053,11 +1060,9 @@ class TritonKernel(Kernel):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
-        try:
-            index = self.simplify_indexing(index)
-        except Exception as e:
-            # it will fail if it has unresolved unbacked symint
-            pass
+        # if not any(str(s).startswith("i") in index.free_symbols):
+            # WIP simplify_indexing requires sorting the divisor by
+        index = self.simplify_indexing(index)
         index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
         # if simple replacements didn't get rid of floor/ceil, try full subs
         if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
@@ -1080,11 +1085,8 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
-        try:
-            index = self.simplify_indexing(index)
-        except Exception as e:
-            # it will fail if it has unresolved unbacked symint
-            pass
+        # if not any(str(s).startswith("i") in index.free_symbols):
+        index = self.simplify_indexing(index)
         index_str = self.index_to_str(index)
 
         mask_vars: Set[str] = set()
@@ -1929,13 +1931,11 @@ class TritonKernel(Kernel):
                     arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
                 )
 
-        print(f"sorted(self.unbacked_symints)): {sorted(self.unbacked_symints, key=str)}")
-
         # NOTE: pass all unbacked symints used by the kernel into the kernel
         # TODO(yf225): should we disable autotune for kernels that takes unbacked symints, to reduce size-mismatch recompilation overhead?
         for k in sorted(self.unbacked_symints, key=str):
             arg = str(k)
-            sizearg = SizeArg(arg, arg)  # TODO(yf225): maybe we should actually pass in the unbacked symint symbol here?
+            sizearg = SizeArg(arg, k)
             signature.append(sizearg)
             argdefs.append(arg)
 
