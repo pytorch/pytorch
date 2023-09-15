@@ -470,6 +470,45 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         compiled_f(nt1, nt3)
         self.assertEqual(compile_count[0], 2)
 
+    def test_compile_pointwise_binary_is_dynamic(self):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+
+        def counter(gm, example_inputs):
+            compile_count[0] += 1
+            return gm
+
+        def fn(nt1, nt2):
+            if nt1.shape == nt2.shape:
+                return nt1 + nt2
+            else:
+                return nt1.sin()
+
+        compile_count = [0]
+        torch._dynamo.reset()
+
+        nt1, offsets = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], offsets)
+
+        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
+        compiled_f(nt1, nt2)
+
+        self.assertEqual(compile_count[0], 1)
+
+        d = torch.randn(3, 4, requires_grad=True, dtype=torch.float64)
+        e = torch.randn(4, 4, requires_grad=True, dtype=torch.float64)
+        f = torch.randn(5, 4, requires_grad=True, dtype=torch.float64)
+
+        nt3, offsets = jagged_from_list([d, e, f], None)
+        nt4, _ = jagged_from_list([d, e, f], offsets)
+
+        out = compiled_f(nt3, nt4)
+        expected = nt3 + nt4
+        self.assertEqual(out.offsets(), expected.offsets())
+        self.assertEqual(out.values(), expected.values())
+        self.assertEqual(compile_count[0], 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
