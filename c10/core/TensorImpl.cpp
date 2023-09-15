@@ -589,6 +589,12 @@ bool TensorImpl::has_storage() const {
 }
 #endif
 
+void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
+  // TODO: force backtrace to be printed on this error
+  TORCH_CHECK(
+      false, "Cannot call ", meth, "() on tensor with symbolic sizes/strides");
+}
+
 void TensorImpl::throw_storage_access_error() const {
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
