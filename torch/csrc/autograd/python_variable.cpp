@@ -26,6 +26,7 @@
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -69,7 +70,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   // right (but ideally, this would just be precomputed in FunctionSchema
   // itself).  (NB: minus one in the loop is because we're testing if the
   // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = arguments.size();
+  int64_t kwarg_only_start = static_cast<int64_t>(arguments.size());
   for (; kwarg_only_start > 0; kwarg_only_start--) {
     const auto& arg = schema.arguments()[kwarg_only_start - 1];
     if (!arg.kwarg_only()) {
@@ -78,7 +79,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   }
 
   // Find the first positional argument that isn't defaulted
-  auto is_default = [&](int64_t idx) -> bool {
+  auto is_default = [&](size_t idx) -> bool {
     const auto& arg = schema.arguments()[idx];
     if (!arg.default_value().has_value()) {
       return false;
@@ -101,7 +102,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   auto args =
       py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
 
-  auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
+  auto schemaAwareToPyObject = [&](size_t idx) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
       const auto& t = arg.real_type();
@@ -268,8 +269,9 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   }
 
   c10::optional<PyObject*> mb_obj =
-      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
-  c10::impl::PyInterpreterStatus status;
+      var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  c10::impl::PyInterpreterStatus status{};
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -345,7 +347,8 @@ bool isResurrectable(THPVariable* self) {
   }
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter()) != c10::make_optional((PyObject*)self)) {
+          getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
+      c10::make_optional((PyObject*)self)) {
     return false;
   }
   return true;
@@ -369,7 +372,16 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   TORCH_INTERNAL_ASSERT(
       !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
 
-  tensor.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(true);
+  c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  auto maybe_pyobj = tensor_impl->pyobj_slot()->check_pyobj(
+      getPyInterpreter(),
+      /*ignore_hermetic_tls=*/false);
+
+  TORCH_INTERNAL_ASSERT(
+      maybe_pyobj.has_value(),
+      "Trying to preserve a Python tensor whose PyObjectSlot does not have a PyObject");
+
+  tensor_impl->pyobj_slot()->set_owns_pyobj(true);
 
 // Resurrect the Python object.  This is something CPython does
 // internally occasionally, see
@@ -443,7 +455,8 @@ static int THPVariable_clear(THPVariable* self) {
 
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-            getPyInterpreter()) == c10::make_optional((PyObject*)self)) {
+            getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
+            c10::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -1051,15 +1064,14 @@ PyObject* THPVariable_get_names(PyObject* self, void* unused) {
   // The long-term plan is to return a list of (python) torch.Dimname.
   // However, for now, return a list of string.
   const auto& tensor = THPVariable_Unpack(self);
-  size_t size = tensor.dim();
+  auto size = tensor.dim();
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple)
     throw python_error();
 
   const auto dimnames = tensor.names();
   for (const auto i : c10::irange(size)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* str;
+    PyObject* str = nullptr;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
       // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
       // deallocated, it'll decrement the refcount on Py_None, which is bad.
@@ -1747,26 +1759,6 @@ PyObject* THPVariable_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-static void clear_slots(PyTypeObject* type, PyObject* self) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t i, n;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyMemberDef* mp;
-
-  n = Py_SIZE(type);
-  mp = type->tp_members;
-  for (i = 0; i < n; i++, mp++) {
-    if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
-      char* addr = (char*)self + mp->offset;
-      PyObject* obj = *(PyObject**)addr;
-      if (obj != nullptr) {
-        *(PyObject**)addr = nullptr;
-        Py_DECREF(obj);
-      }
-    }
-  }
-}
-
 // NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
 // on subclasses.  It's never valid to construct a THPVariable so it's not
 // necessary to implement the dealloc for that case
@@ -1886,8 +1878,8 @@ static PyObject* THPVariable_NewWithVar(
 
   // This function overwrite the Tensor's pyobj field without extra checks
   // Make sure it is not set otherwise we would leak memory
-  auto mb_obj =
-      _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+  auto mb_obj = _var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
 
   // Under some circumstances, we may attempt to create a new Python
   // object for a variable that already has a Python object.  The most common

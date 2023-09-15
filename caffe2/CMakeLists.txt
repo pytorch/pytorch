@@ -400,6 +400,7 @@ set(GENERATED_CXX_PYTHON
 
 set(GENERATED_H_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.h"
   )
 
 set(GENERATED_TESTING_PYTHON
@@ -630,8 +631,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
-  target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS

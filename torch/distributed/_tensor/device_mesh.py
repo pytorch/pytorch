@@ -72,7 +72,8 @@ class _MeshEnv:
 
     @staticmethod
     def num_hosts(device_type: str) -> int:
-        # assume homogeneous hardware for now
+        # ProcessGroup can't tell us this info so we have to infer it, assume
+        # homogeneous hardware for now
         return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
 
 

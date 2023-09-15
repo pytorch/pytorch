@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Callable, cast, Dict
+from typing import Callable, cast, Dict, Optional
 
 import torch
 from torch._ops import OpOverload
@@ -13,6 +13,7 @@ from torch.distributed._tensor.op_schema import (
     OutputSharding,
     OutputSpecType,
     PlacementStrategy,
+    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed._tensor.placement_types import TensorMeta
@@ -27,25 +28,35 @@ class ShardingPropagator:
             OpOverload,
             Callable[[DeviceMesh, OpSchema], StrategyType],
         ] = {}
+        # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
+        self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
         self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
-        self, op_overload: OpOverload, rule_func: Callable[[OpSchema], OutputSharding]
+        self,
+        op_overload: OpOverload,
+        rule_func: Callable[[OpSchema], OutputSharding],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a sharding propagation rule for an operator.
         """
         self.op_to_rules[op_overload] = rule_func
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
     def register_op_strategy(
         self,
         op_overload: OpOverload,
         strategy_func: Callable[[DeviceMesh, OpSchema], StrategyType],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
         Register a sharding strategy generator for an operator.
         """
         self.op_strategy_funcs[op_overload] = strategy_func
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
     def _propagate_tensor_meta(self, op_schema: OpSchema) -> object:
         """
@@ -151,9 +162,8 @@ class ShardingPropagator:
             op_strategy = self.op_strategy_funcs[op_schema.op](mesh, strategy_schema)
 
             assert isinstance(op_strategy, OpStrategy)
-            # we take the first strategy for now
-            # TODO: add a min cost selection logic
-            output_strategy = op_strategy.strategies[0]
+            output_strategy = self._select_strategy(op_strategy)
+
             needs_redistribute = False
             expected_input_specs = []
             for idx, input_spec in enumerate(op_schema.args_spec):
@@ -163,7 +173,7 @@ class ShardingPropagator:
                     else output_strategy.input_specs[idx]
                 )
                 expected_input_specs.append(desired_spec)
-                if input_spec != desired_spec:
+                if input_spec.placements != desired_spec.placements:
                     needs_redistribute = True
 
             suggestion_schema = None
@@ -172,11 +182,17 @@ class ShardingPropagator:
                 reshard_schema._inplace_rewrap_schema_suggestion(op_schema)
                 suggestion_schema = [reshard_schema]
 
-            output_spec: OutputSpecType = output_strategy.output_spec
-            if op_schema.op == aten.native_dropout.default:
+            if op_schema.return_type_tuple_tensors():
                 # for ops return multiple tensors, make output spec return same spec
                 # returned from the op strategy
-                output_spec = (output_strategy.output_spec, output_strategy.output_spec)
+                output_spec: OutputSpecType = tuple(
+                    [
+                        output_strategy.output_spec
+                        for _ in range(len(op_schema.op._schema.returns))
+                    ]
+                )
+            else:
+                output_spec = output_strategy.output_spec
 
             output_sharding = OutputSharding(
                 output_spec,
@@ -240,3 +256,9 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
+
+    def _select_strategy(self, strategy: OpStrategy) -> PlacementStrategy:
+        # for eager execution, we just select the one with the minimal redistributed cost
+        if len(strategy.strategies) == 1:
+            # short cut with only one possible strategy
+            return strategy.strategies[0]

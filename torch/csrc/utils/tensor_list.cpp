@@ -3,6 +3,7 @@
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_scalars.h>
 
@@ -40,9 +41,14 @@ static PyObject* recursive_to_list(
 }
 
 PyObject* tensor_to_list(const Tensor& tensor) {
-  TORCH_CHECK(
-      !tensor.unsafeGetTensorImpl()->is_python_dispatch(),
-      ".tolist() is not supported for tensor subclasses.");
+  {
+    py::object pytensor =
+        py::reinterpret_steal<py::object>(THPVariable_Wrap(tensor));
+    TORCH_CHECK(
+        !tensor.unsafeGetTensorImpl()->is_python_dispatch(),
+        ".tolist() is not supported for tensor subclasses, got ",
+        Py_TYPE(pytensor.ptr())->tp_name);
+  }
   Tensor data = tensor.resolve_conj().resolve_neg();
   if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;

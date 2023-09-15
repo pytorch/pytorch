@@ -10,6 +10,7 @@ from torch.distributed._tensor.op_schema import (
     OpStrategy,
     OutputSharding,
     PlacementStrategy,
+    RuntimeSchemaInfo,
 )
 from torch.distributed._tensor.ops.common_rules import pointwise_rule
 from torch.distributed._tensor.ops.utils import (
@@ -118,23 +119,21 @@ def common_reduction_strategy(
     # by default follow reduction input strategy
     reduction_strategy = OpStrategy([])
 
-    for strat in input_strategy.strategies:
+    for strtg in input_strategy.strategies:
         if not reduction_linear:
-            # input spec for this strategy should clear out pending sum and sharding
+            # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
-            input_spec = DTensorSpec(
-                mesh=mesh,
-                placements=replicate_reduction_dims(
-                    strat.output_spec.placements, reduce_dims
-                ),
-                tensor_meta=strat.output_spec.tensor_meta,
+            input_placements = replicate_reduction_dims(
+                strtg.output_spec.placements, reduce_dims
             )
         else:
-            input_spec = DTensorSpec(
-                mesh=mesh,
-                placements=strat.output_spec.placements,
-                tensor_meta=strat.output_spec.tensor_meta,
-            )
+            input_placements = strtg.output_spec.placements
+
+        input_spec = DTensorSpec(
+            mesh=mesh,
+            placements=input_placements,
+            tensor_meta=strtg.output_spec.tensor_meta,
+        )
 
         reduce_dims_map = _infer_reduce_dims_map(reduce_dims, input_spec.ndim, keep_dim)
         out_placements = map_placements_after_reduction(
@@ -153,7 +152,10 @@ def common_reduction_strategy(
     return reduction_strategy
 
 
-@register_op_strategy([aten.all.default, aten.sum.default, aten.sum.dim_IntList])
+@register_op_strategy(
+    [aten.all.default, aten.sum.default, aten.sum.dim_IntList],
+    schema_info=RuntimeSchemaInfo(1),
+)
 def default_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
@@ -170,7 +172,9 @@ def default_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
     )
 
 
-@register_op_strategy([aten.mean.default, aten.mean.dim, aten.mean.out])
+@register_op_strategy(
+    [aten.mean.default, aten.mean.dim, aten.mean.out], schema_info=RuntimeSchemaInfo(1)
+)
 def mean_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
@@ -192,7 +196,10 @@ def mean_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
     )
 
 
-@register_op_strategy([aten.var.correction, aten.var.correction_out])
+@register_op_strategy(
+    [aten.var.correction, aten.var.correction_out],
+    schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
+)
 def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
@@ -209,7 +216,9 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     )
 
 
-@register_prop_rule([aten._log_softmax.default, aten._softmax.default])
+@register_prop_rule(
+    [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
+)
 def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     input_spec, softmax_dim, _ = op_schema.args_schema
     input_spec = cast(DTensorSpec, input_spec)
@@ -224,7 +233,8 @@ def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     [
         aten._log_softmax_backward_data.default,
         aten._softmax_backward_data.default,
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(2),
 )
 def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     grad_out_spec, out_spec, softmax_dim, _ = op_schema.args_schema

@@ -5,7 +5,6 @@ from typing import List, Optional
 
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh, mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import (
     all_to_all,
     broadcast,
@@ -162,7 +161,7 @@ def mesh_all_to_all(
     return work
 
 
-def spec_to_bytes(spec: DTensorSpec) -> int:
+def spec_to_bytes(spec: "DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     dtype_to_bytes = {
         torch.bool: 1,
@@ -242,7 +241,7 @@ def reduce_scatter_cost(
     )
 
 
-def redistributed_cost(current_spec: DTensorSpec, target_spec: DTensorSpec) -> float:
+def redistributed_cost(current_spec: "DTensorSpec", target_spec: "DTensorSpec") -> float:
     """
     This function returns the cost of redistribute from current to target DTensorSpec.
 
