@@ -231,6 +231,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             stride=spec.tensor_meta.stride,
         )
 
+    __torch_function__ = torch._C._disabled_torch_function_impl
+
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.

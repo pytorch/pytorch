@@ -15,7 +15,9 @@ import inspect
 import os
 import re
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+
+from typing_extensions import ParamSpec
 
 import torch
 from torch._jit_internal import (
@@ -33,6 +35,9 @@ from torch.testing._comparison import default_tolerances
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
+
+R = TypeVar("R", covariant=True)  # return type (always covariant)
+P = ParamSpec("P")
 
 
 def _create_interpreter_name_lookup_fn(frames_up=1):
@@ -1222,14 +1227,14 @@ class TopLevelTracedModule(TracedModule):
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
 
 
-def _script_if_tracing(fn):
+def _script_if_tracing(fn: Callable[P, R]) -> Callable[P, R]:
     @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         if not is_tracing():
             # Not tracing, don't do anything
             return fn(*args, **kwargs)
 
-        compiled_fn = script(wrapper.__original_fn)  # type: ignore[attr-defined]
+        compiled_fn: Callable[P, R] = script(wrapper.__original_fn)  # type: ignore[attr-defined]
         return compiled_fn(*args, **kwargs)
 
     wrapper.__original_fn = fn  # type: ignore[attr-defined]

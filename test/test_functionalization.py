@@ -6,6 +6,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfTorchDynamo, TEST_WITH_TORCHDYNAMO, IS_WINDOWS,
     xfail_inherited_tests
 )
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs
 from torch.utils._pytree import tree_map, tree_map_only, tree_flatten
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -42,6 +43,7 @@ def _functionalize(f, *, reapply_views: bool, crossref: bool):
                 torch._disable_functionalization()
             flat_inputs, _ = tree_flatten(inputs)
             flat_inputs_functional, _ = tree_flatten(inputs_functional)
+
             for inpt, input_functional in zip(flat_inputs, flat_inputs_functional):
                 torch._sync(input_functional)
                 inpt_new = torch._from_functional_tensor(input_functional)
@@ -1502,6 +1504,45 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     copy__1 = torch.ops.aten.copy_.default(arg2_1, getitem_4);  arg2_1 = getitem_4 = None
     return getitem
     """)  # noqa: B950
+
+    # This tests our python shims around C++ Functionalization: FunctionalTensor and FunctionalTensorMode
+    def test_python_functionalization(self):
+        def f(x):
+            x_view = x.view(-1)
+            x.mul_(2)
+            return x_view + 1
+
+        def f_functionalized(x):
+            x_wrapped = FunctionalTensor.to_functional(x)
+
+            # Note [Disabling Functionalize TLS Above Python Functionalization]
+            # This UX is pretty annoying (although python functionalization's main customer is AOTAutograd,
+            # and is not really advertised as a user API).
+            # We need to explicitly disable functionalization when using python FunctionalTensor and FunctionalTensorMode.
+            # Why? FunctionalTensor is a wrapper tensor that holds an inner FunctionalTensorWrapper.
+            # Since the inner tensor has `DispatchKey.Functionalize` in its keyset, then by default,
+            # our FunctionalTensor will inherit the same keyset.
+            # We don't have an easy way of directly mutating a tensor's keyset from python,
+            # so globally disabling functionalization here is easier.
+            maybe_disable = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+            with maybe_disable, FunctionalTensorMode():
+                out_wrapped = f(x_wrapped)
+            out_unwrapped = out_wrapped.elem
+            torch._sync(out_unwrapped)
+            return torch._from_functional_tensor(out_unwrapped)
+
+        # Make a non-leaf
+        x = torch.randn(2, requires_grad=True) + 1
+        fx_g = make_fx(f_functionalized)(x)
+        self.assertExpectedInline(fx_g.code.strip(), """\
+def forward(self, x_1):
+    view = torch.ops.aten.view.default(x_1, [-1])
+    mul = torch.ops.aten.mul.Tensor(x_1, 2);  x_1 = None
+    view_1 = torch.ops.aten.view.default(mul, [-1]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
+    return add""")
+
+
 
 
 @xfail_inherited_tests([

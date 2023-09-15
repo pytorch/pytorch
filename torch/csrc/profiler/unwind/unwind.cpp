@@ -1,8 +1,8 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
-    !__has_include("ext/stdio_filebuf.h")
+#if !defined(__linux__) || !(defined(__x86_64__) || defined(__aarch64__)) || \
+    !defined(__has_include) || !__has_include("ext/stdio_filebuf.h")
 namespace torch {
 namespace unwind {
 std::vector<void*> unwind() {
@@ -300,9 +300,16 @@ extern "C" void unwind_entry(std::vector<void*>* result);
 __asm__(
     ".global unwind_entry\n"
     "unwind_entry:\n"
+#ifdef __aarch64__
+    "mov x1, sp;\n"
+    "mov x2, x29;\n"
+    "b unwind_c;\n"
+#else
     "mov %rsp, %rsi;\n"
     "mov %rbp, %rdx;\n"
-    "jmp unwind_c;\n");
+    "jmp unwind_c;\n"
+#endif
+);
 
 namespace torch {
 namespace unwind {
