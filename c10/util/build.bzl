@@ -16,16 +16,14 @@ def define_targets(rules):
     rules.cc_library(
         name = "base",
         srcs = rules.glob(
-            ["*.cpp"],
-            ["unwind/*.cpp"],
+            ["*.cpp", "unwind/*.cpp"],
             exclude = [
                 "TypeCast.cpp",
                 "typeid.cpp",
             ],
         ),
         hdrs = rules.glob(
-            ["*.h"],
-            ["unwind/*.h"],
+            ["*.h", "unwind/*.h"],
             exclude = [
                 "TypeCast.h",
                 "typeid.h",
