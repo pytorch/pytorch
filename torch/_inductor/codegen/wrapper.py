@@ -969,9 +969,23 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
 
-        from .cpp import cexpr
+        from .cpp import cexpr, CppPrinter
 
         self.expr_printer = cexpr
+
+        # CppPrinter sometimes calls at::native functions which causes problems in
+        # the ABI compatible mode. Currently we are hitting this problem when codegen
+        # Grid computation expressions, but we my need to fix other size computation
+        # as well.
+        class GridExprCppPrinter(CppPrinter):
+            def _print_FloorDiv(self, expr):
+                x, div = expr.args
+                x = self.paren(self.doprint(x))
+                div = self.paren(self.doprint(div))
+                assert expr.is_integer, "Expect integers in GridExprPrinter"
+                return f"({x}/{div})"
+
+        self.grid_expr_printer = GridExprCppPrinter().doprint
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -2005,18 +2019,9 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             grid, (list, tuple)
         ), f"expected grid to be a list or tuple but got: {grid=}"
 
-        from .cpp import CppPrinter
-
-        class GridExprPrinter(CppPrinter):
-            def _print_FloorDiv(self, expr):
-                x, div = expr.args
-                x = self.paren(self.doprint(x))
-                div = self.paren(self.doprint(div))
-                assert expr.is_integer, "Expect integers in GridExprPrinter"
-                return f"({x}/{div})"
-
-        expr_printer = GridExprPrinter().doprint
-        grid_args = [expr_printer(V.graph.sizevars.simplify(item)) for item in grid]
+        grid_args = [
+            self.grid_expr_printer(V.graph.sizevars.simplify(item)) for item in grid
+        ]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 
