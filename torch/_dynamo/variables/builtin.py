@@ -1157,7 +1157,14 @@ class BuiltinVariable(VariableTracker):
     ):
         from .distributed import PlacementVariable
 
-        if isinstance(obj, (variables.DataClassVariable, PlacementVariable)):
+        if isinstance(
+            obj,
+            (
+                variables.DataClassVariable,
+                variables.CustomizedDictVariable,
+                PlacementVariable,
+            ),
+        ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)

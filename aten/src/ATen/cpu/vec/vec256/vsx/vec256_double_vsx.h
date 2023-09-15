@@ -373,6 +373,19 @@ class Vectorized<double> {
     auto ret = (x == x);
     return ret._nor();
   }
+  bool has_infinite() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   DEFINE_MEMBER_OP(operator==, double, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, double, vec_cmpne)

@@ -239,6 +239,20 @@ class Vectorized<float> {
     return (x == v_inf) | (x == v_minus_inf);
   }
 
+  bool has_infinite() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   int zero_mask() const {
     // returns an integer mask where all zero elements are translated to 1-bit
     // and others are translated to 0-bit
