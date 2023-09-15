@@ -22,14 +22,15 @@ extern "C" {
 
 AOTInductorError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
-    size_t num_models) {
+    size_t num_models,
+    bool is_cpu) {
   if (num_models == 0) {
     LOG(ERROR) << "num_models must be positive, but got 0";
     return AOTInductorError::Failure;
   }
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto* container =
-        new torch::aot_inductor::AOTInductorModelContainer(num_models);
+        new torch::aot_inductor::AOTInductorModelContainer(num_models, is_cpu);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
