@@ -5,7 +5,6 @@ import dataclasses
 import enum
 import functools
 import inspect
-import itertools
 import logging
 import operator
 import re
@@ -45,6 +44,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConvertIntSource,
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
@@ -92,6 +92,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    FunctoolsPartialVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -474,6 +475,33 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, functools.partial):
+            func_src = AttrSource(self.get_source(), "func")
+            func_obj = VariableBuilder(self.tx, func_src)(value.func)
+
+            args = []
+            args_source = AttrSource(self.get_source(), "args")
+            for i, arg in enumerate(value.args):
+                args.append(
+                    VariableBuilder(self.tx, GetItemSource(args_source, i))(arg)
+                )
+
+            keywords = {}
+            keywords_source = AttrSource(self.get_source(), "keywords")
+            for k, v in value.keywords.items():
+                keywords[k] = VariableBuilder(
+                    self.tx, GetItemSource(keywords_source, k)
+                )(v)
+
+            guards = {
+                self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
+                args_source.make_guard(GuardBuilder.LIST_LENGTH),
+            }
+
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original=value, guards=guards
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
@@ -686,6 +714,46 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.SymBool):
+            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
+            # user provided SymBool with a SymInt in dynamo.
+
+            # Concretely,
+            # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
+            # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
+            # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
+            # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
+
+            value_hint = value.node.require_hint()
+            new_source = ConvertIntSource(self.source)
+
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                int(value_hint),
+                new_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symint),
+                source=new_source,
+            )
+
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                new_source,
+                new_symint,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=new_symint,
+            )
+            self.tx.output.tracked_fakes.append(
+                TrackedFake(new_symint, new_source, None)
+            )
+            return SymNodeVariable(
+                sym_node_proxy,
+                new_symint == 1,
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -834,16 +902,8 @@ class VariableBuilder:
             #
             # ID_MATCH is required to disambiguate cases as simple as a unit test that constructs 2 models and wraps
             # them differently with different FSDP configs.  (test_dynamo_distributed.py -k test_fsdp_aot_eager)
-            base = self.name
-            name = self.name
-            for i in itertools.count():
-                if name not in self.tx.output.nn_modules:
-                    self.tx.output.nn_modules[name] = value
-                    break
-                name = f"{base}_{i}"
             return FSDPManagedNNModuleVariable(
                 value,
-                name,
                 guards=self.make_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.ID_MATCH),
                 source=self.get_source(),
             )

@@ -72,6 +72,64 @@ def check_inplace_broadcast(self_shape, *args_shape):
     )
 
 
+@register_meta([aten.linspace, aten.logspace])
+@out_wrapper()
+def meta_linspace_logspace(
+    start,
+    end,
+    steps,
+    base=None,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+    requires_grad=False,
+):
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+
+    if any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            torch._check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
+
+    # steps does not participate in the computation of the dtype
+    torch._check_type(
+        isinstance(steps, IntLike),
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
+    )
+    assert isinstance(steps, IntLike)  # for mypy
+    torch._check(steps >= 0, lambda: "number of steps must be non-negative")
+
+    return torch.empty(
+        (steps,),  # type: ignore[arg-type]
+        dtype=dtype,
+        layout=layout,
+        device="meta",
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
 @register_meta([aten.take.default, aten.take.out])
 @out_wrapper()
 def meta_take(self, index):
@@ -289,6 +347,12 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+
+    if torch._debug_has_internal_overlap(self) == 1:  # 1 == MemOverlap::Yes
+        raise RuntimeError(
+            "more than one element of the written-to tensor refers to a single memory location"
+        )
+
     intermediate = src.to(self, non_blocking)
     if self.size() != intermediate.size():
         aten.expand_copy.default(intermediate, self.size())
@@ -3256,6 +3320,27 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     return output, offset2bag, bag_size, max_indices
 
 
+@register_meta(aten._embedding_bag_dense_backward.default)
+def meta_embedding_bag_dense_backward(
+    grad,
+    indices,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    torch._check(
+        grad.dtype in (torch.half, torch.bfloat16, torch.float, torch.double),
+        lambda: f"grad is not floating point, got {grad.dtype}",
+    )
+    index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
+    return index_grad_weight
+
+
 def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
     # if specified, dtype takes precedence
     if dtype:
@@ -3445,6 +3530,26 @@ def meta_index_put(self, indices, values, accumulate=False):
 def meta_masked_fill_(self, mask, value):
     check_inplace_broadcast(self.shape, mask.shape)
     return self
+
+
+@register_meta(aten.masked_scatter_)
+def meta_masked_scatter_(self, mask, source):
+    torch._check(
+        mask.dtype in (torch.bool, torch.uint8), lambda: "Mask must be bool or uint8"
+    )
+    torch._check(
+        self.dtype == source.dtype,
+        lambda: "masked_scatter: expected self and source to have same "
+        "dtypes but got {self.dtype} and {source.dtype}",
+    )
+    return self
+
+
+@register_meta(aten.masked_scatter)
+def meta_masked_scatter(self, mask, source):
+    self, mask = _maybe_broadcast(self, mask)
+    output = torch.empty_like(self, memory_format=torch.contiguous_format)
+    return meta_masked_scatter_(output, mask, source)
 
 
 @register_meta(aten.index_put_.default)

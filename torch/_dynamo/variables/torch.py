@@ -86,7 +86,13 @@ constant_fold_functions = [
 
 
 if torch.distributed.is_available():
-    constant_fold_functions.append(torch.distributed.is_initialized)
+    constant_fold_functions.extend(
+        [
+            torch.distributed.is_initialized,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -453,9 +459,6 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.nn.Parameter:
             # https://github.com/pytorch/pytorch/issues/99569
             unimplemented("torch.nn.Parameter not supported")
-        elif self.value is torch.manual_seed:
-            # https://github.com/pytorch/pytorch/issues/107187
-            unimplemented("torch.manual_seed not supported")
         if (
             self.value.__name__ == "get_state"
             and hasattr(self.value, "__self__")
