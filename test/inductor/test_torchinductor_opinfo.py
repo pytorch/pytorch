@@ -232,7 +232,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
-    "atanh": {f32},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
@@ -243,10 +242,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
-    "nanquantile": {f32, f64},
-    "nn.functional.normalize": {f16},
     "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -266,6 +262,7 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
+    "nn.functional.triplet_margin_loss": {f16},
 }
 
 if not TEST_WITH_ROCM:
