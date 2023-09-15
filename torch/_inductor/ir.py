@@ -2219,7 +2219,7 @@ class Layout(IRNode):
             stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            if stride_ordered[i] > stride_ordered[i + 1]:
+            if V.graph.sizevars.shape_env.evaluate_expr(sympy.Gt(stride_ordered[i], stride_ordered[i + 1])):
                 return False
         return True
 
@@ -3754,8 +3754,9 @@ class DynamicScalar(ExternKernelAlloc):
     ):
         super().__init__(layout, inputs, constant_args)
         self.symint = V.graph.sizevars.shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes.constrain_range(self.symint, min=-sys.maxsize, max=sys.maxsize - 1)
-        V.graph.sizevars.shape_env.dynamic_scalars.add(str(self.symint))
+        # TODO(yf225): we are assuming all .item / .tolist are passed in as sizes and not values (since for values, they can be <1)
+        torch.fx.experimental.symbolic_shapes.constrain_range(self.symint, min=1, max=sys.maxsize - 1)
+        # V.graph.sizevars.shape_env.dynamic_scalars.add(str(self.symint))
 
     def should_allocate(self):
         return False
@@ -3781,20 +3782,21 @@ class DynamicScalar(ExternKernelAlloc):
             inputs=[x],
         )
 
+    # TODO(yf225): add more operations (see sympy Integer) or just pass through
     def __add__(self, other):
-        return self.symint + other
+        return self.symint.node.expr + other
 
     def __mul__(self, other):
-        return self.symint * other
+        return self.symint.node.expr * other
 
     def __rmul__(self, other):
-        return self.symint * other
+        return self.symint.node.expr * other
 
     def __truediv__(self, other):
-        return self.symint / other
+        return self.symint.node.expr / other
 
     def __sub__(self, other):
-        return self.symint - other
+        return self.symint.node.expr - other
 
     def __str__(self):
         return str(self.symint)
@@ -5487,7 +5489,8 @@ class StorageBox(MutableBox):
             return any((op + "(") in fn_str for op in heavy_ops)
 
         if (
-            users > 1
+            # NOTE: it can be i8 * i9, so need to evaluate the expression
+            V.graph.sizevars.shape_env.evaluate_expr(sympy.Gt(users, 1))
             and isinstance(self.data, (Pointwise, Reduction))
             and (
                 self.num_reads() > config.realize_reads_threshold

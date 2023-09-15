@@ -978,11 +978,15 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(
+            self.expr, self.hint, fx_node=self.fx_node,
+            return_expr_if_has_unbacked_symint_and_concrete_val_is_int=True
+        )
         try:
             return int(r)
         except Exception:
             log.warning("Failed to convert to int: %s", r)
+            return r
             raise
 
     def guard_float(self, file, line):
@@ -998,12 +1002,6 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        if str(self.expr) == "Eq(i4, 0)":
-            return bool(False)
-        if str(self.expr) == "Ne(i4, 1)":
-            return bool(True)
-        if str(self.expr) == "Eq(i4, -1)":
-            return bool(False)
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         try:
             return bool(r)
@@ -3390,7 +3388,7 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(
-        self, expr: "sympy.Expr", *, unbacked_only: bool = False, replace_unbacked_with_size_hint: bool = False, compute_hint: bool = False
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False, replace_unbacked_with_default_size_hint: bool = False, compute_hint: bool = False
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3398,15 +3396,8 @@ class ShapeEnv:
         If unbacked_only == True, then we only do substitutions on
         unbacked SymInts (leaving regular hinted integers alone).
         """
+        # breakpoint()
         expr = self.simplify(expr)
-
-        dynamic_scalar_replace = {}
-        for s in expr.free_symbols:
-            if str(s) in self.dynamic_scalars:
-                dynamic_scalar_replace[s] = sympy.Integer(32)
-        expr = safe_expand(expr.xreplace(dynamic_scalar_replace))
-        expr = self.simplify(expr)
-
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -3432,11 +3423,11 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
-            print(f"self.var_to_range: {self.var_to_range}")
-            for s, r in self.var_to_range.items():
-                print(f"s: {s}, type(s): {type(s)}, r: {r}, type(r): {type(r)}")
-            print(f"k: {k}, type(k): {type(k)}, k in self.var_to_range: {k in self.var_to_range}, str(k) in self.var_to_range: {str(k) in self.var_to_range}, self.var_to_range: {self.var_to_range}")
-            # vr = self.var_to_range[k]
+            # print(f"self.var_to_range: {self.var_to_range}")
+            # for s, r in self.var_to_range.items():
+            #     print(f"s: {s}, type(s): {type(s)}, r: {r}, type(r): {type(r)}")
+            # print(f"k: {k}, type(k): {type(k)}, k in self.var_to_range: {k in self.var_to_range}, str(k) in self.var_to_range: {str(k) in self.var_to_range}, self.var_to_range: {self.var_to_range}")
+            # # vr = self.var_to_range[k]
             # TODO(yf225): this is nuts, I don't understand why simple lookup doesn't work.
             vr = None
             for s in self.var_to_range:
@@ -3446,6 +3437,7 @@ class ShapeEnv:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
+            # breakpoint()
             if (
                 vr.lower < (-sys.maxsize - 1) // 2 or
                 (unbacked_only and k in self.var_to_val)
@@ -3490,10 +3482,10 @@ class ShapeEnv:
         if out.is_singleton():
             return out.lower
 
-        if replace_unbacked_with_size_hint:
+        if replace_unbacked_with_default_size_hint:
             unbacked_replace = {}
             for s in new_expr.free_symbols:
-                # TODO(yf225): add comment here
+                # TODO(yf225): we do this only to resolve guard, so usually any default value > 1 would work
                 unbacked_replace[s] = sympy.Integer(32)
             new_expr = safe_expand(new_expr.xreplace(unbacked_replace))
 
@@ -3553,7 +3545,7 @@ class ShapeEnv:
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: "sympy.Expr"):
+    def size_hint(self, expr: "sympy.Expr", replace_unbacked_with_default_size_hint: bool = False):
         """
         Gets a size hint for a given expression from the underlying shapes we had.
         Does not introduce a guard, so only use this when you can guarantee that
@@ -3561,13 +3553,18 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
+            r = self._maybe_evaluate_static(
+                result_expr,
+                compute_hint=True,
+                unbacked_only=replace_unbacked_with_default_size_hint,
+                replace_unbacked_with_default_size_hint=replace_unbacked_with_default_size_hint,
+            )
             if r is not None:
                 return r
-            # if unbacked symint exists, replace it with a reasonable size hint and evaluate again
-            r = self._maybe_evaluate_static(result_expr, unbacked_only=True, replace_unbacked_with_size_hint=True)
-            if r is not None:
-                return r
+            # # if unbacked symint exists, replace it with a reasonable size hint and evaluate again
+            # r = self._maybe_evaluate_static(result_expr, unbacked_only=True, replace_unbacked_with_default_size_hint=True)
+            # if r is not None:
+            #     return r
             raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3764,11 +3761,15 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None, return_expr_if_has_unbacked_symint_and_concrete_val_is_int=False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        if hint is None:
+        print(f"orig_expr: {orig_expr}")
+
+        if any(str(x).startswith("i") for x in orig_expr.free_symbols):
+            concrete_val = self.size_hint(orig_expr, replace_unbacked_with_default_size_hint=True)
+        elif hint is None:
             concrete_val = self.size_hint(orig_expr)
         else:
             concrete_val = sympy.sympify(hint)
@@ -3833,9 +3834,17 @@ class ShapeEnv:
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
                 # Attempt to eliminate the unbacked SymInt
-                new_expr = self._maybe_evaluate_static(expr, unbacked_only=True, replace_unbacked_with_size_hint=True)
+                new_expr = self._maybe_evaluate_static(
+                    expr,
+                    unbacked_only=True,
+                    # NOTE: only replace unbacked SymInt with default size when we are evaluating a guard
+                    replace_unbacked_with_default_size_hint=(concrete_val in [sympy.true, sympy.false]),
+                )
                 # new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                    # NOTE: in guard_int case, instead of raising "data-dependent" error, we pass if concrete_val is int
+                    if isinstance(concrete_val, sympy.Integer) and return_expr_if_has_unbacked_symint_and_concrete_val_is_int:
+                        return new_expr
                     raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
                 expr = new_expr
 
@@ -3845,27 +3854,29 @@ class ShapeEnv:
                 if isinstance(expr, (sympy.Eq, sympy.Ne)):
                     expr = sympy.Not(expr)
 
-            if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                self._maybe_guard_eq(expr, bool(concrete_val))
-                # TODO: If we successfully eliminate a symbol via equality, it
-                # is not actually necessary to save a guard for the equality,
-                # as we will implicitly generate a guard when we match that
-                # input against the symbol
-            elif isinstance(concrete_val, sympy.Integer):
-                # WARNING: we cannot actually do simplifications on guards
-                # on floating point values, because Sympy generally does not
-                # think expressions on integers can ever be equal to floating
-                # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
-                # very clear algebraic laws that hold for floating point, such
-                # simplifications are error prone anyway, so be sure not to
-                # maybe_guard_eq in those cases.
-                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+            if not any(str(x).startswith("i") for x in orig_expr.free_symbols):
+                if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                    self._maybe_guard_eq(expr, bool(concrete_val))
+                    # TODO: If we successfully eliminate a symbol via equality, it
+                    # is not actually necessary to save a guard for the equality,
+                    # as we will implicitly generate a guard when we match that
+                    # input against the symbol
+                elif isinstance(concrete_val, sympy.Integer):
+                    # WARNING: we cannot actually do simplifications on guards
+                    # on floating point values, because Sympy generally does not
+                    # think expressions on integers can ever be equal to floating
+                    # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+                    # very clear algebraic laws that hold for floating point, such
+                    # simplifications are error prone anyway, so be sure not to
+                    # maybe_guard_eq in those cases.
+                    self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
             if concrete_val is sympy.true:
                 g = expr
             elif concrete_val is sympy.false:
                 g = sympy.Not(expr)
             else:
+                print(f"expr: {expr}, concrete_val: {concrete_val}")
                 g = sympy.Eq(expr, concrete_val)  # type: ignore[arg-type]
 
             if not self._suppress_guards_tls():

@@ -1051,7 +1051,11 @@ class TritonKernel(Kernel):
         """
         Compute the index and mask to pass to tl.load() or tl.store()
         """
-        index = self.simplify_indexing(index)
+        try:
+            index = self.simplify_indexing(index)
+        except Exception as e:
+            # it will fail if it has unresolved unbacked symint
+            pass
         index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
         # if simple replacements didn't get rid of floor/ceil, try full subs
         if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
@@ -1074,7 +1078,11 @@ class TritonKernel(Kernel):
                     index = sympy_subs(index, replacements)
 
         index_vars = index.free_symbols
-        index = self.simplify_indexing(index)
+        try:
+            index = self.simplify_indexing(index)
+        except Exception as e:
+            # it will fail if it has unresolved unbacked symint
+            pass
         index_str = self.index_to_str(index)
 
         mask_vars: Set[str] = set()
@@ -1089,7 +1097,7 @@ class TritonKernel(Kernel):
                 pass
             else:
                 # var is one of xN, yN or rN
-                assert var.name[0] in "xyr", var.name
+                assert var.name[0] in "xyri", var.name
                 mask_vars.add(f"{var.name[0]}mask")
 
         need_dense = (
@@ -1862,9 +1870,18 @@ class TritonKernel(Kernel):
 
         code = IndentedBuffer()
 
-        size_hints = [
-            next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
-        ]
+        size_hints = []
+        for numel in self.numels:
+            try:
+                # fail if numel has unbacked symint I think
+                sh = next_power_of_2(V.graph.sizevars.size_hint(numel))
+            except Exception as e:
+                sh = 32
+            finally:
+                size_hints.append(sh)
+        # size_hints = [
+        #     next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
+        # ]
         if self.persistent_reduction:
             assert self.inside_reduction
             heuristics = "persistent_reduction"

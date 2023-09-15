@@ -370,14 +370,6 @@ class SizeVarAllocator:
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
 
-        dynamic_scalar_replace = {}
-        for s in free_symbols:
-            if str(s) in self.shape_env.dynamic_scalars:
-                # TODO(yf225): comment
-                dynamic_scalar_replace[s] = sympy.Integer(32)
-        expr = sympy_subs(expr, dynamic_scalar_replace)
-        free_symbols = expr.free_symbols
-
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr) -> int:
@@ -386,7 +378,7 @@ class SizeVarAllocator:
             return int(out)
         except Exception:
             print(f"out: {out}")
-            return str(out)
+            return out
             log.debug("failed on: %s", out)
             raise
 
