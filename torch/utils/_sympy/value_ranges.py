@@ -1,5 +1,4 @@
 import dataclasses
-from copy import deepcopy
 import itertools
 import sympy
 from sympy.logic.boolalg import BooleanAtom, Boolean as SympyBoolean
@@ -7,7 +6,7 @@ import operator
 import math
 import logging
 import torch
-from typing import Union, Dict
+from typing import Union, Dict, Optional, SupportsFloat
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
@@ -83,9 +82,12 @@ class ValueRanges:
         x = simple_sympify(x)
         return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
 
-    def tighten(self, other: "ValueRanges"):
+    def tighten(self, other) -> "ValueRanges":
         """Given two ValueRanges, returns their intersection"""
-        # Some invariants
+        return self & other
+
+    # Intersection
+    def __and__(self, other) -> "ValueRanges":
         if other == ValueRanges.unknown():
             return self
         if self == ValueRanges.unknown():
@@ -97,9 +99,16 @@ class ValueRanges:
             range = ValueRanges(sympy.Max(self.lower, other.lower), sympy.Min(self.upper, other.upper))
         return range
 
-    # Intersection
-    def __and__(self, other):
-        return ValueRanges(lower=max(self.lower, other.lower), upper=min(self.upper, other.upper))
+    # Union
+    def __or__(self, other) -> "ValueRanges":
+        if ValueRanges.unknown() in (self, other):
+            return ValueRanges.unknown()
+        assert self.is_bool == other.is_bool, (self, other)
+        if self.is_bool:
+            range = ValueRanges(sympy.And(self.lower, other.lower), sympy.Or(self.upper, other.upper))
+        else:
+            range = ValueRanges(sympy.Min(self.lower, other.lower), sympy.Max(self.upper, other.upper))
+        return range
 
     def is_singleton(self) -> bool:
         return self.lower == self.upper
@@ -181,7 +190,7 @@ class SymPyValueRangeAnalysis:
 
         # using nan makes subsequent computation throw, and for the purposes of optimization
         # returning -math.inf - math.inf is equivalent to giving up
-        if math.isnan(value):
+        if isinstance(value, SupportsFloat) and math.isnan(value):
             return ValueRanges.unknown()
 
         if is_python:
@@ -436,6 +445,41 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, sympy.sqrt)
 
+    @staticmethod
+    def where(a, b, c):
+        b = ValueRanges.wrap(b)
+        c = ValueRanges.wrap(c)
+        assert a.is_bool
+        assert b.is_bool == c.is_bool
+        if b.is_bool:
+            return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
+        else:
+            return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
+
+    # expr_cond_pair is used to represent a single (expr, condition) pair in piecewise.
+    # We just return the value range of the expression and its corresponding condition as a tuple
+    # and defer the analysis to piecewise
+    @staticmethod
+    def expr_cond_pair(a, b):
+        assert b.is_bool, f"expect cond_expr's ValueRange to be a boolean range but got {b}"
+        return (a, b)
+
+    # piecewise function can be used to convert a SymBool to SymInt:
+    # int_expr = Piecewise((1, bool_expr), (0, True)), it evalutes to 1 when sym_bool is True and 0 otherwise.
+    #
+    # ranges is a sequence of (expr_range, condition_range) pairs. The range pair is constructed in expr_cond_pair.
+    # The ValueRange of Piecewise is just the union of all expr ranges whose condition expr can be True.
+    @staticmethod
+    def piecewise(*ranges):
+        init_range = None
+        for expr_range, cond_range in ranges:
+            if sympy.true in cond_range:
+                if init_range is None:
+                    init_range = expr_range
+                else:
+                    init_range = init_range | expr_range
+        return init_range
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -529,29 +573,28 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def sub(cls, a, b):
         return cls.add(a, cls.neg(b))
 
-    @staticmethod
-    def where(a, b, c):
-        b = ValueRanges.wrap(b)
-        c = ValueRanges.wrap(c)
-        assert a.is_bool
-        assert b.is_bool == c.is_bool
-        if b.is_bool:
-            return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
-        else:
-            return ValueRanges(sympy.Min(b.lower, c.lower), sympy.Max(b.upper, c.upper))
-
     def __getattr__(self, name):
         log.debug("unhandled ValueRange op %s", name)
         return self.default_handler
 
 
-def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> ValueRanges:
+def bound_sympy(expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None) -> ValueRanges:
+    if isinstance(expr, sympy.Number):
+        return ValueRanges.wrap(expr)
+
+    ranges = ranges or {}
+
+    # If there's a tracing context, augment available constrained ranges.
+    context = torch._guards.TracingContext.get()
+    if context and context.fake_mode.shape_env:
+        ranges = {**ranges, **context.fake_mode.shape_env.var_to_range}
+
     unbounded_vars = expr.free_symbols - ranges.keys()
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
         # TODO A better way of doing this would be to assign them a range upon creation, as
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
-        ranges = deepcopy(ranges)
+        unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
             assert s.is_integer  # type: ignore[attr-defined]
             if s.is_positive:  # type: ignore[attr-defined]
@@ -560,7 +603,7 @@ def bound_sympy(expr: sympy.Expr, ranges: Dict[sympy.Symbol, ValueRanges]) -> Va
                 lower = 0
             else:
                 lower = -math.inf  # type: ignore[assignment]
-
-            ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+            unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
+        ranges = {**ranges, **unbounded_ranges}
 
     return sympy_interp(SymPyValueRangeAnalysis, ranges, expr)

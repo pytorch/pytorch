@@ -14,7 +14,7 @@ import torch
 from torch import fx
 from torch._dynamo.output_graph import OutputGraph
 
-from . import config, eval_frame, optimize_assert, reset, utils
+from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -285,37 +285,6 @@ def format_speedup(speedup, pvalue, is_correct=True, pvalue_threshold=0.1):
     return f"{speedup:.3f}x p={pvalue:.2f}"
 
 
-@contextlib.contextmanager
-def trace_numpy() -> None:
-    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
-    try:
-        yield
-    finally:
-        config.numpy_ndarray_as_tensor = prev
-
-
-def requires_numpy_pytorch_interop(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
-            with trace_numpy():
-                return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
-
-    return _fn
-
-
-def requires_numpy(fn):
-    @functools.wraps(fn)
-    def _fn(*args, **kwargs):
-        if utils.HAS_NUMPY:
-            with trace_numpy():
-                return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires numpy")
-
-    return _fn
-
-
 def rand_strided(
     size: Sequence[int],
     stride: Sequence[int],
@@ -348,16 +317,14 @@ def _make_fn_with_patches(fn, *patches):
 
 
 def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=None):
-    class DummyTestClass(cls):
-        pass
-
-    DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass = type(f"{cls_prefix}{cls.__name__}", cls.__bases__, {})
     DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):
             fn = getattr(cls, name)
             if not callable(fn):
+                setattr(DummyTestClass, name, getattr(cls, name))
                 continue
             new_name = f"{name}{fn_suffix}"
             new_fn = _make_fn_with_patches(fn, *patches)
@@ -365,6 +332,9 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches, xfail_prop=
             if xfail_prop is not None and hasattr(fn, xfail_prop):
                 new_fn = unittest.expectedFailure(new_fn)
             setattr(DummyTestClass, new_name, new_fn)
+        # NB: Doesn't handle slots correctly, but whatever
+        elif not hasattr(DummyTestClass, name):
+            setattr(DummyTestClass, name, getattr(cls, name))
 
     return DummyTestClass
 

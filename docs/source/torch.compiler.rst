@@ -52,12 +52,12 @@ Some of the most commonly used backends include:
      - Description
    * - ``torch.compile(m, backend="inductor")``
      - Uses the TorchInductor backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
-   * - ``torch.compile(m, backend="aot_ts_nvfuser")``
-     - nvFuser with AOT Autograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-   * - ``torch.compile(m, backend="nvprims_nvfuser")``
-     - Tracing with nvFuser and its primitives. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
    * - ``torch.compile(m, backend="cudagraphs")``
      - CUDA graphs with AOT Autograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
+   * - ``torch.compile(m, backend="ipex")``
+     - Uses IPEX on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
+   * - ``torch.compile(m, backend="onnxrt")``
+     - Uses ONNX Runtime for training on CPU/GPU. :doc:`Read more <onnx_dynamo_onnxruntime_backend>`
 
 **Inference-only backends**
 
@@ -67,10 +67,8 @@ Some of the most commonly used backends include:
 
    * - Backend
      - Description
-   * - ``torch.compile(m, backend="onnxrt")``
-     - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__
    * - ``torch.compile(m, backend="tensorrt")``
-     - Uses ONNXRT to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
+     - Uses ONNX Runtime to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
    * - ``torch.compile(m, backend="ipex")``
      - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
    * - ``torch.compile(m, backend="tvm")``

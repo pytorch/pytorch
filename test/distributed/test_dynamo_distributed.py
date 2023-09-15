@@ -760,8 +760,9 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self._param = torch.randn((3,), device="cuda")
-                self._buf = torch.nn.Buffer(
-                    torch.randn((3,), requires_grad=False, device="cuda"))
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
+                )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use `_param` and `_buf` each twice in this compiled forward
@@ -788,8 +789,8 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         class BufModule(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self._buf = nn.Buffer(
-                    torch.randn((3,), requires_grad=False, device="cuda")
+                self.register_buffer(
+                    "_buf", torch.randn((3,), requires_grad=False, device="cuda")
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -801,7 +802,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self._param = nn.Parameter(torch.randn((1,), device="cuda"))
                 self._buf_module = BufModule()
                 # Share the buffer, meaning same tensor but different source
-                self._buf = self._buf_module._buf
+                self.register_buffer("_buf", self._buf_module._buf)
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 # Use the same buffer tensor twice in the compiled forward,
@@ -820,7 +821,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             fsdp_model(inp)
         # Check for no recompiles (if there were incorrect de-dup guards, then
         # the frame count would be equal to the number of forward calls)
-        self.assertEqual(cnt.frame_count, 3)
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_fsdp_staticmethod(self):
         """
@@ -862,8 +863,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             # passing args to the staticmethod (e.g. doubly passing `self`)
             # 3 is expected here for 1 forward.
             # Graph 1 should be add and imul
-            # Graphs 2 and 3 are forward hooks on device mesh, and are fine to capture.
-            self.assertEqual(cnt.frame_count, 3)
+            self.assertEqual(cnt.frame_count, 1)
         for test_out in test_outs:
             self.assertEqual(test_out, ref_out)
 
