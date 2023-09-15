@@ -5,6 +5,7 @@ from torch.testing._internal.common_device_type import *  # noqa: F403
 import collections
 
 import itertools
+import os
 import re
 import typing
 
@@ -15,6 +16,8 @@ import torch.testing._internal.optests as optests
 from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
+from torch._utils_internal import get_file_path_2
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.optests.compile_check import operator_compile_check
 from typing import *  # noqa: F403
@@ -339,12 +342,15 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(AssertionError, "not completely traceable"):
             operator_compile_check(f, (x,), {})
 
+    @unittest.skipIf(
+        TEST_CUDA and not SM70OrLater,
+        "Triton only supports devices of CUDA Capability >= 7.0",
+    )
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_operator_compile_check_op(self, device, dtype, op):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         ):
-            dynamic_only = op.name in ("NumpyNMSCustomOp", "NumpyNonzeroCustomOp")
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
             operator_compile_check(
@@ -352,7 +358,6 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
                 args,
                 kwargs,
                 supports_autograd=op.supports_autograd,
-                dynamic_only=dynamic_only,
                 fullgraph=False,  # Dynamo graph breaks on CustomOp today
             )
 
@@ -1461,10 +1466,9 @@ class TestCustomOp(CustomOpTestCaseBase):
             return torch.ops._torch_testing.numpy_nonzero(x)
 
         x = torch.randn(5, 5)
-        with self.assertRaises(
-            torch._subclasses.fake_tensor.DynamicOutputShapeException
-        ):
-            make_fx(f, tracing_mode="fake")(x)
+        # We've updated to attempt to use unbacked symints even for fake
+        # tracing
+        make_fx(f, tracing_mode="fake")(x)
 
     def test_symints(self):
         def f(x):
@@ -1773,26 +1777,6 @@ class MiniOpTest(CustomOpTestCaseBase):
         y = op(x)
 
 
-mini_op_test_failures_dict = {
-    "aten::nonzero": {
-        # Nonzero doesn't support static shapes
-        "test_aot_dispatch_static__test_nonzero": "xfail",
-    },
-    "mini_op_test::delayed_error": {
-        "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
-        "test_aot_dispatch_static__test_delayed_error": "xfail",
-    },
-    "mini_op_test::incorrect_schema": {
-        # "skip" just to test the skip mechanism
-        "test_schema__test_incorrect_schema": "skip",
-    },
-    "mini_op_test::no_abstract": {
-        "test_aot_dispatch_dynamic__test_no_abstract": "xfail",
-        "test_aot_dispatch_static__test_no_abstract": "xfail",
-        "test_faketensor__test_no_abstract": "xfail",
-    },
-}
-
 mini_op_test_checks = [
     "test_schema",
     "test_autograd_registration",
@@ -1803,9 +1787,11 @@ mini_op_test_checks = [
 
 optests.generate_opcheck_tests(
     MiniOpTest,
-    ["aten", "MiniOpTest"],
-    mini_op_test_failures_dict,
-    "test/test_custom_ops.py",
+    ["aten", "mini_op_test"],
+    get_file_path_2(
+        os.path.dirname(__file__),
+        "minioptest_failures_dict.json",
+    ),
     [],
     mini_op_test_checks,
 )
@@ -1820,48 +1806,48 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
 
     def test_failures_dict_validation(self):
         from torch.testing._internal.optests.generate_tests import (
-            validate_failures_dict,
+            FailuresDict,
+            validate_failures_dict_structure,
         )
 
         failures = {
-            "mini_op_test::incorrect_schema": {},
-            "mini_op_test::delayed_error": {},
-        }
-        with self.assertRaisesRegex(RuntimeError, "alphabetical"):
-            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
-
-        failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error": "xfail",
-                "test_aot_dispatch_dynamic__test_delayed_error": "xfail",
+                "test_aot_dispatch_static__test_delayed_error": {
+                    "comment": "",
+                    "status": "XFAIL",
+                }
             }
         }
-        with self.assertRaisesRegex(RuntimeError, "alphabetical"):
-            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+        with self.assertRaisesRegex(RuntimeError, "got status=XFAIL"):
+            validate_failures_dict_structure(
+                FailuresDict("", failures), mini_op_test_checks, MiniOpTest
+            )
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error": "XFAIL",
-            }
-        }
-        with self.assertRaisesRegex(RuntimeError, "got value=XFAIL"):
-            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
-
-        failures = {
-            "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch__test_delayed_error": "xfail",
+                "test_aot_dispatch__test_delayed_error": {
+                    "comment": "",
+                    "status": "xfail",
+                },
             }
         }
         with self.assertRaisesRegex(RuntimeError, "should begin with one of"):
-            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+            validate_failures_dict_structure(
+                FailuresDict("", failures), mini_op_test_checks, MiniOpTest
+            )
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error_nopenopenope": "xfail",
+                "test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                    "comment": "",
+                    "status": "xfail",
+                },
             }
         }
         with self.assertRaisesRegex(RuntimeError, "does not exist on the TestCase"):
-            validate_failures_dict(failures, mini_op_test_checks, MiniOpTest)
+            validate_failures_dict_structure(
+                FailuresDict("", failures), mini_op_test_checks, MiniOpTest
+            )
 
     def test_opcheck(self):
         x = torch.randn(3, requires_grad=True)

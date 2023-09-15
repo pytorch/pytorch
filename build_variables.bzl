@@ -71,7 +71,6 @@ def libtorch_generated_sources(gencode_pattern):
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
-    "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
@@ -896,6 +895,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/python_dispatch.cpp",
     "torch/csrc/utils/python_symnode.cpp",
     "torch/csrc/utils/pybind.cpp",
+    "torch/csrc/utils/pyobject_preservation.cpp",
     "torch/csrc/utils/structseq.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",
@@ -1438,7 +1438,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/fmha_api.cpp",
+    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.cpp",
 ]
 
 # Files using thrust::sort_by_key need to be linked last
