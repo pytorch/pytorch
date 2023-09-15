@@ -231,6 +231,15 @@ elseif(BLAS STREQUAL "Generic")
     set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
   endif()
   find_library(BLAS_LIBRARIES NAMES ${GENERIC_BLAS})
+  #find apl libs
+  set(APL_LIB_SEARCH_PATHS
+  C:/Users/AWE/Documents/pytorch_openBlas_debug/arm-performance-libraries_23.08/armpl_23.08/bin)
+  
+  find_library(APL_LIB NAMES armpl_ilp64 PATHS ${APL_LIB_SEARCH_PATHS})
+  find_library(APL_FortranRuntime NAMES FortranRuntime PATHS ${APL_LIB_SEARCH_PATHS})
+  find_library(APL_FortranDecimal NAMES FortranDecimal PATHS ${APL_LIB_SEARCH_PATHS})
+  set(APL_LIBRARIES ${APL_LIB} ${APL_FortranRuntime} ${APL_FortranDecimal})
+  set(BLAS_LIBRARIES  ${APL_LIBRARIES})
   message("-- Using BLAS: ${BLAS_LIBRARIES}")
   list(APPEND Caffe2_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
   set(GENERIC_BLAS_FOUND TRUE)
