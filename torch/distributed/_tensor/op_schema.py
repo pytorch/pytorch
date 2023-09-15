@@ -190,6 +190,22 @@ class OpSchema:
             f" kwargs_schema={self.kwargs_schema})"
         )
 
+    def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
+        op_arg_type = self.op._schema.arguments[arg_idx].type
+        is_tensor = isinstance(op_arg_type, torch.TensorType)
+        if is_tensor:
+            return True
+
+        is_list_like = isinstance(op_arg_type, torch.ListType)
+        if not is_list_like:
+            return False
+
+        elem_type = op_arg_type.getElementType()
+        return isinstance(elem_type, torch.TensorType) or (
+            isinstance(elem_type, torch.OptionalType)
+            and isinstance(elem_type.getElementType(), torch.TensorType)
+        )
+
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
         if not self.schema_info:
@@ -202,9 +218,7 @@ class OpSchema:
         args_to_hash = tuple(
             tuple(e) if isinstance(e, list) else e
             for i, e in enumerate(self.args_schema)
-            if isinstance(e, DTensorSpec)
-            or i >= static_argnum
-            or (isinstance(e, list) and isinstance(e[0], DTensorSpec))
+            if self.arg_type_tensor_or_tensor_list_like(i) or i >= static_argnum
         )
         if static_kwargkey is not None:
             kwargs_to_hash = tuple(
