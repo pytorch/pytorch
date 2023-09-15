@@ -254,3 +254,46 @@ def unset_functional_temporarily():
     finally:
         if old is not None:
             torch._C._set_dispatch_mode(old)
+
+
+# This is similar to torch.func.functionalize, but:
+# - It uses FunctionalTensorMode, and FunctionalTensor (a python subclass).
+#   One important advantage to using this mode is that it will let us
+#   run functionalization underneath __torch_dispatch__,
+#   which we need in AOTAutograd.
+# - Doing so means that it does not automatically compose with other
+#   functorch transforms, since these transforms always run above __torch_dispatch__.
+#   That's why this util lives here, and not in functorch.
+def dispatch_functionalize(func):
+    # TODO: pull these from aot autograd
+    def to_fun(t):
+        if isinstance(t, torch.Tensor):
+            return FunctionalTensor.to_functional(t)
+        return t
+
+    def from_fun(t):
+        if not isinstance(t, FunctionalTensor):
+            # quick sanity assert
+            if isinstance(t, torch.Tensor):
+                assert not torch._is_functional_tensor(t)
+            return t
+        torch._sync(t)
+        return torch._from_functional_tensor(t.elem)
+
+    def inner(*args, **kwargs):
+        func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
+        func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+
+        flattened_wrapped_args, _ = pytree.tree_flatten(func_args)
+        flattened_wrapped_kwargs, _ = pytree.tree_flatten(func_kwargs)
+
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        with disable_above, FunctionalTensorMode():
+            func_outputs = func(*func_args, **func_kwargs)
+            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+
+            return outputs
+
+    return inner

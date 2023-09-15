@@ -213,7 +213,7 @@ def validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info):
                     error(f"for input '{name}' expected the grad_input dict to "
                           f"hold a list of None or Tensor gradients but got "
                           f"object of {type(g)} at index {idx}")
-                if info != torch.Tensor:
+                if not issubclass(info, torch.Tensor):
                     error(f"for input '{name}', got a Tensor as the gradient "
                           f"for the {idx}-th value but expected None because "
                           f"the {idx}-th value was not a Tensor (it was "
@@ -226,10 +226,11 @@ def validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info):
             error(f"got object of type {type(grad)} as the gradient for input "
                   f"'{name}', "
                   f"but expected the gradient to be either None or a Tensor")
-        if arg_info != torch.Tensor:
+        if not issubclass(arg_info, torch.Tensor):
             error(f"got a Tensor as the gradient for input '{name}' but "
                   f"expected None as the gradient because input '{name}' "
                   f"was not a Tensor (it was type {arg_info}).")
+
 
 def grad_inputs_dict_to_flat_tuple(grad_inputs_dict, args_info):
     result = []
