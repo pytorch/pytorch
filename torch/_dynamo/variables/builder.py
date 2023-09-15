@@ -1518,28 +1518,31 @@ def _automatic_dynamic(e, tx, name, static_shapes):
     # do a linear scan every time here
     t_id = id(e)
     dim2constraint = {}
-    dim2name = {}
 
     def update_dim2constraint(dim, constraint_range, debug_name):
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
-            dim2constraint[dim] = StrictMinMaxConstraint(
-                vr=constraint_range.vr & dim2constraint[dim].vr,
+            old_constraint_range, old_debug_name = dim2constraint[dim]
+            new_constraint_range = StrictMinMaxConstraint(
+                vr=constraint_range.vr & old_constraint_range.vr,
                 warn_only=False,
             )
-            if dim2name[dim] is not None:
-                assert debug_name is None or debug_name == dim2name[dim]
+            if old_debug_name is not None:
+                assert debug_name is None or debug_name == old_debug_name
+                new_debug_name = old_debug_name
             else:
-                dim2name[dim] = debug_name
+                new_debug_name = debug_name
+            dim2constraint[dim] = new_constraint_range, new_debug_name
         else:
-            dim2constraint[dim] = constraint_range
-            dim2name[dim] = debug_name
+            dim2constraint[dim] = constraint_range, debug_name
 
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
             if constraint.t_id == t_id:
-                update_dim2constraint(constraint.dim, constraint.constraint_range, constraint.debug_name)
+                update_dim2constraint(
+                    constraint.dim, constraint.constraint_range, constraint.debug_name
+                )
             if constraint.shared is not None and constraint.shared.t_id == t_id:
                 # We process constraint ranges for each shared dimension separately
                 # so that we can directly check range constraint violations on them
@@ -1548,12 +1551,13 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                 # constraint ranges, no matter where / how they were specified, by
                 # by the end of this loop.
                 update_dim2constraint(
-                    constraint.shared.dim, constraint.constraint_range, constraint.debug_name
+                    constraint.shared.dim,
+                    constraint.constraint_range,
+                    constraint.debug_name,
                 )
 
     dynamic_dims = []
     constraint_dims = []
-    debug_names = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
         marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
@@ -1575,17 +1579,22 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         # have a dynamic dimension
         # Precedence: export constraints > eager constraints
         constraint = dim2constraint.get(i)
-        debug_name = dim2name.get(i)
         if constraint is None:
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                constraint = RelaxedUnspecConstraint(warn_only=False)
+                constraint_dim = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
-                constraint = RelaxedUnspecConstraint(warn_only=True)
-        constraint_dims.append(constraint)
-        debug_names.append(debug_name)
+                constraint_dim = RelaxedUnspecConstraint(warn_only=True)
+            else:
+                constraint_dim = None
+        else:
+            constraint_dim, debug_name = constraint
+            if debug_name is not None:
+                dim_name = f"{name}.size()[{i}]"
+                tx.output.shape_env.source_name_to_debug_name[dim_name] = debug_name
+        constraint_dims.append(constraint_dim)
 
         # Now, figure out if the dim is dynamic/duck/static
-        if constraint is not None or marked_dynamic or marked_weak_dynamic:
+        if constraint_dim is not None or marked_dynamic or marked_weak_dynamic:
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override policy in this
             # case
@@ -1598,11 +1607,6 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         dynamic_dims.append(dynamic)
 
     tx.output.frame_state[name] = frame_state_entry
-
-    for i, debug_name in enumerate(debug_names):
-        if debug_name is not None:
-            dim_name = f"{name}.size()[{i}]"
-            tx.output.shape_env.source_name_to_debug_name[dim_name] = debug_name
 
     return dynamic_dims, constraint_dims
 

@@ -29,7 +29,6 @@ from torch.utils._pytree import (
     treespec_loads,
     treespec_dumps
 )
-from torch._export import _, Dim, dims, export_rc, TensorType
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -351,7 +350,7 @@ class TestExport(TestCase):
                 self.assertTrue("nn_module_stack" in node.meta)
 
     def test_export_experimental_apis(self):
-        export = export_rc
+        from torch._export import _, Dim, dims, export__RC__ as export, TensorType
 
         # pass dynamic shapes of inputs along with inputs in export call [args]
         def foo(x, y):

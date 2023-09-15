@@ -1,13 +1,16 @@
 import copy
 import dataclasses
 import io
-import re
 import pathlib
+import re
+
+import sys
 import types
 import weakref
 import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -21,7 +24,6 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.export import Constraint, _create_constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -31,6 +33,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.export import _create_constraint, Constraint
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -62,41 +65,52 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 from .wrappers import _wrap_submodules
 
 
-import sys
-
-from typing import NewType
-
-
 class _Dim(type):
+    """
+    Metaclass for Dim types.
+    """
     pass
 
 
 def Dim(name, *, min=None, max=None):
     """
-    Object describing possible values of a tensor dimension.
-    Like a symbolic integer with a range.
-    Can be shared by different dimensions of the same tensor, or of different tensors.
+    Constructs a type analogous to a named symbolic integer with a range.
+    It can be used to describe multiple possible values of a tensor dimension.
+    Note that different dimensions of the same tensor, or of different tensors,
+    can be described by the same type.
     """
-    _min = 0 if min is None else min
+    _min = 2 if min is None else min
     _max = sys.maxsize if max is None else max
     return _Dim(name, (int,), {"min": _min, "max": _max})
 
 
 def dims(*names: str):
     """
-    Util to create multiple Dim objects.
+    Util to create multiple Dim types.
     """
     return tuple(Dim(name) for name in names)
 
 
 class _(int):
+    """
+    A special type representing any fixed value of a tensor dimension.
+    """
     pass
 
 
+"""
+Generic type over any number of dimension types (Dim types or _).
+
+NOTE: Because of Python 3.8's lack of support for user-defined
+variadic generic types, we are forced to implement TensorType as
+an alias for Tuple. Python 3.9+ provides better ways of doing this,
+but such ways are not backward-compatibile with Python 3.8 and
+cause CI failures.
+"""
 TensorType = Tuple
 
 
-def export_rc(
+def export__RC__(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
@@ -104,34 +118,61 @@ def export_rc(
     dynamic_shapes: Optional[Dict[str, Any]] = None,
 ) -> ExportedProgram:
     """
-    API for different ways of exporting with dynamic shape specifications.
-    1. Either pass dynamic shapes of inputs along with inputs in export call.
-    2. Or type arguments of exported function with expected dynamic shapes.
+    API for exporting with dynamic shape specifications instead of constraints.
+    It should be considered "release candidate" (RC), meant to replace `export`.
+
+    See documentation of `export` for `f`, `args`, `kwargs`, and return.
+    Here we focus on documenting mechanisms for specifying dynamic shapes.
+
+    There are two ways of specifying dynamic shapes, described below:
+    1. Either pass `dynamic_shapes` of inputs along with inputs.
+    2. Or type arguments of the callable `f` with expected dynamic shapes.
+
+    Mechanism #1: `dynamic_shapes`
+    ======================================
+    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
+    argument names of `f` to dynamic shape specifications, as follows:
+    - The dynamic shape of a tensor argument can be specified as a dict from
+      dynamic dimension indices to Dim types. It is not required to include
+      static dimension indices in this dict, but when they are, they should
+      be mapped to _.
+    - Arguments that are dicts or tuples of tensors are recursively specified
+      by using mappings or sequences of contained specifications.
+
+    Mechanism #2: types
+    ===================
+    Here, arguments of `f` are expected to be (optionally) typed with their
+    dynamic shape specifications, as follows:
+    - The shape of a tensor argument can be specified as a TensorType of
+      dimension types (Dim types and _). Note that all dimensions, dynamic
+      and static, must be included.
+    - Arguments that are dicts or tuples of tensors are recursively typed
+      by using Dict[str, ...] or List[...] of contained specifications.
     """
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
     from typing import get_origin, get_args
 
-    def typing_zip(combined_args, dynamic_shapes):
+    def assoc_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, tuple):
             if isinstance(dynamic_shapes, Sequence):
                 for arg, shape in zip(combined_args, dynamic_shapes):
-                    yield from typing_zip(arg, shape)
+                    yield from assoc_zip(arg, shape)
             else:
                 assert get_origin(dynamic_shapes) is list, f"Unexpected {dynamic_shapes} matching tuple"
                 shape = get_args(dynamic_shapes)[0]
                 for arg in combined_args:
-                    yield from typing_zip(arg, shape)
+                    yield from assoc_zip(arg, shape)
         elif isinstance(combined_args, dict):
             if isinstance(dynamic_shapes, Mapping):
                 for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
-                    yield from typing_zip(arg, shape)
+                    yield from assoc_zip(arg, shape)
             else:
                 assert get_origin(dynamic_shapes) is dict, f"Unexpected {dynamic_shapes} matching dict"
                 shape = get_args(dynamic_shapes)[1]
                 for arg in combined_args.values():
-                    yield from typing_zip(arg, shape)
+                    yield from assoc_zip(arg, shape)
         # TODO: other container types
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
@@ -159,7 +200,7 @@ def export_rc(
             k: parameter.annotation
             for k, parameter in signature.parameters.items()
         }
-    for tensor, shape in typing_zip(combined_args, dynamic_shapes):
+    for tensor, shape in assoc_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
     constraints = []
@@ -174,7 +215,7 @@ def export_rc(
     return export(f, args, kwargs, constraints=constraints)
 
 
-def dynamic_dim(t: torch.Tensor, index: int, debug_name: str = None):
+def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     if not isinstance(t, torch.Tensor):
         raise UserError(
             UserErrorType.DYNAMIC_DIM,

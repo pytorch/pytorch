@@ -599,11 +599,17 @@ class _ConstraintFactory(type):
             f"Please use torch.export.dynamic_dim() to create one"
         )
 
-    def _create(cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None):
-        return super().__call__(w_tensor, t_id, dim, constraint_range, shared, debug_name)
+    def _create(
+        cls, w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+    ):
+        return super().__call__(
+            w_tensor, t_id, dim, constraint_range, shared, debug_name
+        )
 
 
-def _create_constraint(w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None):
+def _create_constraint(
+    w_tensor, t_id, dim, constraint_range, shared=None, debug_name=None
+):
     return Constraint._create(w_tensor, t_id, dim, constraint_range, shared, debug_name)
 
 
@@ -634,7 +640,12 @@ class Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
             warn_only=False,
         )
         return _create_constraint(
-            self.w_tensor, self.t_id, self.dim, constraint_range, self.shared, self.debug_name
+            self.w_tensor,
+            self.t_id,
+            self.dim,
+            constraint_range,
+            self.shared,
+            self.debug_name,
         )
 
     def __ge__(self, lower):
