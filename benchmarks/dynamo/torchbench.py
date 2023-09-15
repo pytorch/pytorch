@@ -93,6 +93,7 @@ SKIP_FOR_CPU = {
     "llama_v2_7b_16h",  # model is CUDA only
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
+    "simple_gpt",
 }
 
 SKIP_FOR_CUDA = {
@@ -110,6 +111,7 @@ SKIP_TRAIN = {
     "maml",
     "llama",
     "llama_v2_7b_16h",
+    "simple_gpt",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -245,6 +247,11 @@ CANARY_MODELS = {
     "torchrec_dlrm",
 }
 
+ONLY_MULTIPROCESS = {
+    # Models that should only run in --multiprocess mode
+    "simple_gpt"
+}
+
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
@@ -300,12 +307,17 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
+    @property
+    def skip_multiprocess_models(self):
+        return ONLY_MULTIPROCESS
+
     def load_model(
         self,
         device,
         model_name,
         batch_size=None,
         part=None,
+        extra_args=None,
     ):
         if self.args.enable_activation_checkpointing:
             raise NotImplementedError(
@@ -347,9 +359,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
-        extra_args = []
+        if extra_args is None:
+            extra_args = []
         if part:
-            extra_args = ["--part", part]
+            extra_args += ["--part", part]
 
         if model_name == "vision_maskrcnn" and is_training:
             # Output of vision_maskrcnn model is a list of bounding boxes,
