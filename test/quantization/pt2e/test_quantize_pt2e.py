@@ -74,6 +74,9 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     TestHelperModules,
 )
+from torch.testing._internal.common_utils import (
+    TemporaryFileName,
+)
 from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
@@ -1155,6 +1158,42 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
+
+    def test_save_load(self):
+        """Test save/load a quantized model
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        # Calibrate
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        ref_res = m(*example_inputs)
+
+        with TemporaryFileName() as fname:
+            # serialization
+            quantized_ep = torch.export.export(m, example_inputs)
+            torch.export.save(quantized_ep, fname)
+            # deserialization
+            loaded_ep = torch.export.load(fname)
+            loaded_quantized_model = loaded_ep.module()
+            res = loaded_quantized_model(*example_inputs)
+            self.assertEqual(ref_res, res)
 
     def test_mul_and_inplace_mul(self):
         quantizer = XNNPACKQuantizer()
