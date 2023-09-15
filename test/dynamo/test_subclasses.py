@@ -182,7 +182,15 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         z = torch.randn([5, 6])
         a = torch.randn([3, 5])
         b = torch.randn([4, 4])
-        for dim_dynamic in [DimDynamic.DYNAMIC, DimDynamic.DUCK, DimDynamic.STATIC]:
+        # When inputs' DimDynamic is DYNAMIC or DUCK, the inputs
+        # to opt_f will be tensors with SymInt sizes. Dynamo will treat input
+        # as dynamic automatically and will only compile once
+        for dim_dynamic in [DimDynamic.DYNAMIC, DimDynamic.DUCK]:
+            test_automatic_dynamic(f, [x, y, z], dim_dynamic, 1, 1)
+            test_automatic_dynamic(f, [x, a, z], dim_dynamic, 1, 1)
+            test_automatic_dynamic(f, [x, b, z], dim_dynamic, 1, 1)
+
+        for dim_dynamic in [DimDynamic.STATIC]:
             # Recompile once, first with dim 0 and 1 become Dynamic
             test_automatic_dynamic(f, [x, y, z], dim_dynamic, 2, 2)
             # Recompile 2 times, first with dim 1 become Dynamic, second with dim 0 becomes Dynamic.
