@@ -13976,12 +13976,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestBwdGradients",
-                "test_fn_grad",
-                active_if=TEST_WITH_ROCM,
-            )
         ),
         skips=(
             # RuntimeError: expected int at position 0, but got: Tensor
