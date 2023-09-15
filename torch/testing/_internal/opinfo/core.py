@@ -2639,7 +2639,9 @@ def sample_inputs_foreach(
     else:
         # if N > 5, interweave some empty tensors + have the last tensor be 0-sized to fully fix #100701
         return [
-           torch.empty(0, dtype=dtype, device=device) if N >= 5 and (i % 3 != 0 or i == N - 1) else make_tensor(
+            torch.empty(0, dtype=dtype, device=device)
+            if N >= 5 and (i % 3 != 0 or i == N - 1)
+            else make_tensor(
                 (N - i, N - i),
                 dtype=dtype,
                 device=device,

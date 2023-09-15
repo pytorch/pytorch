@@ -132,7 +132,8 @@ void multi_tensor_apply(
     if (tensor_lists[0][t].numel() == 0) {
       n_zero_tensors++;
       if (t != n_tensors - 1) {
-        // allow launching of the last kernel with accumulated tensorListMetadata
+        // allow launching of the last kernel with accumulated
+        // tensorListMetadata
         continue;
       }
     } else {
@@ -151,8 +152,8 @@ void multi_tensor_apply(
     }
 
     // see below note: [chunking territory]
-    const auto chunks = (tensor_lists[0][t].numel() +
-                         kChunkSize - 1) / kChunkSize;
+    const auto chunks =
+        (tensor_lists[0][t].numel() + kChunkSize - 1) / kChunkSize;
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
@@ -195,12 +196,12 @@ void multi_tensor_apply(
     // see below note: [correctly handling 0-sized tails]
     if (chunks == 0 && loc_block_info != 0) {
       multi_tensor_apply_kernel<<<
-            loc_block_info,
-            kBlockSize,
-            0,
-            at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+          loc_block_info,
+          kBlockSize,
+          0,
+          at::cuda::getCurrentCUDAStream()>>>(
+          tensorListMeta, callable, args...);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }
@@ -224,7 +225,8 @@ void multi_tensor_apply(
     if (tensor_lists[0][t].numel() == 0) {
       n_zero_tensors++;
       if (t != n_tensors - 1) {
-        // allow launching of the last kernel with accumulated tensorListMetadata
+        // allow launching of the last kernel with accumulated
+        // tensorListMetadata
         continue;
       }
     } else {
@@ -247,14 +249,15 @@ void multi_tensor_apply(
     // the tensors get filled up. There will always be at least one block
     // per tensor since we skip the zero-sized ones, so the nested forloop
     // below represents iterating through the chunks of a single tensor.
-    const auto chunks = (tensor_lists[0][t].numel() +
-                         kChunkSize - 1) / kChunkSize;
+    const auto chunks =
+        (tensor_lists[0][t].numel() + kChunkSize - 1) / kChunkSize;
     for (auto chunk = 0; chunk < chunks; chunk++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = chunk;
       loc_block_info++;
 
-      // a tensor is not considered full unless all its chunks have been processed
+      // a tensor is not considered full unless all its chunks have been
+      // processed
       const bool tensors_full =
           (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
            chunk == chunks - 1);
@@ -273,10 +276,11 @@ void multi_tensor_apply(
 
         // Reset.
         loc_block_info = 0;
-        if (chunk == chunks - 1) {  // all chunks have already been handled in the kernel
+        if (chunk ==
+            chunks - 1) { // all chunks have already been handled in the kernel
           loc_tensor_info = 0;
           tensorListMeta.start_tensor_this_launch = t + 1;
-        } else {  // blocks were full and tensor chunks remain
+        } else { // blocks were full and tensor chunks remain
           tensorListMeta.numel_for_tensor[0] =
               tensorListMeta.numel_for_tensor[loc_tensor_info - 1];
           for (int d = 0; d < depth; d++) {
@@ -290,19 +294,20 @@ void multi_tensor_apply(
     }
 
     // note: [correctly handling 0-sized tails]
-    // the only reason chunks would be 0 and we have reached this part of the code
-    // is because our tail tensor was zero-sized, and we skipped the prior continue.
-    // if there are blocks in tensorListMetadata, we should kernel launch to end.
+    // the only reason chunks would be 0 and we have reached this part of the
+    // code is because our tail tensor was zero-sized, and we skipped the prior
+    // continue. if there are blocks in tensorListMetadata, we should kernel
+    // launch to end.
     if (chunks == 0 && loc_block_info != 0) {
       multi_tensor_apply_kernel<<<
-            loc_block_info,
-            kBlockSize,
-            0,
-            at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+          loc_block_info,
+          kBlockSize,
+          0,
+          at::cuda::getCurrentCUDAStream()>>>(
+          tensorListMeta, callable, args...);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
-    }
+  }
 }
 
 template <int depth, typename T, typename... ArgTypes>
@@ -324,7 +329,8 @@ void multi_tensor_apply_for_fused_optimizer(
     if (tensor_lists[0][tensor_index].numel() == 0) {
       num_zero_tensors++;
       if (tensor_index != num_tensors - 1) {
-        // allow launching of the last kernel with accumulated tensorListMetadata
+        // allow launching of the last kernel with accumulated
+        // tensorListMetadata
         continue;
       }
     } else {
@@ -345,7 +351,7 @@ void multi_tensor_apply_for_fused_optimizer(
 
     // see above note: [chunking territory]
     const int64_t chunks =
-        (tensor_lists[0][tensor_index].numel() +  kChunkSize - 1) /  kChunkSize;
+        (tensor_lists[0][tensor_index].numel() + kChunkSize - 1) / kChunkSize;
     TORCH_CHECK(chunks > -1);
     for (const auto& chunk : c10::irange(chunks)) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
@@ -389,12 +395,12 @@ void multi_tensor_apply_for_fused_optimizer(
     // see above note: [correctly handling 0-sized tails]
     if (chunks == 0 && loc_block_info != 0) {
       multi_tensor_apply_kernel<<<
-            loc_block_info,
-            kBlockSize,
-            0,
-            at::cuda::getCurrentCUDAStream()>>>(
-            tensorListMeta, callable, args...);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+          loc_block_info,
+          kBlockSize,
+          0,
+          at::cuda::getCurrentCUDAStream()>>>(
+          tensorListMeta, callable, args...);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 }
