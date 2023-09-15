@@ -202,6 +202,16 @@ capture_scalar_outputs = False
 # (these are separated for historical reasons).
 capture_dynamic_output_shape_ops = False
 
+# By default, dynamo will treat all ints as backed SymInts, which means (1) it
+# will wait to see the int change over multiple runs before generalizing and
+# (2) it will still always 0/1 specialize an int.  When true, this knob
+# forces dynamo to treat _length_per_key and _offset_per_key on
+# KeyedJaggedTensor from torchrec as size-like unbacked SymInts, so that
+# they (1) generalize immediately and (2) unsoundly never compare equal to
+# 0/1.  This is not on by default as AOTAutograd/Inductor cannot currently
+# compile this code; however, this can be useful for export.
+force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
+
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
