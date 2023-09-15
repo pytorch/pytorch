@@ -332,6 +332,10 @@ class AsyncCollectiveTensor(torch.Tensor):
     def __tensor_flatten__(self):
         return ["elem"], None
 
+    def tolist(self):
+        wait_tensor(self.elem)
+        return self.elem.tolist()
+
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta):
         assert meta is None
