@@ -11,7 +11,6 @@ import sympy
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
-from caffe2.torch._export import export__RC__
 from torch.fx._compatibility import compatibility
 
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
