@@ -7,10 +7,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
     maybe_handle_decomp,
 )
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
-)
 from torch._C import DispatchKey, _ExcludeDispatchKeyGuard, DispatchKeySet
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -159,36 +155,26 @@ out_dtype.py_impl(DispatchKey.Autograd)(autograd_not_implemented(out_dtype, defe
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
 def out_dtype_proxy(
+    mode: ProxyTorchDispatchMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
-    # TODO Move this to proper utility function
-    from torch._ops import mode_stack_per_key, temporarily_pop_mode
-    pre_dispatch_modes = mode_stack_per_key().get(DispatchKey.PreDispatch, [])  # type: ignore[attr-defined]
-    if len(pre_dispatch_modes) > 0:
-        with temporarily_pop_mode(pre_dispatch_modes) as mode:
-            if mode.enable_tracing:
-                return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-            else:
-                return out_dtype(op, output_dtype, *args)
-
-    mode = _get_current_dispatch_mode()
-    assert (mode is not None), "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-        else:
-            return out_dtype(op, output_dtype, *args)
+    if mode.enable_tracing:
+        return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
+    else:
+        return out_dtype(op, output_dtype, *args)
 
 
 @out_dtype.py_impl(FakeTensorMode)
 def out_dtype_fake_tensor_mode(
+    mode: FakeTensorMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
-    return out_dtype_dense(op, output_dtype, *args)
+    with mode:
+        return out_dtype_dense(op, output_dtype, *args)
 
 
 @out_dtype.py_impl(DispatchKey.Functionalize)
