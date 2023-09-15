@@ -148,10 +148,15 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
             body_gm = getattr(gm, body_graph.name)
             inp_pos_to_buffer_name_for_submod = {}
             real_operands = []
+            # TODO Fix situation here to replace dot with underscore...
+            state_dict_for_lookup = {
+                key.replace(".", "_"): value
+                for key, value in state_dict.items()
+            }
             for ix, operand in enumerate(operands):
                 if operand.target in inp_pos_to_param_buffer_name.values():
                     inp_pos_to_buffer_name_for_submod[ix] = operand.target
-                    body_gm.register_buffer(operand.target, state_dict[operand.target])
+                    body_gm.register_buffer(operand.target, state_dict_for_lookup[operand.target])
                 else:
                     real_operands.append(operand)
             node.args = (body_graph, num_mapped, *real_operands)
@@ -332,7 +337,7 @@ def _process_constraints(
         val = placeholder_nodes[input_dim.input_name].meta["val"]
         assert isinstance(val, FakeTensor)
         symint = val.shape[input_dim.dim]
-        assert isinstance(symint, SymInt)
+        assert isinstance(symint, SymInt), f"Expected SymInt but got {symint}: {type(symint)}"
         symbol = symint.node._expr
         range_constraints[symbol] = RangeConstraint(min_val, max_val)
 

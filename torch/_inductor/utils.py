@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import collections
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -7,6 +10,7 @@ import logging
 import math
 import operator
 import os
+import platform
 import shutil
 import sys
 import tempfile
@@ -32,8 +36,10 @@ from unittest import mock
 import sympy
 
 import torch
+from torch.autograd import DeviceType
+from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
 from .cuda_properties import current_device, get_device_capability
@@ -42,6 +48,84 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+
+
+def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
+    """
+    Returns benchmark results by examining torch profiler events.
+    This could be more accurate as it doesn't count CPU side overhead.
+    However, this also requires manually excluding irrelevant event, e.g.
+    vectorized_elementwise_kernel which is used to fill L2 cache,
+    various CUDA events, etc, so could also be fragile.
+    """
+
+    fn()
+    torch.cuda.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+
+    # Estimate the runtime of the function
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+    for _ in range(5):
+        cache.zero_()
+        fn()
+    end_event.record()
+    torch.cuda.synchronize()
+    estimate_ms = start_event.elapsed_time(end_event) / 5
+
+    # compute number of warmup and repeat
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
+
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
+    ) as p:
+        # Benchmark
+        for i in range(n_repeat):
+            # we clear the L2 cache before each run
+            cache.zero_()
+            # record time of `fn`
+            fn()
+        # Record clocks
+        torch.cuda.synchronize()
+
+    log.debug("raw events")
+    log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+
+    filtered_events = EventList(
+        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+    )
+    if len(filtered_events) % n_repeat != 0:
+        raise RuntimeError(
+            "Failed to divide all profiling events into #repeat groups. "
+            "#CUDA events: %d, #repeats: %s",
+            len(filtered_events),
+            n_repeat,
+        )
+    num_event_per_group = len(filtered_events) / n_repeat
+    actual_events = EventList(
+        [
+            event
+            for i, event in enumerate(filtered_events)
+            if i % num_event_per_group != 0
+        ]
+    )
+    actual_events._build_tree()
+    actual_events = actual_events.key_averages()
+
+    log.debug("profiling time breakdown")
+    log.debug(actual_events.table(row_limit=-1))
+
+    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    log.debug("profiling results: %s ms", res)
+    return res
 
 
 def do_bench(*args, **kwargs):
@@ -126,7 +210,11 @@ def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(numer: int, denom: int) -> int:
+def ceildiv(
+    numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
+) -> Union[int, sympy.Expr]:
+    if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
+        return CeilDiv(numer, denom)
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -513,7 +601,7 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvaluewithlinemap(self):
+    def getvaluewithlinemap(self) -> tuple[str, list[tuple[int, LineContext]]]:
         buf = StringIO()
         p = 1
         linemap = []
@@ -531,11 +619,11 @@ class IndentedBuffer:
             p += 1 + line.count("\n")
         return buf.getvalue(), linemap
 
-    def getvalue(self):
+    def getvalue(self) -> str:
         v, _ = self.getvaluewithlinemap()
         return v
 
-    def getrawvalue(self):
+    def getrawvalue(self) -> str:
         buf = StringIO()
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
@@ -623,7 +711,7 @@ class DeferredLineBase:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
         raise NotImplementedError()
 
-    def _new_line(self, line: str) -> "DeferredLineBase":
+    def _new_line(self, line: str) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
         raise NotImplementedError()
 
@@ -652,25 +740,57 @@ def is_big_gpu(index):
     return True
 
 
-def use_triton_template(layout, *, enable_int32=False):
-    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
-    if enable_int32:
-        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+def use_max_autotune() -> bool:
     return (
-        (
-            config.max_autotune
-            or config.max_autotune_gemm
-            or config.search_autotune_cache
-        )
-        and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
+        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+    )
+
+
+def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+    return (
+        use_max_autotune()
         and layout.device.type == "cuda"
-        and layout.dtype in layout_dtypes
+        and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
 
+def _use_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
+    ]
+
+
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    if enable_int32:
+        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "TRITON"
+    )
+
+
+def use_cutlass_template(layout):
+    from .codegen.cuda.cutlass_utils import try_import_cutlass
+
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "CUTLASS"
+    )
+
+    if res:
+        if not try_import_cutlass():
+            log.warning(
+                "Failed to import CUTLASS lib. Please check whether "
+                "_inductor.config.cuda.cutlass_dir is set correctly. "
+                "Skipping CUTLASS backend for now."
+            )
+            return False
+    return res
+
+
 def use_aten_gemm_kernels():
-    return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")
+    return not use_max_autotune() or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:
@@ -1041,26 +1161,54 @@ def reduction_num_outputs(reduction_type):
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
-def has_free_symbols(itr):
-    return any(hasattr(x, "free_symbols") and len(x.free_symbols) > 0 for x in itr)
+def is_linux() -> bool:
+    return platform.system() == "Linux"
 
 
-def is_dynamic(*args):
-    from . import ir
+# Placeholder strings used in triton codegen.
+class Placeholder(enum.Enum):
+    # The placeholder for the actual name of a triton kernel.
+    # e.g. for "def triton_" it would be "triton_"
+    KERNEL_NAME = "KERNEL_NAME"
 
-    for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
-            ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
-                return True
-        elif not isinstance(t, ir.IRNode):
-            continue
-        else:
-            raise TypeError(f"unexpected type for is_dynamic {type(t)}")
+    # The descriptive name of the triton kernel; when unique_kernel_names = False, this
+    # placeholder will be replaced with a string with more information.
+    DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
-    return False
+
+# A utility function for easier AOTInductor testing
+aot_inductor_launcher = """
+    #include <c10/cuda/CUDAStream.h>
+    #include <torch/csrc/inductor/aot_runtime/interface.h>
+
+    void run(
+            std::vector<at::Tensor>& input_tensors,
+            std::vector<at::Tensor>& output_tensors) {
+        AOTInductorModelContainerHandle container_handle;
+        AOT_INDUCTOR_ERROR_CHECK(
+            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
+        const auto stream_id = cuda_stream.stream();
+        AOTInductorStreamHandle stream_handle =
+            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+        AOTInductorTensorHandle inputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
+        AOTInductorTensorHandle outputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
+        std::vector<AOTInductorParamShape> output_shapes(
+            output_tensors.size(), AOTInductorParamShape());
+        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+            container_handle,
+            inputs_handle,
+            input_tensors.size(),
+            outputs_handle,
+            output_tensors.size(),
+            output_shapes.data(),
+            stream_handle,
+            proxy_executor_handle));
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+    }
+"""
