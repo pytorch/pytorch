@@ -1923,7 +1923,7 @@ class TritonKernel(Kernel):
         mutated_args = sorted(mutated_args)
 
         op_info = None
-        if node_schedule:
+        if node_schedule and config.triton.descriptive_names:
             op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
