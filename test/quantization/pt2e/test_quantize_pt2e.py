@@ -97,6 +97,29 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
     }
 
+    def _get_pt2e_quantized_linear(self) -> torch.fx.GraphModule:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        # Calibrate
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        return m
 
     def _test_quantizer(
         self,
@@ -1132,6 +1155,17 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_fold_quantize(self):
+        """Test to make sure the quantized model gets quantized weight (quantize op is folded)
+        """
+        m = self._get_pt2e_quantized_linear()
+        node_occurrence = {
+            # quantize op for weight node is folded
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 3,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
     def test_add_and_inplace_add(self):
         quantizer = XNNPACKQuantizer()
         quantization_config = get_symmetric_quantization_config(is_per_channel=True)
@@ -1162,27 +1196,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_save_load(self):
         """Test save/load a quantized model
         """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
-        example_inputs = (torch.randn(2, 2),)
-        m = M().eval()
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._get_pt2e_quantized_linear()
         ref_res = m(*example_inputs)
 
         with TemporaryFileName() as fname:

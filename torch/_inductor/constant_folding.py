@@ -51,7 +51,11 @@ class ConstantFolder(torch.fx.Interpreter):
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
     def is_impure(self, node: torch.fx.node.Node):
-        if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
+        if node.target in [
+            torch.ops.quantized_decomposed.dequantize_per_channel.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+        ]:
             # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
             # -> quantized_decomposed.dequantize_per_channel.default
             # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
