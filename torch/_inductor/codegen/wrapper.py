@@ -1845,11 +1845,11 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             namespace {
 
             struct Grid {
-                Grid(int32_t x, int32_t y, int32_t z)
+                Grid(uint32_t x, uint32_t y, uint32_t z)
                   : grid_x(x), grid_y(y), grid_z(z) {}
-                int32_t grid_x;
-                int32_t grid_y;
-                int32_t grid_z;
+                uint32_t grid_x;
+                uint32_t grid_y;
+                uint32_t grid_z;
             };
 
             }  // anonymous namespace
@@ -1857,7 +1857,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             static inline CUfunction loadKernel(
                     const std::string &filePath,
                     const std::string &funcName,
-                    int sharedMemBytes) {
+                    uint32_t sharedMemBytes) {
                 CUmodule mod;
                 CUfunction func;
                 CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
@@ -1874,15 +1874,16 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
             static inline void launchKernel(
                     CUfunction func,
-                    int gridX,
-                    int gridY,
-                    int gridZ,
-                    int numWarps,
-                    int sharedMemBytes,
+                    uint32_t gridX,
+                    uint32_t gridY,
+                    uint32_t gridZ,
+                    uint32_t numWarps,
+                    uint32_t sharedMemBytes,
                     void* args[],
                     cudaStream_t stream) {
                 CUDA_DRIVER_CHECK(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr));
+                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
+                ));
             }
             """
         )
@@ -2003,9 +2004,19 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         assert isinstance(
             grid, (list, tuple)
         ), f"expected grid to be a list or tuple but got: {grid=}"
-        grid_args = [
-            self.expr_printer(V.graph.sizevars.simplify(item)) for item in grid
-        ]
+
+        from .cpp import CppPrinter
+
+        class GridExprPrinter(CppPrinter):
+            def _print_FloorDiv(self, expr):
+                x, div = expr.args
+                x = self.paren(self.doprint(x))
+                div = self.paren(self.doprint(div))
+                assert expr.is_integer, "Expect integers in GridExprPrinter"
+                return f"({x}/{div})"
+
+        expr_printer = GridExprPrinter().doprint
+        grid_args = [expr_printer(V.graph.sizevars.simplify(item)) for item in grid]
         grid_args_str = ", ".join(grid_args)
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
 

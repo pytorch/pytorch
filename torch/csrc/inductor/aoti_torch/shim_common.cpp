@@ -1,4 +1,3 @@
-#include <ATen/native/BinaryOps.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -77,10 +76,6 @@ int32_t aoti_torch_dtype_int32() {
 
 int32_t aoti_torch_dtype_int64() {
   return (int32_t)c10::ScalarType::Long;
-}
-
-int64_t aoti_torch_div_floor_integer(int64_t a, int64_t b) {
-  return at::native::div_floor_integer(a, b);
 }
 
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {

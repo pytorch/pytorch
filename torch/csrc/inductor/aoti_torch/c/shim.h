@@ -98,9 +98,6 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int16();
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int32();
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int64();
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int64_t
-aoti_torch_div_floor_integer(int64_t a, int64_t b);
-
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
