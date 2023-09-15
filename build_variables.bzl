@@ -1100,7 +1100,6 @@ aten_cpu_source_non_codegen_list = [
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
     "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
-    "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
 ]
 
 aten_ufunc_headers = [
@@ -1164,6 +1163,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
+    "aten/src/ATen/native/cpu/AmpGradScalerKernels.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k0.cpp",
     "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
     "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
