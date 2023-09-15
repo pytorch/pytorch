@@ -161,6 +161,7 @@ file(GLOB native_utils_cpp "native/utils/*.cpp")
 
 # flash_attention sources
 file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
+file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
 #Mem_eff attention sources
@@ -170,6 +171,7 @@ file(GLOB mem_eff_attention_cuda_cpp "native/transformers/cuda/mem_eff_attention
 
 if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_cu})
+  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
 endif()
 

@@ -21,9 +21,13 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 
 class AOTInductorModelRunner:
     @classmethod
-    def load(cls, model, example_inputs, example_outputs, options=None):
+    def load(
+        cls, model, example_inputs, example_outputs, options=None, constraints=None
+    ):
         # AOTInductorModel relies on the caller to pass in output_tensors,
         # so we need to explicitly allocate output tensors here.
+        if constraints is None:
+            constraints = []
         output_tensors = []
         example_outputs, output_spec = pytree.tree_flatten(example_outputs)
         for output in example_outputs:
@@ -34,6 +38,7 @@ class AOTInductorModelRunner:
             model,
             example_inputs,
             options=options,
+            constraints=constraints,
         )
 
         optimized = torch.utils.cpp_extension.load_inline(
@@ -47,16 +52,56 @@ class AOTInductorModelRunner:
         return optimized, exported, output_tensors, output_spec
 
     @classmethod
-    def run(cls, model, example_inputs, example_outputs, options=None):
-        example_outputs = copy.deepcopy(example_outputs)
-        optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
-            model, example_inputs, example_outputs, options
-        )
+    def run_compiled(
+        cls, optimized, exported, example_inputs, output_tensors, output_spec
+    ):
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             example_inputs, exported.call_spec.in_spec
         )
         optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
+
+    @classmethod
+    def run(
+        cls, model, example_inputs, example_outputs, options=None, constraints=None
+    ):
+        if constraints is None:
+            constraints = []
+        example_outputs = copy.deepcopy(example_outputs)
+        optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.load(
+            model, example_inputs, example_outputs, options, constraints=constraints
+        )
+        return AOTInductorModelRunner.run_compiled(
+            optimized, exported, example_inputs, output_tensors, output_spec
+        )
+
+    @classmethod
+    def run_multiple(
+        cls,
+        model,
+        list_example_inputs,
+        list_example_outputs,
+        options=None,
+        constraints=None,
+    ):
+        optimized, exported, _, output_spec = AOTInductorModelRunner.load(
+            model,
+            list_example_inputs[0],
+            list_example_outputs[0],
+            options=options,
+            constraints=constraints,
+        )
+        list_output_tensors = []
+        for example_inputs, example_outputs in zip(
+            list_example_inputs, list_example_outputs
+        ):
+            output_tensors = [torch.empty_like(output) for output in example_outputs]
+            list_output_tensors.append(
+                AOTInductorModelRunner.run_compiled(
+                    optimized, exported, example_inputs, output_tensors, output_spec
+                )
+            )
+        return list_output_tensors
 
 
 class AotInductorTests(TestCase):
@@ -223,6 +268,202 @@ class AotInductorTests(TestCase):
         expected = model(*example_inputs)
         actual = torch._export.export(model, example_inputs)(*example_inputs)
         self.assertTrue(same(actual, expected))
+
+    def test_simple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                add_0 = x + y
+                return torch.nn.functional.relu(input=add_0, inplace=False)
+
+        model = Model()
+        a = torch.randn(128, 2048, device="cuda")
+        b = torch.randn(128, 2048, device="cuda")
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 2048,
+            torch._export.dynamic_dim(a, 0) == torch._export.dynamic_dim(b, 0),
+        ]
+        example_inputs = (a, b)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model, example_inputs, expected, constraints=constraints
+        )
+        self.assertTrue(same(actual, expected))
+
+    def test_poi_multiple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                add_0 = x + y
+                return torch.nn.functional.relu(input=add_0, inplace=False)
+
+        model = Model()
+        a = torch.randn(128, 2048, device="cuda")
+        b = torch.randn(128, 2048, device="cuda")
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 2048,
+            torch._export.dynamic_dim(a, 0) == torch._export.dynamic_dim(b, 0),
+        ]
+        list_example_inputs = [(a, b)]
+        list_example_inputs.append(
+            (
+                torch.randn(64, 2048, device="cuda"),
+                torch.randn(64, 2048, device="cuda"),
+            ),
+        )
+        list_example_inputs.append(
+            (
+                torch.randn(211, 2048, device="cuda"),
+                torch.randn(211, 2048, device="cuda"),
+            ),
+        )
+        list_expected = [
+            (model(*example_inputs),) for example_inputs in list_example_inputs
+        ]
+        list_actual = AOTInductorModelRunner.run_multiple(
+            model, list_example_inputs, list_expected, constraints=constraints
+        )
+        self.assertTrue(same(list_actual, list_expected))
+
+    def test_addmm_multiple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self, n, k):
+                super().__init__()
+                self.weight = torch.randn(n, k, device="cuda")
+                self.bias = torch.randn(n, device="cuda")
+
+            def forward(self, a):
+                return torch.nn.functional.linear(a, self.weight, self.bias)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model(N, K)
+        batch = 2
+        a = torch.randn(batch, M, K, device="cuda")
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 2048,
+        ]
+        list_example_inputs = [(a,)]
+        batch = 2048
+        list_example_inputs.append(
+            (torch.randn(batch, M, K, device="cuda"),),
+        )
+        batch = 128
+        list_example_inputs.append(
+            (torch.randn(batch, M, K, device="cuda"),),
+        )
+        list_expected = [
+            (model(*example_inputs),) for example_inputs in list_example_inputs
+        ]
+        list_actual = AOTInductorModelRunner.run_multiple(
+            model,
+            list_example_inputs,
+            list_expected,
+            constraints=constraints,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        self.assertTrue(same(list_actual, list_expected))
+
+    def test_bmm_multiple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b):
+                return torch.bmm(a, b)
+
+        M = 8
+        N = 6
+        K = 16
+        model = Model()
+        batch = 1024
+        a = torch.randn(batch, M, K, device="cuda")
+        b = torch.randn(batch, K, N, device="cuda")
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 2048,
+            torch._export.dynamic_dim(a, 0) == torch._export.dynamic_dim(b, 0),
+        ]
+        list_example_inputs = [(a, b)]
+        batch = 2048
+        list_example_inputs.append(
+            (
+                torch.randn(batch, M, K, device="cuda"),
+                torch.randn(batch, K, N, device="cuda"),
+            ),
+        )
+        batch = 128
+        list_example_inputs.append(
+            (
+                torch.randn(batch, M, K, device="cuda"),
+                torch.randn(batch, K, N, device="cuda"),
+            ),
+        )
+        list_expected = [
+            (model(*example_inputs),) for example_inputs in list_example_inputs
+        ]
+        list_actual = AOTInductorModelRunner.run_multiple(
+            model,
+            list_example_inputs,
+            list_expected,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+            constraints=constraints,
+        )
+        self.assertTrue(same(list_actual, list_expected))
+
+    def test_foreach_multiple_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                x_unsqueeze = torch.unsqueeze(x, dim=0)
+                y_unsqueeze = torch.unsqueeze(y, dim=0)
+                cat = torch.cat([x_unsqueeze, y_unsqueeze], dim=0)
+                return cat
+
+        model = Model()
+        a = torch.randn(128, 2048, device="cuda")
+        b = torch.randn(128, 2048, device="cuda")
+        constraints = [
+            torch._export.dynamic_dim(a, 0) >= 1,
+            torch._export.dynamic_dim(a, 0) <= 2048,
+            torch._export.dynamic_dim(a, 0) == torch._export.dynamic_dim(b, 0),
+        ]
+        list_example_inputs = [(a, b)]
+        list_example_inputs.append(
+            (
+                torch.randn(64, 2048, device="cuda"),
+                torch.randn(64, 2048, device="cuda"),
+            ),
+        )
+        list_example_inputs.append(
+            (
+                torch.randn(211, 2048, device="cuda"),
+                torch.randn(211, 2048, device="cuda"),
+            ),
+        )
+        list_expected = [
+            (model(*example_inputs),) for example_inputs in list_example_inputs
+        ]
+        list_actual = AOTInductorModelRunner.run_multiple(
+            model, list_example_inputs, list_expected, constraints=constraints
+        )
+        self.assertTrue(same(list_actual, list_expected))
 
 
 if __name__ == "__main__":

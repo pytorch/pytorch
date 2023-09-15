@@ -380,16 +380,6 @@ inductor_override_kwargs = {
     "linalg.eig": {"check_gradient": False},
 }
 
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
-
-
 # Always test with all sample for following ops
 inductor_all_samples = {
     "arange",
