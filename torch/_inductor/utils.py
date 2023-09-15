@@ -869,8 +869,7 @@ class OriginOpList:
     oi_list: List[OriginOpInfo]
 
     def __repr__(self):
-        op_list = [op for op in self.oi_list]
-        return str(op_list)
+        return str(list(self.oi_list))
 
     def codegen(self, code: IndentedBuffer, cm_stack: contextlib.ExitStack, line: str):
         with cm_stack as k_stack:

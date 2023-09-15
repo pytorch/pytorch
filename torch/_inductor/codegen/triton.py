@@ -1933,7 +1933,7 @@ class TritonKernel(Kernel):
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "origin_ops":  str(op_info)
+            "origin_ops": str(op_info),
         }
 
         for tree in self.range_trees:
