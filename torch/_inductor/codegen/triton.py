@@ -1932,11 +1932,10 @@ class TritonKernel(Kernel):
         print(f"sorted(self.unbacked_symints)): {sorted(self.unbacked_symints, key=str)}")
 
         # NOTE: pass all unbacked symints used by the kernel into the kernel
-        # TODO(yf225): need a way to pass only the unbacked symints actually used by the kernel, to reduce recompilation and encourage cache lookup
-        # TODO(yf225): remove need to increment the count
+        # TODO(yf225): should we disable autotune for kernels that takes unbacked symints, to reduce size-mismatch recompilation overhead?
         for k in sorted(self.unbacked_symints, key=str):
             arg = str(k)
-            sizearg = SizeArg(arg, arg)  # TODO(yf225): maybe we should actually pass in the unbacked symint symbol here
+            sizearg = SizeArg(arg, arg)  # TODO(yf225): maybe we should actually pass in the unbacked symint symbol here?
             signature.append(sizearg)
             argdefs.append(arg)
 
