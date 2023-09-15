@@ -132,6 +132,10 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#ifdef USE_FBGEMM
+#include <fbgemm/Utils.h>
+#endif
+
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
@@ -439,6 +443,9 @@ TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
   const auto& result = maybe_get_output();
 
   if (result.defined()) {
+    TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+                "index_out: self (", self.scalar_type(), ") and result (", result.scalar_type(),
+                ") must have the same scalar type");
     at::assert_no_internal_overlap(result);
     at::assert_no_overlap(result, self);
     for (const at::OptionalTensorRef& index : materialized) {
@@ -853,7 +860,9 @@ TORCH_IMPL_FUNC(index_copy_out)
 // Not calling into index_reduce_func_impl because of a different dtype dispatch
 TORCH_IMPL_FUNC(index_add_cpu_out)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  if (!result.is_same(self)) result.copy_(self);
+  if (!result.is_same(self)) {
+     result.copy_(self);
+  }
   auto numel = index.numel();
 
   auto index_contig = index.contiguous();
@@ -866,7 +875,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
     //     selfSlice.add_(sourceSlice);
     //   }
     // But much faster as this reuses the iterator from add_
-    if (numel == 0) {
+    if (numel == 0 || self.numel() == 0) {
       return;
     }
 
@@ -941,8 +950,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
           add_stub(iter.device_type(), iter, alpha);
       }
     });
-  }
-  else {
+  } else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
 
     // explicitly capture all required variables to work around windows build
@@ -1479,6 +1487,72 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
+// fast paths for GNN usage
+static bool can_use_expanded_index_path(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    const Tensor& src,
+    bool is_scatter_like) {
+#ifdef USE_FBGEMM
+  if (!fbgemm::is_radix_sort_accelerated_with_openmp()) {
+    return false;
+  }
+#else
+  return false;
+#endif
+
+  if (!self.device().is_cpu()) {
+    return false;
+  }
+
+  const auto st = self.scalar_type();
+  if (!(c10::isFloatingType(st)) || st == ScalarType::Half) {
+    return false;
+  }
+
+  // skip when having empty tensor
+  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
+    return false;
+  }
+
+  // skip when having scalar tensor
+  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) {
+    return false;
+  }
+
+  // allow only different size on dim 0 for src and index
+  // https://github.com/pytorch/pytorch/issues/99595
+  for (const auto dim : c10::irange(1, index.dim())) {
+    if (src.size(dim) != index.size(dim)) {
+      return false;
+    }
+  }
+
+  if (is_scatter_like) {
+    // using `spmm` for scatter would require sorting on index,
+    // this is only perf beneficial when the inner dimension, aka, `channels`
+    // is big enough.
+    constexpr int64_t threshold = 16;
+    if (index.numel() / index.size(0) < threshold) {
+      return false;
+    }
+  }
+
+  // usually the expanded index has stride on the first dimension to be 1,
+  // and strides on other dims to be 0 or 1, e.g.
+  //   shape [108365, 16]; strides [1, 0]
+  //   shape [13264, 1, 7]; strides [1, 1, 0]
+  auto index_strides = index.strides().vec();
+  bool is_index_expanded = index_strides[0] == 1;
+  for (const auto dim : c10::irange(1, index_strides.size())) {
+    if (index_strides[dim] > 1) { is_index_expanded = false; }
+  }
+
+  // index is expanded
+  return dim == 0 && is_index_expanded && src.is_contiguous() && self.is_contiguous();
+}
+
 // gather_out_cpu_cuda
 TORCH_IMPL_FUNC(gather_out)
 (const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
@@ -1994,19 +2068,21 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
-  DimVector self_sizes{self.sizes()};
+  SymDimVector self_sizes{self.sym_sizes()};
   // update number of elements at dim as per indices
-  self_sizes[dim] = indices.size(dim);
-  auto broadcast_shape = infer_size(self_sizes, indices.sizes());
-  auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
+  self_sizes[dim] = indices.sym_size(dim);
+  auto broadcast_shape = infer_size_symint(self_sizes, indices.sym_sizes());
+  auto indices_broadcasted = at::broadcast_to_symint(indices, broadcast_shape);
 
-  DimVector indices_sizes{indices.sizes()};
+  SymDimVector indices_sizes{indices.sym_sizes()};
   // update number of elements at dim as per self
-  indices_sizes[dim] = self.size(dim);
-  broadcast_shape = infer_size(indices_sizes, self.sizes());
-  auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+  indices_sizes[dim] = self.sym_size(dim);
+  broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
+  auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
-  return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
+  return std::make_tuple(std::move(self_broadcasted),
+                         std::move(indices_broadcasted),
+                         std::move(dim));
 }
 
 static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {

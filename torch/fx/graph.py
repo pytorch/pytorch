@@ -195,11 +195,18 @@ class _Namespace:
 
         return False
 
+    def _rename_object(self, obj: Any, name: str):
+        assert obj in self._obj_to_name
+        self._obj_to_name[obj] = name
+        self._used_names.add(name)
+
 dtype_abbrs = {
     torch.bfloat16: 'bf16',
     torch.float64: 'f64',
     torch.float32: 'f32',
     torch.float16: 'f16',
+    torch.float8_e4m3fn: 'f8e4m3fn',
+    torch.float8_e5m2: 'f8e5m2',
     torch.complex32: 'c32',
     torch.complex64: 'c64',
     torch.complex128: 'c128',
@@ -612,9 +619,9 @@ class _PyTreeCodeGen(CodeGen):
         return flat_args
 
     def process_outputs(self, out: Any) -> Any:
-        if self.pytree_info is None:
+        if self.pytree_info is None or self.pytree_info.out_spec is None:
             return out
-        if not isinstance(out, list):
+        if not isinstance(out, (list, tuple)):
             out = [out]
         assert(self.pytree_info.out_spec is not None)
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
@@ -665,7 +672,7 @@ class _PyTreeCodeGen(CodeGen):
         return fn_definition
 
     def generate_output(self, output_args):
-        if self.pytree_info:
+        if self.pytree_info and self.pytree_info.out_spec:
             return f'return pytree.tree_unflatten({repr(output_args)}, self._out_spec)'
         else:
             return super().generate_output(output_args)

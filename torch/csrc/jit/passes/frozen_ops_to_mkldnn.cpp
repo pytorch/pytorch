@@ -110,7 +110,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 
   // CALCULATE ALIASING SETS
 
-  auto aliasDb = torch::make_unique<AliasDb>(graph);
+  auto aliasDb = std::make_unique<AliasDb>(graph);
 
   // map from Value to its Aliasing Set
   std::unordered_map<Value*, ValueSetPtr> alias_mapping;
@@ -223,7 +223,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   }
 }
 
-// This is a factory function that creates an Operation that that takes
+// This is a factory function that creates an Operation that takes
 // MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
 // run aten operations on. The precondition for using this function is that the
 // aten operations in `aten_op` should be an identity for zero inputs. In other

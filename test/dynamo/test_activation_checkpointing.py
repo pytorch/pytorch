@@ -10,6 +10,7 @@ import torch._functorch.config
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils.checkpoint import checkpoint
 
@@ -20,6 +21,21 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 def count_ops(gm, args, freq, op):
     assert [node.target for node in gm.graph.nodes].count(op) == freq
     return gm
+
+
+def find_first_node(gm, func):
+    for node in gm.graph.nodes:
+        if node.target is func:
+            return node
+    return None
+
+
+def op_count(gm):
+    result = 0
+    for node in gm.graph.nodes:
+        if "call" in node.op:
+            result += 1
+    return result
 
 
 class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
@@ -280,6 +296,94 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(cnt.graphs), 2)
+
+    @requires_cuda()
+    def test_kwargs(self):
+        def gn(x, y, z=None):
+            a = torch.matmul(x, y)
+            if z is not None:
+                return torch.matmul(a, z)
+            return a
+
+        def fn(x, y, z):
+            return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        z = torch.randn(4, 4, requires_grad=True)
+        args = (x, y, z)
+
+        backend = "aot_eager"
+        cnt = CompileCounterWithBackend(backend)
+
+        expected = fn(*args)
+        result = torch.compile(fn, backend=cnt)(*args)
+
+        self.assertEqual(result, expected)
+
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        # one for checkpoint, and 3 for x, y, z
+        self.assertEqual(len(wrap_node.args), 4)
+
+        body_function = getattr(cnt.graphs[0], wrap_node.args[0].name)
+        self.assertEqual(op_count(body_function), 2)
+
+    @requires_cuda()
+    def test_symints_location(self):
+        def gn(x, y):
+            return torch.matmul(x, torch.nn.functional.dropout(y, 0.5))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(gn, x, y)
+
+        backend = "aot_eager"
+        cnt = CompileCounterWithBackend(backend)
+        opt_fn = torch.compile(fn, backend=cnt)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        args = (x, y)
+        expected = fn(*args)
+        result = opt_fn(*args)
+
+        x = torch.randn(5, 5, requires_grad=True)
+        y = torch.randn(5, 5, requires_grad=True)
+        args = (x, y)
+        expected = fn(*args)
+        result = opt_fn(*args)
+
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(len(cnt.graphs), 2)
+        wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
+        self.assertEqual(len(wrap_node.args), 3)
+
+    @requires_cuda()
+    def test_autocast_flash_attention(self):
+        def fn(primals_1, primals_2, primals_3):
+            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                primals_1, primals_2, primals_3, None, True, scale=0.17677669529663687
+            )[0]
+
+        def gn(*args):
+            return torch.utils.checkpoint.checkpoint(fn, *args)
+
+        with torch.cuda.amp.autocast():
+            x = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
+            y = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
+            z = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
+            args = (x, y, z)
+
+            torch.manual_seed(0)
+            ref = gn(*args)
+
+            opt_gn = torch.compile(gn)
+            torch.manual_seed(0)
+            res = opt_gn(*args)
+            self.assertEqual(ref, res)
 
 
 if __name__ == "__main__":

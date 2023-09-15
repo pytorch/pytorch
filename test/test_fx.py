@@ -68,6 +68,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 
 class SimpleTest(torch.nn.Module):
     def forward(self, x):
@@ -329,6 +330,7 @@ class TestFX(JitTestCase):
         inp = torch.randn(3)
         self.assertEqual(mod(inp), rmatmul_f(inp))
 
+    @skipIfNoDynamoSupport
     def test_control_flow_tracing(self):
         def true(x, y):
             return x + y
@@ -339,7 +341,7 @@ class TestFX(JitTestCase):
         def f(x, y):
             x = control_flow.cond(x[0] == 0, true, false, [x, y])
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to symbolically trace HigherOrderOperators"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected pred to be bool or tensor, but got Proxy\(eq\)"):
             _ = symbolic_trace(f)
 
     def test_disallow_override(self):
@@ -3490,7 +3492,7 @@ class TestFX(JitTestCase):
 
         def f_sum_dict(x):
             out = 0
-            for k, v in x.items():
+            for v in x.values():
                 out += v
             return out
 
@@ -4302,7 +4304,7 @@ class TestFunctionalTracing(JitTestCase):
                 try:
                     sig = inspect.signature(fn)
                     has_tensor_arg = False
-                    for arg, param in sig.parameters.items():
+                    for param in sig.parameters.values():
                         if isinstance(param.annotation, type) and issubclass(param.annotation, torch.Tensor):
                             has_tensor_arg = True
                     if not has_tensor_arg:

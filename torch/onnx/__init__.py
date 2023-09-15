@@ -1,5 +1,3 @@
-"""ONNX exporter."""
-
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import (
@@ -10,7 +8,6 @@ from torch._C._onnx import (
 )
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
-    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -50,6 +47,17 @@ from ._internal.exporter import (  # usort:skip. needs to be last to avoid circu
     ExportOutput,
     ExportOutputSerializer,
     dynamo_export,
+    OnnxExporterError,
+    enable_fake_mode,
+    OnnxRegistry,
+    DiagnosticOptions,
+)
+
+from ._internal.onnxruntime import (
+    is_onnxrt_backend_supported,
+    OrtBackend as _OrtBackend,
+    OrtBackendOptions as _OrtBackendOptions,
+    OrtExecutionProvider as _OrtExecutionProvider,
 )
 
 __all__ = [
@@ -93,6 +101,12 @@ __all__ = [
     "ExportOutput",
     "ExportOutputSerializer",
     "dynamo_export",
+    "OnnxExporterError",
+    "enable_fake_mode",
+    "OnnxRegistry",
+    "DiagnosticOptions",
+    # DORT / torch.compile
+    "is_onnxrt_backend_supported",
 ]
 
 # Set namespace for exposed private names
@@ -102,16 +116,17 @@ ExportOptions.__module__ = "torch.onnx"
 ExportOutput.__module__ = "torch.onnx"
 ExportOutputSerializer.__module__ = "torch.onnx"
 dynamo_export.__module__ = "torch.onnx"
+OnnxExporterError.__module__ = "torch.onnx"
+enable_fake_mode.__module__ = "torch.onnx"
+OnnxRegistry.__module__ = "torch.onnx"
+DiagnosticOptions.__module__ = "torch.onnx"
+is_onnxrt_backend_supported.__module__ = "torch.onnx"
+_OrtExecutionProvider.__module__ = "torch.onnx"
+_OrtBackendOptions.__module__ = "torch.onnx"
+_OrtBackend.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
-
-
-@_deprecation.deprecated(
-    since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
-)
-def _export(*args, **kwargs):
-    return utils._export(*args, **kwargs)
 
 
 # TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.

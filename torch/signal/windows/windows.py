@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from typing import Optional, Iterable
 
 import torch
@@ -422,9 +421,9 @@ Examples::
 def hamming(M: int,
             *,
             sym: bool = True,
-            dtype: torch.dtype = None,
+            dtype: Optional[torch.dtype] = None,
             layout: torch.layout = torch.strided,
-            device: torch.device = None,
+            device: Optional[torch.device] = None,
             requires_grad: bool = False) -> Tensor:
     return general_hamming(M, sym=sym, dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
@@ -469,9 +468,9 @@ Examples::
 def hann(M: int,
          *,
          sym: bool = True,
-         dtype: torch.dtype = None,
+         dtype: Optional[torch.dtype] = None,
          layout: torch.layout = torch.strided,
-         device: torch.device = None,
+         device: Optional[torch.device] = None,
          requires_grad: bool = False) -> Tensor:
     return general_hamming(M,
                            alpha=0.5,
@@ -521,9 +520,9 @@ Examples::
 def blackman(M: int,
              *,
              sym: bool = True,
-             dtype: torch.dtype = None,
+             dtype: Optional[torch.dtype] = None,
              layout: torch.layout = torch.strided,
-             device: torch.device = None,
+             device: Optional[torch.device] = None,
              requires_grad: bool = False) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -575,9 +574,9 @@ Examples::
 def bartlett(M: int,
              *,
              sym: bool = True,
-             dtype: torch.dtype = None,
+             dtype: Optional[torch.dtype] = None,
              layout: torch.layout = torch.strided,
-             device: torch.device = None,
+             device: Optional[torch.device] = None,
              requires_grad: bool = False) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -644,9 +643,9 @@ Examples::
 def general_cosine(M, *,
                    a: Iterable,
                    sym: bool = True,
-                   dtype: torch.dtype = None,
+                   dtype: Optional[torch.dtype] = None,
                    layout: torch.layout = torch.strided,
-                   device: torch.device = None,
+                   device: Optional[torch.device] = None,
                    requires_grad: bool = False) -> Tensor:
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -721,9 +720,9 @@ def general_hamming(M,
                     *,
                     alpha: float = 0.54,
                     sym: bool = True,
-                    dtype: torch.dtype = None,
+                    dtype: Optional[torch.dtype] = None,
                     layout: torch.layout = torch.strided,
-                    device: torch.device = None,
+                    device: Optional[torch.device] = None,
                     requires_grad: bool = False) -> Tensor:
     return general_cosine(M,
                           a=[alpha, 1. - alpha],

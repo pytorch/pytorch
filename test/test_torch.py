@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: tests"]
 
 import torch
@@ -29,11 +28,11 @@ from itertools import product, combinations, permutations
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (
+from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest,
-    TEST_WITH_CROSSREF, skipIfTorchDynamo,
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
+    TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -56,7 +55,8 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
-    all_types_and, floating_types, floating_and_complex_types, integral_types_and
+    all_types_and, floating_types, floating_and_complex_types, integral_types_and,
+    get_all_qint_dtypes,
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -714,30 +714,6 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='mean').shape)
             self.assertEqual((), torch.nn.functional.nll_loss(input, target, reduction='sum').shape)
 
-        # multilabel_margin_loss
-        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
-            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device), torch.tensor([[0]], device=device)):
-                if (input.dim() <= 1 and target.dim() <= 1) or (input.dim() == 2 and target.dim() == 2):
-                    output_shape = (target.shape[0],) if target.dim() == 2 else ()
-                    self.assertEqual(output_shape,
-                                     torch.nn.functional.multilabel_margin_loss(input, target, reduction='none').shape)
-                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean').shape)
-                    self.assertEqual((), torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum').shape)
-                else:
-                    self.assertRaises(RuntimeError,
-                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='none'))
-                    self.assertRaises(RuntimeError,
-                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='mean'))
-                    self.assertRaises(RuntimeError,
-                                      lambda: torch.nn.functional.multilabel_margin_loss(input, target, reduction='sum'))
-
-        # multi_margin_loss
-        for input in (zero_d, one_d, torch.randn(1, 1, device=device)):
-            for target in (torch.tensor(0, device=device), torch.tensor([0], device=device)):
-                self.assertEqual(target.shape, torch.nn.functional.multi_margin_loss(input, target, reduction='none').shape)
-                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
-                self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
-
     # Test that `torch._check_tensor_all` raises errors in the correct cases
     def test_check_tensor_all(self, device):
         default_message = 'Expected cond to be True'
@@ -1275,6 +1251,100 @@ else:
                         f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
                         + e.output.decode("utf-8")))
 
+    @onlyCPU
+    @skipIfTorchInductor("aot-autograd issue")
+    @dtypes(*get_all_qint_dtypes())
+    def test_nondeterministic_resize_quantized(self, device, dtype):
+        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
+        b = torch.quantize_per_tensor(a, 0.1, 10, dtype)
+        self.check_nondeterministic_alert(
+            lambda: b.resize_((10,)),
+            'quantized_resize_cpu_')
+
+    @skipXLA
+    @skipIfTorchInductor("aot-autograd issue")
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_deterministic_resize(self, device, dtype):
+        test_cases = [
+            # size, stride, resize_size
+            ((10,), (1,), (5,)),
+            ((10,), (0,), (10,)),
+            ((10,), (1,), (20,)),
+            ((2, 3, 4), None, (2, 3, 4)),
+            ((2, 3, 4), None, (6, 3, 4)),
+            ((2, 3, 4), None, (2, 5, 4)),
+            ((2, 3, 4), None, (2, 3, 6)),
+            ((2, 3, 4), None, (3, 4, 5)),
+            ((2, 3, 4), (1, 4, 12), (2, 3, 4)),
+            ((2, 3, 4), (1, 4, 12), (4, 3, 4)),
+            ((2, 3, 4), (1, 4, 12), (2, 4, 4)),
+            ((2, 3, 4), (1, 4, 12), (2, 3, 5)),
+            ((2, 3, 4), (1, 4, 12), (3, 4, 5)),
+            ((2, 3, 4), (1, 0, 1), (2, 4, 5)),
+        ]
+
+        for size, stride, resize_size in test_cases:
+            if stride is None:
+                a = torch.zeros(size, dtype=dtype, device=device)
+            else:
+                a = torch.empty_strided(size, stride, dtype=dtype, device=device).fill_(0)
+            old_storage = a.untyped_storage().clone()
+            with DeterministicGuard(True):
+                a.resize_(resize_size)
+
+            new_storage = a.untyped_storage()
+
+            # If storage size was increased, check that the new section is
+            # filled with NaN/MAX_INT. Otherwise, check that the storages are
+            # equal.
+            old_tensor = torch.tensor(old_storage, dtype=dtype)
+            old_numel = old_tensor.numel()
+            new_tensor = torch.tensor(new_storage, dtype=dtype)
+            new_numel = new_tensor.numel()
+
+            if new_numel > old_numel:
+                self.assertEqual(new_tensor[:old_numel], old_tensor)
+                fill_section = new_tensor[old_numel:]
+
+                if dtype.is_floating_point or dtype.is_complex:
+                    self.assertTrue(fill_section.isnan().all())
+                else:
+                    if dtype == torch.bool:
+                        max_val = True
+                    else:
+                        max_val = torch.iinfo(dtype).max
+                    self.assertTrue(fill_section.eq(max_val).all())
+            else:
+                self.assertEqual(old_tensor, new_tensor)
+
+    # When deterministic algorithms are enabled, `torch.empty` should fill floating
+    # point tensors with NaN and integer tensors with MAX_INT
+    @skipXLA
+    @skipIfTorchInductor("aot-autograd issue")
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_deterministic_empty(self, device, dtype):
+        gen_fns = [
+            lambda: torch.empty(10, 9, device=device, dtype=dtype),
+            lambda: torch.empty(10, 9, out=torch.zeros(1, device=device, dtype=dtype)),
+            lambda: torch.empty_like(torch.zeros(10, 9, device=device, dtype=dtype)),
+            lambda: torch.empty_like(torch.zeros(10, 9, device=device, dtype=dtype), memory_format=torch.contiguous_format),
+            lambda: torch.empty_strided((10, 9), (1, 5), device=device, dtype=dtype),
+            lambda: torch.empty_permuted((2, 3, 5), (1, 0, 2), device=device, dtype=dtype),
+        ]
+
+        for gen_fn in gen_fns:
+            with DeterministicGuard(True):
+                res = gen_fn()
+
+            if dtype.is_floating_point or dtype.is_complex:
+                self.assertTrue(res.isnan().all())
+            else:
+                if dtype == torch.bool:
+                    max_val = True
+                else:
+                    max_val = torch.iinfo(dtype).max
+                self.assertTrue(res.eq(max_val).all())
+
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
     @skipIfMps
@@ -1567,6 +1637,7 @@ else:
             'replication_pad3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @skipIfTorchDynamo("Warning is not raised.")
     def test_nondeterministic_alert_NLLLoss(self, device):
         module = torch.nn.NLLLoss()
         input = torch.randn(2, 3, 5, 5, device=device)
@@ -1658,11 +1729,20 @@ else:
     @skipIfMps
     def test_nondeterministic_alert_bincount(self, device):
         a = torch.tensor([], device=device, dtype=torch.long)
+        weights = torch.tensor([], device=device)
+
         for op_call in [torch.bincount, torch.Tensor.bincount]:
+            # Error should only be raised when device is CUDA and weights are
+            # given
+            self.check_nondeterministic_alert(
+                lambda: op_call(a, weights),
+                '_bincount_cuda',
+                torch.device(device).type == 'cuda')
+
             self.check_nondeterministic_alert(
                 lambda: op_call(a),
                 '_bincount_cuda',
-                torch.device(device).type == 'cuda')
+                False)
 
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
@@ -2368,7 +2448,7 @@ else:
             self.assertTrue(y.is_contiguous())
             self.assertEqual(expected, actual)
 
-    @tf32_on_and_off()
+    @tf32_on_and_off(0.005)
     def test_cdist_non_contiguous_batch(self, device):
         for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
             x = torch.randn(4, 3, 2, 5, 7, device=device).mT
@@ -2816,6 +2896,7 @@ else:
             self.assertEqual(actual, expected, equal_nan=True, atol=1e-4, rtol=0, exact_dtype=False)
 
     @onlyNativeDeviceTypes
+    @slowTestIf(TEST_WITH_TORCHINDUCTOR)
     @dtypes(torch.long, torch.float32, torch.complex64)
     def test_gradient_extreme_cases(self, device, dtype):
         # Test behaviour for inf and nan values
@@ -3043,6 +3124,10 @@ else:
 
             dst._neg_view().copy_(src)
             self.assertEqual(dst, src.neg(), exact_dtype=False)
+
+            # issue: https://github.com/pytorch/pytorch/issues/106051
+            dst._neg_view().copy_(dst)
+            self.assertEqual(dst, src, exact_dtype=False)
 
         for dst_dtype, src_dtype in [
                 (torch.complex64, torch.complex64),
@@ -3957,7 +4042,6 @@ else:
         self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     # functions that operate over a dimension but don't reduce.
-    @skipIfTorchInductor("RuntimeError: Trying to create tensor with negative dimension -1: [-1]")
     def test_dim_function_empty(self, device):
         shape = (0, 1, 2, 0)
         x = torch.randn(shape, device=device)
@@ -4110,7 +4194,8 @@ else:
                 torch.index_select(w, 1, ind_05)
             with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
                 torch.index_select(s, 0, ind_empty)
-        self.assertRaises(RuntimeError, lambda: torch.ones([]).index_select(0, torch.Tensor([0, 0]).int()))
+        with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+            torch.ones([]).index_select(0, torch.Tensor([0, 0]).int())
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
@@ -4785,26 +4870,26 @@ else:
                 x_c_clone = x_c.clone() if is_inplace else x_c
                 result_c = fn(x_c_clone, y_c)
                 result = fn(x_clone, y)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
+                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in bias_fns:
                 result_c = fn(x_c, b_c)
                 result = fn(x, bias)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
+                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{memory_format}' format")
 
             for fn in return_contig_fns:
                 result_c = fn(x_c, y_c)
                 result = fn(x, y)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c, f"Failed for '{inspect.getsource(fn).strip()}'")
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
-                    "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
+                    f"result of the '{inspect.getsource(fn).strip()}' is not in '{torch.contiguous_format}' format")
 
         _test_helper(
             torch.randn((4, 3, 8, 8), device=device).contiguous(memory_format=torch.channels_last),
@@ -4865,6 +4950,7 @@ else:
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
+    @skipIfTorchDynamo("NotImplementedError: PrimTorch does not support pinned memory")
     def test_pin_memory_from_constructor(self, device):
         def _get_like(t, **kwargs):
             return [
@@ -5929,6 +6015,7 @@ class TestTorch(TestCase):
                     self.assertEqual(added, -tensor)
 
     @skipIfTorchInductor("AssertionError: RuntimeError not raised by <lambda>")
+    @set_default_dtype(torch.double)
     def test_index_add_correctness(self):
         # Check whether index_add can get correct result when
         # alpha is 1, and dtype of index is torch.long,
@@ -5950,7 +6037,8 @@ class TestTorch(TestCase):
             if device == 'cuda':
                 self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
             else:
-                self.assertEqual(out, ref_out.to(dtype=dtype))
+                # scatter_add uses fp32 as accumulate type, while index_add doesn't.
+                self.assertEqual(out, ref_out.to(dtype=dtype), atol=1e-2, rtol=1e-2)
 
         for dim in [-1, -2, -3]:
             for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
@@ -5965,6 +6053,30 @@ class TestTorch(TestCase):
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
                 index = (torch.ones(256) * 257).to(dtype=torch.long)
                 self.assertRaises(RuntimeError, lambda: result.index_add_(dim, index, source))
+
+    def test_linspace_logspace(self):
+        # Ensure the output does not require grad regardless of inputs requiring gard or not.
+        # The output of factory functions should not be part of any computational graph.
+        start = 0.0
+        end = 3.0
+
+        for step in [0, 1, 2]:
+            self.assertFalse(
+                torch.linspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.linspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.linspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
+            self.assertFalse(
+                torch.logspace(
+                    torch.tensor(start, requires_grad=True),
+                    torch.tensor(end, requires_grad=True), step
+                ).requires_grad
+            )
+            self.assertFalse(torch.logspace(torch.tensor(start, requires_grad=True), end, step).requires_grad)
+            self.assertFalse(torch.logspace(start, torch.tensor(end, requires_grad=True), step).requires_grad)
 
     # FIXME: move to shape ops test suite
     def test_unflatten(self):
@@ -6317,11 +6429,11 @@ class TestTorch(TestCase):
 
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(str),
+            f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {str}.",
             lambda: "foo" in x)
         self.assertRaisesRegex(
             RuntimeError,
-            "Tensor.__contains__ only supports Tensor or scalar, but you passed in a {}.".format(type([1, 2])),
+            f"Tensor.__contains__ only supports Tensor or scalar, but you passed in a {type([1, 2])}.",
             lambda: [1, 2] in x)
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
@@ -6607,9 +6719,9 @@ class TestTorch(TestCase):
 
         # fail parse with > 1 element variables
         self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
-        self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3, 3))))
+        self.assertRaises(TypeError, lambda: torch.ones(torch.tensor(3, 3)))
         self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
-        self.assertRaises(TypeError, lambda: torch.ones((np.array(3, 3))))
+        self.assertRaises(TypeError, lambda: torch.ones(np.array(3, 3)))
 
         # fail parse with additional positional args after intlist arg
         self.assertRaisesRegex(TypeError,
@@ -7191,21 +7303,21 @@ tensor([4.0000+0.j,    inf+0.j, 1.5000+infj,   -inf+4.j, 0.0000+0.j,    nan+infj
         self.assertExpectedInline(str(y), expected_str)
 
         # test dtype
-        torch.set_default_dtype(torch.float)
-        x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
-        self.assertEqual(x.__repr__(), str(x))
-        expected_str = '''\
+        with set_default_dtype(torch.float):
+            x = torch.tensor([1e-324, 1e-323, 1e-322, 1e307, 1e308, 1e309], dtype=torch.float64)
+            self.assertEqual(x.__repr__(), str(x))
+            expected_str = '''\
 tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
                 inf], dtype=torch.float64)'''
-        self.assertExpectedInline(str(x), expected_str)
+            self.assertExpectedInline(str(x), expected_str)
 
         # test changing default dtype
-        torch.set_default_dtype(torch.float64)
-        self.assertEqual(x.__repr__(), str(x))
-        expected_str = '''\
+        with set_default_dtype(torch.float64):
+            self.assertEqual(x.__repr__(), str(x))
+            expected_str = '''\
 tensor([ 0.0000e+00, 9.8813e-324, 9.8813e-323, 1.0000e+307, 1.0000e+308,
                 inf])'''
-        self.assertExpectedInline(str(x), expected_str)
+            self.assertExpectedInline(str(x), expected_str)
 
         # test summary
         x = torch.zeros(10000)
@@ -7652,6 +7764,26 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         test_helper((3, 3), (3, 3, 3, 3), torch.channels_last)
         test_helper((3, 3, 3), (3, 3, 3, 3, 3), torch.channels_last_3d)
+
+    def test_dim_order(self):
+        shape = (2, 3, 5, 7)
+
+        t = torch.empty(shape)
+        self.assertSequenceEqual(t.dim_order(), (0, 1, 2, 3), seq_type=tuple)
+        # transpose doesn't really change the underlying physical memory
+        # so expecting dim_order change to reflect that (like strides)
+        self.assertSequenceEqual(t.transpose(0, 1).dim_order(), (1, 0, 2, 3))
+
+        t = torch.empty(shape, memory_format=torch.channels_last)
+        self.assertSequenceEqual(t.dim_order(), (0, 2, 3, 1))
+
+        t = torch.empty((2, 3, 5, 7, 8), memory_format=torch.channels_last_3d)
+        self.assertSequenceEqual(t.dim_order(), (0, 2, 3, 4, 1))
+
+        for dim_order in itertools.permutations(range(4)):
+            self.assertSequenceEqual(
+                dim_order, torch.empty_permuted(shape, dim_order).dim_order()
+            )
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
@@ -8122,7 +8254,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         for seed, expected_initial_seed in test_cases:
             torch.manual_seed(seed)
             actual_initial_seed = torch.initial_seed()
-            msg = "expected initial_seed() = %x after calling manual_seed(%x), but got %x instead" % (
+            msg = "expected initial_seed() = {:x} after calling manual_seed({:x}), but got {:x} instead".format(
                 expected_initial_seed, seed, actual_initial_seed)
             self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
         for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
@@ -8166,7 +8298,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     # FIXME: Port to a more appropriate test suite
     # Fails with inductor (and aot_eager) because functionalization replaces copy_ with copy,
     # which doesn't properly error on bad inputs.
-    @skipIfTorchInductor("FIXME")
     def test_copy_many_to_one(self):
         # Testing in-place copy where it attempt to write from many memory
         # storage to a single storage would cause RuntimeError to be thrown
@@ -8230,7 +8361,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             devices = [t.device]
             if t.device.type == 'cuda':
                 if t.device.index == -1:
-                    devices.append('cuda:{}'.format(torch.cuda.current_device()))
+                    devices.append(f'cuda:{torch.cuda.current_device()}')
                 elif t.device.index == torch.cuda.current_device():
                     devices.append('cuda')
             for device in devices:
@@ -8347,7 +8478,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(t.grad is not None)
 
         # Make sure invalid subclasses raise nice errors
-        class BadSubTensor():
+        class BadSubTensor:
             member_var = object()
 
         err_msg = "Creating a Tensor subclass from a class that does not inherit from Tensor"
@@ -8401,7 +8532,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             except RuntimeError:
                 pass
             with mp.Pool(1) as pool:
-                out: list = pool.map(method, [arg])
+                out = pool.map(method, [arg])
                 self.assertTrue(out[0])
 
         def _test_multinomial_invalid_probs(probs):
@@ -8486,16 +8617,15 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
         device_hash_set = set()
-        for device in list(device_set):
+        for device in device_set:
             device_hash_set.add(hash(torch.device(device)))
         self.assertEqual(len(device_set), len(device_hash_set))
 
         def get_expected_device_repr(device):
             if device.index is not None:
-                return "device(type='{type}', index={index})".format(
-                    type=device.type, index=device.index)
+                return f"device(type='{device.type}', index={device.index})"
 
-            return "device(type='{type}')".format(type=device.type)
+            return f"device(type='{device.type}')"
 
         for device in device_set:
             dev = torch.device(device)
@@ -8585,7 +8715,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         from torch._torch_docs import __file__ as doc_file
         from torch._torch_docs import multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args
 
-        with open(doc_file, "r", encoding="utf-8") as f:
+        with open(doc_file, encoding="utf-8") as f:
             doc_strs = f.read()
 
         matches = re.findall(
@@ -8601,8 +8731,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             for common_args in [multi_dim_common, single_dim_common, factory_common_args, factory_like_common_args]:
                 for k, v in common_args.items():
-                    self.assertNotIn(v, desc, 'The argument description "{}" in {} can be '
-                                              'replaced by {{{}}}'.format(v, func, k))
+                    self.assertNotIn(v, desc, f'The argument description "{v}" in {func} can be '
+                                              f'replaced by {{{k}}}')
 
     def test_doc(self):
         checked_types = (types.MethodType, types.FunctionType,
@@ -8616,7 +8746,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             skip_regexes = []
             for r in skips:
                 if isinstance(r, str):
-                    skip_regexes.append(re.compile('^{}$'.format(re.escape(r))))
+                    skip_regexes.append(re.compile(f'^{re.escape(r)}$'))
                 else:
                     skip_regexes.append(r)
 
@@ -8638,10 +8768,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 full_name = ns_name + '.' + name
                 if any(r.match(name) for r in skip_regexes):
                     self.assertFalse(has_doc,
-                                     'New docs have been added for {}, please remove '
-                                     'it from the skipped list in TestTorch.test_doc'.format(full_name))
+                                     f'New docs have been added for {full_name}, please remove '
+                                     'it from the skipped list in TestTorch.test_doc')
                 else:
-                    self.assertTrue(has_doc, '{} is missing documentation'.format(full_name))
+                    self.assertTrue(has_doc, f'{full_name} is missing documentation')
 
             # FIXME: All of the following should be marked as expected failures
             # so that it is easier to tell when missing has been added.
@@ -8701,6 +8831,16 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         T()
 
+    def test_storage_base_init(self):
+        # Direct construction not OK
+        self.assertRaises(RuntimeError, lambda: torch._C.StorageBase())
+
+        # But construction of subclass is OK
+        class T(torch._C.StorageBase):
+            pass
+
+        T()
+
     def test_tensor_base_new(self):
 
         # OK to call super().__new__, see
@@ -8712,6 +8852,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         x = torch.ones(5)
         test_tensor = TestTensor(x)
+
+    def test_storage_base_new(self):
+
+        # OK to call super().__new__, see
+        # https://github.com/pytorch/pytorch/issues/57421
+        class TestStorage(torch._C.StorageBase):
+            @staticmethod
+            def __new__(cls, x, *args, **kwargs):
+                return super().__new__(cls, x, *args, **kwargs)
+
+        x = torch.UntypedStorage(5)
+        test_storage = TestStorage(x)
 
     def test_pyobj_preserved(self):
         x = torch.empty(2)
@@ -8737,6 +8889,160 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del z  # it's dead again
         self.assertEqual(type(y.grad), MyTensor)
 
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc(self):
+        m, t = Tracker.make()
+        s0 = torch.UntypedStorage(10)
+        s1 = s0
+        s0._tracker = t
+        del t
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_from_tensor_dealloc(self):
+        m, t = Tracker.make()
+        a = torch.randn(10)
+        s0 = a.untyped_storage()
+        s0._tracker = t
+        del t
+
+        s1 = a.untyped_storage()
+        self.assertTrue(s0 is s1)
+        self.assertTrue(hasattr(s1, '_tracker'))
+
+        del a
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_from_tensor_dealloc_zombie(self):
+        m, t = Tracker.make()
+        a = torch.randn(10)
+        s0 = a.untyped_storage()
+        s0._tracker = t
+        del t
+
+        s1 = a.untyped_storage()
+        self.assertTrue(s0 is s1)
+        self.assertTrue(hasattr(s1, '_tracker'))
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertFalse(m[0])
+        del a
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_from_tensor_dealloc_resurrected(self):
+        m, t = Tracker.make()
+        a = torch.randn(10)
+        s0 = a.untyped_storage()
+        s0._tracker = t
+        del t
+
+        s1 = a.untyped_storage()
+        self.assertTrue(s0 is s1)
+        self.assertTrue(hasattr(s1, '_tracker'))
+
+        self.assertFalse(m[0])
+        del s0
+        self.assertFalse(m[0])
+        del s1
+        self.assertFalse(m[0])
+
+        s0 = a.untyped_storage()
+        self.assertTrue(isinstance(s0, torch.UntypedStorage))
+
+        del a
+        self.assertFalse(m[0])
+        del s0
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc_resurrected(self):
+        m, t = Tracker.make()
+        s = torch.UntypedStorage(10)
+        s._tracker = t
+        del t
+
+        a = torch.tensor(s)
+        self.assertFalse(m[0])
+        del s
+
+        self.assertFalse(m[0])
+
+        s = a.untyped_storage()
+        self.assertTrue(isinstance(s, torch.UntypedStorage))
+
+        del a
+        self.assertFalse(m[0])
+        del s
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc_subclass_zombie(self):
+        class MyStorage(torch.UntypedStorage):
+            finalized_count = 0
+
+            def __del__(self):
+                MyStorage.finalized_count += 1
+
+        m, t = Tracker.make()
+        s = MyStorage(10)
+        s._tracker = t
+        del t
+
+        a = torch.tensor(s)
+        self.assertFalse(m[0])
+        del s
+
+        self.assertEqual(MyStorage.finalized_count, 0)
+        self.assertFalse(m[0])
+
+        del a
+        self.assertEqual(MyStorage.finalized_count, 1)
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Tracker hook does not work in TorchDynamo")
+    def test_storage_dealloc_subclass_resurrected(self):
+        class MyStorage(torch.UntypedStorage):
+            finalized_count = 0
+
+            def __del__(self):
+                MyStorage.finalized_count += 1
+
+        m, t = Tracker.make()
+        s = MyStorage(10)
+        s._tracker = t
+        del t
+
+        a = torch.tensor(s)
+        self.assertFalse(m[0])
+        del s
+
+        self.assertEqual(MyStorage.finalized_count, 0)
+        self.assertFalse(m[0])
+
+        s = a.untyped_storage()
+        del a
+        self.assertFalse(m[0])
+        self.assertEqual(MyStorage.finalized_count, 0)
+        self.assertTrue(isinstance(s, MyStorage))
+        del s
+        self.assertEqual(MyStorage.finalized_count, 1)
+        self.assertTrue(m[0])
+
     def test_tensor_slot_dealloc(self):
 
         class SlotTensor1(torch._C._TensorBase):
@@ -8758,10 +9064,41 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    def test_storage_slot_dealloc(self):
+
+        class SlotStorage1(torch._C.StorageBase):
+            __slots__ = ['slot1']
+
+        class SlotStorage2(SlotStorage1):
+            __slots__ = ['slot2']
+
+        m1, t1 = Tracker.make()
+        m2, t2 = Tracker.make()
+        slot_storage = SlotStorage2(torch.UntypedStorage(2))
+        slot_storage.slot1 = t1
+        slot_storage.slot2 = t2
+        del t1
+        del t2
+        self.assertFalse(m1[0])
+        self.assertFalse(m2[0])
+        del slot_storage
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     def test_tensor_dict_dealloc(self):
         m, t = Tracker.make()
         x = torch.empty(2)
+        x.arf = t
+        del t
+        self.assertFalse(m[0])
+        del x
+        self.assertTrue(m[0])
+
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_storage_dict_dealloc(self):
+        m, t = Tracker.make()
+        x = torch.UntypedStorage(2)
         x.arf = t
         del t
         self.assertFalse(m[0])
@@ -8780,10 +9117,35 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del fin_tensor
         self.assertTrue(m[0])
 
+    def test_storage_finalizer_dealloc(self):
+        m = [False]
+
+        class FinalizerStorage(torch._C.StorageBase):
+            def __del__(self):
+                m[0] = True
+
+        fin_storage = FinalizerStorage(torch.UntypedStorage(2))
+        self.assertFalse(m[0])
+        del fin_storage
+        self.assertTrue(m[0])
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
     def test_tensor_weakref_dealloc(self):
-
         x = torch.empty(2)
+        m = [False]
+
+        def cb(r):
+            m[0] = True
+
+        wref = weakref.ref(x, cb)
+        del x
+        self.assertTrue(m[0])
+        self.assertEqual(wref(), None)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_storage_weakref_dealloc(self):
+
+        x = torch.UntypedStorage(2)
         m = [False]
 
         def cb(r):
@@ -8837,6 +9199,49 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_storage_cycle_via_dict(self):
+        m1, t1 = Tracker.make()
+        x = torch.UntypedStorage(2)
+        x._tracker = t1
+        del t1
+
+        m2, t2 = Tracker.make()
+        y = torch.UntypedStorage(2)
+        y._tracker = t2
+        del t2
+
+        x._loop = y
+        y._loop = x
+
+        # C++ reference should keep the cycle live!
+        # This exercise THPVariable_subtype_traverse
+        # NB: Because z.grad is a reference done entirely in C++, cycles
+        # involving it directly are NOT broken by Python GC; you've
+        # set up a good old C++ reference cycle which we cannot safely
+        # break (because C++ references are allowed to be accessed
+        # multithreaded-ly) (TODO: except maybe if you can prove that
+        # only Python has access to the C++ object, in which case you can
+        # also prove that no multithreaded access occurs)
+        z = torch.UntypedStorage(2)
+        z.grad = x
+
+        del x
+        del y
+
+        gc.collect()
+        self.assertFalse(m1[0])
+        self.assertFalse(m2[0])
+
+        with disable_gc():
+            del z
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
     def test_tensor_cycle_via_slots(self):
         m1 = [False]
         m2 = [False]
@@ -8869,6 +9274,67 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
 
+    def test_storage_cycle_via_slots(self):
+        m1 = [False]
+        m2 = [False]
+
+        class SlotStorage1(torch._C.StorageBase):
+            __slots__ = ['slot1']
+
+            def __del__(self):
+                m1[0] = True
+
+        class SlotStorage2(SlotStorage1):
+            __slots__ = ['slot2']
+
+            def __del__(self):
+                m2[0] = True
+
+        x = SlotStorage1(torch.UntypedStorage(2))
+        y = SlotStorage2(torch.UntypedStorage(2))
+
+        x.slot1 = y
+        y.slot2 = x
+
+        del x
+        with disable_gc():
+            del y
+            self.assertFalse(m1[0])
+            self.assertFalse(m2[0])
+
+        gc.collect()
+        self.assertTrue(m1[0])
+        self.assertTrue(m2[0])
+
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_storage_preserve_nonhermetic_in_hermetic_context(self):
+        from torch.library import Library, impl
+        global _my_storage
+
+        my_lib = Library("my_lib", "DEF")
+        my_lib.define('my_func() -> None')
+
+        a = torch.tensor([1.])
+        _my_storage = a.untyped_storage()
+
+        m, t = Tracker.make()
+        _my_storage._tracker = t
+        del t
+
+        @impl(my_lib, 'my_func', '')
+        def my_func():
+            global _my_storage
+            del _my_storage
+
+        self.assertFalse(m[0])
+        torch.ops.my_lib.my_func()
+        self.assertFalse(m[0])
+
+        s = a.untyped_storage()
+        del a
+        del s
+        self.assertTrue(m[0])
+
     # FIXME: move to test_autograd?
     @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_backward_hooks_traverse(self):
@@ -8897,7 +9363,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertTrue(m2[0])
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_dead_weak_ref(self):
+    def test_tensor_dead_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
         y = torch.empty(2)
@@ -8913,7 +9379,24 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
         self.assertRaises(RuntimeError, lambda: x.sigmoid())
 
-    def test_resurrected_weak_ref(self):
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_storage_dead_weak_ref(self):
+        x = torch.UntypedStorage(2)
+        w_x = weakref.ref(x)
+        y = torch.tensor(x)
+        del x
+
+        x = w_x()
+        # Ideally, x would keep the storage live.  But CPython doesn't
+        # provide enough hooks to do this.  So it will go dead and x
+        # will transmute into storage with null StorageImpl. Not great, but the
+        # best we can do.
+        del y
+
+        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x[0])
+        self.assertRaisesRegex(RuntimeError, "Got a null Storage", lambda: x.float())
+
+    def test_tensor_resurrected_weak_ref(self):
         x = torch.empty(2)
         w_x = weakref.ref(x)
         y = torch.empty(2)
@@ -8926,13 +9409,42 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del y
         x.sigmoid()
 
+    def test_storage_resurrected_weak_ref(self):
+        x = torch.UntypedStorage(2)
+        w_x = weakref.ref(x)
+        y = torch.tensor(x)
+        del x
+
+        x = w_x()
+        # Use this to manually fix weak reference after dereferencing them
+        x._fix_weakref()
+        del y
+        x.float()
+
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
-    def test_fix_weakref_no_leak(self):
+    def test_tensor_fix_weakref_no_leak(self):
         import weakref
 
         called = False
 
         a = torch.randn(1)
+
+        def callback(w):
+            nonlocal called
+            called = True
+        wa = weakref.ref(a, callback)
+        a._fix_weakref()
+        del a
+
+        self.assertTrue(called)
+
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1993")
+    def test_storage_fix_weakref_no_leak(self):
+        import weakref
+
+        called = False
+
+        a = torch.UntypedStorage(1)
 
         def callback(w):
             nonlocal called
@@ -9028,6 +9540,18 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         c = a.where(a != 0, not_zero)
 
         self.assertEqual(b, c)
+
+    def test_data_ptr_of_empty_tensor_with_storage(self):
+        t = torch.empty((2, 2))
+        self.assertNotEqual(t.data_ptr(), 0)
+        t.resize_((0, 2))
+        self.assertEqual(t.data_ptr(), 0)
+
+    def test_data_ptr_of_empty_view_with_storage(self):
+        t = torch.empty((2, 2))
+        self.assertNotEqual(t.data_ptr(), 0)
+        t2 = t[0:0].view(0, 1)
+        self.assertEqual(t2.data_ptr(), 0)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
@@ -9154,4 +9678,5 @@ instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu')
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()

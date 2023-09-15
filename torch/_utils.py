@@ -1,4 +1,5 @@
 import copyreg
+import functools
 import sys
 import traceback
 import warnings
@@ -228,7 +229,7 @@ def _validate_loaded_sparse_tensors():
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size()
+                    t._indices(), t._values(), t.size(), t.is_coalesced()
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -253,7 +254,7 @@ def _validate_loaded_sparse_tensors():
                 )
             else:
                 raise NotImplementedError(
-                    "_validate_loaded_sparse_tensors for layout `%s`" % (t.layout)
+                    f"_validate_loaded_sparse_tensors for layout `{t.layout}`"
                 )
 
     finally:
@@ -275,9 +276,9 @@ def _rebuild_sparse_tensor(layout, data):
             is_coalesced = None
         else:
             indices, values, size, is_coalesced = data
-        result = torch.sparse_coo_tensor(indices, values, size, check_invariants=False)
-        if is_coalesced is not None:
-            result._coalesced_(is_coalesced)
+        result = torch.sparse_coo_tensor(
+            indices, values, size, check_invariants=False, is_coalesced=is_coalesced
+        )
         _sparse_tensors_to_validate.append(result)
         return result
 
@@ -299,7 +300,7 @@ def _rebuild_sparse_tensor(layout, data):
         _sparse_tensors_to_validate.append(result)
         return result
 
-    raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
+    raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
@@ -375,9 +376,7 @@ def _rebuild_qtensor(
             device=storage.device,
         )
     else:
-        raise RuntimeError(
-            "Can't deserialize quantized tensor with qscheme {}".format(qscheme)
-        )
+        raise RuntimeError(f"Can't deserialize quantized tensor with qscheme {qscheme}")
     tensor.set_(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
     # NB: This line exists only for backwards compatibility; the
@@ -676,9 +675,7 @@ class ExceptionWrapper:
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = "Caught {} {}.\nOriginal {}".format(
-            self.exc_type.__name__, self.where, self.exc_msg
-        )
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -771,7 +768,7 @@ def _get_device_index(
     device_idx: Optional[int] = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
-            raise ValueError("Expected a non cpu device, but got: {}".format(device))
+            raise ValueError(f"Expected a non cpu device, but got: {device}")
         device_idx = -1 if device.type == "cpu" else device.index
     if isinstance(device, int):
         device_idx = device
@@ -788,8 +785,7 @@ def _get_device_index(
                 device_idx = _get_current_device_index()
         else:
             raise ValueError(
-                "Expected a torch.device with a specified index "
-                "or an integer, but got:{}".format(device)
+                f"Expected a torch.device with a specified index or an integer, but got:{device}"
             )
     return device_idx
 
@@ -844,3 +840,13 @@ def classproperty(func):
 # Whether we are compiling with torch.compile or not
 def is_compiling():
     return False
+
+
+@functools.lru_cache(2)
+def _get_device_module(device_type: str):
+    device_module = getattr(torch, device_type, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
+        )
+    return device_module

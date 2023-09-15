@@ -45,12 +45,12 @@ def embedding_rules(op_schema: OpSchema) -> OutputSharding:
         output_spec=None,
         schema_suggestions=[
             OpSchema(
-                func_schema=op_schema.func_schema,
+                op=op_schema.op,
                 args_schema=(
                     weight_spec,
                     DTensorSpec(
                         mesh=inp_spec.mesh,
-                        placements=[Replicate()] * len(inp_spec.placements),
+                        placements=tuple([Replicate()] * len(inp_spec.placements)),
                         tensor_meta=inp_spec.tensor_meta,
                     ),
                 ),
@@ -77,14 +77,19 @@ def embedding_dense_backward_rules(op_schema: OpSchema) -> OutputSharding:
         # sharded. In this case, gradients for the embedding table should be
         # Partial.
         return OutputSharding(
-            output_spec=DTensorSpec(mesh=indices.mesh, placements=[_Partial()])
+            output_spec=DTensorSpec(mesh=indices.mesh, placements=(_Partial(),))
         )
     elif grad_output.placements == [_Partial()] and indices.placements == [Replicate()]:
         # The embedding table is replicated and the indices is also replicated
         # (local is a more precise term). This is postional embedding. In this
         # case, gradients for the embmedding table should be Partial.
         return OutputSharding(
-            output_spec=DTensorSpec(mesh=indices.mesh, placements=[_Partial()])
+            output_spec=DTensorSpec(mesh=indices.mesh, placements=(_Partial(),))
+        )
+    elif all(placement.is_replicate() for placement in indices.placements):
+        # BWD for colwise sharding case
+        return OutputSharding(
+            output_spec=DTensorSpec(mesh=indices.mesh, placements=(Shard(1),))
         )
     else:
         raise NotImplementedError(

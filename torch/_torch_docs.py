@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Adds docstrings to functions defined in the torch._C"""
 
 import re
@@ -1258,7 +1257,7 @@ be the PyTorch datatype corresponding to the NumPy's scalar's datatype.
 
 When :attr:`obj` is none of the above but a scalar, or a sequence of scalars then the
 returned tensor will, by default, infer its datatype from the scalar values, be on the
-CPU device, and not share its memory.
+current default device, and not share its memory.
 
 .. seealso::
 
@@ -1283,7 +1282,8 @@ Keyword args:
            If ``False`` then the returned tensor shares its memory with :attr:`obj` and an
            error is thrown if it cannot.
     device (:class:`torch.device`, optional): the device of the returned tensor.
-           Default: ``None``, which causes the device of :attr:`obj` to be used.
+           Default: ``None``, which causes the device of :attr:`obj` to be used. Or, if
+           :attr:`obj` is a Python sequence, the current default device will be used.
     requires_grad (bool, optional): whether the returned tensor requires grad.
            Default: ``False``, which causes the returned tensor not to require a gradient.
            If ``True``, then the returned tensor will require a gradient, and if :attr:`obj`
@@ -3044,6 +3044,7 @@ resolve_neg(input) -> Tensor
 
 Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
 else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+
 Args:
     {input}
 
@@ -3054,12 +3055,11 @@ Example::
     >>> z = y.imag
     >>> z.is_neg()
     True
-    >>> out = y.resolve_neg()
+    >>> out = z.resolve_neg()
     >>> out
-    tensor([-1, -2, -3])
+    tensor([-1., -2., 3.])
     >>> out.is_neg()
     False
-
 """.format(
         **common_args
     ),
@@ -3202,15 +3202,16 @@ Supports input of float, double, cfloat and cdouble dtypes. Also supports batche
 of vectors, for which it computes the product along the dimension :attr:`dim`.
 In this case, the output has the same batch dimensions as the inputs.
 
-If :attr:`dim` is not given, it defaults to the first dimension found with the
-size 3. Note that this might be unexpected.
+.. warning::
+    If :attr:`dim` is not given, it defaults to the first dimension found
+    with the size 3. Note that this might be unexpected.
+
+    This behavior is deprecated and will be changed to match that of :func:`torch.linalg.cross`
+    in a future release.
 
 .. seealso::
-        :func:`torch.linalg.cross` which requires specifying dim (defaulting to -1).
+        :func:`torch.linalg.cross` which has dim=-1 as default.
 
-.. warning:: This function may change in a future PyTorch release to match
-        the default behaviour in :func:`torch.linalg.cross`. We recommend using
-        :func:`torch.linalg.cross`.
 
 Args:
     {input}
@@ -5911,7 +5912,7 @@ lgamma(input, *, out=None) -> Tensor
 Computes the natural logarithm of the absolute value of the gamma function on :attr:`input`.
 
 .. math::
-    \text{out}_{i} = \ln \Gamma(|\text{input}_{i}|)
+    \text{out}_{i} = \ln |\Gamma(\text{input}_{i})|
 """
     + """
 Args:
@@ -5950,8 +5951,8 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
-    start (float): the starting value for the set of points
-    end (float): the ending value for the set of points
+    start (float or Tensor): the starting value for the set of points. If `Tensor`, it must be 0-dimensional
+    end (float or Tensor): the ending value for the set of points. If `Tensor`, it must be 0-dimensional
     steps (int): size of the constructed tensor
 
 Keyword arguments:
@@ -6334,8 +6335,8 @@ with base :attr:`base`. That is, the values are:
 From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
-    start (float): the starting value for the set of points
-    end (float): the ending value for the set of points
+    start (float or Tensor): the starting value for the set of points. If `Tensor`, it must be 0-dimensional
+    end (float or Tensor): the ending value for the set of points. If `Tensor`, it must be 0-dimensional
     steps (int): size of the constructed tensor
     base (float, optional): base of the logarithm function. Default: ``10.0``.
 
@@ -9774,7 +9775,7 @@ Args:
 Example::
 
     >>> a = torch.zeros(8, 8)
-    >>> b = torch.ones(8)
+    >>> b = torch.ones(2, 8)
     >>> a.slice_scatter(b, start=6)
     tensor([[0., 0., 0., 0., 0., 0., 0., 0.],
             [0., 0., 0., 0., 0., 0., 0., 0.],
@@ -9785,7 +9786,7 @@ Example::
             [1., 1., 1., 1., 1., 1., 1., 1.],
             [1., 1., 1., 1., 1., 1., 1., 1.]])
 
-    >>> b = torch.ones(2)
+    >>> b = torch.ones(8, 2)
     >>> a.slice_scatter(b, dim=1, start=2, end=6, step=2)
     tensor([[0., 0., 1., 0., 1., 0., 0., 0.],
             [0., 0., 1., 0., 1., 0., 0., 0.],
@@ -10515,8 +10516,8 @@ Example::
 
 add_docstr(
     torch.sparse_coo_tensor,
-    r"""
-sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False, check_invariants=None) -> Tensor
+    r"""sparse_coo_tensor(indices, values, size=None, """
+    r"""*, dtype=None, device=None, requires_grad=False, check_invariants=None, is_coalesced=None) -> Tensor
 
 Constructs a :ref:`sparse tensor in COO(rdinate) format
 <sparse-coo-docs>` with specified values at the given
@@ -10524,7 +10525,9 @@ Constructs a :ref:`sparse tensor in COO(rdinate) format
 
 .. note::
 
-   This function returns an :ref:`uncoalesced tensor <sparse-uncoalesced-coo-docs>`.
+   This function returns an :ref:`uncoalesced tensor
+   <sparse-uncoalesced-coo-docs>` when :attr:`is_coalesced` is
+   unspecified or ``None``.
 
 {sparse_factory_device_note}
 
@@ -10549,6 +10552,15 @@ Keyword args:
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     {requires_grad}
     {check_invariants}
+    is_coalesced (bool, optional): When``True``, the caller is
+        responsible for providing tensor indices that correspond to a
+        coalesced tensor.  If the :attr:`check_invariants` flag is
+        False, no error will be raised if the prerequisites are not
+        met and this will lead to silently incorrect results. To force
+        coalescion please use :meth:`coalesce` on the resulting
+        Tensor.
+        Default: None: except for trivial cases (e.g. nnz < 2) the
+        resulting Tensor has is_coalesced set to ``False```.
 
 Example::
 
@@ -11373,9 +11385,11 @@ Example::
 add_docstr(
     torch.take_along_dim,
     r"""
-take_along_dim(input, indices, dim, *, out=None) -> Tensor
+take_along_dim(input, indices, dim=None, *, out=None) -> Tensor
 
 Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
+
+If :attr:`dim` is None, the input array is treated as if it has been flattened to 1d.
 
 Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
 are designed to work with this function. See the examples below.
@@ -11387,7 +11401,7 @@ are designed to work with this function. See the examples below.
 Args:
     {input}
     indices (tensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int): dimension to select along.
+    dim (int, optional): dimension to select along.
 
 Keyword args:
     {out}
@@ -11997,19 +12011,21 @@ Example::
 add_docstr(
     torch.fake_quantize_per_channel_affine,
     r"""
-fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max) -> Tensor
+fake_quantize_per_channel_affine(input, scale, zero_point, axis, quant_min, quant_max) -> Tensor
 
 Returns a new tensor with the data in :attr:`input` fake quantized per channel using :attr:`scale`,
 :attr:`zero_point`, :attr:`quant_min` and :attr:`quant_max`, across the channel specified by :attr:`axis`.
 
 .. math::
-    \text{output} = min(
-        \text{quant\_max},
-        max(
-            \text{quant\_min},
-            \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
-        )
-    )
+    \text{output} = (
+        min(
+            \text{quant\_max},
+            max(
+                \text{quant\_min},
+                \text{std::nearby\_int}(\text{input} / \text{scale}) + \text{zero\_point}
+            )
+        ) - \text{zero\_point}
+    ) \times \text{scale}
 
 Args:
     input (Tensor): the input value(s), in ``torch.float32``
@@ -12065,7 +12081,7 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1]``
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
 can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
 applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
@@ -12277,6 +12293,13 @@ memory_format=torch.contiguous_format) -> Tensor
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
@@ -12309,6 +12332,13 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
 ``torch.empty(input.size(), dtype=input.dtype, layout=input.layout, device=input.device)``.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     {input}
 
@@ -12340,6 +12370,13 @@ Creates a tensor with the specified :attr:`size` and :attr:`stride` and filled w
 .. warning::
     If the constructed tensor is "overlapped" (with multiple indices referring to the same element
     in memory) its behavior is undefined.
+
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
 
 Args:
     size (tuple of int): the shape of the output tensor
@@ -12386,6 +12423,13 @@ Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
 tensor with no overlaps.  If possible, prefer using this function over
 :func:`torch.empty_strided` or manual use of :func:`torch.as_strided`.
 
+.. note::
+    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, the
+    output tensor is initialized to prevent any possible nondeterministic
+    behavior from using the data as an input to an operation. Floating point
+    and complex tensors are filled with NaN, and integer tensors are filled
+    with the maximum value.
+
 Args:
     size (tuple of int): the shape of the output tensor
     physical_layout (tuple of int): the ordering of dimensions physically in memory
@@ -12407,6 +12451,8 @@ Examples:
     (105, 1, 21, 3)
     >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).stride()
     (105, 1, 21, 3)
+    >>> torch.empty_permuted((2, 3, 5, 7), (0, 2, 3, 1)).dim_order()
+    (0, 2, 3, 1)
 """.format(
         **factory_common_args
     ),
@@ -13579,9 +13625,7 @@ add_docstr(
     r"""
 Generator.manual_seed(seed) -> Generator
 
-Sets the seed for generating random numbers. Returns a `torch.Generator` object.
-It is recommended to set a large seed, i.e. a number that has a good balance of 0
-and 1 bits. Avoid having many 0 bits in the seed.
+Sets the seed for generating random numbers. Returns a `torch.Generator` object. Any 32-bit integer is a valid seed.
 
 Arguments:
     seed (int): The desired seed. Value must be within the inclusive range
@@ -13759,8 +13803,10 @@ bucketize(input, boundaries, *, out_int32=False, right=False, out=None) -> Tenso
 
 Returns the indices of the buckets to which each value in the :attr:`input` belongs, where the
 boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
-as :attr:`input`. If :attr:`right` is False (default), then the left boundary is closed. More
-formally, the returned index satisfies the following rules:
+as :attr:`input`. If :attr:`right` is False (default), then the left boundary is open. Note that
+this behavior is opposite the behavior of
+`numpy.digitize <https://docs.scipy.org/doc/numpy/reference/generated/numpy.digitize.html>`_.
+More formally, the returned index satisfies the following rules:
 
 .. list-table::
    :widths: 15 85
@@ -14026,23 +14072,19 @@ for unary_base_func_name in (
     if hasattr(torch, unary_foreach_func_name):
         add_docstr(
             getattr(torch, unary_foreach_func_name),
-            r"""
-{}(self: List[Tensor]) -> List[Tensor]
+            rf"""
+{unary_foreach_func_name}(self: List[Tensor]) -> List[Tensor]
 
-Apply :func:`torch.{}` to each Tensor of the input list.
-            """.format(
-                unary_foreach_func_name, unary_base_func_name
-            ),
+Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+            """,
         )
     unary_inplace_foreach_func_name = f"{unary_foreach_func_name}_"
     if hasattr(torch, unary_inplace_foreach_func_name):
         add_docstr(
             getattr(torch, unary_inplace_foreach_func_name),
-            r"""
-{}(self: List[Tensor]) -> None
+            rf"""
+{unary_inplace_foreach_func_name}(self: List[Tensor]) -> None
 
-Apply :func:`torch.{}` to each Tensor of the input list.
-        """.format(
-                unary_inplace_foreach_func_name, unary_base_func_name
-            ),
+Apply :func:`torch.{unary_base_func_name}` to each Tensor of the input list.
+        """,
         )

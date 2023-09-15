@@ -73,9 +73,7 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-TensorImpl::~TensorImpl() {
-  pyobj_slot_.destroy_pyobj_if_needed();
-}
+TensorImpl::~TensorImpl() = default;
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -503,7 +501,7 @@ DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and
 // test_aot_autograd_symbolic_exhaustive_nn_functional_unfold_cpu_float32 to run
 // very slowly.
 
-static bool definitely_true(SymBool b) {
+static bool definitely_true(const SymBool& b) {
   return b.has_hint() && b.guard_bool(__FILE__, __LINE__);
 }
 
@@ -582,7 +580,7 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  pyobj_slot_.destroy_pyobj_if_needed();
+  pyobj_slot_.maybe_destroy_pyobj();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY

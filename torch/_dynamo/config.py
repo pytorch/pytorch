@@ -9,10 +9,6 @@ import torch
 from . import external_utils
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
 # torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
@@ -35,7 +31,13 @@ minimum_call_count = 1
 dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
-cache_size_limit = 64
+
+# controls the maximum number of cache entries with a guard on same ID_MATCH'd
+# object. It also controls the maximum size of cache entries if they don't have
+# any ID_MATCH'd guards.
+cache_size_limit = 8
+# controls the maximum number of entries for a code object.
+accumulated_cache_size_limit = 64
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -68,7 +70,18 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = not is_fbcode()
+automatic_dynamic_shapes = True
+
+# This flag changes how the shapes of parameters are treated.
+# If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
+# If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
+# while the shapes of torch.Tensor are assumed to be dynamic.
+force_parameter_static_shapes = True
+
+# This flag ensures that the shapes of a nn module are always assumed to be static
+# If the flag is set to True, then the shapes of a nn.module are assumed to be static
+# If the flag is set to False, then the shapes of a nn.module can be dynamic
+force_nn_module_property_static_shapes = True
 
 # Typically, if you mark_dynamic a dimension, we will error if the dimension
 # actually ended up getting specialized.  This knob changes the behavior so
@@ -114,10 +127,6 @@ rewrite_assert_with_torch_assert = True
 # Show a warning for every specialization
 print_specializations = False
 
-# Simplify guards, summarizing static and dynamic constraints on dimensions.
-# NOTE: This only has an effect when dynamic_shapes=True.
-summarize_dim_constraints = False
-
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
@@ -133,6 +142,8 @@ skipfiles_inline_module_allowlist = {
     torch._decomp,
     torch.utils._contextlib,
     torch.utils._pytree,
+    torch.fx._pytree,
+    torch.sparse,
 }
 
 # If a string representing a PyTorch module is in this ignorelist,
@@ -216,9 +227,6 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
-# Throw an error if backend changes without reset
-raise_on_backend_change = False
-
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
@@ -237,11 +245,42 @@ report_guard_failures = os.environ.get("TORCHDYNAMO_REPORT_GUARD_FAILURES") == "
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
-numpy_ndarray_as_tensor = False
-
 # Uses z3 for validating the guard optimizations transformations.
-translation_validation = False
+translation_validation = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION", "0") == "1"
+)
+# Timeout (in milliseconds) for z3 finding a solution.
+translation_validation_timeout = int(
+    os.environ.get("TORCHDYNAMO_TRANSLATION_VALIDATION_TIMEOUT", "600000")
+)
+# Disables bisection for translation validation.
+#
+# Translation validation bisection is enabled by default, if translation validation
+# is also enabled. This should help finding guard simplification issues. However,
+# since validation uses Z3 for bisecting, it might take a lot of time.
+#
+# Set this configuration option so as to avoid bisecting.
+translation_validation_no_bisect = (
+    os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
+)
+# Disables ShapeEnv event recording.
+# See: [Note: Recording ShapeEnv Events]
+dont_record_shape_env_events = False
+# Checks whether replaying ShapeEnv events on a freshly constructed one yields
+# the a ShapeEnv with the same state. This should be used only in testing.
+check_shape_env_recorded_events = False
+
+# Trace through NumPy or graphbreak
+trace_numpy = True
+
+# Default NumPy dtypes when tracing with torch.compile
+# We default to 64bits. For efficiency, one may want to change these to float32
+numpy_default_float = "float64"
+numpy_default_complex = "complex128"
+numpy_default_int = "int64"
+
+# use numpy's PRNG if True, pytorch otherwise
+use_numpy_random_stream = False
 
 
 def is_fbcode():
@@ -271,6 +310,15 @@ capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
+
+# simulates what would happen if we didn't have support for BUILD_SET opcode,
+# used for testing
+inject_BUILD_SET_unimplemented_TESTING_ONLY = False
+
+# wraps (un)equalities with 'Not' class after recording the correct expression
+# in the FX graph. This should incorrectly construct the divisible and replacement
+# lists, and incorrectly issue guards.
+inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY = False
 
 _autograd_backward_strict_mode_banned_ops = [
     "stride",

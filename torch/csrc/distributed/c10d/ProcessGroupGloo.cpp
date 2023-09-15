@@ -60,6 +60,7 @@
       func<int8_t>(__VA_ARGS__);                 \
       break;                                     \
     case ::at::ScalarType::Byte:                 \
+    case ::at::ScalarType::Bool:                 \
       func<uint8_t>(__VA_ARGS__);                \
       break;                                     \
     case ::at::ScalarType::Int:                  \
@@ -89,6 +90,7 @@
       func<int8_t>(args);                        \
       break;                                     \
     case ::at::ScalarType::Byte:                 \
+    case ::at::ScalarType::Bool:                 \
       func<uint8_t>(args);                       \
       break;                                     \
     case ::at::ScalarType::Int:                  \
@@ -510,12 +512,13 @@ inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
 
 ProcessGroupGloo::AsyncWork::AsyncWork(
     std::vector<std::vector<at::Tensor>> outputTensors,
+    OpType opType,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
     // Profiler: Pass nullptr as profilingTitle to parent constructor to
     // replace default profiler implementation with async version that reports
     // correct timestamps for work that is asynchronously executed.
-    : Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
+    : Work(-1, opType, nullptr, inputTensors),
       outputTensors_(std::move(outputTensors)),
       future_(createFutureAsOutput(outputTensors_)) {
   if (profilingTitle != nullptr) {
@@ -569,10 +572,11 @@ void ProcessGroupGloo::SendWork::abort() {
 ProcessGroupGloo::RecvWork::RecvWork(
     at::Tensor& tensor,
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+    OpType opType,
     const char* profilingTitle)
     : Work(
           -1,
-          OpType::UNKNOWN,
+          opType,
           profilingTitle,
           c10::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
@@ -681,7 +685,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   std::array<char, HOST_NAME_MAX> hostname{};
   auto rv = gethostname(hostname.data(), HOST_NAME_MAX);
   if (rv != 0) {
-    throw std::system_error(errno, std::system_category());
+    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -708,7 +712,7 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
   auto hostname = std::unique_ptr<char[]>(new char[hostNameMax]);
   auto rv = gethostname(hostname.get(), hostNameMax);
   if (rv != 0) {
-    throw std::system_error(errno, std::system_category());
+    C10_THROW_ERROR(DistBackendError, std::strerror(errno));
   }
 
   // Use this machine's hostname if it resolves to an address.
@@ -856,7 +860,11 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
       int rootRank,
       int rootTensor,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:broadcast", inputs),
+      : ProcessGroupGloo::AsyncWork(
+            {inputs},
+            OpType::BROADCAST,
+            "gloo:broadcast",
+            inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -995,7 +1003,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:all_reduce", inputs),
+      : ProcessGroupGloo::AsyncWork(
+            {inputs},
+            OpType::ALLREDUCE,
+            "gloo:all_reduce",
+            inputs),
         context(context),
         inputs(inputs),
         reduceOp(reduceOp),
@@ -1071,7 +1083,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:sparse_all_reduce", inputs),
+      : ProcessGroupGloo::AsyncWork(
+            {inputs},
+            OpType::_ALLREDUCE_SPARSE,
+            "gloo:sparse_all_reduce",
+            inputs),
         context(context),
         inputs(inputs),
         tag(tag) {}
@@ -1569,7 +1585,11 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
       int rootTensor,
       ReduceOp reduceOp,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork({inputs}, "gloo:reduce", inputs),
+      : ProcessGroupGloo::AsyncWork(
+            {inputs},
+            OpType::REDUCE,
+            "gloo:reduce",
+            inputs),
         context(context),
         inputs(inputs),
         rootRank(rootRank),
@@ -1727,7 +1747,11 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<std::vector<at::Tensor>>& outputs,
       std::vector<at::Tensor>& inputs,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(outputs, "gloo:all_gather", inputs),
+      : ProcessGroupGloo::AsyncWork(
+            outputs,
+            OpType::ALLGATHER,
+            "gloo:all_gather",
+            inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -1922,6 +1946,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
             output_lists,
+            OpType::ALLGATHER_COALESCED,
             "gloo:all_gather",
             input_list),
         context(context),
@@ -2051,7 +2076,11 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
       std::vector<at::Tensor>& inputs,
       int root,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork(outputs, "gloo:gather", inputs),
+      : ProcessGroupGloo::AsyncWork(
+            outputs,
+            OpType::GATHER,
+            "gloo:gather",
+            inputs),
         context(context),
         outputs(outputs),
         inputs(inputs),
@@ -2250,6 +2279,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
             {outputs},
+            OpType::SCATTER,
             "gloo:scatter",
             !inputs.empty() ? c10::optional<std::vector<at::Tensor>>(inputs[0])
                             : c10::nullopt),
@@ -2441,6 +2471,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       uint32_t tag)
       : ProcessGroupGloo::AsyncWork(
             {{outputTensor}},
+            OpType::ALLTOALL,
             "gloo:all_to_all",
             c10::optional<std::vector<at::Tensor>>({inputTensor})),
         context(context),
@@ -2650,7 +2681,8 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recv(
 
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
-  return c10::make_intrusive<RecvWork>(tensor, std::move(buf), "gloo:recv");
+  return c10::make_intrusive<RecvWork>(
+      tensor, std::move(buf), OpType::RECV, "gloo:recv");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
@@ -2679,7 +2711,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
   // The work captures the tensor to prevent it being deallocated and
   // the unbound buffer to synchronize on completion of the recv.
   return c10::make_intrusive<RecvWork>(
-      tensor, std::move(buf), "gloo:recvAnySource");
+      tensor, std::move(buf), OpType::RECVANYSOURCE, "gloo:recvAnySource");
 }
 
 namespace {
@@ -2690,7 +2722,11 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
       const std::shared_ptr<gloo::Context>& context,
       std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork,
       uint32_t tag)
-      : ProcessGroupGloo::AsyncWork({}, "gloo:barrier", c10::nullopt),
+      : ProcessGroupGloo::AsyncWork(
+            {},
+            OpType::BARRIER,
+            "gloo:barrier",
+            c10::nullopt),
         context(context),
         priorWork(std::move(priorWork)),
         tag(tag) {}
