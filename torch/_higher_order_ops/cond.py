@@ -2,18 +2,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch._subclasses.functional_tensor
 import torch.fx.traceback as fx_traceback
 
 import torch.utils._pytree as pytree
 
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._C import DispatchKey
 from torch._dynamo.exc import CondOpArgsMismatchError
 
-from torch._functorch.eager_transforms import (
-    _unwrap_all_tensors_from_functional,
-    _wrap_all_tensors_to_functional,
-    functionalize,
-)
 from torch._higher_order_ops.utils import autograd_not_implemented
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -407,25 +403,19 @@ def _has_potential_branch_input_alias(branch, inputs):
     return _detect_input_alias(gm)
 
 
-@cond_op.py_impl(DispatchKey.Functionalize)
-def cond_func(pred, true_fn, false_fn, inputs):
-    reapply_views = torch._C._functionalization_reapply_views_tls()
-    unwrapped_inputs = _unwrap_all_tensors_from_functional(
-        inputs, reapply_views=reapply_views
-    )
-    unwrapped_pred = _unwrap_all_tensors_from_functional(
-        pred, reapply_views=reapply_views
-    )
-    mode = "mutations_and_views" if reapply_views else "mutations"
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        functional_true = functionalize(true_fn, remove=mode)
-        functional_false = functionalize(false_fn, remove=mode)
-        for branch in [true_fn, false_fn]:
+@cond_op.py_functionalize_impl()
+def cond_func(ctx, pred, true_fn, false_fn, inputs):
+    unwrapped_inputs = ctx.unwrap(inputs)
+    unwrapped_pred = ctx.unwrap(pred)
+    with ctx.redispatch():
+        functional_true = ctx.wrap_function(true_fn)
+        functional_false = ctx.wrap_function(false_fn)
+        for branch in [functional_true, functional_false]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be modifying the input!"
                 )
-
+        for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
                     "One of torch.cond branch might be aliasing the input!"
@@ -434,45 +424,7 @@ def cond_func(pred, true_fn, false_fn, inputs):
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
-        return _wrap_all_tensors_to_functional(cond_return, level=0)
-
-
-@cond_op.py_impl(torch._C._functorch.TransformType.Functionalize)
-def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
-    """
-    Functionalization implementation for torch.cond. Currently:
-      1. We don't allow any input mutation inside the branches
-      2. Our check for above condition is not exhaustive
-    """
-    reapply_views = interpreter.functionalize_add_back_views()
-    mode = "mutations_and_views" if reapply_views else "mutations"
-    # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_inputs = _unwrap_all_tensors_from_functional(
-        inputs, reapply_views=reapply_views
-    )
-    unwrapped_pred = _unwrap_all_tensors_from_functional(
-        pred, reapply_views=reapply_views
-    )
-
-    functional_true_fn = functionalize(true_fn, remove=mode)
-    functional_false_fn = functionalize(false_fn, remove=mode)
-
-    with interpreter.lower():
-        for branch in [functional_true_fn, functional_false_fn]:
-            if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
-                raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be modifying the input!"
-                )
-        for branch in [true_fn, false_fn]:
-            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
-                raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be aliasing the input!"
-                )
-
-        cond_return = cond_op(
-            unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs
-        )
-        return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
+        return ctx.wrap(cond_return)
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm

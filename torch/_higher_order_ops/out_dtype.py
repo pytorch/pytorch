@@ -11,11 +11,7 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode,
     _pop_mode_temporarily,
 )
-from torch._C import DispatchKey, _ExcludeDispatchKeyGuard, DispatchKeySet
-from torch._functorch.eager_transforms import (
-    _unwrap_all_tensors_from_functional,
-    _wrap_all_tensors_to_functional,
-)
+from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._prims_common import elementwise_dtypes, ELEMENTWISE_TYPE_PROMOTION_KIND
@@ -191,29 +187,10 @@ def out_dtype_fake_tensor_mode(
     return out_dtype_dense(op, output_dtype, *args)
 
 
-@out_dtype.py_impl(DispatchKey.Functionalize)
-def out_dtype_func1(op, output_dtype, *args):
-    reapply_views = torch._C._functionalization_reapply_views_tls()
-    # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_args = tuple(
-        _unwrap_all_tensors_from_functional(arg, reapply_views=reapply_views)
-        for arg in args
-    )
-    # pyre-ignore
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
+@out_dtype.py_functionalize_impl()
+def out_dtype_func(ctx, op, output_dtype, *args):
+    unwrapped_args = tuple(ctx.unwrap(arg) for arg in args)
+
+    with ctx.redispatch():
         res = out_dtype(op, output_dtype, *unwrapped_args)
-    return _wrap_all_tensors_to_functional(res, level=0)
-
-
-@out_dtype.py_impl(torch._C._functorch.TransformType.Functionalize)
-def out_dtype_func2(interpreter, op, output_dtype, *args):
-    reapply_views = interpreter.functionalize_add_back_views()
-    # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_args = tuple(
-        _unwrap_all_tensors_from_functional(arg, reapply_views=reapply_views)
-        for arg in args
-    )
-
-    with interpreter.lower():
-        res = out_dtype(op, output_dtype, *unwrapped_args)
-        return _wrap_all_tensors_to_functional(res, level=interpreter.level())
+    return ctx.wrap(res)
