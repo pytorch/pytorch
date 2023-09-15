@@ -273,8 +273,7 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
     return false;
   }
 #ifdef USE_NUMPY
-  TORCH_CHECK(::torch::utils::is_numpy_available(), "Numpy is not available");
-  if (PyArray_CheckExact(index)) {
+  if (::torch::utils::is_numpy_available() && PyArray_CheckExact(index)) {
     return false;
   }
 #endif
