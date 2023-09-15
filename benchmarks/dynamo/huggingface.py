@@ -453,6 +453,7 @@ class HuggingfaceRunner(BenchmarkRunner):
         device,
         model_name,
         batch_size=None,
+        extra_args=None,
     ):
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
