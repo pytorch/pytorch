@@ -564,7 +564,7 @@ def repro_analyze(options, mod, load_args):
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)
+        pbar.update(1)  # type: ignore[has-type]
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
