@@ -21,7 +21,7 @@ if not errorlevel 0 exit /b 1
 cd %TMP_DIR_WIN%\build\torch\test
 for /r "." %%a in (*.exe) do (
     call :libtorch_check "%%~na" "%%~fa"
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 goto fail
 )
 
 goto :eof
