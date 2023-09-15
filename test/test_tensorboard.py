@@ -422,6 +422,7 @@ class TestTensorBoardSummary(BaseTestCase):
     def test_text(self):
         self.assertTrue(compare_proto(summary.text('dummy', 'text 123'), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_auto(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='auto', max_bins=5), self))
 
