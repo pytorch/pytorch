@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import collections
 import contextlib
 import cProfile
@@ -50,7 +48,7 @@ def has_dot() -> bool:
         return False
 
 
-def draw_buffers(nodes: list[BaseSchedulerNode], print_graph=False, fname=None):
+def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
     """
     Draw a graph in fname.svg.
     """
@@ -87,7 +85,7 @@ def draw_buffers(nodes: list[BaseSchedulerNode], print_graph=False, fname=None):
     draw_graph(gm, fname, clear_meta=False)
 
 
-def create_fx_from_snodes(snodes: list[BaseSchedulerNode]) -> fx.Graph:
+def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
