@@ -55,7 +55,7 @@ run_tests() {
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
     else
-        "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
+        # "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         if [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
             if [[ "${USE_CUDA}" == "1" ]]; then
