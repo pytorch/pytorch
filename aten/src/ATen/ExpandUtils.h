@@ -187,17 +187,18 @@ expand_inplace(
 // See NOTE [ ExpandUtils Borrowing ] above for `MaybeOwned` explanation.
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
 expand_outplace(const Tensor& to_expand1, const Tensor& to_expand2) {
-  if (to_expand1.sizes().equals(to_expand2.sizes())) {
+  auto s1 = to_expand1.sym_sizes();
+  auto s2 = to_expand2.sym_sizes();
+  if (s1.equals(s2)) {
     return std::make_tuple(
         c10::MaybeOwned<Tensor>::borrowed(to_expand1),
         c10::MaybeOwned<Tensor>::borrowed(to_expand2));
   }
 
-  auto expanded_size =
-      infer_size_dimvector(to_expand1.sizes(), to_expand2.sizes());
+  auto expanded_size = infer_size_symdimvector(s1, s2);
   return std::make_tuple(
-      c10::MaybeOwned<Tensor>::owned(to_expand1.expand(expanded_size)),
-      c10::MaybeOwned<Tensor>::owned(to_expand2.expand(expanded_size)));
+      c10::MaybeOwned<Tensor>::owned(to_expand1.expand_symint(expanded_size)),
+      c10::MaybeOwned<Tensor>::owned(to_expand2.expand_symint(expanded_size)));
 }
 
 inline std::tuple<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>>
