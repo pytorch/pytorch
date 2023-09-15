@@ -690,12 +690,6 @@ meta_function_device_expected_failures = defaultdict(dict)
 meta_function_device_expected_failures_only_outplace = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
-meta_function_device_expected_failures['cpu'] = {
-    torch.native_batch_norm: {bf16},
-    torch._native_batch_norm_legit: {bf16},
-    torch.native_layer_norm: {bf16},
-}
-
 meta_function_device_expected_failures['cuda'] = {
     torch.corrcoef: {bf16, f16},  # aten::_local_scalar_dense
     torch.cov: {f16},  # aten::_local_scalar_dense
@@ -834,13 +828,6 @@ meta_inplace_skips = set({
 
 meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
-
-meta_dispatch_device_expected_failures['cpu'] = {
-    aten.native_batch_norm.default: {bf16},
-    aten._native_batch_norm_legit.default: {bf16},
-    aten._native_batch_norm_legit.no_stats: {bf16},
-    aten.native_layer_norm.default: {bf16},
-}
 
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._unique2.default: {f16},  # aten::_unique2
