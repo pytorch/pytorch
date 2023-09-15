@@ -77,8 +77,7 @@ Tensor Adagrad::step(LossClosure closure) {
       }
       auto grad = p.grad();
 
-      auto param_state =
-          state_.find(c10::guts::to_string(p.unsafeGetTensorImpl()));
+      auto param_state = state_.find(p.unsafeGetTensorImpl());
       auto& options = static_cast<AdagradOptions&>(group.options());
       auto initial_accumulator_value = options.initial_accumulator_value();
 
@@ -88,12 +87,11 @@ Tensor Adagrad::step(LossClosure closure) {
         state->step(0);
         state->sum(torch::full_like(
             p, initial_accumulator_value, MemoryFormat::Preserve));
-        state_[c10::guts::to_string(p.unsafeGetTensorImpl())] =
-            std::move(state);
+        state_[p.unsafeGetTensorImpl()] = std::move(state);
       }
 
-      auto& state = static_cast<AdagradParamState&>(
-          *state_[c10::guts::to_string(p.unsafeGetTensorImpl())]);
+      auto& state =
+          static_cast<AdagradParamState&>(*state_[p.unsafeGetTensorImpl()]);
 
       state.step(state.step() + 1);
 
