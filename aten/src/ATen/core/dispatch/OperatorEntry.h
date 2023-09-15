@@ -3,7 +3,6 @@
 #include <ATen/core/function_schema.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/either.h>
 #include <c10/util/Optional.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/PyHandleCache.h>

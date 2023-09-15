@@ -104,6 +104,7 @@ class AOTInductorModelRunner:
         return list_output_tensors
 
 
+@unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
 class AotInductorTests(TestCase):
     def test_simple(self):
         class Repro(torch.nn.Module):
@@ -470,5 +471,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA and not TEST_WITH_ROCM and not IS_FBCODE:
+    if HAS_CUDA and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
