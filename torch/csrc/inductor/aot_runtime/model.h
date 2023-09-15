@@ -362,8 +362,7 @@ class AOTICudaStreamGuard {
 
   ~AOTICudaStreamGuard() {
     // restore the previous stream as current
-    AOTI_TORCH_ERROR_CHECK(
-        aoti_torch_set_current_cuda_stream(stream_, device_index_));
+    aoti_torch_set_current_cuda_stream(stream_, device_index_);
   }
 
  private:

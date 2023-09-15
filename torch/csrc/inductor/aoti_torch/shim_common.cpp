@@ -1,3 +1,4 @@
+#include <ATen/native/BinaryOps.h>
 #include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -78,6 +79,10 @@ int32_t aoti_torch_dtype_int64() {
   return (int32_t)c10::ScalarType::Long;
 }
 
+int64_t aoti_torch_div_floor_integer(int64_t a, int64_t b) {
+  return at::native::div_floor_integer(a, b);
+}
+
 AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
@@ -89,6 +94,20 @@ AOTITorchError aoti_torch_get_data_ptr(void** ret, AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     *ret = t->data_ptr();
+  });
+}
+
+AOTITorchError aoti_torch_get_sizes(int64_t** ret, AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret = const_cast<int64_t*>(t->sizes().data());
+  });
+}
+
+AOTITorchError aoti_torch_get_strides(int64_t** ret, AtenTensorHandle tensor) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
+    *ret = const_cast<int64_t*>(t->strides().data());
   });
 }
 

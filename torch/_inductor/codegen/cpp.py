@@ -323,7 +323,11 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         if expr.is_integer:
-            return f"at::native::div_floor_integer({x}, {div})"
+            if config.aot_inductor.abi_compatible:
+                # Other operators may need to do this too, but we have only hit FloorDiv so far
+                return f"aoti_torch_div_floor_integer({x}, {div})"
+            else:
+                return f"at::native::div_floor_integer({x}, {div})"
         return f"at::native::div_floor_floating(static_cast<double>({x}), static_cast<double>({div}))"
 
     def _print_floor(self, expr):

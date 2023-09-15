@@ -549,21 +549,25 @@ class WrapperCodeGen(CodeGen):
 
         return result.getvaluewithlinemap()
 
+    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
+        code.writeline(f"{self.declare}{name}_size = {name}.{self.size}{self.ending}")
+
+    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
+        code.writeline(
+            f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
+        )
+
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
 
         @functools.lru_cache(None)
         def sizeof(name):
-            code.writeline(
-                f"{self.declare}{name}_size = {name}.{self.size}{self.ending}"
-            )
+            self.codegen_input_size_var_decl(code, name)
             return f"{name}_size"
 
         @functools.lru_cache(None)
         def strideof(name):
-            code.writeline(
-                f"{self.declare}{name}_stride = {name}.{self.stride}{self.ending}"
-            )
+            self.codegen_input_size_var_decl(code, name)
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
@@ -1140,6 +1144,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     torch::List<c10::optional<at::Scalar>> optional_list;
                     """
                 )
+
+    def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
+        if config.aot_inductor.abi_compatible:
+            code.writeline(f"int64_t* {name}_size;")
+            code.writeline(
+                f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_sizes(&{name}_size, {name}.get()));"
+            )
+        else:
+            super().codegen_input_size_var_decl(code, name)
+
+    def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
+        if config.aot_inductor.abi_compatible:
+            code.writeline(f"int64_t* {name}_stride;")
+            code.writeline(
+                f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_strides(&{name}_stride, {name}.get()));"
+            )
+        else:
+            super().codegen_input_stride_var_decl(code, name)
 
     def codegen_model_constructor(self):
         """
