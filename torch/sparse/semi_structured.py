@@ -364,7 +364,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         raise NotImplementedError(error_string)
 
     def to_dense(self):
-        if not cls._FORCE_CUTLASS:
+        if not self._FORCE_CUTLASS:
             raise RuntimeError("Converting to dense is not yet supported by cuSPARSELt backend!")
 
         if self.compressed_tensor is None:
