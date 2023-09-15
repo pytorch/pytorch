@@ -3,8 +3,6 @@ import logging
 import operator
 from typing import Callable, List, Sequence, Tuple, Union
 
-import numpy
-
 import torch
 from torch._dynamo.utils import counters
 
@@ -454,8 +452,7 @@ class SplitCatSimplifier:
                 for user_input in user_inputs
                 if isinstance(user_input, tuple)
             }
-
-        cumulative_sizes = [0] + list(numpy.cumsum(split_sections))
+        cumulative_sizes = [0] + torch.cumsum(torch.tensor(split_sections), 0).tolist()
         split_ranges = sorted(
             [(cumulative_sizes[r[0]], cumulative_sizes[r[1] + 1]) for r in ranges]
         )
@@ -578,7 +575,7 @@ class SplitCatSimplifier:
                     for i in range(len(split_ranges))
                 ]
         # Now assign the right getitem to the right input
-        cumulative_sizes = [0] + list(numpy.cumsum(split_sections))
+        cumulative_sizes = [0] + torch.cumsum(torch.tensor(split_sections), 0).tolist()
         new_user_inputs_list = []
         for user_inputs in user_inputs_list:
             new_user_inputs = []
