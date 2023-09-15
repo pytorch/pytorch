@@ -3202,15 +3202,16 @@ Supports input of float, double, cfloat and cdouble dtypes. Also supports batche
 of vectors, for which it computes the product along the dimension :attr:`dim`.
 In this case, the output has the same batch dimensions as the inputs.
 
-If :attr:`dim` is not given, it defaults to the first dimension found with the
-size 3. Note that this might be unexpected.
+.. warning::
+    If :attr:`dim` is not given, it defaults to the first dimension found
+    with the size 3. Note that this might be unexpected.
+
+    This behavior is deprecated and will be changed to match that of :func:`torch.linalg.cross`
+    in a future release.
 
 .. seealso::
-        :func:`torch.linalg.cross` which requires specifying dim (defaulting to -1).
+        :func:`torch.linalg.cross` which has dim=-1 as default.
 
-.. warning:: This function may change in a future PyTorch release to match
-        the default behaviour in :func:`torch.linalg.cross`. We recommend using
-        :func:`torch.linalg.cross`.
 
 Args:
     {input}
@@ -5911,7 +5912,7 @@ lgamma(input, *, out=None) -> Tensor
 Computes the natural logarithm of the absolute value of the gamma function on :attr:`input`.
 
 .. math::
-    \text{out}_{i} = \ln \Gamma(|\text{input}_{i}|)
+    \text{out}_{i} = \ln |\Gamma(\text{input}_{i})|
 """
     + """
 Args:
@@ -5950,8 +5951,8 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
 From PyTorch 1.11 linspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
-    start (float): the starting value for the set of points
-    end (float): the ending value for the set of points
+    start (float or Tensor): the starting value for the set of points. If `Tensor`, it must be 0-dimensional
+    end (float or Tensor): the ending value for the set of points. If `Tensor`, it must be 0-dimensional
     steps (int): size of the constructed tensor
 
 Keyword arguments:
@@ -6334,8 +6335,8 @@ with base :attr:`base`. That is, the values are:
 From PyTorch 1.11 logspace requires the steps argument. Use steps=100 to restore the previous behavior.
 
 Args:
-    start (float): the starting value for the set of points
-    end (float): the ending value for the set of points
+    start (float or Tensor): the starting value for the set of points. If `Tensor`, it must be 0-dimensional
+    end (float or Tensor): the ending value for the set of points. If `Tensor`, it must be 0-dimensional
     steps (int): size of the constructed tensor
     base (float, optional): base of the logarithm function. Default: ``10.0``.
 
@@ -11384,9 +11385,11 @@ Example::
 add_docstr(
     torch.take_along_dim,
     r"""
-take_along_dim(input, indices, dim, *, out=None) -> Tensor
+take_along_dim(input, indices, dim=None, *, out=None) -> Tensor
 
 Selects values from :attr:`input` at the 1-dimensional indices from :attr:`indices` along the given :attr:`dim`.
+
+If :attr:`dim` is None, the input array is treated as if it has been flattened to 1d.
 
 Functions that return indices along a dimension, like :func:`torch.argmax` and :func:`torch.argsort`,
 are designed to work with this function. See the examples below.
@@ -11398,7 +11401,7 @@ are designed to work with this function. See the examples below.
 Args:
     {input}
     indices (tensor): the indices into :attr:`input`. Must have long dtype.
-    dim (int): dimension to select along.
+    dim (int, optional): dimension to select along.
 
 Keyword args:
     {out}
@@ -12078,7 +12081,7 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1]``
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
 can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
 applied at :attr:`dim` = ``dim + input.dim() + 1``.
 

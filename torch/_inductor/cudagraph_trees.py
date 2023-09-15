@@ -1069,7 +1069,7 @@ class CUDAGraphNode:
                 for i, elem in enumerate(inputs)
                 if isinstance(elem, torch.Tensor)
                 and i not in self.wrapped_function.static_input_idxs
-                and elem.data_ptr() != 0
+                and elem.untyped_storage().data_ptr() != 0
             ]
             check_memory_pool(self.device, self.cuda_graphs_pool, memory)
 
@@ -1133,7 +1133,7 @@ class CUDAGraphNode:
             )
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
-            is_empty_storage = o.data_ptr() == 0
+            is_empty_storage = o.untyped_storage().data_ptr() == 0
             if ref and ref() is not None or is_empty_storage:
                 self.output_storage_alias.append(None)
                 self.static_output_tensors[i] = o

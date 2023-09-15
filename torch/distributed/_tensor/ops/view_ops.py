@@ -632,7 +632,7 @@ def register_prop_rule_map(
                 )
 
                 suggested_schema = OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=args[:shape_argnum]
                     + (tuple(local_out_shape),)
                     + args[shape_argnum + 1 :],
@@ -661,7 +661,7 @@ def register_prop_rule_map(
                 output_spec=None,
                 schema_suggestions=[
                     OpSchema(
-                        func_schema=op_schema.func_schema,
+                        op=op_schema.op,
                         args_schema=(
                             DTensorSpec(
                                 placements=tuple(suggested_placements),

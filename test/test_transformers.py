@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     gradcheck,
     make_tensor,
+    NOTEST_CPU
 )
 
 
@@ -2836,7 +2837,11 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
 
-device_types = ("cpu", "cuda")
+if NOTEST_CPU:
+    device_types = ("cuda", )
+else:
+    device_types = ("cpu", "cuda")
+
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types)

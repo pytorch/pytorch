@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
 import re
 import unittest
@@ -20,7 +19,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -217,6 +216,16 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
+
+    def test_symint_input(self):
+        def f(x):
+            i = x.size(0)
+            return wrap(lambda x, i: x.view(i), x, i)
+
+        x = torch.randn(3, 1)
+        self._test_wrap_simple(
+            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
+        )
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -792,19 +801,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         y = 8
 
-        # When running with dynamic shapes, `y` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # int are not passed as argument and directly
-            # baked into the graph.
-            self._test_wrap_simple(f, (x, y), 2)
+        self._test_wrap_simple(f, (x, y), ifdynstaticdefault(2, 3))
 
     def test_wrap_all_kwarg(self):
         def f(y, x):
@@ -876,20 +873,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         opt(x, y)
         self.assertEqual(counters["stats"]["calls_captured"], 1)
 
-        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # verify that we `do` recompile
-            output = opt(x, y, 8)
-            self.assertEqual(counters["stats"]["calls_captured"], 2)
-            self.assertEqual(output, 2 * x)
+        output = opt(x, y, 8)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(output, 2 * x)
 
     def test_wrap_kwarg_default_else_branch(self):
         def f(x, y, z):
@@ -904,19 +890,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # expected_num_wrap_args = 2 because in this case,
-            # we take the `else` branch and `y` is not lifted.
-            self._test_wrap_simple(f, (x, y, 8), 2)
+        self._test_wrap_simple(f, (x, y, 8), 2)
 
     def test_wrap_unsupported_kwarg(self):
         def f(x, y, z):
@@ -968,6 +942,27 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         result = f(x)
         self.assertEqual(result, (x.sin(), x.sin()))
         self.assertEqual(cnt.frame_count, 0)
+
+    def test_map_symint_input(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        ref = fn(x, y)
+        res = compiled_fn(x, y)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
