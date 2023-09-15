@@ -2,13 +2,13 @@ import inspect
 from typing import Dict, List
 
 import torch._C
-from torch._guards import Guard, GuardSource
+from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, DummyGlobalSource
 from ..stream import StreamMethodContainer
 from .base import VariableTracker
 from .functions import (
@@ -79,30 +79,41 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__enter__")
         )
-        return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(tx, [], {})
+        try:
+            return variables.UserMethodVariable(
+                self.cm_obj.__enter__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(tx, [], {})
+        except Unsupported as e:
+            raise unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __enter__ function"
+            ) from e
 
     def exit(self, tx, *args):
         options = VariableTracker.propagate(self)
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(
-            tx,
-            [
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-            ],
-            {},
-        )
+        try:
+            x = variables.UserMethodVariable(
+                self.cm_obj.__exit__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(
+                tx,
+                [
+                    variables.ConstantVariable(None),
+                    variables.ConstantVariable(None),
+                    variables.ConstantVariable(None),
+                ],
+                {},
+            )
+        except Unsupported as e:
+            raise unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __exit__ function"
+            ) from e
+
         # Remove the checkpoint if there is no graph break
         # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
@@ -112,7 +123,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = {Guard("", GuardSource.GLOBAL, GuardBuilder.GRAD_MODE)}
+    _guards_singleton = {Guard(DummyGlobalSource(), GuardBuilder.GRAD_MODE)}
 
     @staticmethod
     def create(tx, target_value, **kwargs):
@@ -151,9 +162,7 @@ class GradModeVariable(ContextWrappingVariable):
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = {
-        Guard("", GuardSource.GLOBAL, GuardBuilder.TORCH_FUNCTION_STATE)
-    }
+    _guards_singleton = {Guard(DummyGlobalSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
 
     @staticmethod
     def create(tx, **kwargs):
@@ -184,7 +193,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
     _guards_singleton = {
-        Guard("", GuardSource.GLOBAL, GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        Guard(DummyGlobalSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
     }
 
     @staticmethod
@@ -269,7 +278,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return "torch.autograd.graph"
 
     def fn_name(self):
-        return "disable_saved_tensors_hook"
+        return "disable_saved_tensors_hooks"
 
 
 class AutocastModeVariable(ContextWrappingVariable):

@@ -11,7 +11,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
@@ -236,7 +235,7 @@ struct TORCH_API Module : public Object {
 
   Module copy() const;
 
-  Module deepcopy() const;
+  Module deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the

@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import collections
 import contextlib
+import enum
 import functools
 import inspect
 import itertools
@@ -7,27 +10,122 @@ import logging
 import math
 import operator
 import os
+import platform
 import shutil
 import sys
 import tempfile
 import textwrap
 import time
+import unittest
 from io import StringIO
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    TypeVar,
+    Union,
+    ValuesView,
+)
 from unittest import mock
 
 import sympy
 
 import torch
-from torch.fx.immutable_collections import immutable_dict, immutable_list
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.autograd import DeviceType
+from torch.autograd.profiler_util import EventList
+from torch.fx.immutable_collections import immutable_list
+from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
 from .cuda_properties import current_device, get_device_capability
 
 log = logging.getLogger(__name__)
 
+_T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
+
+
+def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
+    """
+    Returns benchmark results by examining torch profiler events.
+    This could be more accurate as it doesn't count CPU side overhead.
+    However, this also requires manually excluding irrelevant event, e.g.
+    vectorized_elementwise_kernel which is used to fill L2 cache,
+    various CUDA events, etc, so could also be fragile.
+    """
+
+    fn()
+    torch.cuda.synchronize()
+    cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
+
+    # Estimate the runtime of the function
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
+    for _ in range(5):
+        cache.zero_()
+        fn()
+    end_event.record()
+    torch.cuda.synchronize()
+    estimate_ms = start_event.elapsed_time(end_event) / 5
+
+    # compute number of warmup and repeat
+    n_warmup = max(1, int(warmup / estimate_ms))
+    n_repeat = max(1, int(rep / estimate_ms))
+
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CUDA,
+        ]
+    ) as p:
+        # Benchmark
+        for i in range(n_repeat):
+            # we clear the L2 cache before each run
+            cache.zero_()
+            # record time of `fn`
+            fn()
+        # Record clocks
+        torch.cuda.synchronize()
+
+    log.debug("raw events")
+    log.debug(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
+
+    filtered_events = EventList(
+        [event for event in p.events() if event.device_type == DeviceType.CUDA]
+    )
+    if len(filtered_events) % n_repeat != 0:
+        raise RuntimeError(
+            "Failed to divide all profiling events into #repeat groups. "
+            "#CUDA events: %d, #repeats: %s",
+            len(filtered_events),
+            n_repeat,
+        )
+    num_event_per_group = len(filtered_events) / n_repeat
+    actual_events = EventList(
+        [
+            event
+            for i, event in enumerate(filtered_events)
+            if i % num_event_per_group != 0
+        ]
+    )
+    actual_events._build_tree()
+    actual_events = actual_events.key_averages()
+
+    log.debug("profiling time breakdown")
+    log.debug(actual_events.table(row_limit=-1))
+
+    res = sum(event.cuda_time for event in actual_events) / 1000.0
+    log.debug("profiling results: %s ms", res)
+    return res
 
 
 def do_bench(*args, **kwargs):
@@ -62,7 +160,7 @@ def do_bench(*args, **kwargs):
 
 
 @functools.lru_cache(None)
-def has_triton():
+def has_triton() -> bool:
     if not torch.cuda.is_available():
         return False
     try:
@@ -74,7 +172,7 @@ def has_triton():
 
 
 @functools.lru_cache(None)
-def has_torchvision_roi_align():
+def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
@@ -89,7 +187,7 @@ def conditional_product(*args):
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
-def decode_device(device):
+def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
     if device is None:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
@@ -108,11 +206,15 @@ def sympy_dot(seq1, seq2):
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
 
-def unique(it):
+def unique(it: Iterable[_T]) -> ValuesView[_T]:
     return {id(x): x for x in it}.values()
 
 
-def ceildiv(numer: int, denom: int):
+def ceildiv(
+    numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
+) -> Union[int, sympy.Expr]:
+    if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
+        return CeilDiv(numer, denom)
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -122,7 +224,7 @@ def ceildiv(numer: int, denom: int):
     return -(numer // -denom)
 
 
-def next_power_of_2(n):
+def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
     assert n <= 2**32, "32-bit only"
     n -= 1
@@ -193,7 +295,7 @@ def synchronize():
         torch.cuda.synchronize()
 
 
-def timed(model, example_inputs, times=1):
+def timed(model: Callable[..., Any], example_inputs, times: int = 1) -> float:
     synchronize()
     torch.manual_seed(1337)
     t0 = time.perf_counter()
@@ -213,33 +315,6 @@ def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
     return took
 
 
-immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
-immutable_list.__hash__ = lambda self: hash(tuple(self))
-
-
-def freeze_inputs(f):
-    """
-    Useful for wrapping lists in tuples for caching purposes
-    """
-
-    def freeze_value(x):
-        if isinstance(x, (immutable_dict, immutable_list)):
-            return x
-        if isinstance(x, list):
-            return immutable_list(x)
-        if isinstance(x, dict):
-            return immutable_dict(x)
-        return x
-
-    @functools.wraps(f)
-    def wrapped(*args):
-        args = [freeze_value(x) for x in args]
-        return f(*args)
-
-    wrapped.cache_info = f.cache_info
-    return wrapped
-
-
 def precompute_method(obj: Any, method: str):
     """Replace obj.method() with a new method that returns a precomputed constant."""
     result = getattr(obj, method)()
@@ -252,7 +327,7 @@ def precompute_methods(obj: Any, methods: List[str]):
         precompute_method(obj, method)
 
 
-def cmp(a, b):
+def cmp(a, b) -> int:
     return int(a > b) - int(a < b)
 
 
@@ -350,7 +425,9 @@ def get_kernel_metadata(node_schedule, wrapper):
     return metadata, "\n".join(detailed_metadata)
 
 
-def dominated_nodes(initial_queue: Iterable[torch.fx.Node], skip_filter=None):
+def dominated_nodes(
+    initial_queue: Iterable[torch.fx.Node], skip_filter=None
+) -> Set[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
     initial_queue = list(initial_queue)
     dominated_set = set(initial_queue)
@@ -384,7 +461,7 @@ def gather_origins(args, kwargs):
     return set(itertools.chain(*arg_origins, *kwarg_origins))
 
 
-def sympy_str(expr: sympy.Expr):
+def sympy_str(expr: sympy.Expr) -> str:
     """
     Normal sympy str is very slow, this is a lot faster.  The result are
     somewhat worse, as it doesn't do as much simplification.  So don't
@@ -402,7 +479,7 @@ def sympy_str(expr: sympy.Expr):
     return str(expr)
 
 
-def sympy_symbol(name) -> sympy.Symbol:
+def sympy_symbol(name: str) -> sympy.Symbol:
     # This should never be used for creating shape/stride symbols, as those
     # should all be allocated before Inductor.
     assert name[0] != "s"
@@ -438,10 +515,11 @@ def has_incompatible_cudagraph_ops(gm):
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
-        "run_with_rng_state",
         "run_and_save_rng_state",
+        "run_with_rng_state",
     }
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
@@ -466,7 +544,9 @@ def has_incompatible_cudagraph_ops(gm):
 
 
 instance_descriptor = collections.namedtuple(
-    "instance_descriptor", ["divisible_by_16", "equal_to_1"]
+    "instance_descriptor",
+    ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
+    defaults=[tuple(), tuple(), tuple(), tuple()],
 )
 
 
@@ -521,7 +601,7 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvaluewithlinemap(self):
+    def getvaluewithlinemap(self) -> tuple[str, list[tuple[int, LineContext]]]:
         buf = StringIO()
         p = 1
         linemap = []
@@ -539,11 +619,11 @@ class IndentedBuffer:
             p += 1 + line.count("\n")
         return buf.getvalue(), linemap
 
-    def getvalue(self):
+    def getvalue(self) -> str:
         v, _ = self.getvaluewithlinemap()
         return v
 
-    def getrawvalue(self):
+    def getrawvalue(self) -> str:
         buf = StringIO()
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
@@ -607,7 +687,7 @@ class IndentedBuffer:
                 if isinstance(line, LineContext):
                     self._lines.append(line)
                 else:
-                    IndentedBuffer.writeline(self, line[dedent:])
+                    IndentedBuffer.writeline(self, line[int(dedent) :])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -631,7 +711,7 @@ class DeferredLineBase:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
         raise NotImplementedError()
 
-    def _new_line(self, line: str) -> "DeferredLineBase":
+    def _new_line(self, line: str) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
         raise NotImplementedError()
 
@@ -660,25 +740,57 @@ def is_big_gpu(index):
     return True
 
 
-def use_triton_template(layout, *, enable_int32=False):
-    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
-    if enable_int32:
-        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+def use_max_autotune() -> bool:
     return (
-        (
-            config.max_autotune
-            or config.max_autotune_gemm
-            or config.search_autotune_cache
-        )
-        and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
+        config.max_autotune or config.max_autotune_gemm or config.search_autotune_cache
+    )
+
+
+def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+    return (
+        use_max_autotune()
         and layout.device.type == "cuda"
-        and layout.dtype in layout_dtypes
+        and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
 
+def _use_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip() for x in config.max_autotune_gemm_backends.upper().split(",")
+    ]
+
+
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    if enable_int32:
+        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
+    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "TRITON"
+    )
+
+
+def use_cutlass_template(layout):
+    from .codegen.cuda.cutlass_utils import try_import_cutlass
+
+    layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
+    res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
+        "CUTLASS"
+    )
+
+    if res:
+        if not try_import_cutlass():
+            log.warning(
+                "Failed to import CUTLASS lib. Please check whether "
+                "_inductor.config.cuda.cutlass_dir is set correctly. "
+                "Skipping CUTLASS backend for now."
+            )
+            return False
+    return res
+
+
 def use_aten_gemm_kernels():
-    return "ATEN" in config.max_autotune_gemm_backends.upper().split(",")
+    return not use_max_autotune() or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:
@@ -743,6 +855,25 @@ def override_lowering(aten_op, override_fn):
         lowering.lowerings[aten_op] = orig_fn
 
 
+def add_scheduler_init_hook(pre_fn, post_fn=None):
+    """
+    Add hook functions to be called at the beginning and end of Scheduler.__init__.
+    Used for unit tests.
+    """
+    from torch._inductor.scheduler import Scheduler
+
+    orig_fn = Scheduler.__init__
+
+    def wrapper(scheduler, nodes):
+        pre_fn(scheduler, nodes)
+        out = orig_fn(scheduler, nodes)
+        if post_fn:
+            post_fn(scheduler, nodes)
+        return out
+
+    return unittest.mock.patch.object(Scheduler, "__init__", wrapper)
+
+
 def developer_warning(msg):
     """
     Warnings that will be actionable for PyTorch developers, but not
@@ -755,7 +886,7 @@ def developer_warning(msg):
         log.info(msg)
 
 
-def get_num_bytes(*args, num_in_out_args=0):
+def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
     """
     Return the total number of bytes the arguments of tensor type takes.
 
@@ -774,7 +905,7 @@ def get_num_bytes(*args, num_in_out_args=0):
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
     try:
-        import colorama
+        import colorama  # type: ignore[import]
 
         if ms > 0.012 and gb_per_s < 650:
             info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
@@ -891,11 +1022,18 @@ def blue_text(msg):
     return _color_text(msg, "blue")
 
 
-PYTHON_TYPE_TO_SCHEMA_TYPE = {
-    torch.dtype: "int",
-    torch.device: "Device",
-    bool: "bool",
-}
+@functools.lru_cache(None)
+def python_type_to_schema_type():
+    from . import ir
+
+    PYTHON_TYPE_TO_SCHEMA_TYPE = {
+        torch.dtype: "int",
+        torch.device: "Device",
+        bool: "bool",
+        float: "float",
+        ir.TensorBox: "Tensor",
+    }
+    return PYTHON_TYPE_TO_SCHEMA_TYPE
 
 
 def may_get_optional_schema_type(schema_type, is_optional_arg):
@@ -916,8 +1054,8 @@ def type_match(arg, arg_type, is_optional_arg):
             # TODO: add support here
             return False
 
-    if arg.__class__ in PYTHON_TYPE_TO_SCHEMA_TYPE:
-        schema_type = PYTHON_TYPE_TO_SCHEMA_TYPE[arg.__class__]
+    if arg.__class__ in python_type_to_schema_type():
+        schema_type = python_type_to_schema_type()[arg.__class__]
         may_optional_schema_type = may_get_optional_schema_type(
             schema_type, is_optional_arg
         )
@@ -950,6 +1088,9 @@ def schema_match(schema, args, kwargs):
     def is_optional(arg):
         return "Optional" in str(arg.type)
 
+    def allow_none(arg):
+        return is_optional(arg) or arg.has_default_value()
+
     assert len(args) <= max_pos_args, args_error_message(
         len(args), max_pos_args, min_args
     )
@@ -966,7 +1107,7 @@ def schema_match(schema, args, kwargs):
                 obj = kwargs[argument.name]
                 is_kwd = True
 
-        if obj is None and not is_optional(argument):
+        if obj is None and not allow_none(argument):
             return False
 
         if obj is not None:
@@ -991,3 +1132,83 @@ def try_find_schema(schemas, args, kwargs):
             return schema
 
     return None
+
+
+def get_device_tflops(dtype):
+    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
+
+    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    if dtype in (torch.float16, torch.bfloat16):
+        return get_max_tensorcore_tflops(dtype)
+
+    if torch.backends.cuda.matmul.allow_tf32:
+        return get_max_tensorcore_tflops(torch.float32)
+    else:
+        return get_max_simd_tflops(torch.float32)
+
+
+def get_gpu_dram_gbps():
+    from triton.testing import get_dram_gbps
+
+    return get_dram_gbps()
+
+
+def is_welford_reduction(reduction_type):
+    return reduction_type.startswith("welford")
+
+
+def reduction_num_outputs(reduction_type):
+    return 3 if is_welford_reduction(reduction_type) else 1
+
+
+def is_linux() -> bool:
+    return platform.system() == "Linux"
+
+
+# Placeholder strings used in triton codegen.
+class Placeholder(enum.Enum):
+    # The placeholder for the actual name of a triton kernel.
+    # e.g. for "def triton_" it would be "triton_"
+    KERNEL_NAME = "KERNEL_NAME"
+
+    # The descriptive name of the triton kernel; when unique_kernel_names = False, this
+    # placeholder will be replaced with a string with more information.
+    DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
+
+
+# A utility function for easier AOTInductor testing
+aot_inductor_launcher = """
+    #include <c10/cuda/CUDAStream.h>
+    #include <torch/csrc/inductor/aot_runtime/interface.h>
+
+    void run(
+            std::vector<at::Tensor>& input_tensors,
+            std::vector<at::Tensor>& output_tensors) {
+        AOTInductorModelContainerHandle container_handle;
+        AOT_INDUCTOR_ERROR_CHECK(
+            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+        const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
+        const auto stream_id = cuda_stream.stream();
+        AOTInductorStreamHandle stream_handle =
+            reinterpret_cast<AOTInductorStreamHandle>(stream_id);
+        AOTInductorTensorHandle inputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
+        AOTInductorTensorHandle outputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
+        std::vector<AOTInductorParamShape> output_shapes(
+            output_tensors.size(), AOTInductorParamShape());
+        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+            container_handle,
+            inputs_handle,
+            input_tensors.size(),
+            outputs_handle,
+            output_tensors.size(),
+            output_shapes.data(),
+            stream_handle,
+            proxy_executor_handle));
+
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+    }
+"""

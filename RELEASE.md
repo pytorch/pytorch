@@ -32,8 +32,10 @@
     - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
+- [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
+  - [Triton dependency for the release](#triton-dependency-for-the-release)
 
 <!-- tocstop -->
 
@@ -43,6 +45,7 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | Stable CUDA | Experimental CUDA |
 | --- | --- | --- | --- |
+| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
 | 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
 | 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
 | 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
@@ -329,6 +332,10 @@ the size restrictions for publishing on PyPI so the default version that is publ
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
 
+# Submitting Tutorials
+
+Tutorials in support of a release feature must be submitted to the [pytorch/tutorials](https://github.com/pytorch/tutorials) repo at least two weeks before the release date to allow for editorial and technical review. There is no cherry-pick process for tutorials. All tutorials will be merged around the release day and published at [pytorch.org/tutorials](https://pytorch.org/tutorials/).
+
 # Special Topics
 
 ## Updating submodules for a release
@@ -346,3 +353,19 @@ git config --file=.gitmodules -e
 An example of this process can be found here:
 
 * https://github.com/pytorch/pytorch/pull/48312
+
+## Triton dependency for the release
+
+In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
+
+In Nightly builds we have following configuration:
+* Conda builds, depend on: https://anaconda.org/pytorch-nightly/torchtriton
+* Wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton/
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/nightly/pytorch-triton-rocm/
+
+However for release we have following :
+* Conda builds, depend on: https://anaconda.org/pytorch-test/torchtriton for test and https://anaconda.org/pytorch/torchtriton for release
+* Wheel builds, depend only triton pypi package: https://pypi.org/project/triton/ for both test and release
+* Rocm wheel builds, depend on : https://download.pytorch.org/whl/test/pytorch-triton-rocm/ for test and https://download.pytorch.org/whl/pytorch-triton-rocm/ for release
+
+Important: The release of https://pypi.org/project/triton/ needs to be requested from OpenAI once branch cut is completed. Please include the release PIN hash in the request: https://github.com/pytorch/pytorch/blob/release/2.1/.ci/docker/ci_commit_pins/triton.txt .

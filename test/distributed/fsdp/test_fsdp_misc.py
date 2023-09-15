@@ -7,6 +7,7 @@ import warnings
 from collections import namedtuple
 from contextlib import nullcontext
 from copy import deepcopy
+from itertools import chain
 from typing import Any, Tuple
 
 import torch
@@ -455,11 +456,11 @@ class TestFSDPMiscMultiProcess(FSDPTest):
 
         # Check that `device_id` with `sync_module_states=True` works
         nested_wrapped_module = init_nested_wrapped_module()
-        nested_wrapped_module.buf = nn.Buffer(
-            torch.ones((2, 2), device="cpu") * self.rank
+        nested_wrapped_module.register_buffer(
+            "buf", torch.ones((2, 2), device="cpu") * self.rank
         )
-        nested_wrapped_module.module[0].buf = nn.Buffer(
-            torch.ones((3, 2), device="cpu") * self.rank
+        nested_wrapped_module.module[0].register_buffer(
+            "buf", torch.ones((3, 2), device="cpu") * self.rank
         )
         nested_wrapped_module = FSDP(
             nested_wrapped_module,
@@ -641,6 +642,52 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
             FSDP(CPUGPUModule())
 
     @skip_if_lt_x_gpu(2)
+    def test_fsdp_ignored_module_meta(self):
+        torch.cuda.set_device(self.rank)
+
+        class CPUGPUModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(1, 1)
+                self.b = nn.Linear(1, 1)
+
+        with torch.device("meta"):
+            m = CPUGPUModule()
+        m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)
+        meta_device = torch.device("meta")
+        self.assertEqual(meta_device, next(m.a.parameters()).device)
+
+        # Test with param_init_fn
+        with torch.device("meta"):
+            m = CPUGPUModule()
+        m = FSDP(
+            m,
+            device_id=torch.cuda.current_device(),
+            ignored_modules=[m.a],
+            use_orig_params=True,
+            param_init_fn=lambda m: m.to_empty(
+                device=torch.cuda.current_device(), recurse=False
+            ),
+        )
+        self.assertEqual(meta_device, next(m.a.parameters()).device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_device_id_no_move_ignored_params_and_bufs(self):
+        class CPUGPUModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(1, 1)
+                self.b = nn.Linear(1, 1)
+                self.a.register_buffer("buf", torch.ones(1))
+
+        m = CPUGPUModule()
+        m = FSDP(m, device_id=self.rank, ignored_modules=[m.a], use_orig_params=True)
+        ignored_params = m.a.parameters()
+        ignored_bufs = m.a.buffers()
+        for t in chain(ignored_params, ignored_bufs):
+            self.assertEqual(torch.device("cpu"), t.device)
+
+    @skip_if_lt_x_gpu(2)
     def test_multigpu_module(self):
         """
         Module on multiple GPUs wrapped in FSDP should raise an error.
@@ -707,7 +754,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
                 torch.manual_seed(rank)
                 torch.cuda.manual_seed(rank)
                 self.lin = nn.Linear(10, 10, bias=False)
-                self.buffer = nn.Buffer(torch.ones(1) * rank)
+                self.register_buffer("buffer", torch.ones(1) * rank)
 
         m = MyModel(self.rank).cuda()
         _assert_module_states(

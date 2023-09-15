@@ -1,6 +1,7 @@
 import builtins
 import collections
 import inspect
+import itertools
 import math
 import operator
 import warnings
@@ -213,6 +214,8 @@ __all__ = [
     "cumsum",
     "cumprod",
     "mean",
+    "dot",
+    "vdot",
     "std",
     "std_mean",
     "sum",
@@ -276,6 +279,7 @@ __all__ = [
     "squeeze",
     "t",
     "T",
+    "take_along_dim",
     "tensor_split",
     "transpose",
     "unfold",
@@ -285,6 +289,7 @@ __all__ = [
     "view_as",
     "vsplit",
     "vstack",
+    "view_as_complex",
     "unflatten",
     "unbind",
     "triu",
@@ -329,12 +334,36 @@ __all__ = [
     #
     # Misc
     #
+    "is_complex",
     "renorm",
+    "stft",
+    "istft",
 ]
 
 Tensor = torch.Tensor
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 aten = torch._ops.ops.aten
+
+
+def is_noncontiguous_supported(device):
+    if device is not None and device.type == "hpu":
+        return False
+    return True
+
+
+def handle_noncontiguous_outputs(input_tlist, output):
+    device = None
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    for t in input_tlist:
+        if isinstance(t, FakeTensor):
+            device = t.fake_device
+            break
+
+    if not is_noncontiguous_supported(device):
+        output = output.contiguous()
+
+    return output
 
 
 def _broadcast_shapes(*_shapes):
@@ -433,7 +462,8 @@ def _make_elementwise_unary_reference(
             if extra_meta is not None:
                 extra_meta(a)
 
-            return prim(a)
+            output = prim(a)
+            return handle_noncontiguous_outputs([a], output)
 
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, prim.__name__)
@@ -529,6 +559,11 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@register_decomposition(aten.is_complex)
+def is_complex(input: TensorLikeType):
+    return utils.is_complex_dtype(input.dtype)
 
 
 @register_decomposition(aten.conj_physical)
@@ -915,6 +950,43 @@ def trunc(a):
     return prims.trunc(a)
 
 
+# TODO: register this as a real ref/decomposition once TorchInductor supports complex!
+def view_as_complex(self: TensorLikeType) -> TensorLikeType:
+    input_dtype = self.dtype
+    torch._check(
+        utils.is_float_dtype(input_dtype),
+        lambda: f"view_as_complex is only supported for floating point"
+        f"tensors, but got a tensor of scalar type: {input_dtype}",
+    )
+    sizes = self.size()
+    torch._check(
+        len(sizes) != 0,
+        lambda: "Input tensor must have one or more dimensions",
+    )
+    torch._check(
+        sizes[-1] == 2,
+        lambda: "Tensor must have a last dimension of size 2",
+    )
+
+    old_strides = self.stride()
+    torch._check(
+        old_strides[-1] == 1,
+        lambda: "Tensor must have a last dimension with stride 1",
+    )
+    dims = old_strides[:-1]
+    torch._check(
+        py_all(stride % 2 == 0 for stride in dims),
+        lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
+    )
+    torch._check(
+        self.storage_offset() % 2 == 0,
+        lambda: "Tensor must have a storage_offset divisible by 2",
+    )
+    return prims.view_element_type(
+        self, utils.corresponding_complex_dtype(input_dtype)
+    ).squeeze(-1)
+
+
 def _make_elementwise_binary_reference(
     type_promotion_kind,
     aten_op=infer_aten_op,
@@ -954,7 +1026,8 @@ def _make_elementwise_binary_reference(
                 lambda: f"{name}: Receive two Number inputs to an elementwise binary operation!",
             )
             a, b = _maybe_broadcast(a, b)
-            return prim(a, b)
+            output = prim(a, b)
+            return handle_noncontiguous_outputs([a, b], output)
 
         if has_out:
             _ref = out_wrapper()(_ref)
@@ -1659,7 +1732,8 @@ def sub(
             # which will mess with type promotion.
             b = b * alpha
 
-    return prims.sub(a, b)
+    output = prims.sub(a, b)
+    return handle_noncontiguous_outputs([a, b], output)
 
 
 # TODO: add docstring
@@ -2920,14 +2994,13 @@ def narrow(
     torch._check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
     dim_length = a.size(dim)
-    # Start being the end is usually invalid since it's out of bounds. So it's
-    # not allowed by canonicalize_dim. But for narrow it's valid as long as
-    # the length is 0, which is handled by the check below.
-    if start != dim_length:
-        # Negative start means indexing from the end of dim.
-        # Note: a dimension isn't being canonicalized here, this reuses
-        # canonicalize_dim because the semantics are similar.
-        start = utils.canonicalize_dim(dim_length, start)  # type: ignore[arg-type]
+    torch._check_with(
+        IndexError,
+        -dim_length <= start and start <= dim_length,  # type: ignore[arg-type]
+        lambda: f"start out of range (expected to be in range of [{-dim_length}, {dim_length}], but got {start})",
+    )
+    if start < 0:
+        start = start + dim_length
     torch._check(
         start <= dim_length - length,  # type: ignore[arg-type]
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
@@ -3146,6 +3219,269 @@ def renorm(
     if acc_type != input.dtype:
         norm_factor = prims.convert_element_type(norm_factor, input.dtype)
     return (input * norm_factor).contiguous()
+
+
+# CompositeImplicitAutograd - don't register decomp
+@aten.stft.center.py_impl(DispatchKey.CompositeImplicitAutograd)
+def stft(
+    input: Tensor,
+    n_fft: int,
+    hop_length: Optional[int] = None,
+    win_length: Optional[int] = None,
+    window: Optional[Tensor] = None,
+    center: bool = True,
+    pad_mode: str = "reflect",
+    normalized: bool = False,
+    onesided: Optional[bool] = None,
+    return_complex: Optional[bool] = None,
+) -> Tensor:
+    torch._check(
+        window is None or window.device == input.device,
+        lambda: (
+            f"stft input and window must be on the same device but got self on {input.device}"
+            + f" and window on {window.device}"  # type: ignore[union-attr]
+        ),
+    )
+
+    hop_length_ = hop_length if hop_length is not None else n_fft // 4
+    win_length_ = win_length if win_length is not None else n_fft
+
+    if return_complex is None:
+        return_complex_ = input.is_complex() or (
+            window is not None and utils.is_complex_dtype(window.dtype)
+        )
+        torch._check(
+            return_complex_,
+            (
+                "stft requires the return_complex parameter be given for real inputs, "
+                + "and will further require that return_complex=True in a future PyTorch release."
+            ),
+        )
+    else:
+        return_complex_ = return_complex
+
+    torch._check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: "stft expected a tensor of floating point or complex values",
+    )
+    torch._check(1 <= input.ndim <= 2, lambda: "stft expected a 1D or 2D tensor")
+
+    original_ndim = input.ndim
+    if original_ndim == 1:
+        input = input.unsqueeze(0)
+
+    if center:
+        extra_dims = 3 - input.ndim
+        pad_amount = n_fft // 2
+        extended_shape = [*itertools.repeat(1, extra_dims), *input.shape]
+        input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
+        input = input.view(input.size()[extra_dims:])
+
+    batch = input.size(0)
+    length = input.size(1)
+    torch._check(
+        0 < n_fft <= length,
+        lambda: f"stft expected 0 < n_fft <= {length}, but got n_fft={n_fft}",
+    )
+    torch._check(
+        hop_length_ > 0,
+        lambda: f"stft expected hop_length > 0 but got hop_length={hop_length_}",
+    )
+    torch._check(
+        0 < win_length_ <= n_fft,
+        lambda: f"stft expected 0 < win_length <= n_fft but got win_length={win_length_}",
+    )
+    torch._check(
+        window is None or window.shape == (win_length_,),
+        lambda: (
+            f"expected a 1D window tensor of size equal to win_length={win_length_}, "
+            + f"but got window with size {window.shape}"  # type: ignore[union-attr]
+        ),
+    )
+
+    if win_length_ < n_fft:
+        if window is None:
+            window = torch.ones(win_length_, dtype=input.dtype, device=input.device)
+        left = (n_fft - win_length_) // 2
+        window = aten.constant_pad_nd(window, [left, n_fft - win_length_ - left])
+
+    input = input.unfold(dimension=-1, size=n_fft, step=hop_length_)
+    if window is not None:
+        input = input * window
+
+    complex_fft = utils.is_complex_dtype(input.dtype)
+    onesided = onesided if onesided is not None else not complex_fft
+    norm = "ortho" if normalized else None
+    if onesided:
+        torch._check(
+            not complex_fft,
+            lambda: "Cannot have onesided output if window or input is complex",
+        )
+        out = torch.fft.rfft(input, dim=-1, norm=norm)
+    else:
+        out = torch.fft.fft(input, dim=-1, norm=norm)
+
+    out.transpose_(1, 2)
+
+    if original_ndim == 1:
+        out = out.squeeze_(0)
+
+    return out if return_complex_ else torch.view_as_real(out)
+
+
+# CompositeImplicitAutograd - don't register decomp
+@aten.istft.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def istft(
+    input: Tensor,
+    n_fft: int,
+    hop_length: Optional[int] = None,
+    win_length: Optional[int] = None,
+    window: Optional[Tensor] = None,
+    center: bool = True,
+    normalized: bool = False,
+    onesided: Optional[bool] = None,
+    length: Optional[int] = None,
+    return_complex=False,
+) -> Tensor:
+    torch._check(
+        window is None or window.device == input.device,
+        lambda: (
+            f"istft input and window must be on the same device but got self on {input.device}"
+            + f" and window on {window.device}"  # type: ignore[union-attr]
+        ),
+    )
+
+    hop_length_ = hop_length if hop_length is not None else n_fft // 4
+    win_length_ = win_length if win_length is not None else n_fft
+
+    torch._check(
+        utils.is_complex_dtype(input.dtype),
+        lambda: (
+            "istft input and window must be on the same device but got self on "
+            + f"{input.device} and window on {window.device}"  # type: ignore[union-attr]
+        ),
+    )
+    n_frames = input.size(-1)
+    fft_size = input.size(-2)
+
+    expected_output_signal_len = n_fft + hop_length_ * (n_frames - 1)
+    torch._check(input.numel() > 0, lambda: "istft input tensor cannot be empty")
+    torch._check(
+        2 <= input.ndim <= 3,
+        lambda: f"istft expected a tensor with 2 or 3 dimensions, but got {input.ndim}",
+    )
+    onesided_ = onesided if onesided is not None else fft_size != n_fft
+
+    if onesided_:
+        torch._check(
+            n_fft // 2 + 1 == fft_size,
+            lambda: (
+                "istft expected the frequency dimension (3rd to the last) of the input tensor "
+                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+            ),
+        )
+    else:
+        torch._check(
+            n_fft == fft_size,
+            lambda: (
+                "istft expected the frequency dimension (3rd to the last) of the input tensor "
+                + "to match n_fft when onesided=False, but got {fft_size}",
+            ),
+        )
+
+    torch._check(
+        0 < hop_length_ <= win_length_,
+        lambda: "istft expected 0 < hop_length <= win_length",
+    )
+    torch._check(
+        0 < win_length_ <= n_fft, lambda: "istft expected 0 < win_length <= n_fft"
+    )
+    torch._check(
+        window is None or window.shape == (win_length_,),
+        lambda: "Invalid window shape. window has to be 1D and length of `win_length`",
+    )
+
+    if window is None:
+        real_dtype = utils.corresponding_real_dtype(input.dtype)
+        window_ = torch.ones(win_length_, dtype=real_dtype, device=input.device)
+    else:
+        window_ = window
+
+    if win_length_ != n_fft:
+        left = (n_fft - win_length_) // 2
+        window_ = aten.constant_pad_nd(window_, (left, n_fft - win_length_ - left), 0)
+
+    original_ndim = input.ndim
+    if input.ndim == 2:
+        input = input.unsqueeze(0)
+
+    input = input.transpose(1, 2)
+    norm = "ortho" if normalized else None
+    if return_complex:
+        torch._check(
+            not onesided_,
+            lambda: "cannot have onesided output if window or input is complex",
+        )
+        input = torch.fft.ifft(input, dim=-1, norm=norm)
+    else:
+        torch._check(
+            window is None or not utils.is_complex_dtype(window.dtype),
+            lambda: "Complex windows are incompatible with return_complex=False",
+        )
+        if not onesided_:
+            input = input.narrow(dim=-1, start=0, length=n_fft // 2 + 1)
+        input = torch.fft.irfft(input, dim=-1, norm=norm)
+
+    assert input.size(2) == n_fft
+
+    y_tmp = input * window_.view([1, 1, n_fft])
+    y = aten.unfold_backward(
+        y_tmp,
+        input_sizes=(y_tmp.size(0), expected_output_signal_len),
+        dim=1,
+        size=n_fft,
+        step=hop_length_,
+    )
+    window_envelop = aten.unfold_backward(
+        window_.pow(2).expand((1, n_frames, n_fft)),
+        input_sizes=(y_tmp.size(0), expected_output_signal_len),
+        dim=1,
+        size=n_fft,
+        step=hop_length_,
+    )
+
+    assert expected_output_signal_len == y.size(1)
+    assert expected_output_signal_len == window_envelop.size(1)
+
+    start = n_fft // 2 if center else 0
+    if length is not None:
+        end = start + length
+    elif center:
+        end = expected_output_signal_len - n_fft // 2
+    else:
+        end = expected_output_signal_len
+
+    length = max(0, end - start)
+    y = y.narrow(dim=1, start=start, length=length)
+    window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
+
+    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
+    torch._check(
+        not window_envelop_lowest.item(),
+        lambda: "window overlap add min less than 1e-11",
+    )
+
+    y = y / window_envelop
+    if original_ndim == 2:
+        y = y.squeeze(0)
+
+    if end > expected_output_signal_len:
+        warnings.warn(
+            "The length of signal is shorter than the length parameter. Result is being "
+            + "padded with zeros in the tail. Please check your center and hop_length settings"
+        )
+        y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
+    return y
 
 
 # Get the new shape and stride after applying unfold to an input tensor
@@ -4119,6 +4455,45 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
+# CompositeImplicitAutograd - don't register decomp
+# missing ref impl. for aten.gather
+@out_wrapper()
+def take_along_dim(
+    a: torch.Tensor, indices: torch.Tensor, dim: Optional[int] = None
+) -> torch.Tensor:
+    torch._check(
+        a.ndim == indices.ndim,
+        lambda: (
+            "torch.take_along_dim(): input and indices should have the same "
+            f"number of dimensions, but got {a.ndim} dimensions for input, and "
+            f"{indices.ndim} dimensions for indices"
+        ),
+    )
+
+    torch._check(
+        utils.is_integer_dtype(indices.dtype),
+        lambda: (
+            "torch.take_along_dim(): dtype of indices should be int but got "
+            f"{indices.dtype} instead"
+        ),
+    )
+
+    if dim is None:
+        return torch.gather(a.view(-1), 0, indices.view(-1))
+    else:
+        self_sizes = list(a.shape)
+        self_sizes[dim] = indices.size(dim)
+        broadcast_shape = utils.infer_size_shapes(self_sizes, indices.size())
+        indices_broadcast = broadcast_to(indices, broadcast_shape)
+
+        indices_sizes = list(indices.shape)
+        indices_sizes[dim] = a.size(dim)
+        broadcast_shape = utils.infer_size_shapes(indices_sizes, a.size())
+        self_broadcast = broadcast_to(a, broadcast_shape)
+
+        return torch.gather(self_broadcast, dim, indices_broadcast)
+
+
 @out_wrapper()
 def empty(
     *shape,
@@ -4517,15 +4892,16 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     # make sure the decomposition output's stride is same as non-decomposition path.
     stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != stride:
-        return prims.copy_strided(output, stride)
-    return output
+        output = prims.copy_strided(output, stride)
+
+    return handle_noncontiguous_outputs(inputs, output)
 
 
 @register_decomposition(aten.linspace)
 @out_wrapper()
 def linspace(
-    start: NumberType,
-    end: NumberType,
+    start: Union[NumberType, TensorLikeType],
+    end: Union[NumberType, TensorLikeType],
     steps: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -4534,6 +4910,19 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    if isinstance(start, TensorLikeType):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        start = _maybe_convert_to_dtype(start, torch.float64)
+    if isinstance(end, TensorLikeType):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        end = _maybe_convert_to_dtype(end, torch.float64)
+
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
@@ -4552,7 +4941,8 @@ def linspace(
     # steps does not participate in the computation of the dtype
     torch._check_type(
         isinstance(steps, IntLike),
-        lambda: "steps must be int, not float",
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
     assert isinstance(steps, IntLike)  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
@@ -4566,9 +4956,10 @@ def linspace(
     if steps == 0:
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
-        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    if start == end:
-        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+        if isinstance(start, TensorLikeType):
+            return torch.empty((steps,), dtype=dtype, **factory_kwargs).copy_(start)  # type: ignore[arg-type]
+        else:
+            return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
     # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
     rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
@@ -4598,8 +4989,8 @@ def linspace(
 @register_decomposition(aten.logspace)
 @out_wrapper()
 def logspace(
-    start: NumberType,
-    end: NumberType,
+    start: Union[NumberType, TensorLikeType],
+    end: Union[NumberType, TensorLikeType],
     steps: NumberType,
     base: NumberType = 10,
     *,
@@ -4616,8 +5007,20 @@ def logspace(
     if prims.utils.is_integer_dtype(dtype):
         if isinstance(start, FloatLike):
             start = sym_int(start)
+        elif isinstance(start, TensorLikeType):
+            torch._check(
+                start.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
+            start = _maybe_convert_to_dtype(start, dtype)
         if isinstance(end, FloatLike):
             end = sym_int(end)
+        elif isinstance(end, TensorLikeType):
+            torch._check(
+                end.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
+            end = _maybe_convert_to_dtype(end, dtype)
 
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
@@ -4632,8 +5035,8 @@ def logspace(
     if base < 0:
         raise NotImplementedError
     ret = torch.linspace(  # type: ignore[misc]
-        start,
-        end,
+        start,  # type: ignore[arg-type]
+        end,  # type: ignore[arg-type]
         steps,  # type: ignore[arg-type]
         dtype=_dtype,
         layout=layout,
@@ -5478,24 +5881,71 @@ def log_normal(self, mean=1, std=2, generator=None):
 
 
 # TODO: add support for functionalization aten.normal_functional
+# NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("self",),
+    type_promoting_args=(
+        "mean",
+        "std",
+    ),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def normal(self, mean=0, std=1, generator=None):
+def normal(
+    mean=0,
+    std=1,
+    shape=None,
+    *,
+    generator=None,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=None,
+):
     assert generator is None
-    torch._check(std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}")
+    assert layout is None
+
+    if not isinstance(std, TensorLike):
+        torch._check(
+            std >= 0, lambda: f"normal expects std >= 0.0, but found std {std}"
+        )
+
+    if shape is None:
+        tensors = tuple(t for t in (mean, std) if isinstance(t, TensorLike))
+        torch._check(
+            len(tensors) > 0,
+            lambda: "normal expects that either mean or std is a tensor, or shape is defined",
+        )
+        torch._check(
+            layout is None and pin_memory is None,
+            lambda: "Cannot pass layout, or pin_memory without shape",
+        )
+
+        shape = _broadcast_shapes(*(t.shape for t in tensors))
+        dtype = tensors[0].dtype
+        device = tensors[0].device
+    else:
+        torch._check(
+            not isinstance(mean, TensorLike) and not isinstance(std, TensorLike),
+            lambda: "normal expects mean and std to be scalars when shape is defined",
+        )
+        dtype = torch.get_default_dtype() if dtype is None else dtype
+        device = torch.device("cpu") if device is None else device
+
     normal_samples = prims.normal(
-        self.shape,
+        shape,
         mean=0.0,
         std=1.0,
-        dtype=self.dtype,
-        device=self.device,
+        dtype=dtype,
+        device=device,
         requires_grad=False,
     )
     return std * normal_samples + mean
+
+
+@register_decomposition(aten.normal_)
+def normal_(self, mean=0, std=1, *, generator=None):
+    return normal(mean, std, self.shape, out=self, generator=generator)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -5521,6 +5971,64 @@ def deg2rad(self: TensorLikeType):
 @register_decomposition(aten.count_nonzero)
 def count_nonzero(self, dim: Optional[DimsType] = None):
     return (self != 0).sum(dim)
+
+
+def _dot_check(self, other):
+    torch._check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    torch._check(self.numel() == other.numel(), numel_error)
+
+
+@register_decomposition(aten.dot)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def dot(self, other):
+    if self.is_complex():
+        if self.is_conj():
+            if other.is_conj():
+                return torch.dot(self.conj(), other.conj()).conj()
+            else:
+                return torch.vdot(self.conj(), other)
+        elif other.is_conj():
+            return torch.vdot(other.conj(), self)
+
+    _dot_check(self, other)
+    return (self * other).sum()
+
+
+@register_decomposition(aten.vdot)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "other"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def vdot(self, other):
+    if not self.is_complex():
+        return torch.dot(self, other)
+
+    if self.is_conj():
+        if other.is_conj():
+            return torch.vdot(other.conj(), self.conj())
+        else:
+            return torch.dot(self.conj(), other)
+    elif other.is_conj():
+        return torch.dot(self, other.conj()).conj()
+
+    _dot_check(self, other)
+    # The decomposition fails if you do self.conj()... not sure why
+    return (self.conj_physical() * other).sum()
 
 
 # inplace
@@ -5617,7 +6125,6 @@ xlogy_ = _make_inplace(xlogy)
 cauchy_ = _make_inplace(cauchy)
 exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
-normal_ = _make_inplace(normal)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 

@@ -27,7 +27,6 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-from torch.distributed._tensor import DTensor
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
     _named_parameters_with_duplicates,
@@ -80,6 +79,7 @@ or a submodule chosen by the provided wrapping policy.
 # special cases such as for high CPU overhead or for intentionally bypassing
 # checks in the overrides, we may use 'unsafe'.
 _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
+
 # Environment variable toggling whether to check for parameter/gradient
 # writeback in case their storages change after FSDP initialization
 # We should check by default since it prevents silent correctness errors, but
@@ -343,7 +343,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
 
-    # NB: This is not a regular method, because FlatParameter are not actually
+    # NB: This is not a regular method, because FlatParameters are not actually
     # instances of this class (see __new__ above).  So you must indirectly
     # call this directly through the classmethod.
     @classmethod
@@ -511,6 +511,19 @@ class FlatParamHandle:
         # it points to parameterizes behavior. We use the following attribute
         # to track which tensor data the parameters are unsharded views into.
         self._unsharded_flat_param_for_skipped_views: Optional[Tensor] = None
+        # The index in the state's `all_handles`, which must be the
+        # same across ranks for the execution order validation to work
+        self._handle_index: Optional[int] = None
+        # Index in handles_to_pre_forward_order
+        self._pre_forward_order_index: Optional[int] = None
+        # Index in `handles_post_forward_order`
+        self._post_forward_index: Optional[int] = None
+        # Used for guarding against mistargeted forward prefetches
+        self._needs_pre_forward_unshard = False
+        # Used for guarding against mistargeted backward prefetches
+        self._needs_pre_backward_unshard = False
+        # Was the handle prefetched? Set on successful _prefetch_handle and unshard
+        self._prefetched = False
         # Optimistically assume a valid input `params` and set dtype attributes
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
@@ -1124,7 +1137,7 @@ class FlatParamHandle:
             # sharded tensor on the compute device to be all-gathered (for
             # sharded strategies) or directly used (for `NO_SHARD`) for
             # computation.
-            flat_param._mp_shard = torch.zeros_like(
+            flat_param._mp_shard = torch.empty_like(
                 flat_param._local_shard,
                 device=self.device,
                 dtype=self._fwd_bwd_param_dtype,
@@ -1139,7 +1152,7 @@ class FlatParamHandle:
                 else flat_param.dtype
             )  # use low precision if parameter mixed precision is enabled
             padded_unsharded_numel = flat_param.numel() * self.world_size
-            flat_param._full_param_padded = torch.zeros(
+            flat_param._full_param_padded = torch.empty(
                 padded_unsharded_numel,
                 device=self.device,
                 dtype=unsharded_param_dtype,
@@ -1150,7 +1163,7 @@ class FlatParamHandle:
             if self._uses_param_mixed_precision:
                 # For parameter mixed precision, we maintain a full precision
                 # padded unsharded tensor for when we force full precision.
-                flat_param._full_prec_full_param_padded = torch.zeros(
+                flat_param._full_prec_full_param_padded = torch.empty(
                     padded_unsharded_numel,
                     device=self.device,
                     dtype=flat_param.dtype,  # full precision
@@ -1280,6 +1293,14 @@ class FlatParamHandle:
                 unsharded_flat_param.dtype != self._fwd_bwd_param_dtype,
                 f"Expects full precision but got {self._fwd_bwd_param_dtype}",
             )
+            # For no-reshard-after-forward strategies, `_full_param_padded` may
+            # still be allocated from a previous forward. As we are forcing
+            # full precision here, the full-precision unsharded copy may be
+            # modified, invalidating the existing low-precision unsharded copy,
+            # so we should free it here to ensure a new all-gather for the next
+            # forward/backward computation to persist the modifications.
+            if flat_param._full_param_padded.untyped_storage().size() > 0:
+                _free_storage(flat_param._full_param_padded)
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
         return unsharded_flat_param
@@ -1776,6 +1797,8 @@ class FlatParamHandle:
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
         views = self._get_unflat_views()
+        from torch.distributed._tensor import DTensor
+
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, flat_param._param_infos)
         ):

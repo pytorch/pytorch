@@ -117,6 +117,9 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         cls._exit_stack.enter_context(
             unittest.mock.patch("torch._dynamo.config.suppress_errors", True)
         )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch("torch._dynamo.config.verbose", False)
+        )
 
     @classmethod
     def tearDownClass(cls):

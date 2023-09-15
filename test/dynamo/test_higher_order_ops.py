@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import functools
+import re
 import unittest
 
 import functorch.experimental.control_flow as control_flow
@@ -19,7 +19,7 @@ from torch._dynamo.testing import (
     EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, ifdynstaticdefault
 from torch._higher_order_ops.wrap import wrap
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -74,6 +74,33 @@ def op_count(gm):
     return result
 
 
+# Checks that a dict matches a dict with "regex keys". That is,
+# the keys are regex expressions.
+def assert_dict_matches_regex(self, dct, dct_with_regex_keys):
+    regex_keys = dct_with_regex_keys.keys()
+    regex_key_to_actual_key = {}
+    for regex_key in regex_keys:
+        for key in dct:
+            if re.match(regex_key, key):
+                if regex_key in regex_key_to_actual_key:
+                    raise AssertionError(
+                        f"Single key regex mapped to multiple keys. Please improve your "
+                        f"regex. Got: regex='{regex_key}' "
+                        f"keys='{regex_key_to_actual_key[regex_key]}',"
+                        f"'{key}'"
+                    )
+                regex_key_to_actual_key[regex_key] = key
+    new_dct = {}
+    for regex_key in regex_keys:
+        if regex_key not in regex_key_to_actual_key:
+            raise AssertionError(
+                f"Got regex '{regex_key}' but could not match any key in dict with "
+                f"keys {dct.keys()}"
+            )
+        new_dct[regex_key_to_actual_key[regex_key]] = dct_with_regex_keys[regex_key]
+    self.assertEqual(dct, new_dct)
+
+
 class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
@@ -113,6 +140,24 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
+
+    def test_error_message_sane(self):
+        foo = []
+
+        def inner(x):
+            foo.append(x)
+            return x.clone()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            return wrap(inner, x)
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "while introspecting wrap, we were unable to trace function `inner`",
+        ):
+            f(x)
 
     def test_no_freevars(self):
         def f(x):
@@ -171,6 +216,16 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3)
         self._test_wrap_simple(f, (x,), 3)
+
+    def test_symint_input(self):
+        def f(x):
+            i = x.size(0)
+            return wrap(lambda x, i: x.view(i), x, i)
+
+        x = torch.randn(3, 1)
+        self._test_wrap_simple(
+            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
+        )
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -746,19 +801,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         y = 8
 
-        # When running with dynamic shapes, `y` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # int are not passed as argument and directly
-            # baked into the graph.
-            self._test_wrap_simple(f, (x, y), 2)
+        self._test_wrap_simple(f, (x, y), ifdynstaticdefault(2, 3))
 
     def test_wrap_all_kwarg(self):
         def f(y, x):
@@ -830,20 +873,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         opt(x, y)
         self.assertEqual(counters["stats"]["calls_captured"], 1)
 
-        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # verify that we `do` recompile
-            output = opt(x, y, 8)
-            self.assertEqual(counters["stats"]["calls_captured"], 2)
-            self.assertEqual(output, 2 * x)
+        output = opt(x, y, 8)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(output, 2 * x)
 
     def test_wrap_kwarg_default_else_branch(self):
         def f(x, y, z):
@@ -858,19 +890,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         y = torch.randn(3, 3)
 
-        # When running with dynamic shapes, `z` is captured as SymNodeVariable,
-        # which is not supported currently.
-        err_msg = "HigherOrderOperator with body that accepts non-Tensors as input"
-        err_ctx = (
-            self.assertRaisesRegex(torch._dynamo.exc.Unsupported, err_msg)
-            if check_dynamic_shape_capture()
-            else contextlib.nullcontext()
-        )
-
-        with err_ctx:
-            # expected_num_wrap_args = 2 because in this case,
-            # we take the `else` branch and `y` is not lifted.
-            self._test_wrap_simple(f, (x, y, 8), 2)
+        self._test_wrap_simple(f, (x, y, 8), 2)
 
     def test_wrap_unsupported_kwarg(self):
         def f(x, y, z):
@@ -910,6 +930,39 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         for name, _ in map_gm.named_modules():
             name_set.add(name)
         self.assertEqual(name_set, {"", "map_body_1.map_body_0", "map_body_1"})
+
+    def test_map_multi_return(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def f(x):
+            return control_flow.map(lambda x: (x.sin(), x.sin()), x)
+
+        x = torch.randn(3)
+        result = f(x)
+        self.assertEqual(result, (x.sin(), x.sin()))
+        self.assertEqual(cnt.frame_count, 0)
+
+    def test_map_symint_input(self):
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        x = torch.randn(3, 1)
+        y = torch.randn(3, 1)
+        compiled_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        ref = fn(x, y)
+        res = compiled_fn(x, y)
+
+        self.assertEqual(ref, res)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, ifdynstaticdefault(2, 3))
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
@@ -980,24 +1033,17 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
 
-        actual = mod_for_compile(torch.ones(6, 4))
-        ref = mod_for_eager(torch.ones(6, 4))
-        self.assertEqual(actual, ref)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_eager(torch.ones(6, 4))
 
-        actual = mod_for_compile(torch.ones(3, 4))
-        ref = mod_for_eager(torch.ones(3, 4))
-        self.assertEqual(actual, ref)
-
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
-def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
-    l_x_ = L_x_
-    size = l_x_.size();  l_x_ = None
-    getitem = size[0];  size = None
-    gt = getitem > 4;  getitem = None
-    return (gt,)""",
-        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_compile(torch.ones(3, 4))
 
     def test_cond_free_variable_in_both_branches(self):
         backend = EagerAndRecordGraphs()
@@ -1069,16 +1115,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
                 return control_flow.cond(y, true_fn, false_fn, [x])
 
+        mod_for_eager = Foo()
         mod_for_compile = torch.compile(
             Foo(), backend=cnt, dynamic=True, fullgraph=False
         )
-        mod_for_eager = Foo()
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_eager(torch.tensor(True), torch.tensor(5))
 
-        res = mod_for_compile(torch.tensor(True), torch.tensor(5))
-        res = mod_for_compile(torch.tensor(True), torch.tensor(5))
-
-        self.assertEqual(len(backend.graphs), 0)
-        self.assertEqual(res, mod_for_eager(torch.tensor(True), torch.tensor(5)))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            r"Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            mod_for_compile(torch.tensor(True), torch.tensor(5))
 
     def test_cond_with_constant_pred(self):
         def test(pred, x):
@@ -1238,10 +1289,11 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         f(x)
         self.assertEqual(y, x)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
             {
-                "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)": 1
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 1
             },
         )
 
@@ -1340,9 +1392,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         result = f(x)
         self.assertEqual(result, [1, torch.sin(x), 2.0])
         self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_fallback_on_nested_tuple_output(self):
@@ -1381,9 +1434,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         result = f(x)
         self.assertEqual(result, [{"a": -x}])
         self.assertEqual(cnt.frame_count, 0)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
     def test_access_module_attr(self):
@@ -1548,7 +1602,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
 
 class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
-    def _grad_compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
+    def run(self, result=None):
+        # capture_func_transform will be set to False (for 2.1) till we
+        # support all transforms, so manually patch it to `True`` for
+        # testing on release branch.
+        with config.patch(capture_func_transforms=True):
+            super().run(result)
+
+    def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
         actual = fn(*inputs)
         expected = torch.compile(fn, backend=backend, fullgraph=fullgraph)(*inputs)
@@ -1568,7 +1629,7 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1625,7 +1686,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(fn)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1674,9 +1735,7 @@ class GraphModule(torch.nn.Module):
         # There are two graphs, first for generating `y` and
         # second for application of `grad`.
         # We are interested in the second graph.
-        wrapped_gm = self._grad_compile_check(
-            wrapper_fn, (x,), fullgraph=False, graph_idx=1
-        )
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1725,7 +1784,7 @@ class GraphModule(torch.nn.Module):
 
         # Graph break because dynamo is unable to get source `fn` and
         # functools.wraps in `grad` leads to graph-break
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False)
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1768,7 +1827,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(fn, has_aux=True)(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,))
+        wrapped_gm = self._compile_check(wrapper_fn, (x,))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1813,7 +1872,7 @@ class GraphModule(torch.nn.Module):
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1851,15 +1910,21 @@ class GraphModule(torch.nn.Module):
     def test_grad_two_tensor_all_grad_has_aux(self):
         counters.clear()
 
+        nums = (0, 1)
+
         def fn(x, y):
             return ((x.sin() + y).sum(), x.cos())
 
-        def wrapper_fn(x, y):
+        def wrapper_fn_const_var(x, y):
             return torch.func.grad(fn, argnums=(0, 1), has_aux=True)(x, y)
+
+        def wrapper_fn_tuple_var(x, y):
+            return torch.func.grad(fn, argnums=nums, has_aux=True)(x, y)
 
         y = torch.randn(3, 3, 3)
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm_const_var = self._compile_check(wrapper_fn_const_var, (x, y))
+        wrapped_gm_tuple_var = self._compile_check(wrapper_fn_tuple_var, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -1894,8 +1959,14 @@ class GraphModule(torch.nn.Module):
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
             return (sum_1, cos)
 """
-        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, expected)
+        actual_const_var = normalize_gm(
+            wrapped_gm_const_var.print_readable(print_output=False)
+        )
+        actual_tuple_var = normalize_gm(
+            wrapped_gm_tuple_var.print_readable(print_output=False)
+        )
+        self.assertExpectedInline(actual_const_var, expected)
+        self.assertExpectedInline(actual_tuple_var, expected)
 
     def test_grad_over_grad(self):
         counters.clear()
@@ -1907,7 +1978,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.grad(torch.func.grad(fn))(x)
 
         x = torch.randn(())
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x,), fullgraph=False)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False)
 
         if check_dynamic_shape_capture():
             return
@@ -1980,10 +2051,11 @@ class GraphModule(torch.nn.Module):
         actual = wrapper_fn(x)
         expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
             {
-                "HigherOrderOperator: Mutating a variable not in the current scope (replace_all)": 2
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
             },
         )
         self.assertEqual(actual, expected)
@@ -2005,9 +2077,10 @@ class GraphModule(torch.nn.Module):
             (x1, x2)
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
+        assert_dict_matches_regex(
+            self,
             dict(counters["graph_break"]),
-            {"HigherOrderOperator with body that accepts non-Tensors as input": 2},
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
         )
         self.assertEqual(actual, expected)
 
@@ -2022,7 +2095,7 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(3, 3, 3)
         y = 3.0
-        wrapped_gm = self._grad_compile_check(wrapper_fn, (x, y))
+        wrapped_gm = self._compile_check(wrapper_fn, (x, y))
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -2056,16 +2129,7 @@ class GraphModule(torch.nn.Module):
     def test_grad_disable_capture(self):
         counters.clear()
 
-        @contextlib.contextmanager
-        def disable_grad_capture():
-            org_val = torch._dynamo.config.capture_func_transforms
-            torch._dynamo.config.capture_func_transforms = False
-            try:
-                yield
-            finally:
-                torch._dynamo.config.capture_func_transforms = org_val
-
-        with disable_grad_capture():
+        with config.patch(capture_func_transforms=False):
             # We have verified above that this
             # function compiles
             def fn(x):
@@ -2082,7 +2146,10 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(len(counters["graph_break"]), 1)
             self.assertEqual(
                 dict(counters["graph_break"]),
-                {"torch.func.grad capture is disabled": 2},
+                {
+                    "torch.func.grad capture is disabled, it can be turned "
+                    "on by setting `torch._dynamo.config.capture_func_transforms=True`": 2
+                },
             )
             self.assertEqual(actual, expected)
 
@@ -2103,6 +2170,580 @@ class GraphModule(torch.nn.Module):
             {"torch.func.grad: kwargs arguments are currently unsupported.": 2},
         )
         self.assertEqual(actual, expected)
+
+    def test_vmap(self):
+        def fn(x):
+            return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            add = sum_1 + sum_2;  sum_1 = sum_2 = None
+            return add
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_free_const(self):
+        y = 3
+
+        def fn(x):
+            return torch.func.vmap(lambda x: x.sum(0) + x.sum(1) + y)(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            add = sum_1 + sum_2;  sum_1 = sum_2 = None
+            add_1 = add + 3;  add = None
+            return add_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_free_tensor(self):
+        y = torch.randn(3, 3)
+
+        def fn(x):
+            return torch.func.vmap(lambda x: x.sum(0) + x.sum(1) + y)(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select, l_y_):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            add = sum_1 + sum_2;  sum_1 = sum_2 = None
+            add_1 = add + l_y_;  add = l_y_ = None
+            return add_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_two_inputs(self):
+        def fn(x, y):
+            return torch.func.vmap(
+                lambda x, y: x.sum(0) + x.sum(1) + y, in_dims=(0, 1)
+            )(x, y)
+
+        x = torch.randn(3, 3, 3)
+        y = torch.randn(3, 3)
+        wrapped_gm = self._compile_check(fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        select_1 = l_y_.select(1, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select, select_1):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            add = sum_1 + sum_2;  sum_1 = sum_2 = None
+            add_1 = add + select_1;  add = select_1 = None
+            return add_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_two_inputs_tuple_in_dims(self):
+        in_dims = (0, 1)
+
+        def fn(x, y):
+            return torch.func.vmap(
+                lambda x, y: x.sum(0) + x.sum(1) + y, in_dims=in_dims
+            )(x, y)
+
+        x = torch.randn(3, 3, 3)
+        y = torch.randn(3, 3)
+        wrapped_gm = self._compile_check(fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        select_1 = l_y_.select(1, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select, select_1):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            add = sum_1 + sum_2;  sum_1 = sum_2 = None
+            add_1 = add + select_1;  add = select_1 = None
+            return add_1
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_over_vmap_two_inputs(self):
+        def fn(x, y):
+            return torch.func.vmap(torch.func.vmap(lambda x, y: x + y, in_dims=1))(x, y)
+
+        x = torch.randn(3, 3, 3)
+        y = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(fn, (x, y))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+        _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        select_1 = l_y_.select(0, 0)
+        vmap_body_1 = self.vmap_body_1
+        vmap_proxy = torch.func.vmap(vmap_body_1, (0, 0), 0, 'error');  vmap_body_1 = None
+        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select, select_1):
+            select_2 = select.select(1, 0)
+            select_3 = select_1.select(1, 0)
+            vmap_body_0 = self.vmap_body_0
+            vmap_proxy = torch.func.vmap(vmap_body_0, (1, 1), 0, 'error');  vmap_body_0 = None
+            call = vmap_proxy.__call__(select, select_1);  vmap_proxy = select = select_1 = None
+            return call
+
+        class GraphModule(torch.nn.Module):
+            def forward(self, select_2, select_3):
+                add = select_2 + select_3;  select_2 = select_3 = None
+                return add
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_over_vmap_captured(self):
+        x = torch.ones(2, 3)
+        y = torch.ones(5, 3)
+
+        def fn(x):
+            return torch.func.vmap(torch.func.vmap(lambda y: x * y))(y)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
+        l_x_ = L_x_
+        l_y_ = L_y_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+        _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_y_.select(0, 0)
+        vmap_body_1 = self.vmap_body_1
+        vmap_proxy = torch.func.vmap(vmap_body_1, (0, None), 0, 'error');  vmap_body_1 = None
+        call = vmap_proxy.__call__(l_y_, l_x_);  vmap_proxy = l_y_ = l_x_ = None
+        return (call,)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select, l_x_):
+            select_1 = select.select(0, 0)
+            vmap_body_0 = self.vmap_body_0
+            vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
+            call = vmap_proxy.__call__(select, l_x_);  vmap_proxy = select = l_x_ = None
+            return call
+
+        class GraphModule(torch.nn.Module):
+            def forward(self, select_1, l_x_):
+                mul = l_x_ * select_1;  l_x_ = select_1 = None
+                return mul
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_multiple_outputs(self):
+        x = torch.ones(2, 4, 3)
+
+        def fn(x):
+            return torch.vmap(lambda x: (x.sum(0), x.sum(1)))(x)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            return (sum_1, sum_2)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_multiple_outputs_diff_dims(self):
+        x = torch.ones(2, 4, 3)
+
+        def fn(x):
+            return torch.vmap(lambda x: (x.sum(0), x.sum(1)), out_dims=(1, 0))(x)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            return (sum_1, sum_2)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_multiple_outputs_out_dims_tuple(self):
+        x = torch.ones(2, 4, 3)
+        out_dims = (1, 0)
+
+        def fn(x):
+            return torch.vmap(lambda x: (x.sum(0), x.sum(1)), out_dims=out_dims)(x)
+
+        wrapped_gm = self._compile_check(fn, (x,))
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_ : torch.Tensor):
+        l_x_ = L_x_
+
+        _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
+
+        select = l_x_.select(0, 0)
+        vmap_body_0 = self.vmap_body_0
+        vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
+        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        getitem = call[0]
+        getitem_1 = call[1];  call = None
+        return (getitem, getitem_1)
+
+    class GraphModule(torch.nn.Module):
+        def forward(self, select):
+            sum_1 = select.sum(0)
+            sum_2 = select.sum(1);  select = None
+            return (sum_1, sum_2)
+"""
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(actual, expected)
+
+    def test_vmap_kwargs(self):
+        counters.clear()
+        x = torch.ones(2, 3)
+        y = torch.randn(2, 3)
+
+        def fn(x, y):
+            return torch.func.vmap(lambda x, y: x + y)(x, y=y)
+
+        actual = fn(x, y)
+        expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"NYI - torch.func.vmap: kwargs arguments are currently unsupported.": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_vmap_pytree_inputs(self):
+        counters.clear()
+        x = torch.ones(2, 3)
+        y = torch.randn(2, 3)
+
+        def vmap_fn(inps):
+            x = inps["x"]
+            y = inps["y"]
+            return x + y
+
+        def fn(x, y):
+            return torch.func.vmap(vmap_fn)({"x": x, "y": y})
+
+        actual = fn(x, y)
+        expected = torch.compile(fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        assert_dict_matches_regex(
+            self,
+            dict(counters["graph_break"]),
+            {".*HigherOrderOperator with body that accepts non-Tensors as input": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_vmap_side_effects(self):
+        counters.clear()
+        x = torch.ones(2, 3)
+        y = torch.randn(2, 3)
+
+        some_list = []
+
+        def f(x, y):
+            some_list.append(1)
+            return x + y
+
+        def wrapper_fn(x, y):
+            return torch.func.vmap(f)(x, y)
+
+        actual = wrapper_fn(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        assert_dict_matches_regex(
+            self,
+            dict(counters["graph_break"]),
+            {
+                r".*HigherOrderOperator: Mutating a variable not in the current scope \(replace_all\)": 2
+            },
+        )
+        self.assertEqual(actual, expected)
+
+    def test_vmap_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                return torch.func.vmap(lambda x: x.sum(0) + x.sum(1))(x)
+
+            x = torch.randn(3, 3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {
+                    "torch.func.vmap capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2
+                },
+            )
+            self.assertEqual(actual, expected)
+
+    def test_vmap_illegal_op_graph_break(self):
+        counters.clear()
+
+        def bad_fn(x):
+            x.stride()
+            return x
+
+        def wrapper_fn(x):
+            return torch.func.vmap(bad_fn)(x)
+
+        x = torch.randn(3, 3, 3)
+        actual = wrapper_fn(x)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        assert_dict_matches_regex(
+            self,
+            dict(counters["graph_break"]),
+            {".*Illegal getattr invocation stride in strict mode": 2},
+        )
+        self.assertEqual(actual, expected)
+
+    def test_vmap_multiple_invocation_in_dims(self):
+        counters.clear()
+
+        def wrapper_fn(x, in_dims):
+            return torch.func.vmap(torch.sum, in_dims)(x)
+
+        x = torch.randn(3, 3, 3, 3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
+        expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
+        # Third invocation of `opt` makes `in_dims` as SymInt.
+        actual = opt(x, 0), opt(x, 1), opt(x, 2)
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.vmap: in_dims is not an int or tuple variable.": 2},
+        )
+
+    def test_vmap_multiple_invocation_out_dims(self):
+        counters.clear()
+
+        def wrapper_fn(x, out_dims):
+            return torch.func.vmap(lambda x: torch.sum(x, 0), out_dims=out_dims)(x)
+
+        x = torch.randn(3, 3, 3, 3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=False, dynamic=True)
+        expected = wrapper_fn(x, 0), wrapper_fn(x, 1), wrapper_fn(x, 2)
+        # Third invocation of `opt` makes `in_dims` as SymInt.
+        actual = opt(x, 0), opt(x, 1), opt(x, 2)
+        self.assertEqual(expected, actual)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        self.assertEqual(
+            dict(counters["graph_break"]),
+            {"torch.func.vmap: out_dims is not an int or tuple variable.": 2},
+        )
+
+    def test_vmap_new_tensor_in_body(self):
+        def fn(x):
+            return x + torch.ones(3)
+
+        def wrapper_fn(x):
+            return torch.func.vmap(fn)(x)
+
+        x = torch.randn(
+            3,
+        )
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        expected = wrapper_fn(x)
+        actual = opt(x)
+        self.assertEqual(expected, actual)
+
+    def test_vmap_new_tensor_unused_in_body(self):
+        def fn(x):
+            return torch.tensor(0.5)
+
+        def wrapper_fn(x):
+            return torch.func.vmap(fn)(x)
+
+        x = torch.randn(3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        expected = wrapper_fn(x)
+        actual = opt(x)
+        self.assertEqual(expected, actual)
+
+    def test_vmap_new_tensor_implicit_via_op(self):
+        def wrapper_fn(x):
+            return torch.func.vmap(lambda t: torch.add(t, 0.5))(x)
+
+        x = torch.randn(3)
+        opt = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        expected = wrapper_fn(x)
+        actual = opt(x)
+        self.assertEqual(expected, actual)
 
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):

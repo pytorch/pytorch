@@ -1076,6 +1076,7 @@ def embedding_bag(
 
 
 @_onnx_symbolic("aten::size")
+@symbolic_helper.quantized_args(True, quantize_output=False)
 @_beartype.beartype
 def size(g: jit_utils.GraphContext, self, dim=None):
     if dim is None:
@@ -5845,9 +5846,7 @@ def index(g: jit_utils.GraphContext, self, index):
             if rank is None:
                 return symbolic_helper._unimplemented(
                     "aten::index",
-                    "operator of advanced indexing on tensor of unknown rank. "
-                    "Try turning on shape inference during export: "
-                    "torch.onnx._export(..., onnx_shape_inference=True).",
+                    "operator of advanced indexing on tensor of unknown rank.",
                     self,
                 )
             # TODO: If indexing is supported natively in ONNX in future opsets,
