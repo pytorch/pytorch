@@ -4,20 +4,8 @@ import torch
 import torch.cuda
 
 
-def __singleton(cls):
-    instance = {}
-
-    def get_instance(*args, **kwargs):
-        if cls not in instance:
-            instance[cls] = cls(*args, **kwargs)
-        return instance[cls]
-
-    return get_instance
-
-
 # This class is used to contain the provided stream methods for dynamo to
 # capture the stream usage.
-@__singleton
 class StreamMethodContainer:
     def __init__(self) -> None:
         self.current_stream_method = {}
