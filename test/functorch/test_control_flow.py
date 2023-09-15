@@ -1490,7 +1490,6 @@ def forward(self, arg0_1, arg1_1):
         def foo(x):
             return cond(x.shape[0] == 4, true_fn, false_fn, [x])
 
-        self.maxDiff = None
         exp_graph = """\
 class foo(torch.nn.Module):
     def forward(self, x_1: f32[s0, s1]):

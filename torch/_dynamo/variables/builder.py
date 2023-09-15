@@ -1538,7 +1538,6 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         # E.g., {} -> {"x": [2, 4]}
         frame_state_entry = FrameStateSizeEntry(None, None)
         frame_state_entry.size = list(e.size())
-        pass
     else:
         frame_state_entry = tx.output.frame_state[name]
         if frame_state_entry.size is not None:
