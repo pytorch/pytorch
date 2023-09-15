@@ -5621,7 +5621,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
 
-
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
