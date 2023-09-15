@@ -10,6 +10,8 @@ _kernel_category_choices = [
     "pointwise",
     "reduction",
     "persistent_reduction",
+    "template",
+    "foreach",
 ]
 
 
@@ -96,7 +98,6 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                 ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
             )
 
-        bench_result = []
         kernel_desc = (
             f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
         )

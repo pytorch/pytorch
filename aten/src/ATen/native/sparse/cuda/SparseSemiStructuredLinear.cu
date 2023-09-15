@@ -11,7 +11,7 @@
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/linear_combination_relu.h>
 #include <cutlass/epilogue/thread/linear_combination_silu.h>
-#include <ATen/native/sparse/cuda/cutlass/gemm_sparse_row_broadcast.h>
+#include <cutlass/gemm/device/gemm_sparse_row_broadcast.h>
 #endif
 
 #include <type_traits>
@@ -590,9 +590,9 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = false;
                 const auto EnableColumnMajorColumnMajorLayouts = false;
-                const auto EnableActviationNone = true;
-                const auto EnableActviationReLU = true;
-                const auto EnableActviationSiLU = false;
+                const auto EnableActivationNone = true;
+                const auto EnableActivationReLU = true;
+                const auto EnableActivationSiLU = false;
                 output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
@@ -606,9 +606,9 @@ Tensor _sparse_semi_structured_linear(
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
                     EnableColumnMajorColumnMajorLayouts,
-                    EnableActviationNone,
-                    EnableActviationReLU,
-                    EnableActviationSiLU>(
+                    EnableActivationNone,
+                    EnableActivationReLU,
+                    EnableActivationSiLU>(
                     tensor_a,
                     tensor_b,
                     tensor_c,
@@ -631,9 +631,9 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
                 const auto EnableColumnMajorColumnMajorLayouts = true;
-                const auto EnableActviationNone = true;
-                const auto EnableActviationReLU = true;
-                const auto EnableActviationSiLU = true;
+                const auto EnableActivationNone = true;
+                const auto EnableActivationReLU = true;
+                const auto EnableActivationSiLU = true;
                 output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
@@ -647,9 +647,9 @@ Tensor _sparse_semi_structured_linear(
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
                     EnableColumnMajorColumnMajorLayouts,
-                    EnableActviationNone,
-                    EnableActviationReLU,
-                    EnableActviationSiLU>(
+                    EnableActivationNone,
+                    EnableActivationReLU,
+                    EnableActivationSiLU>(
                     tensor_a,
                     tensor_b,
                     tensor_c,
@@ -672,9 +672,9 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
                 const auto EnableColumnMajorColumnMajorLayouts = true;
-                const auto EnableActviationNone = true;
-                const auto EnableActviationReLU = true;
-                const auto EnableActviationSiLU = true;
+                const auto EnableActivationNone = true;
+                const auto EnableActivationReLU = true;
+                const auto EnableActivationSiLU = true;
                 output = two_four_sgemm_cutlass_dispatch_layouts_activation<
                     ElementInputA,
                     ElementInputB,
@@ -688,9 +688,9 @@ Tensor _sparse_semi_structured_linear(
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
                     EnableColumnMajorColumnMajorLayouts,
-                    EnableActviationNone,
-                    EnableActviationReLU,
-                    EnableActviationSiLU>(
+                    EnableActivationNone,
+                    EnableActivationReLU,
+                    EnableActivationSiLU>(
                     tensor_a,
                     tensor_b,
                     tensor_c,

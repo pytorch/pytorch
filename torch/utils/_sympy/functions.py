@@ -78,11 +78,14 @@ class FloorDiv(sympy.Function):
                 if gcd == divisor:
                     return FloorDiv(base - a, divisor) + a / gcd
 
-        gcd = sympy.gcd(base, divisor)
-        if gcd != 1:
-            return FloorDiv(
-                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-            )
+        try:
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
+        except sympy.PolynomialError:
+            pass  # https://github.com/pytorch/pytorch/issues/108276
 
 
 class ModularIndexing(sympy.Function):
@@ -105,12 +108,15 @@ class ModularIndexing(sympy.Function):
         ):
             return (base // divisor) % modulus
 
-        if divisor != 1:
-            gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
-                return ModularIndexing(
-                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd), modulus
-                )
+        try:
+            if divisor != 1:
+                gcd = sympy.gcd(base, divisor)
+                if gcd != 1:
+                    return ModularIndexing(
+                        sympy.simplify(base / gcd), sympy.simplify(divisor / gcd), modulus
+                    )
+        except sympy.PolynomialError:
+            pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
             new_terms = []
@@ -137,6 +143,19 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
+class Where(sympy.Function):
+    """
+    Good ol' ternary operator
+    """
+
+    nargs = (3,)
+
+    @classmethod
+    def eval(cls, c, p, q):
+        if c == sympy.true:
+            return p
+        elif c == sympy.false:
+            return q
 
 class Mod(sympy.Function):
     """

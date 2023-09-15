@@ -1,7 +1,7 @@
 import torch
 
 
-def _sparse_semi_structured_from_dense(dense):
+def _sparse_semi_structured_from_dense_cutlass(dense):
     if dense.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional dense tensor, got {dense.dim()}-dimensional tensor"
@@ -205,7 +205,7 @@ def _sparse_semi_structured_from_dense(dense):
     return (sparse, meta_reordered)
 
 
-def _sparse_semi_structured_to_dense(sparse, meta_reordered):
+def _sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered):
     if sparse.dim() != 2:
         raise RuntimeError(
             f"Expected 2-dimensional sparse tensor, got {sparse.dim()}-dimensional tensor"
@@ -319,21 +319,29 @@ def _sparse_semi_structured_to_dense(sparse, meta_reordered):
     return dense.view(m, 2 * k)
 
 
-def sparse_semi_structured_from_dense(dense, compile=True):
+# This function converts dense matrix into sparse semi-structured
+# representation, producing "compressed" matrix, in the layout used by
+# CUTLASS backend, and corresponding metadata matrix.
+def sparse_semi_structured_from_dense_cutlass(dense, compile=True):
     if compile:
         from torch._dynamo.utils import is_compile_supported
         if is_compile_supported(dense.device.type):
-            kernel = torch.compile(_sparse_semi_structured_from_dense)
+            kernel = torch.compile(_sparse_semi_structured_from_dense_cutlass)
+            print(kernel)
             return kernel(dense)
 
-    return _sparse_semi_structured_from_dense(dense)
+    return _sparse_semi_structured_from_dense_cutlass(dense)
 
 
-def sparse_semi_structured_to_dense(sparse, meta_reordered, compile=True):
+# This function performs reverse of the function above - it
+# reconstructs dense matrix from a pair of "compressed" matrix, given
+# in the layout used by CUTLASS backend, and accompanying metadata
+# matrix.
+def sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered, compile=True):
     if compile:
         from torch._dynamo.utils import is_compile_supported
         if is_compile_supported(sparse.device.type):
-            kernel = torch.compile(_sparse_semi_structured_to_dense)
+            kernel = torch.compile(_sparse_semi_structured_to_dense_cutlass)
             return kernel(sparse, meta_reordered)
 
-    return _sparse_semi_structured_to_dense(sparse, meta_reordered)
+    return _sparse_semi_structured_to_dense_cutlass(sparse, meta_reordered)

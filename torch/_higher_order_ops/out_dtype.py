@@ -5,10 +5,7 @@ from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
-)
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
+    maybe_handle_decomp,
 )
 from torch._C import DispatchKey, _ExcludeDispatchKeyGuard, DispatchKeySet
 from torch._functorch.eager_transforms import (
@@ -22,10 +19,14 @@ from torch._higher_order_ops.utils import autograd_not_implemented
 
 # TODO to figure out a more generic approach
 ALLOWABLE_OPS = [
+    torch.ops.aten.linear.default,
     torch.ops.aten.mm.default,
     torch.ops.aten.conv2d.default,
+    torch.ops.aten.convolution.default,
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
+    torch.ops.aten.div.Tensor,
+    torch.ops.aten.div.Scalar,
 ]
 
 
@@ -86,6 +87,13 @@ out_dtype.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
 
 
 def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
+    # NB: Long-term we should put the decomposition logic into
+    # ProxyTorchDispatchMode so that people do not need to call maybe_handle_decomp
+    # in all HigherOrderOp proxy implementations.
+    r = maybe_handle_decomp(proxy_mode, func_overload, (op, output_dtype, *args), {})
+    if r is not NotImplemented:
+        return r
+
     with disable_proxy_modes_tracing():
         # This is a simplified implementation of this operator just for tracing.
         # Actual implementation may also first promote the arguments
@@ -99,12 +107,36 @@ def trace_out_dtype(proxy_mode, func_overload, op, output_dtype, *args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
+@out_dtype.py_impl(DispatchKey.PreDispatch)  # type: ignore[attr-defined]
+def out_dtype_predispatch(*args, **kwargs):
+    with torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(DispatchKey.PreDispatch)):  # type: ignore[attr-defined]
+        return out_dtype(*args, **kwargs)
+
+
 @out_dtype.py_impl(DispatchKey.CompositeExplicitAutograd)
 def out_dtype_dense(
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
+    if is_int_mm(op, output_dtype, args):
+        return torch._int_mm(*args)
+    return out_dtype_fallback(op, output_dtype, *args)
+
+
+def is_int_mm(op, output_dtype, args):
+    return (
+        op == torch.ops.aten.mm.default and
+        output_dtype == torch.int32 and
+        len(args) == 2 and
+        args[0].dtype == torch.int8 and
+        args[1].dtype == torch.int8 and
+        args[0].is_cuda and
+        args[1].is_cuda
+    )
+
+
+def out_dtype_fallback(op, output_dtype, *args):
     flat_inputs = pytree.tree_flatten(args)[0] + [torch.ones(1, dtype=output_dtype)]
     promote_dtype: torch.dtype = elementwise_dtypes(
         *flat_inputs,
@@ -118,31 +150,31 @@ def out_dtype_dense(
     return res
 
 
-out_dtype.py_impl(DispatchKey.Autograd)(autograd_not_implemented(out_dtype, deferred_error=False))
+out_dtype.py_impl(DispatchKey.Autograd)(autograd_not_implemented(out_dtype, deferred_error=True))
 
 
 @out_dtype.py_impl(ProxyTorchDispatchMode)
 def out_dtype_proxy(
+    mode: ProxyTorchDispatchMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
-    mode = _get_current_dispatch_mode()
-    assert (mode is not None), "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
-        else:
-            return out_dtype(op, output_dtype, *args)
+    if mode.enable_tracing:
+        return trace_out_dtype(mode, out_dtype, op, output_dtype, *args)
+    else:
+        return out_dtype(op, output_dtype, *args)
 
 
 @out_dtype.py_impl(FakeTensorMode)
 def out_dtype_fake_tensor_mode(
+    mode: FakeTensorMode,
     op: torch._ops.OpOverload,
     output_dtype: torch.dtype,
     *args
 ):
-    return out_dtype_dense(op, output_dtype, *args)
+    with mode:
+        return out_dtype_dense(op, output_dtype, *args)
 
 
 @out_dtype.py_impl(DispatchKey.Functionalize)
