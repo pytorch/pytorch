@@ -14,6 +14,7 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <utility>
 #include <c10/util/typeid.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
@@ -629,6 +630,37 @@ at::Tensor preprocess_mask(
 
   return attn_mask;
 }
+// FlashAttentionV2 requires that head dimension be a multiple of 8
+// This was previously done within the kernel, however
+// This causes the kernel to maybe alias query, key, value
+// So instead we pad the head_dimensions to be a multiple of 8 in the composite
+// region
+template <int alignment_size, bool slice>
+at::Tensor pad_last_dim(const at::Tensor& attn_bias) {
+  auto last_dim_size = attn_bias.sym_size(-1);
+  if (last_dim_size % alignment_size == 0) {
+    return attn_bias;
+  }
+  auto pad_count = alignment_size - (last_dim_size % alignment_size);
+  auto padded_bias = at::pad_symint(attn_bias, {c10::SymInt(0), pad_count});
+  if (slice) {
+    return padded_bias.slice_symint(-1, 0, last_dim_size);
+  }
+  return padded_bias;
+}
+
+at::Tensor post_process_flash_output(
+    at::Tensor out,
+    c10::SymInt const& og_size) {
+  if (!out.is_nested()) {
+    out = out.slice_symint(-1, 0, og_size);
+  } else {
+    TORCH_CHECK(
+        out.size(-1) == og_size,
+        "FlashAttentionV2 returned a nested tensor with an incorrect size")
+  }
+  return out;
+}
 
 } // namespace
 
@@ -679,6 +711,18 @@ Tensor scaled_dot_product_attention(
   c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
+      if(query_.device().type() == DeviceType::CUDA){
+        c10::SymInt og_size = query_.sym_size(-1);
+        Tensor query_padded = pad_last_dim<8, false>(query_);
+        Tensor key_padded = pad_last_dim<8, false>(key);
+        Tensor value_padded = pad_last_dim<8, false>(value);
+        // We need to calculate the scale based off the OG head dim size
+        auto og_scale = sdp::calculate_scale(query_, scale);
+        auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
+            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
+        return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
+      }
+      // For the CPU case we do not need to pad the last dim
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
           query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);

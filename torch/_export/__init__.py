@@ -255,9 +255,29 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 if path == root and ty is root_cls:
                     add_root = False
             if add_root:
-                # TODO(zhxchen17) normalize all the way down to dot strings.
-                node.meta["nn_module_stack"] = {root_key: (root, root_cls), **nn_module_stack}
+                def normalize_path(path):
+                    try:
+                        parts = []
 
+                        class Path:
+                            def __getattr__(self, name):
+                                parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
+
+                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                node.meta["nn_module_stack"] = {
+                    key: (normalize_path(path), ty)
+                    for key, (path, ty) in nn_module_stack.items()
+                }
 
 def export(
     f: Callable,

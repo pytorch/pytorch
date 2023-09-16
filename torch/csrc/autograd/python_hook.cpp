@@ -92,7 +92,9 @@ bool _call_hooks(PyObject* dict, PyObject* args) {
 
 } // namespace
 
-PyFunctionTensorPreHook::PyFunctionTensorPreHook(PyObject* dict, int value_idx)
+PyFunctionTensorPreHook::PyFunctionTensorPreHook(
+    PyObject* dict,
+    size_t value_idx)
     : dict(dict), value_idx(value_idx) {
   Py_INCREF(dict);
 }
@@ -169,17 +171,18 @@ auto PyFunctionPostHook::operator()(
 }
 
 void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     args.add_tensor_pre_hook(
-        c10::SafePyObject(value, getPyInterpreter()), value_idx);
+        c10::SafePyObject(value, getPyInterpreter()),
+        static_cast<int>(value_idx));
   }
 }
 
 void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -188,7 +191,7 @@ void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
 }
 
 void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
-  PyObject *key, *value;
+  PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
@@ -225,7 +228,7 @@ auto PyFunctionTensorPostAccGradHooks::operator()(const Variable& tensor)
 
 static PyObject* wrap_variables(const variable_list& c_variables) {
   size_t num_vars = c_variables.size();
-  THPObjectPtr tuple(PyTuple_New(num_vars));
+  THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(num_vars)));
   if (!tuple)
     throw python_error();
   for (const auto i : c10::irange(num_vars)) {
