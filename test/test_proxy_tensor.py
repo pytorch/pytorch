@@ -516,10 +516,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -530,10 +527,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -1069,6 +1063,25 @@ def forward(self, a_1):
     return empty"""  # noqa: B950
         )
 
+
+    def test_setitem_symint(self):
+        # from moco
+        # https://github.com/pytorch/pytorch/issues/101939
+        def f(x):
+            x[0] = x.size(0)
+            return x
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size = None
+    select = torch.ops.aten.select.int(x_1, 0, 0)
+    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
+    return x_1"""  # noqa: B950
+        )
+
     def test_dynamic_pointwise_scalar(self):
         def f(gravity, mask):
             gravity[mask, 0] = gravity[mask, 0] * -1
@@ -1585,7 +1598,6 @@ symbolic_tensor_failures = {
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
-    xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
@@ -1615,7 +1627,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
 }
 
 inplace_symbolic_tensor_failures = {

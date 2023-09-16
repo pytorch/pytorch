@@ -1234,10 +1234,15 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_non_fake_inputs=False,
         shape_env=None,
+        static_shapes=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
+        if static_shapes is not None:
+            self.static_shapes = static_shapes
+        else:
+            self.static_shapes = shape_env is None
 
         import torch._functorch.config
 
@@ -1323,6 +1328,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
+        log.debug("%s %s %s", func, args, kwargs)
 
         if func == torch.ops.prim.device.default:
             # NB: Don't use is_our_fake, just serve the fake information
@@ -1379,7 +1385,7 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
-            ), "f{func} should not have fake inputs without constants"
+            ), f"{func} should not have fake inputs without constants"
             const_args, const_kwargs = pytree.tree_map_only(
                 FakeTensor,
                 lambda t: t.constant if self.is_our_fake(t) else t,
@@ -1757,7 +1763,7 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         tensor,
         *,
-        static_shapes=False,
+        static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
@@ -1767,6 +1773,8 @@ class FakeTensorMode(TorchDispatchMode):
         memoized_only=False,
     ):
         shape_env = self.shape_env
+        if static_shapes is None:
+            static_shapes = self.static_shapes
         if static_shapes:
             assert (
                 dynamic_dims is None
