@@ -228,8 +228,9 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "_upsample_bilinear2d_aa": {f16, f32, f64},  # needs decomp
+    "_upsample_bilinear2d_aa": {f16, f32, f64},
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
+    "atanh": {f32},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
@@ -239,8 +240,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    "multinomial": {f16, f32, f64}, # needs decomp
+    "multinomial": {f16, f32, f64},
+    "nanquantile": {f32, f64},
+    "nn.functional.normalize": {f16},
     "nn.functional.rrelu": {f16, f32, f64},
+    "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -248,8 +252,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64}, # UnsupportedFakeTensorException("meta converter nyi")
-    "to_sparse": {f16, f32, f64}, # possibly needs a meta reg
+    "sparse.sampled_addmm": {f32, f64},
+    "to_sparse": {f16, f32, f64},
     "uniform": {f16},
 }
 
@@ -260,7 +264,6 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.triplet_margin_loss": {f16},
 }
 
 if not TEST_WITH_ROCM:
