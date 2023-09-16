@@ -36,7 +36,10 @@ namespace aot_inductor {
 
 class AOTInductorModelContainer {
  public:
-  AOTInductorModelContainer(size_t num_models) {
+  AOTInductorModelContainer(
+      size_t num_models,
+      bool is_cpu = false,
+      std::optional<std::string> cubin_dir = std::nullopt) {
     LOG(INFO) << "Constructing an AOTInductorModelContainer with " << num_models
               << " model instances";
     TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
@@ -45,7 +48,7 @@ class AOTInductorModelContainer {
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create(constants_));
+      models_.push_back(AOTInductorModel::Create(constants_, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -81,34 +84,44 @@ class AOTInductorModelContainer {
     }
 
     size_t num_constants = model->num_constants();
-    std::vector<size_t> constants_internal_offset(num_constants);
-    // Compute required blob size with 64-alignment
-    size_t max_blob = 0;
-    for (size_t i = 0; i < num_constants; i++) {
-      size_t data_size = model->constant_data_size(i);
-      if (data_size % AOT_CONST_GPU_ALIGNMENT) {
-        data_size = AOT_CONST_GPU_ALIGNMENT +
-            (data_size / AOT_CONST_GPU_ALIGNMENT) * AOT_CONST_GPU_ALIGNMENT;
-      }
-      constants_internal_offset[i] = max_blob;
-      max_blob += data_size;
-    }
-    constant_blob_ = RAII_cudaMalloc(max_blob);
-
     constants_->reserve(num_constants);
-    auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+
+    std::vector<size_t> constants_internal_offset(num_constants);
+    if (!is_cpu) {
+      // Compute required blob size with 64-alignment if on GPU.
+      size_t max_blob = 0;
+      for (size_t i = 0; i < num_constants; i++) {
+        size_t data_size = model->constant_data_size(i);
+        if (data_size % AOT_CONST_GPU_ALIGNMENT) {
+          data_size = AOT_CONST_GPU_ALIGNMENT +
+              (data_size / AOT_CONST_GPU_ALIGNMENT) * AOT_CONST_GPU_ALIGNMENT;
+        }
+        constants_internal_offset[i] = max_blob;
+        max_blob += data_size;
+      }
+      constant_blob_ = RAII_cudaMalloc(max_blob);
+    }
+
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
       std::string name = model->constant_name(i);
       size_t data_size = model->constant_data_size(i);
-      auto* internal_ptr = constants_ptr + constants_internal_offset[i];
-      // Copy data to GPU memory
-      // TODO: Handle shared storage case.
-      C10_CUDA_CHECK(cudaMemcpy(
-          internal_ptr,
-          _binary_constants_bin_start + bytes_read,
-          data_size,
-          cudaMemcpyHostToDevice));
+      uint8_t* internal_ptr;
+      if (is_cpu) {
+        // get pointer to constant which is packed in model during compile time.
+        internal_ptr =
+            const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
+      } else {
+        auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+        internal_ptr = constants_ptr + constants_internal_offset[i];
+        // Copy data to GPU memory
+        // TODO: Handle shared storage case.
+        C10_CUDA_CHECK(cudaMemcpy(
+            internal_ptr,
+            _binary_constants_bin_start + bytes_read,
+            data_size,
+            cudaMemcpyHostToDevice));
+      }
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
@@ -117,17 +130,21 @@ class AOTInductorModelContainer {
       auto stride = model->constant_stride(i);
       auto offset = model->constant_offset(i);
 
+      auto device_type = at::kCUDA;
+      if (is_cpu) {
+        device_type = at::kCPU;
+      }
       auto tensor = at::for_blob(internal_ptr, size)
                         .strides(stride)
                         .storage_offset(offset)
-                        .options(at::device(at::kCUDA).dtype(dtype))
+                        .options(at::device(device_type).dtype(dtype))
                         .make_tensor();
       constants_->emplace(std::move(name), std::move(tensor));
     }
   }
 
   void run(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<int64_t>>** output_shapes,
       cudaStream_t stream,
