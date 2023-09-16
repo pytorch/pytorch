@@ -51,7 +51,6 @@ TEST(AotInductorTest, BasicTest) {
   AOTInductorModelContainerHandle container_handle;
   AOT_INDUCTOR_ERROR_CHECK(
       AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
-  AOTInductorParamShape max_output_shape;
   const int64_t* max_output_sizes;
   int64_t max_output_dim;
   AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerGetMaxOutputShape(
@@ -88,10 +87,10 @@ TEST(AotInductorTest, BasicTest) {
       output_sizes.data(),
       output_ndims.data()));
 
-  ASSERT_EQ(output_shapes.size(), 1);
-  ASSERT_EQ(output_shapes[0].ndim, 2);
-  ASSERT_EQ(output_shapes[0].shape_data[0], 32);
-  ASSERT_EQ(output_shapes[0].shape_data[1], 10);
+  ASSERT_EQ(output_sizes.size(), 1);
+  ASSERT_EQ(output_ndims[0], 2);
+  ASSERT_EQ(output_sizes[0][0], 32);
+  ASSERT_EQ(output_sizes[0][1], 10);
   ASSERT_TRUE(torch::allclose(results_ref, outputs[0]));
   AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
 }
