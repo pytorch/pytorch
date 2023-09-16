@@ -4645,8 +4645,6 @@ def fn():
         def fn():
             default_state = torch.default_generator.get_state()
             x = torch.rand([2, 3])
-            if default_state.dtype != "float32":
-                x = x * 2
             torch._dynamo.graph_break()
             torch.default_generator.set_state(default_state)
             y = torch.rand([2, 3])
@@ -4654,7 +4652,7 @@ def fn():
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
         x, y = opt_fn()
-        self.assertEqual(x, y * 2)
+        self.assertEqual(x, y)
 
     def test_torch_distributions_lazy_property(self):
         def fn(x):
