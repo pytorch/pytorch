@@ -723,7 +723,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
       const auto split_size = p_node->Input(1).toInt();
       const auto dim = p_node->Input(2).toInt();
       const auto drop_remainder = p_node->Input(3).toBool();
-      p_node->Output(0) = at::native::split(self, split_size, dim, drop_remainder);
+      p_node->Output(0) =
+          at::native::split(self, split_size, dim, drop_remainder);
     };
   }
 
@@ -734,8 +735,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
       const auto& split_sizes = p_node->Input(1).toIntList();
       const auto dim = p_node->Input(2).toInt();
       const auto drop_remainder = p_node->Input(3).toBool();
-      p_node->Output(0) =
-          at::native::split_with_sizes(self, split_sizes.vec(), dim, drop_remainder);
+      p_node->Output(0) = at::native::split_with_sizes(
+          self, split_sizes.vec(), dim, drop_remainder);
     };
   }
 
@@ -759,8 +760,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& split_sizes = p_node->Input(1).toIntList();
         const auto dim = p_node->Input(2).toInt();
         const auto drop_remainder = p_node->Input(3).toBool();
-        p_node->Output(0) =
-            at::native::split_with_sizes(self, split_sizes.vec(), dim, drop_remainder);
+        p_node->Output(0) = at::native::split_with_sizes(
+            self, split_sizes.vec(), dim, drop_remainder);
       };
     });
 

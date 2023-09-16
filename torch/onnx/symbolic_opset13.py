@@ -72,7 +72,14 @@ def frobenius_norm(g: jit_utils.GraphContext, self, dim=None, keepdim=False):
 @_onnx_symbolic("aten::split")
 @symbolic_helper.parse_args("v", "v", "i", "b", "i")
 @_beartype.beartype
-def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, drop_remainder, _outputs=None):
+def split(
+    g: jit_utils.GraphContext,
+    self,
+    split_size_or_sizes,
+    dim,
+    drop_remainder,
+    _outputs=None,
+):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
@@ -129,7 +136,9 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, drop_remain
 
 @_onnx_symbolic("aten::split_with_sizes")
 @_beartype.beartype
-def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, drop_remainder, _outputs=None):
+def split_with_sizes(
+    g: jit_utils.GraphContext, self, split_sizes, dim, drop_remainder, _outputs=None
+):
     return split(g, self, split_sizes, dim, drop_remainder, _outputs)
 
 
