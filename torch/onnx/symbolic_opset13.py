@@ -128,7 +128,10 @@ def split(
             )
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
-    if leftover and not drop_remainder:
+    parsed_drop_remainder = symbolic_helper._get_const(
+        drop_remainder, "b", "drop_remainder"
+    )
+    if leftover and not parsed_drop_remainder:
         splits.append(leftover)
     splits = g.op("Constant", value_t=torch.tensor(splits))
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)

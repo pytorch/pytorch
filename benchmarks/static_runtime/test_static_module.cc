@@ -1664,7 +1664,8 @@ TEST(UseSplitAndSqueeze, Fusion) {
     graph(%x: Tensor):
       %dim: int = prim::Constant[value=1]()
       %split_size: int = prim::Constant[value=1]()
-      %split: Tensor[] = aten::split(%x, %split_size, %dim)
+      %drop_remainder: bool = prim::Constant[value=0]()
+      %split: Tensor[] = aten::split(%x, %split_size, %dim, %drop_remainder)
       %a: Tensor, %b: Tensor = prim::ListUnpack(%split)
       %c: Tensor = aten::squeeze(%a, %dim)
       %d: Tensor = aten::squeeze(%b, %dim)

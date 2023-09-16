@@ -1451,7 +1451,15 @@ def embedding_renorm(g: jit_utils.GraphContext, weight, indices, max_norm, norm_
 
 @_onnx_symbolic("aten::chunk")
 @_beartype.beartype
-def chunk(g: jit_utils.GraphContext, self, chunks, dim):
+def chunk(g: jit_utils.GraphContext, self, chunks, dim, redistribute, drop_remainder):
+    parsed_redistribute = symbolic_helper._get_const(redistribute, "b", "redistribute")
+    parsed_drop_remainder = symbolic_helper._get_const(
+        drop_remainder, "b", "drop_remainder"
+    )
+    if parsed_redistribute or parsed_drop_remainder:
+        return symbolic_helper._unimplemented(
+            "chunk", "redistribute=True or drop_remainder=True not supported yet"
+        )
     # Calculate chunk size for dynamic chunk
     dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
     chunk_size_s = g.op(
@@ -1464,7 +1472,7 @@ def chunk(g: jit_utils.GraphContext, self, chunks, dim):
         g.op("Sub", dim_size, g.op("Mul", chunk_size, chunk_size_s)),
     ]
     chunk_vec = g.op("Concat", *chunk_vec, axis_i=0)
-    return split(g, self, chunk_vec, dim)
+    return split(g, self, chunk_vec, dim, drop_remainder)
 
 
 @_onnx_symbolic("aten::normal")

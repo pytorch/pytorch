@@ -1190,7 +1190,10 @@ def split(
             )
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
-    if leftover and not drop_remainder:
+    parsed_drop_remainder = symbolic_helper._get_const(
+        drop_remainder, "b", "drop_remainder"
+    )
+    if leftover and not parsed_drop_remainder:
         splits.append(leftover)
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
@@ -1213,7 +1216,8 @@ def split_with_sizes(
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
         )
-    if drop_remainder:
+    parsed_drop_remainder = symbolic_helper._get_const(drop_remainder, "b", "drop_remainder")    
+    if parsed_drop_remainder:
         return symbolic_helper._unimplemented(
             "split_with_sizes", "drop_remainder=True not supported"
         )

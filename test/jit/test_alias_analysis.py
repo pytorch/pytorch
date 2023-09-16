@@ -17,8 +17,9 @@ class TestAliasAnalysis(JitTestCase):
             %11 : NoneType = prim::Constant()
             %8 : int = prim::Constant[value=0]()
             %7 : int = prim::Constant[value=1]()
+            %9 : bool = prim::Constant[value=0]()
             %x.1 : Tensor = aten::add(%a.1, %b.1, %7)
-            %y.1 : Tensor[] = aten::split(%x.1, %7, %8)
+            %y.1 : Tensor[] = aten::split(%x.1, %7, %8, %9)
             return ()
         """
         graph = parse_ir(graph_str)
