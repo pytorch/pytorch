@@ -1,0 +1,75 @@
+# ${generated_comment}
+
+import builtins
+from enum import Enum
+from pathlib import Path
+from typing import (
+    Any,
+    AnyStr,
+    BinaryIO,
+    Callable,
+    ContextManager,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    overload,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
+
+import torch
+from torch import Tensor
+from torch.types import (
+    _bool,
+    _complex,
+    _device,
+    _dispatchkey,
+    _dtype,
+    _float,
+    _int,
+    _layout,
+    _qscheme,
+    _size,
+    Device,
+    Number,
+    Storage,
+    SymInt,
+)
+
+class Tensor(torch._C._TensorBase):
+    requires_grad: _bool
+    retains_grad: _bool
+    shape: Size
+    data: Tensor
+    names: List[str]
+    device: _device
+    dtype: _dtype
+    layout: _layout
+    real: Tensor
+    imag: Tensor
+    T: Tensor
+    H: Tensor
+    mT: Tensor
+    mH: Tensor
+    ndim: _int
+    output_nr: _int
+    _version: _int
+    _base: Optional[Tensor]
+    _cdata: _int
+    grad_fn: Optional[_Node]
+    _grad_fn: Any
+    _grad: Optional[Tensor]
+    grad: Optional[Tensor]
+    _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
+    nbytes: _int
+    itemsize: _int
+    ${tensor_method_hints}
