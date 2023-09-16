@@ -37,8 +37,16 @@ struct PythonTraceback : public CapturedTraceback::Python {
     PyFrameObject* f = PyEval_GetFrame();
     Py_XINCREF(f);
     while (f) {
-      frames.emplace_back(
-          CapturedTraceback::PyFrame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+      // It's crucial we no longer hold a strong ref to the code.
+      // As it causes a reference cycle of code -> traceback -> code
+      PyObject* code = (PyObject*)PyFrame_GetCode(f);
+      PyObject* weakref = PyWeakref_NewRef(code, nullptr);
+      Py_DECREF(code);
+
+      if (weakref != nullptr) {
+        frames.emplace_back(
+            CapturedTraceback::PyFrame{(void*)weakref, PyFrame_GetLasti(f)});
+      }
       auto f_back = PyFrame_GetBack(f);
       Py_XDECREF(f);
       f = f_back;
@@ -84,7 +92,12 @@ struct PythonTraceback : public CapturedTraceback::Python {
       }
     }
     for (const auto& f : to_symbolize) {
-      auto f_code = (PyCodeObject*)f.code;
+      auto f_code = (PyCodeObject*)PyWeakref_GetObject((PyObject*)f.code);
+      // We only hold a weakref to the object, so it might have evaporated.
+      if ((PyObject*)f_code == Py_None) {
+        continue;
+      }
+      Py_INCREF(f_code);
       py::handle filename = f_code->co_filename;
       py::handle funcname = f_code->co_name;
       auto lineno = PyCode_Addr2Line(f_code, f.lasti);
@@ -94,6 +107,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
           py::cast<std::string>(filename),
           py::cast<std::string>(funcname),
           (uint64_t)lineno});
+      Py_DECREF(f_code);
       // find all the additional frames associated with inductor generated
       // code
       if (stack_frames_for_code.ptr()) {
