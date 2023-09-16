@@ -1210,33 +1210,29 @@ static int eval_frame_mod_exec(PyObject *mod) {
 
   #if IS_PYTHON_3_11_PLUS
   if (PyType_Ready(&THPPyInterpreterFrameType) < 0) {
-    goto failure;
+    return -1;
   }
   // TODO (kenjin) convert this to heap type. This operation will leak references on interpreter finalization IIRC.
   Py_INCREF(&THPPyInterpreterFrameType);
   if (PyModule_AddObject(mod, "_PyInterpreterFrame", (PyObject*)&THPPyInterpreterFrameType) < 0) {
     // Need to decref on failure as PyModule_AddObject only steals a reference on success.
     Py_DECREF(&THPPyInterpreterFrameType);
-    goto failure;
+    return -1;
   }
 #endif
 
 
   if (PyType_Ready(&CacheEntryType) < 0) {
-    goto failure;
+    return -1;
   }
   // TODO (kenjin) convert this to heap type. This operation will leak references on interpreter finalization IIRC.
   Py_INCREF(&CacheEntryType);
   if (PyModule_AddObject(mod, "_CacheEntry", (PyObject *) &CacheEntryType) < 0) {
-      Py_DECREF(&CacheEntryType);
-      goto failure;
+    Py_DECREF(&CacheEntryType);
+    return -1;
   }
   return 0;
 
-failure:
-  PyThread_tss_delete(&eval_frame_callback_key);
-  Py_DECREF(Py_None);
-  return -1;
 }
 
 static PyModuleDef_Slot eval_frame_module_slots[] = {
