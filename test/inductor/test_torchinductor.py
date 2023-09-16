@@ -7114,7 +7114,7 @@ class CommonTemplate:
             actual = compiled(x)
             self.assertEqual(ref, actual)
 
-    def test_tolist_repeat_interleave(self):
+    def test_item_repeat_interleave(self):
         def f(x):
             repeats = x[0][1].item()
             torch.export.constrain_as_size(repeats)
