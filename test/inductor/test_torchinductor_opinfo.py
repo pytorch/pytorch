@@ -365,11 +365,6 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
-    "gradient": {"check_gradient": False},  # segfault on check_gradient
-    # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
-    "linalg.solve_triangular": {"check_gradient": False},
-    "linalg.lu_factor": {"check_gradient": False},
-    "linalg.lu_factor_ex": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops
