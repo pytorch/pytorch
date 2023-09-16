@@ -1758,7 +1758,7 @@ class FlatParamHandle:
             # If it is, unstash it from queue
             self._free_event_queue.pop(unsharded_flat_param)
             # Then direct free
-            self._free_unsharded_flat_param()
+            _free_storage(unsharded_flat_param)
 
     def post_reshard(self):
         """
