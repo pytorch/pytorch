@@ -478,6 +478,18 @@ class GuardBuilder(GuardBuilderBase):
         if guard.is_local():
             return self.ID_MATCH(guard)
 
+    def CLOSURE_MATCH(self, guard: Guard):
+        """matches a closure by __code__ id."""
+        if guard.is_local():
+            val = self.get(guard.name)
+            # Strictly only want user-defined functions
+            if type(val) == types.FunctionType and hasattr(val, "__code__"):
+                ref = self.arg_ref(guard)
+                code = f"___check_obj_id({ref}.__code__, {self.id_ref(val.__code__)})"
+                self._produce_guard_code(guard, [code])
+            else:
+                self.FUNCTION_MATCH(guard)
+
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
 

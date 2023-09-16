@@ -335,7 +335,7 @@ class VariableBuilder:
                 lambda self, value: LambdaVariable(
                     InspectSignatureVariable.create,
                     source=self.source,
-                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                    guards=self.make_guards(GuardBuilder.CLOSURE_MATCH),
                 ),
             ),
             (comptime, lambda self, value: ComptimeVariable()),
@@ -546,7 +546,7 @@ class VariableBuilder:
             return UserFunctionVariable(
                 value,
                 source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+                guards=make_guards(GuardBuilder.CLOSURE_MATCH),
             )
         elif istype(value, (types.ModuleType, replay_record.DummyModule)):
             return PythonModuleVariable(
