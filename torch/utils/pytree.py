@@ -728,3 +728,16 @@ def _broadcast_to_and_flatten(
         )
     except ValueError:
         return None
+
+
+class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
+    def __instancecheck__(self, instance: object) -> bool:
+        return isinstance(instance, optree.PyTreeSpec) and instance.is_leaf()
+
+
+class PyTreeLeafSpec(optree.PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
+    def __new__(cls) -> "PyTreeLeafSpec":
+        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+
+
+LeafSpec = PyTreeLeafSpec
