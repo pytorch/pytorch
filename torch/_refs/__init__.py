@@ -3973,7 +3973,6 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
     return x[idx]
 
 
-@register_decomposition(aten.squeeze)
 def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
     if dim is None:
         dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)

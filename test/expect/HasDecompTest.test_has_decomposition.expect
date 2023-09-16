@@ -1257,6 +1257,8 @@ aten::split_copy.Tensor
 aten::split_copy.Tensor_out
 aten::split_with_sizes_copy
 aten::split_with_sizes_copy.out
+aten::squeeze.dim
+aten::squeeze.dims
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
