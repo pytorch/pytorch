@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import itertools
 import logging
 
 import weakref
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,7 +25,11 @@ prims = torch.ops.prims
 log = logging.getLogger(__name__)
 
 
-def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
+def replace_params_with_constants(
+    gm: torch.fx.GraphModule,
+    flat_params: list[Any],
+    fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
+) -> List[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
@@ -152,7 +158,7 @@ def invalidate_eager_modules():
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def discard_traced_gm_params(mod):
+def discard_traced_gm_params(mod: torch.fx.GraphModule):
     for attr_name, tensor in list(
         itertools.chain(
             mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
@@ -166,7 +172,7 @@ def discard_traced_gm_params(mod):
         setattr(mod, attr_name, e_t)
 
 
-def enforce_output_layout(gm):
+def enforce_output_layout(gm: torch.fx.GraphModule):
     """
     Make sure the output node's layout does not change due to compiler optimizations
     by adding aten.as_strided nodes with the expected strides.
@@ -197,7 +203,7 @@ def enforce_output_layout(gm):
     gm.recompile()
 
 
-def enforce_as_strided_input_layout(gm):
+def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
     """
     Make sure the as_strided node's input's layout does not change due to compiler
     optimizations, because the as_strided strides info depends on input tensor stride info.
@@ -223,7 +229,7 @@ def enforce_as_strided_input_layout(gm):
 
 
 @dynamo_timed
-def convert_conv_weights_to_channels_last(gm):
+def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     """
     Convert 4d convolution weight tensor to channels last format.
 
