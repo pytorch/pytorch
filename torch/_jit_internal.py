@@ -47,10 +47,14 @@ from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
-if sys.version_info >= (3, 10):
+IS_PY39_PLUS = sys.version_info >= (3, 9)
+IS_PY310_PLUS = sys.version_info >= (3, 10)
+
+
+if IS_PY310_PLUS:
     from types import UnionType as BuiltinUnionType
 else:
-    BuiltinUnionType = ()
+    BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
 
 LockType: Type
 try:
@@ -84,9 +88,6 @@ class SourceLoader:
 
 
 loader = SourceLoader()
-
-IS_PY39_PLUS = sys.version_info >= (3, 9)
-IS_PY310_PLUS = sys.version_info >= (3, 10)
 
 
 def createResolutionCallbackFromEnv(lookup_base):
