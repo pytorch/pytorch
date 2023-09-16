@@ -1,7 +1,21 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Logging.h>
+#include <cpuinfo.h>
 
 namespace c10 {
+
+size_t TaskThreadPoolBase::defaultNumThreads() {
+  cpuinfo_initialize();
+  size_t num_threads = cpuinfo_get_processors_count();
+  if (num_threads > 0) {
+    return num_threads;
+  }
+  num_threads = std::thread::hardware_concurrency();
+  if (num_threads == 0) {
+    num_threads = 1;
+  }
+  return num_threads;
+}
 
 ThreadPool::ThreadPool(
     int pool_size,

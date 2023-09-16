@@ -692,7 +692,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 
   struct StartFrame {
     TraceKey trace_key_;
-    approx_time_t start_time;
+    approx_time_t start_time{};
   };
 
  private:
@@ -960,7 +960,7 @@ class PostProcess {
     using stack_t = std::vector<std::shared_ptr<Result>>;
     const auto initial_size = out.size();
     auto pop = [](stack_t& stack, time_t t) {
-      TORCH_INTERNAL_ASSERT(stack.size(), "Python replay stack is empty.");
+      TORCH_INTERNAL_ASSERT(!stack.empty(), "Python replay stack is empty.");
       c10::get<ExtraFields<E>>(stack.back()->extra_fields_).end_time_ns_ = t;
       stack.pop_back();
     };

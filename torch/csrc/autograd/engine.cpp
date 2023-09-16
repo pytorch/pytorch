@@ -538,7 +538,8 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         break;
       }
 
-      if (!(local_graph_task = task.base_.lock())) {
+      local_graph_task = task.base_.lock();
+      if (!local_graph_task) {
         // GraphTask for function is no longer valid, skipping further
         // execution.
         continue;
@@ -622,8 +623,8 @@ void Engine::reentrant_thread_init() {
     auto task = tp_shared->graphtasks_queue_.front();
     tp_shared->graphtasks_queue_.pop();
     lk.unlock();
-    std::shared_ptr<GraphTask> graph_task;
-    if (!(graph_task = task.lock())) {
+    std::shared_ptr<GraphTask> graph_task = task.lock();
+    if (!graph_task) {
       LOG(INFO) << "GraphTask has expired, skipping reentrant execution";
       continue;
     }
@@ -808,7 +809,9 @@ void set_device(int device) {
              c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
-        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+        impl->setDevice(at::Device(
+            static_cast<c10::DeviceType>(i),
+            static_cast<c10::DeviceIndex>(device)));
       }
     }
   }
@@ -1012,7 +1015,7 @@ void Engine::evaluate_function(
     fn.release_variables();
   }
 
-  int num_outputs = outputs.size();
+  auto num_outputs = outputs.size();
   if (num_outputs == 0) { // Note: doesn't acquire the mutex
     // Records leaf stream (if applicable)
     // See Note [Streaming backwards]
@@ -1161,9 +1164,9 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(
       root_edges,
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<variable_list&>(inputs),
       [](const std::string& msg) { return msg; });
   if (accumulate_grad && create_graph) {
