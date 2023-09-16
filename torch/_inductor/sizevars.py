@@ -318,7 +318,9 @@ class SizeVarAllocator:
             right = sympy_subs(right, self.inv_precomputed_replacements)
         print(f"left: {left}")
         print(f"right: {right}")
-        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        # NOTE: sympy has trouble resolving `Eq(4*i3 + 4, 4*i3 + 4)` to True, so try another way instead
+        # TODO(yf225): do we really need this?
+        assert self.shape_env.evaluate_expr(sympy.Eq(left-right, 0))
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:

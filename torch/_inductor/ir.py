@@ -1662,6 +1662,12 @@ class ExpandView(BaseView):
     def _normalize_size(x, new_size):
         """Replace `-1` with correct sizes"""
         new_size = list(map(sympy.expand, new_size))
+        # TODO(yf225): fix up the i3 symbol to use the original symbol object, i.e. prevent copying of symbols
+        # we should add a new method that does expand + dedup
+        for i in range(len(new_size)):
+            for s in new_size[i].free_symbols:
+                if str(s) in V.graph.sizevars.shape_env.name_to_var:
+                    new_size[i] = new_size[i].replace(s, V.graph.sizevars.shape_env.name_to_var[str(s)])
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
         assert len(new_size) == len(old_size)
@@ -1861,7 +1867,25 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
-        if 0 in new_size:
+        print(f"old_size: {old_size}, new_size: {new_size}")
+
+        # TODO(yf225): this is likely wrong, but how to not do fancy indexing and fall back the right way?
+        # maybe there is a way to impl this for unbacked symint, maybe can swap with default value 2 (or different value (prime numbers) for different symint) and reason through it
+        # old_size: [4, i3], new_size: [4*i3]
+        has_unbacked = False
+        # for e in new_size:
+        #     for s in e.free_symbols:
+        #         if str(s).startswith("i"):
+        #             has_unbacked = True
+        #             break
+
+        # for e in old_size:
+        #     for s in e.free_symbols:
+        #         if str(s).startswith("i"):
+        #             has_unbacked = True
+        #             break
+
+        if 0 in new_size or has_unbacked:
 
             def fake_reindex(index):
                 return tuple([0] * len(old_size))
@@ -1914,6 +1938,8 @@ class View(GenericView):
         """
         Perform a reshape entirely by modifying indexing math
         """
+        _maybe_evaluate_static = V.graph.sizevars.shape_env._maybe_evaluate_static
+
         size_hint = V.graph.sizevars.size_hint
         vars = [sympy_symbol(f"view{i}") for i in range(len(new_size))]
 
@@ -1929,22 +1955,22 @@ class View(GenericView):
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
-            elif size_hint(size_new) == size_hint(size_old):
+            elif _maybe_evaluate_static(sympy.Eq(size_hint(size_new), size_hint(size_old))):
                 view_expr.append(var)
                 V.graph.sizevars.guard_equals(size_new, size_old)
-            elif size_hint(size_new) < size_hint(size_old):
-                while size_hint(size_new) < size_hint(size_old):
+            elif _maybe_evaluate_static(sympy.Lt(size_hint(size_new), size_hint(size_old))):
+                while _maybe_evaluate_static(sympy.Lt(size_hint(size_new), size_hint(size_old))):
                     var2, size_new2 = stack_new.pop()
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
                 V.graph.sizevars.guard_equals(size_new, size_old)
-            elif size_hint(size_new) > size_hint(size_old):
+            elif _maybe_evaluate_static(sympy.Gt(size_hint(size_new), size_hint(size_old))):
                 divisor = sympy.Integer(1)
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
-                while size_hint(size_new) > size_hint(size_old):
+                while _maybe_evaluate_static(sympy.Gt(size_hint(size_new), size_hint(size_old))):
                     modulus = stack_old.pop()
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
@@ -3753,9 +3779,13 @@ class DynamicScalar(ExternKernelAlloc):
         constant_args=(),
     ):
         super().__init__(layout, inputs, constant_args)
-        self.symint = V.graph.sizevars.shape_env.create_unbacked_symint()
-        # TODO(yf225): we are assuming all .item / .tolist are passed in as sizes and not values (since for values, they can be <1)
-        torch.fx.experimental.symbolic_shapes.constrain_range(self.symint, min=1, max=sys.maxsize - 1)
+        # TODO(yf225): we somehow end up with different torch.SymInts of the same name `i3` in the system
+        # and evaluate_expr on `i3 - i3` will not resolve to 0 :(.
+        # We need to dedup the symbols, maybe by making evaluate_expr replace symbols of the same name to the exact same symbol object
+        # Is this caused by deep-copying the ShapeEnv environment?
+        self.symval = V.graph.current_node.meta['val']
+        print(f"ir.py: self.symval: {self.symval}, id(self.symval): {id(self.symval)}, type(self.symval):{type(self.symval)}")
+        print(f"ir.py: self.symval.node.expr: {self.symval.node.expr}, id(self.symval.node.expr): {id(self.symval.node.expr)}, type(self.symval.node.expr):{type(self.symval.node.expr)}")
 
     def should_allocate(self):
         return False
@@ -3770,7 +3800,7 @@ class DynamicScalar(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")
-        wrapper.writeline(f"{self.symint} = {self.get_name()}")
+        wrapper.writeline(f"{self.symval} = {self.get_name()}")
 
     @classmethod
     def create(cls, x: "TensorBox"):
@@ -3783,22 +3813,22 @@ class DynamicScalar(ExternKernelAlloc):
 
     # TODO(yf225): add more operations (see sympy Integer) or just pass through
     def __add__(self, other):
-        return self.symint.node.expr + other
+        return self.symval.node.expr + other
 
     def __mul__(self, other):
-        return self.symint.node.expr * other
+        return self.symval.node.expr * other
 
     def __rmul__(self, other):
-        return self.symint.node.expr * other
+        return self.symval.node.expr * other
 
     def __truediv__(self, other):
-        return self.symint.node.expr / other
+        return self.symval.node.expr / other
 
     def __sub__(self, other):
-        return self.symint.node.expr - other
+        return self.symval.node.expr - other
 
     def __str__(self):
-        return str(self.symint)
+        return str(self.symval)
         # return self.get_name()
 
     __repr__ = __str__

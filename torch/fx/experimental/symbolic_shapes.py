@@ -2158,6 +2158,7 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        self.name_to_var: Dict[str, sympy.Symbol] = {}
         # Maps symbolic ints to their min/max range for runtime checks.
         # This is because we assume a graph generated with N=2 is general enough
         # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
@@ -2720,6 +2721,7 @@ class ShapeEnv:
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = self._default_unspecified_value_range()
+        self.name_to_var[str(symbol)] = symbol
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
@@ -3425,6 +3427,11 @@ class ShapeEnv:
         If unbacked_only == True, then we only do substitutions on
         unbacked SymInts (leaving regular hinted integers alone).
         """
+        # TODO(yf225): assert we don't have duplicated symbols of same name in `expr`
+        # i.e. all same-name symbols should have same id()
+        # TODO(yf225): to observe duplicated symbols, try the repeat_interleave test case
+        # and print traceback at /data/users/willfeng/miniconda3/lib/python3.11/site-packages/sympy-1.12-py3.11.egg/sympy/core/symbol.py Symbol __new__ method
+
         # breakpoint()
         expr = self.simplify(expr)
         symbols = list(expr.free_symbols)
@@ -3831,6 +3838,8 @@ class ShapeEnv:
 
             expr = orig_expr
 
+            print(f"here1: expr: {expr}")
+
             static_expr = self._maybe_evaluate_static(expr)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
@@ -3839,8 +3848,17 @@ class ShapeEnv:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
+            print(f"here2: expr: {expr}")
+
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
+                for s in expr.atoms():
+                    print(f"s: {s}, id(s): {id(s)}, type(s): {type(s)}")
+
+                print(f"self.var_to_range: {self.var_to_range}")
+                for s in self.var_to_range.keys():
+                    print(f"self.var_to_range: s: {s}, id(s): {id(s)}, type(s): {type(s)}")
+
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
                     if allow_return_unbacked_symint:
