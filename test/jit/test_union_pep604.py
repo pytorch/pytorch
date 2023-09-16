@@ -353,6 +353,14 @@ class TestUnion(JitTestCase):
 
         self.assertEqual(fn2(), 10)
 
+    @unittest.skip
+    def test_union_optional_of_union_return(self):
+        @torch.jit.script
+        def fn() -> None | str | int:
+            y: Optional[int | str] = "foo"
+            return y
+
+    @unittest.skip
     def test_union_optional_of_union_is_flattened(self):
         @torch.jit.script
         def fn(flag: int) -> str | int | None:

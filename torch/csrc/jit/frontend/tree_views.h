@@ -1208,10 +1208,6 @@ struct Delete : public Stmt {
   }
 };
 
-
-
-
-
 /*
  * NOTE: transforming PEP 604 union into equivalent union type
  *
@@ -1230,7 +1226,9 @@ struct Delete : public Stmt {
  * <KIND> |
  */
 
-inline void _flatten_pep604_union(const torch::jit::Expr& node, std::vector<torch::jit::Expr>* result) {
+inline void _flatten_pep604_union(
+    const torch::jit::Expr& node,
+    std::vector<torch::jit::Expr>* result) {
   // flatten possibly nested union expressions like (int | (float | str))
   // into a flat list of expressions like [int, float, str]
   if (node.kind() == '|') {
@@ -1250,7 +1248,7 @@ inline std::vector<Expr> get_pep604_union_members(const Expr& node) {
 
 // Flattens a PEP 604 union into a classical union.
 // For example, ((x | y) | z) is transformed into Union[x, y, z].
-inline Expr pep604union_to_union(const Expr& expr){
+inline Expr pep604union_to_union(const Expr& expr) {
   // noop if not a pep604 union
   if (expr.kind() != '|')
     return expr;
@@ -1261,11 +1259,9 @@ inline Expr pep604union_to_union(const Expr& expr){
   auto synthesised_union = Subscript::create(
       expr.range(),
       Var::create(expr.range(), Ident::create(expr.range(), "Union")),
-      List<Expr>::create(expr.range(), members)
-      );
+      List<Expr>::create(expr.range(), members));
   return synthesised_union;
 }
-
 
 } // namespace jit
 } // namespace torch
@@ -1277,4 +1273,3 @@ struct iterator_traits<torch::jit::ListIterator<T>>
     : std::iterator_traits<torch::jit::TreeList::const_iterator> {};
 
 } // namespace std
-

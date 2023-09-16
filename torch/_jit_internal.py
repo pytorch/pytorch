@@ -14,6 +14,7 @@ import io
 import pickle
 import sys
 import threading
+import types
 import typing
 import warnings
 import weakref
@@ -47,12 +48,14 @@ from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
-IS_PY39_PLUS = sys.version_info >= (3, 9)
-IS_PY310_PLUS = sys.version_info >= (3, 10)
+IS_PY39_PLUS: Final[bool] = sys.version_info >= (3, 9)
+IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
 
-
-if IS_PY310_PLUS:
-    from types import UnionType as BuiltinUnionType
+BuiltinUnionType: Union[Type, Tuple[Type, ...]]
+if sys.version_info >= (3, 10):
+    # NOTE: IS_PY310_PLUS doesn't work with mypy.
+    # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
+    BuiltinUnionType = types.UnionType
 else:
     BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
 
@@ -1366,7 +1369,9 @@ def check_empty_containers(obj) -> None:
 def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
-    if origin_type is list or origin_type is List:
+    if origin_type is None:
+        return False
+    elif origin_type is list or origin_type is List:
         check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
@@ -1412,7 +1417,9 @@ def container_checker(obj, target_type) -> bool:
             elif not isinstance(el, el_type):
                 return False
         return True
-    elif origin_type is Union or issubclass(origin_type, BuiltinUnionType):  # also handles Optional
+    elif origin_type is Union or issubclass(
+        origin_type, BuiltinUnionType
+    ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
         inner_types = get_args(target_type)

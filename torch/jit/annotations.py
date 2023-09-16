@@ -459,9 +459,7 @@ def try_ann_to_type(ann, loc, rcb=None):
     if is_future(ann):
         return FutureType(try_ann_to_type(ann_args[0], loc))
     if is_await(ann):
-        elementType = (
-            try_ann_to_type(ann_args[0], loc) if ann_args else AnyType.get()
-        )
+        elementType = try_ann_to_type(ann_args[0], loc) if ann_args else AnyType.get()
         return AwaitType(elementType)
     if ann is float:
         return FloatType.get()
