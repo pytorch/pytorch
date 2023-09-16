@@ -207,8 +207,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -242,11 +240,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
     "geometric": {f16},
-    "linalg.eig": {f32, f64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
@@ -377,6 +372,8 @@ inductor_override_kwargs = {
     "linalg.solve_triangular": {"check_gradient": False},
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
+    # grad calculation below fails for both the aten and the compiled implementation.
+    "linalg.eig": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops

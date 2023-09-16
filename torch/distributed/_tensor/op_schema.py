@@ -131,6 +131,25 @@ class TupleStrategy(StrategyType):
 
 
 @dataclass
+class RuntimeSchemaInfo:
+    """
+    RuntimeSchemaInfo stores the operator schema related information for runtime (eager)
+    execution. This is mainly used for two ways: 1. to generate hash for args to determine
+    whether to re-run sharding prop or not 2. to determine if we need pytree
+    """
+
+    # This static_argnum records static arg "starting index" for ops that have non-tensor
+    # args/kwargs which would affect sharding propagation results. All args after this
+    # index would be hashed to our sharding cache.
+    # Note that only a few ops need this information, e.g. view, transpose, var.dim, etc.
+    static_argnum: int = -1
+    # This static_kwargkey records static kwarg names which would affect sharding prop
+    static_kwargkey: Optional[List[str]] = None
+    # TODO: make use of this field
+    needs_pytree: bool = True
+
+
+@dataclass
 class OpSchema:
     """
     OpSchema is a data class that describes an operator input schemas, it
@@ -153,6 +172,8 @@ class OpSchema:
     args_schema: ArgsType
     kwargs_schema: KwargsType
 
+    schema_info: Optional[RuntimeSchemaInfo] = None
+
     @property
     def args_spec(self) -> Tuple[DTensorSpec, ...]:
         """
@@ -171,25 +192,80 @@ class OpSchema:
             f" kwargs_schema={self.kwargs_schema})"
         )
 
-    def __hash__(self) -> int:
-        # NOTE: we turn kwargs_schema into a frozenset to hash as it would not be nested dict
-        frozen_set_kwargs_schema = frozenset(self.kwargs_schema.items())
-        return hash(
-            (
-                self.op,
-                tuple(tuple(e) if isinstance(e, list) else e for e in self.args_schema),
-                frozen_set_kwargs_schema,
-            )
+    def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
+        op_arg_type = self.op._schema.arguments[arg_idx].type
+        is_tensor = isinstance(op_arg_type, torch.TensorType)
+        if is_tensor:
+            return True
+
+        is_list_like = isinstance(op_arg_type, torch.ListType)
+        if not is_list_like:
+            return False
+
+        elem_type = op_arg_type.getElementType()
+        return isinstance(elem_type, torch.TensorType) or (
+            isinstance(elem_type, torch.OptionalType)
+            and isinstance(elem_type.getElementType(), torch.TensorType)
         )
 
+    def __hash__(self) -> int:
+        # Only hash args and kwargs that op indicates to hash
+        if not self.schema_info:
+            static_argnum = len(self.args_schema)
+            static_kwargkey = None
+        else:
+            static_argnum = self.schema_info.static_argnum
+            static_kwargkey = self.schema_info.static_kwargkey
+
+        args_to_hash = tuple(
+            tuple(e) if isinstance(e, list) else e
+            for i, e in enumerate(self.args_schema)
+            if self.arg_type_tensor_or_tensor_list_like(i) or i >= static_argnum
+        )
+        if static_kwargkey is not None:
+            kwargs_to_hash = tuple(
+                self.kwargs_schema.get(k, None) for k in static_kwargkey
+            )
+            return hash((self.op, args_to_hash, kwargs_to_hash))
+        else:
+            return hash((self.op, args_to_hash))
+
     def __eq__(self, other: object) -> bool:
+        # early return checks
         if not isinstance(other, OpSchema):
             return False
-        return (
-            self.op == other.op
-            and self.args_schema == other.args_schema
-            and self.kwargs_schema == other.kwargs_schema
-        )
+
+        if self.op != other.op:
+            return False
+
+        if len(self.args_schema) != len(other.args_schema):
+            return False
+
+        # compare each element and early return if any of them is different
+        if not self.schema_info:
+            static_argnum = len(self.args_schema)
+            static_kwargkey = None
+        else:
+            static_argnum = self.schema_info.static_argnum
+            static_kwargkey = self.schema_info.static_kwargkey
+
+        for i, (self_arg, other_arg) in enumerate(
+            zip(self.args_schema, other.args_schema)
+        ):
+            if isinstance(self_arg, DTensorSpec) and self_arg != other_arg:
+                return False
+            elif i >= static_argnum and self_arg != other_arg:
+                return False
+
+        # check kwarg equality when there's a static kwarg key
+        if static_kwargkey:
+            for key in static_kwargkey:
+                if self.kwargs_schema.get(key, None) != other.kwargs_schema.get(
+                    key, None
+                ):
+                    return False
+
+        return True
 
     def gen_fake_args(self) -> ArgsType:
         """
