@@ -1497,7 +1497,7 @@ def forward(self, arg0_1, arg1_1):
         # Need this because Dynamo checks lambda code ID not object itself.
         def make_dummy_fn(op):
             exec(f"temp = lambda x: x.{op}()")
-            return temp
+            return locals()["temp"]
 
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
