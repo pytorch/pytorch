@@ -5105,7 +5105,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         mixed_dtype = False
                     helper(self, nn.BatchNorm2d, shape, dtype, mixed_dtype, torch.channels_last)
 
-        precisons = {torch.float: 1e-4, torch.bfloat16: None, torch.float16: None}
+        precisons = {torch.float: 1e-4, torch.bfloat16: 1e-3, torch.float16: 1e-3}
         for shape in [(4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
             for dtype in [torch.float, torch.bfloat16, torch.float16]:
                 for mixed_dtype in [False, True]:
