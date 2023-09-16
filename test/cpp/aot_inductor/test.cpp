@@ -52,11 +52,12 @@ TEST(AotInductorTest, BasicTest) {
   AOT_INDUCTOR_ERROR_CHECK(
       AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
   AOTInductorParamShape max_output_shape;
+  const int64_t* max_output_sizes;
+  int64_t max_output_dim;
   AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerGetMaxOutputShape(
-      container_handle, 0 /*output_idx*/, &max_output_shape));
+      container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
-  c10::IntArrayRef array_size(
-      max_output_shape.shape_data, max_output_shape.ndim);
+  c10::IntArrayRef array_size(max_output_sizes, max_output_dim);
   torch::Tensor output_tensor =
       at::zeros(array_size, at::dtype(at::kFloat).device(at::kCUDA));
   std::vector<torch::Tensor> outputs;
@@ -70,8 +71,9 @@ TEST(AotInductorTest, BasicTest) {
       reinterpret_cast<AOTInductorTensorHandle>(inputs.data());
   AOTInductorTensorHandle outputs_handle =
       reinterpret_cast<AOTInductorTensorHandle>(outputs.data());
-  std::vector<AOTInductorParamShape> output_shapes(
-      outputs.size(), AOTInductorParamShape());
+
+  std::vector<const int64_t*> output_sizes(outputs.size());
+  std::vector<int64_t> output_ndims(outputs.size());
 
   AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
 
@@ -81,9 +83,10 @@ TEST(AotInductorTest, BasicTest) {
       inputs.size(),
       outputs_handle,
       outputs.size(),
-      output_shapes.data(),
       stream_handle,
-      proxy_executor_handle));
+      proxy_executor_handle,
+      output_sizes.data(),
+      output_ndims.data()));
 
   ASSERT_EQ(output_shapes.size(), 1);
   ASSERT_EQ(output_shapes[0].ndim, 2);

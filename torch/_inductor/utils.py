@@ -1195,8 +1195,8 @@ aot_inductor_launcher = """
             reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
         AOTInductorTensorHandle outputs_handle =
             reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
-        std::vector<AOTInductorParamShape> output_shapes(
-            output_tensors.size(), AOTInductorParamShape());
+        std::vector<const int64_t*> output_sizes(output_tensors.size());
+        std::vector<int64_t> output_ndims(output_tensors.size());
         AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
@@ -1205,9 +1205,11 @@ aot_inductor_launcher = """
             input_tensors.size(),
             outputs_handle,
             output_tensors.size(),
-            output_shapes.data(),
             stream_handle,
-            proxy_executor_handle));
+            proxy_executor_handle,
+            output_sizes.data(),
+            output_ndims.data()
+        ));
 
         AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
     }
