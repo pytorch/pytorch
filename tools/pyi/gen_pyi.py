@@ -1289,6 +1289,14 @@ def gen_pyi(
             **env,
         },
     )
+    fm.write_with_template(
+        "torch/_tensor.pyi",
+        "torch/_C/_tensor.pyi.in",
+        lambda: {
+            "generated_comment": "@" + "generated from torch/_C/_tensor.pyi.in",
+            **env,
+        }
+    )
     gen_nn_functional(fm)
 
 
