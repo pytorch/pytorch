@@ -1108,8 +1108,6 @@ aten::replication_pad3d
 aten::replication_pad3d.out
 aten::replication_pad3d_backward
 aten::replication_pad3d_backward.grad_input
-aten::resize
-aten::resize.out
 aten::resize_
 aten::resize_as
 aten::resize_as.out
