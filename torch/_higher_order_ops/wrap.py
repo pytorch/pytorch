@@ -1,5 +1,7 @@
+from typing import Any
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint
+from torch.utils._pytree import tree_flatten
 from itertools import count
 import inspect
 
@@ -10,7 +12,7 @@ class Wrap(HigherOrderOperator):
     def __init__(self):
         super().__init__("wrap")
 
-    def __call__(self, func, *args, **kwargs):
+    def __call__(self, func, *args, **kwargs) -> Any:
         # Dynamo already traces the body of HigherOrderOp beforehand when it
         # so no need to trace into it.
         import torch._dynamo  # noqa: F401
@@ -19,7 +21,8 @@ class Wrap(HigherOrderOperator):
         @disable
         def wrapper():
             result = func(*args, **kwargs)
-            return result
+            result, _ = tree_flatten(result)
+            return result[0] if len(result) == 1 else result
 
         return wrapper()
 

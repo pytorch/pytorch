@@ -1403,7 +1403,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             {".*HigherOrderOperator body's output must consist of tensors only": 1},
         )
 
-    def test_fallback_on_nested_tuple_output(self):
+    def test_nested_tuple_output(self):
         counters.clear()
 
         backend = EagerAndRecordGraphs()
@@ -1411,7 +1411,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnt)
         def f(x):
-            ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
+            a, b = wrap(lambda x: ((x.sin(), x.cos()),), x)
             return a + b
 
         x = torch.randn(2, 3)
@@ -1419,31 +1419,26 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, x.sin() + x.cos())
         self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertTrue(len(wrap_node.args), 1)
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
         self.assertEqual(op_count(body_function), 2)
 
-    def test_fallback_on_output_with_dict(self):
-        # We can likely support this in the future, I just don't want to deal
-        # with it right now
+    def test_output_with_dict(self):
         counters.clear()
         cnt = CompileCounter()
 
-        @torch.compile(backend=cnt)
+        @torch.compile(backend=cnt, fullgraph=True)
         def f(x):
             return wrap(lambda x: [{"a": -x}], x)
 
         x = torch.randn(3)
         result = f(x)
-        self.assertEqual(result, [{"a": -x}])
-        self.assertEqual(cnt.frame_count, 0)
-        assert_dict_matches_regex(
-            self,
-            dict(counters["graph_break"]),
-            {".*HigherOrderOperator body's output must consist of tensors only": 1},
-        )
+        self.assertEqual(result, -x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     def test_access_module_attr(self):
         counters.clear()
