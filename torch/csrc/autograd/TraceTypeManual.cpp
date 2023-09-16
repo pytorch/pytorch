@@ -62,7 +62,7 @@ const Tensor& resize_(
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    self.resize_(size, std::move(optional_memory_format));
+    self.resize_(size, optional_memory_format);
   }
   return self;
 }
@@ -78,7 +78,7 @@ const Tensor& resize_as_(
 
   {
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
-    self.resize_as_(the_template, std::move(optional_memory_format));
+    self.resize_as_(the_template, optional_memory_format);
   }
   return self;
 }
