@@ -1,22 +1,34 @@
 # Owner(s): ["module: pytree"]
 
+import unittest
+from collections import namedtuple, OrderedDict
+
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TEST_WITH_TORCHDYNAMO,
+    TestCase,
+)
 from torch.utils._pytree import (
+    _broadcast_to_and_flatten,
+    _register_pytree_node,
+    LeafSpec,
+    tree_all,
+    tree_all_only,
+    tree_any,
+    tree_any_only,
     tree_flatten,
     tree_map,
+    tree_map_only,
     tree_unflatten,
     TreeSpec,
-    LeafSpec,
     treespec_dumps,
     treespec_loads,
-    _register_pytree_node,
 )
-import unittest
-from torch.utils._pytree import _broadcast_to_and_flatten, tree_map_only, tree_all
-from torch.utils._pytree import tree_any, tree_all_only, tree_any_only
-from collections import namedtuple, OrderedDict
-from torch.testing._internal.common_utils import parametrize, subtest, instantiate_parametrized_tests, TEST_WITH_TORCHDYNAMO
+
 
 class TestPytree(TestCase):
     def test_treespec_equality(self):
