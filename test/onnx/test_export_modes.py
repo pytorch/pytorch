@@ -32,7 +32,7 @@ class TestExportModes(pytorch_test_common.ExportTestCase):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         f = io.BytesIO()
-        torch.onnx._export(
+        torch.onnx.utils._export(
             torch_model,
             (fake_input),
             f,
@@ -44,7 +44,7 @@ class TestExportModes(pytorch_test_common.ExportTestCase):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         f = io.BytesIO()
-        torch.onnx._export(
+        torch.onnx.utils._export(
             torch_model,
             (fake_input),
             f,
@@ -56,7 +56,7 @@ class TestExportModes(pytorch_test_common.ExportTestCase):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         f = io.BytesIO()
-        torch.onnx._export(
+        torch.onnx.utils._export(
             torch_model,
             (fake_input),
             f,
@@ -68,7 +68,7 @@ class TestExportModes(pytorch_test_common.ExportTestCase):
         torch_model = TestExportModes.MyModel()
         fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         d = tempfile.mkdtemp()
-        torch.onnx._export(
+        torch.onnx.utils._export(
             torch_model,
             (fake_input),
             d,

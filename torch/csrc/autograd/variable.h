@@ -732,7 +732,7 @@ inline Variable make_variable_differentiable_view(
 // See NOTE [ Autograd View Variables ] for details.
 // Non-differentiable view. Just share version counter.
 inline Variable make_variable_non_differentiable_view(
-    Variable base,
+    const Variable& base,
     const at::Tensor& data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
@@ -795,7 +795,7 @@ inline Variable make_variable(
 /// specifying the function in the autograd graph, and what particular input of
 /// that function, this variable is connected to.
 inline Variable make_variable(
-    at::Tensor data,
+    const at::Tensor& data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {

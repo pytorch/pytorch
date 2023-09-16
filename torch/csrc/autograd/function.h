@@ -501,11 +501,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   void add_retains_grad_hook(
       std::unique_ptr<FunctionPreHook>&& pre_hook,
-      int output_idx) {
+      size_t output_idx) {
     retains_grad_hooks_[output_idx] = std::move(pre_hook);
   }
 
-  std::unique_ptr<FunctionPreHook> pop_retains_grad_hook(int output_idx) {
+  std::unique_ptr<FunctionPreHook> pop_retains_grad_hook(size_t output_idx) {
     auto ret = std::move(retains_grad_hooks_[output_idx]);
     retains_grad_hooks_.erase(output_idx);
     return ret;
@@ -531,7 +531,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return empty;
   }
 
-  std::unordered_map<int, std::unique_ptr<FunctionPreHook>>&
+  std::unordered_map<size_t, std::unique_ptr<FunctionPreHook>>&
   retains_grad_hooks() noexcept {
     return retains_grad_hooks_;
   }
@@ -680,8 +680,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hooks_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  std::unordered_map<int, std::unique_ptr<FunctionPreHook>> retains_grad_hooks_;
+  std::unordered_map<size_t, std::unique_ptr<FunctionPreHook>>
+      retains_grad_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

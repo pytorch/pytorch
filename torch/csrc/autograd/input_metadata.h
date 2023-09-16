@@ -61,7 +61,7 @@ struct InputMetadata {
             t.unsafeGetTensorImpl()->is_python_dispatch(),
             t.is_nested()) {}
 
-  const at::TensorOptions options() const {
+  const at::TensorOptions& options() const {
     return options_;
   }
 
@@ -184,6 +184,7 @@ struct InputMetadata {
     return c10::get<at::Tensor>(shape_);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const at::TensorOptions options_;
   MetadataShape shape_;
   c10::Stream stream_ = c10::Stream(c10::Stream::Default::DEFAULT, device());
