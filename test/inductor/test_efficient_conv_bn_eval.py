@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import copy
 import importlib
 import itertools
 import os
@@ -109,10 +110,15 @@ class EfficientConvBNEvalTemplate(TestCase):
                 kernel_size=3,
                 stride=2,
             ).eval()
+            # Copy module to test backward
+            mod_optimized = copy.deepcopy(mod_eager)
             if sync_bn:
                 mod_eager = nn.SyncBatchNorm.convert_sync_batchnorm(mod_eager).eval()
+                mod_optimized = nn.SyncBatchNorm.convert_sync_batchnorm(
+                    mod_optimized
+                ).eval()
             torch._dynamo.reset()
-            mod_optimized = torch.compile(mod_eager)
+            mod_optimized = torch.compile(mod_optimized)
 
             inps = [4, 3, 96]
             if module[0] == nn.Conv2d:
@@ -120,13 +126,33 @@ class EfficientConvBNEvalTemplate(TestCase):
             if module[0] == nn.Conv3d:
                 inps.append(inps[-1])
                 inps.append(inps[-1])
+            inp = torch.rand(inps).to(self.device)
 
             original_value = counters["inductor"]["efficient_conv_bn_eval"]
-            inp = torch.rand(inps).to(self.device)
+
+            optim_eager = torch.optim.SGD(mod_eager.parameters(), lr=1e-3)
+            optim_optimized = torch.optim.SGD(mod_optimized.parameters(), lr=1e-3)
+
+            optim_eager.zero_grad()
+            optim_optimized.zero_grad()
+
+            # test forward
             out_eager = mod_eager(inp)
             out_optimized = mod_optimized(inp)
+
             self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
 
+            out_eager.mean().backward()
+            out_optimized.mean().backward()
+
+            optim_eager.step()
+            optim_optimized.step()
+            # test forward (by testing forward again after one training iteration)
+            inp_bw = torch.rand_like(inp)
+            out_eager_bw = mod_eager(inp_bw)
+            out_optimized_bw = mod_optimized(inp_bw)
+
+            self.assertEqual(out_eager_bw, out_optimized_bw, atol=2e-04, rtol=1e-5)
             current_value = counters["inductor"]["efficient_conv_bn_eval"]
             self.assertEqual(
                 current_value - original_value, test_class.expected_optimization_count
@@ -139,7 +165,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             (nn.Conv3d, nn.BatchNorm3d),
         ]
         test_classes = [ConvOp, MultiUserConvOp]
-        sync_bns = [True, False]
+        sync_bns = [False, True]
         for test_class, use_bias, module, sync_bn in itertools.product(
             test_classes, conv_bias, modules, sync_bns
         ):
