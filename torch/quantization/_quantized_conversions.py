@@ -78,4 +78,4 @@ def quantized_weight_reorder_for_mixed_dtypes_linear(weight):
     outp[3::4] = tmp[3::4]
     outp = (outp.to(torch.int) + 128).to(tmp.dtype)
 
-    return outp.view(nrows, ncols)
+    return outp.view(nrows, ncols).view(torch.uint8)

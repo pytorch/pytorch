@@ -328,9 +328,7 @@ class TestMixedDtypesLinearCuda(TestCase):
 
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
-                quantized_weight_reorder_for_mixed_dtypes_linear(weight).view(
-                    torch.uint8
-                ),
+                quantized_weight_reorder_for_mixed_dtypes_linear(weight),
                 scale,
                 bias=bias,
                 activation=activation,
@@ -353,7 +351,7 @@ class TestMixedDtypesLinearCuda(TestCase):
         activations = [None, "relu", "silu"]
         rtol, atol = 1e-3, 1e-3
         if dtype == torch.bfloat16:
-            rtol, atol = 1e-2, 1e-2
+            rtol, atol = 1e-2, 1e-3
         for batch_shape, (m, n, k), add_bias, activation in \
             product(batch_shapes, shapes, (False, True), activations):
             run_test(batch_shape, m, n, k, add_bias, activation, dtype, device, rtol, atol)

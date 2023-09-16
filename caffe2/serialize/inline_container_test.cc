@@ -340,6 +340,59 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
           const std::map<std::string, std::string>& metadata_map) {});
 }
 
+class ChunkRecordIteratorTest : public ::testing::TestWithParam<int64_t> {};
+INSTANTIATE_TEST_SUITE_P(
+    ChunkRecordIteratorTestGroup,
+    ChunkRecordIteratorTest,
+    testing::Values(100, 150, 1010));
+
+TEST_P(ChunkRecordIteratorTest, ChunkRead) {
+  auto chunkSize = GetParam();
+  std::string zipFileName = "output_chunk_" + std::to_string(chunkSize) + ".zip";
+  const char* fileName = zipFileName.c_str();
+  const std::string recordName = "key1";
+  const size_t tensorDataSizeInBytes = 1000;
+
+  // write records through writers
+  std::ostringstream oss;
+  PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
+    oss.write(static_cast<const char*>(b), n);
+    return oss ? n : 0;
+  });
+
+  auto tensorData = std::vector<uint8_t>(tensorDataSizeInBytes, 1);
+  auto dataPtr = tensorData.data();
+  writer.writeRecord(recordName, dataPtr, tensorDataSizeInBytes);
+  const std::unordered_set<std::string>& written_records =
+      writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records.size(), 1);
+  ASSERT_EQ(written_records.count(recordName), 1);
+  writer.writeEndOfFile();
+  ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
+
+  std::string the_file = oss.str();
+  std::ofstream foo(fileName);
+  foo.write(the_file.c_str(), the_file.size());
+  foo.close();
+  LOG(INFO) << "Finished saving tensor into zip file " << fileName;
+
+  LOG(INFO) << "Testing chunk size " << chunkSize;
+  PyTorchStreamReader reader(fileName);
+  ASSERT_TRUE(reader.hasRecord(recordName));
+  auto chunkIterator = reader.createChunkReaderIter(
+      recordName, tensorDataSizeInBytes, chunkSize);
+  std::vector<uint8_t> buffer(chunkSize);
+  size_t totalReadSize = 0;
+  while (auto readSize = chunkIterator.next(buffer.data())) {
+    auto expectedData = std::vector<uint8_t>(readSize, 1);
+    ASSERT_EQ(memcmp(expectedData.data(), buffer.data(), readSize), 0);
+    totalReadSize += readSize;
+  }
+  ASSERT_EQ(totalReadSize, tensorDataSizeInBytes);
+  // clean up
+  remove(fileName);
+}
+
 } // namespace
 } // namespace serialize
 } // namespace caffe2

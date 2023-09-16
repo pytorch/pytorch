@@ -14,12 +14,9 @@
 
 using at::TypeKind;
 using c10::Argument;
-using c10::either;
 using c10::FunctionSchema;
 using c10::IValue;
 using c10::ListType;
-using c10::make_left;
-using c10::make_right;
 using c10::OperatorName;
 using c10::OptionalType;
 
@@ -36,13 +33,13 @@ struct SchemaParser {
             Source::DONT_COPY)),
         type_parser(L, /*parse_complete_tensor_types*/ false) {}
 
-  either<OperatorName, FunctionSchema> parseDeclaration() {
+  std::variant<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
 
     // If there is no parentheses coming, then this is just the operator name
     // without an argument list
     if (L.cur().kind != '(') {
-      return make_left<OperatorName, FunctionSchema>(std::move(name));
+      return OperatorName(std::move(name));
     }
 
     std::vector<Argument> arguments;
@@ -97,7 +94,7 @@ struct SchemaParser {
           parseArgument(0, /*is_return=*/true, /*kwarg_only=*/false));
     }
 
-    return make_right<OperatorName, FunctionSchema>(
+    return FunctionSchema(
         std::move(name.name),
         std::move(name.overload_name),
         std::move(arguments),
@@ -130,16 +127,16 @@ struct SchemaParser {
     return {name, overload_name};
   }
 
-  std::vector<either<OperatorName, FunctionSchema>> parseDeclarations() {
-    std::vector<either<OperatorName, FunctionSchema>> results;
+  std::vector<std::variant<OperatorName, FunctionSchema>> parseDeclarations() {
+    std::vector<std::variant<OperatorName, FunctionSchema>> results;
     do {
-      results.push_back(parseDeclaration());
+      results.emplace_back(parseDeclaration());
     } while (L.nextIf(TK_NEWLINE));
     L.expect(TK_EOF);
     return results;
   }
 
-  either<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
+  std::variant<OperatorName, FunctionSchema> parseExactlyOneDeclaration() {
     auto result = parseDeclaration();
     L.nextIf(TK_NEWLINE);
     L.expect(TK_EOF);
@@ -161,7 +158,7 @@ struct SchemaParser {
       // note: an array with a size hint can only occur at the Argument level
       fake_type = ListType::create(std::move(fake_type));
       real_type = ListType::create(std::move(real_type));
-      N = c10::stoll(L.expect(TK_NUMBER).text());
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
@@ -248,14 +245,14 @@ struct SchemaParser {
           n = L.expect(TK_NUMBER).text();
 
         if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
-          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          auto imag = std::stod(n.substr(0, n.size() - 1));
           return c10::complex<double>(0, imag);
         } else if (
             kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
-          return c10::stod(n);
+          return std::stod(n);
         } else {
-          int64_t v = c10::stoll(n);
+          int64_t v = std::stoll(n);
           return v;
         }
     }
@@ -368,7 +365,7 @@ struct SchemaParser {
 };
 } // namespace
 
-either<OperatorName, FunctionSchema> parseSchemaOrName(
+std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
     const std::string& schemaOrName) {
   return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
 }
@@ -376,17 +373,17 @@ either<OperatorName, FunctionSchema> parseSchemaOrName(
 FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
   TORCH_CHECK(
-      parsed.is_right(),
+      std::holds_alternative<FunctionSchema>(parsed),
       "Tried to parse a function schema but only the operator name was given");
-  return std::move(parsed.right());
+  return std::get<FunctionSchema>(std::move(parsed));
 }
 
 OperatorName parseName(const std::string& name) {
   auto parsed = parseSchemaOrName(name);
   TORCH_CHECK(
-      parsed.is_left(),
+      std::holds_alternative<OperatorName>(parsed),
       "Tried to parse an operator name but function schema was given");
-  return std::move(parsed.left());
+  return std::get<OperatorName>(std::move(parsed));
 }
 
 } // namespace torch::jit
