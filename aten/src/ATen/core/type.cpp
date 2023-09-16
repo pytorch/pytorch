@@ -248,6 +248,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofSymInts() {
+  static auto value = ListType::create(SymIntType::get());
+  return value;
+}
 ListTypePtr ListType::ofComplexDoubles() {
   static auto value = ListType::create(ComplexType::get());
   return value;
@@ -262,6 +266,10 @@ ListTypePtr ListType::ofBools() {
 }
 ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
+  return value;
+}
+ListTypePtr ListType::ofNumbers() {
+  static auto value = ListType::create(NumberType::get());
   return value;
 }
 

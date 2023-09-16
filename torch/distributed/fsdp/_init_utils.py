@@ -24,6 +24,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
+from torch.distributed._tensor import DeviceMesh, mesh_resources
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
@@ -78,10 +79,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -98,21 +99,36 @@ def _init_process_group_state(
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
     policy: Optional[_Policy],
+    device_mesh: Optional[DeviceMesh] = None,
 ) -> _FSDPState:
+    if process_group is not None and device_mesh is not None:
+        raise ValueError(
+            "Cannot pass both process_group and device_mesh at the "
+            "same time. Please just pass only one of them."
+        )
     is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
     if is_hybrid_strategy:
-        if process_group is None and policy is None:
+        if process_group is None and policy is None and device_mesh is None:
             # Raise an error here, since this is manual wrapping with no process group
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
+                f"Manual wrapping with {sharding_strategy}",
+                "requires explicit specification of process group or device_mesh.",
             )
-        state = _init_process_group_state_for_hybrid_shard(state, process_group)
+        else:
+            state = _init_process_group_state_for_hybrid_shard(
+                state, process_group, device_mesh
+            )
     else:
-        state.process_group = (
-            process_group if process_group is not None else _get_default_group()
-        )
+        if device_mesh:
+            state._device_mesh = device_mesh
+            state.process_group = device_mesh.get_dim_groups(mesh_dim=0)
+        else:
+            state.process_group = (
+                process_group if process_group is not None else _get_default_group()
+            )
+
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
     data_parallel_world_size = state.world_size
@@ -131,9 +147,23 @@ def _init_process_group_state(
 
 @no_type_check
 def _init_process_group_state_for_hybrid_shard(
-    state: _FSDPState, process_group
+    state: _FSDPState,
+    process_group: ProcessGroupType,
+    device_mesh: DeviceMesh,
 ) -> _FSDPState:
-    if process_group is None:
+    if device_mesh:
+        if _is_valid_hybrid_shard_device_mesh(device_mesh):
+            state._device_mesh = device_mesh
+            # We currently only allow _inter_node_pg to be the outermost dimension, and the
+            # process_group(intra_node) to be the innermost dimension.
+            state._inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
+            state.process_group = device_mesh.get_dim_groups(mesh_dim=1)
+        else:
+            raise ValueError(
+                "Expected device_mesh to have ndim=2 "
+                f"but got {len(device_mesh.get_dim_groups())}"
+            )
+    elif process_group is None:
         default_group = _get_default_group()
         intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(
             default_group, state._device_handle.device_count()
@@ -167,6 +197,17 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
         and len(process_group) == 2
         and all(isinstance(pg, dist.ProcessGroup) for pg in process_group)
     )
+
+
+@no_type_check
+def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
+    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    if parent_mesh is not None:
+        raise RuntimeError(
+            f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
+            "Hybrid sharding + TP is not supported yet.",
+        )
+    return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
 @no_type_check
@@ -273,6 +314,10 @@ def _init_ignored_module_states(
         module,
         state._ignored_modules,
         ignored_parameters,
+    )
+    state._ignored_buffer_names = _get_ignored_buffer_names(
+        module,
+        state._ignored_modules,
     )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
@@ -489,16 +534,31 @@ def _init_param_handle_from_module(
     )
     # Materialize the module if needed
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
-        _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
+        _materialize_with_param_init_fn(
+            fully_sharded_module, param_init_fn, state._ignored_modules
+        )
     elif is_meta_module:
-        _materialize_meta_module(fully_sharded_module, device_id)
+        _materialize_meta_module(
+            fully_sharded_module, device_id, state._ignored_modules
+        )
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
-            check_fn=lambda k: _get_module_fsdp_state(k) is None,
+            check_fn=lambda submodule: _get_module_fsdp_state(submodule) is None
+            and submodule not in state._ignored_modules,
         )
+
+    ignored_buffers = {
+        buffer
+        for ignored_module in state._ignored_modules
+        for buffer in ignored_module.buffers()
+    }
+
     _move_module_to_device(
-        fully_sharded_module, state._ignored_params, device_from_device_id
+        fully_sharded_module,
+        state._ignored_params,
+        ignored_buffers,
+        device_from_device_id,
     )
     state.compute_device = _get_compute_device(
         fully_sharded_module,
@@ -512,6 +572,10 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             fully_sharded_module, managed_params, state.process_group
         )
+        if state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            _sync_module_params_and_buffers(
+                fully_sharded_module, managed_params, state._inter_node_pg
+            )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
     return state
 
@@ -635,6 +699,37 @@ def _get_ignored_params(
     return all_ignored_params
 
 
+def _get_ignored_buffer_names(
+    root_module: torch.nn.Module,
+    ignored_modules: Set[torch.nn.Module],
+) -> Set[str]:
+    """
+    Returns the cleaned buffer FQNs in ``ignored_modules``
+    """
+    all_ignored_buffer_names: Set[str] = set()
+
+    buffers_in_ignored_modules = {
+        buffer for m in ignored_modules for buffer in m.buffers()
+    }
+
+    all_ignored_buffer_names.update(
+        {
+            clean_tensor_name(buffer_name)
+            for buffer_name, buffer in root_module.named_buffers()
+            if buffer in buffers_in_ignored_modules
+        }
+    )
+
+    # Always include nested FSDP modules' ignored buffer names
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
+
+    return all_ignored_buffer_names
+
+
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:
     """
     Returns the fully prefixed names of all buffers in the module hierarchy
@@ -732,12 +827,13 @@ def _need_to_materialize_module(
 def _materialize_with_param_init_fn(
     root_module: nn.Module,
     param_init_fn: Callable[[nn.Module], None],
+    ignored_modules: Set[nn.Module],
 ) -> None:
     if not callable(param_init_fn):
         raise ValueError(
             f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
         )
-    modules_to_materialize = _get_modules_to_materialize(root_module)
+    modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
     for module in modules_to_materialize:
         param_init_fn(module)
 
@@ -745,12 +841,13 @@ def _materialize_with_param_init_fn(
 def _materialize_meta_module(
     root_module: nn.Module,
     device_from_device_id: Optional[torch.device],
+    ignored_modules: Set[nn.Module],
 ):
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
         torch.cuda.current_device()
     )
-    modules_to_materialize = _get_modules_to_materialize(root_module)
+    modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
     try:
         # Assume that each module's `reset_parameters()` only initializes its
         # own parameters and not those of its children
@@ -774,9 +871,11 @@ def _materialize_meta_module(
         raise e
 
 
-def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
+def _get_modules_to_materialize(
+    root_module: nn.Module, ignored_modules: Set[nn.Module]
+) -> List[nn.Module]:
     # Run BFS to collect the modules to materialize via `reset_parameters()`,
-    # stopping at any module with FSDP already applied
+    # stopping at any module with FSDP already applied or at ignored modules.
     modules_to_materialize: List[nn.Module] = []
     queue = collections.deque([root_module])
     visited_modules: Set[nn.Module] = {root_module}
@@ -787,6 +886,7 @@ def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
             if (
                 child_module not in visited_modules
                 and _get_module_fsdp_state(child_module) is None
+                and child_module not in ignored_modules
             ):
                 visited_modules.add(child_module)
                 queue.append(child_module)
@@ -796,6 +896,7 @@ def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
 def _move_module_to_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    ignored_buffers: Set[torch.Tensor],
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
@@ -836,10 +937,9 @@ def _move_module_to_device(
             for submodule in curr_module.children():
                 if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
                     queue.append(submodule)
-        # NOTE: This includes moving ignored modules' parameters. If we
-        # decide to change the semantics in the future, simply filter based
-        # on the ignored parameters (and buffers).
-        _move_states_to_device(params, buffers, device_from_device_id)
+        params_to_move = [p for p in params if p not in ignored_params]
+        bufs_to_move = [p for p in buffers if p not in ignored_buffers]
+        _move_states_to_device(params_to_move, bufs_to_move, device_from_device_id)
         return
     param = next(_get_orig_params(module, ignored_params), None)
     if param is not None and param.device == cpu_device:

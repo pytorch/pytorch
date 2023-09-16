@@ -157,7 +157,7 @@ class PyCodegen:
         self.top_of_stack = value
 
     def add_graph_output(self, value):
-        graph_outputs_key = id(value.proxy)
+        graph_outputs_key = id(value.as_proxy())
         if graph_outputs_key not in self.graph_outputs:
             self.graph_outputs[graph_outputs_key] = GraphOutputEntry(
                 len(self.graph_outputs), value
