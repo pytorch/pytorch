@@ -186,6 +186,8 @@ class TestPytree(TestCase):
             {"a": 0, "b": [{"c": 1}]},
             {"a": 0, "b": [1, {"c": 2}, torch.randn(3)], "c": (torch.randn(2, 3), 1)},
         ]
+        for case in cases:
+            run_test(case)
 
     def test_treemap(self):
         def run_test(pytree):
@@ -200,19 +202,19 @@ class TestPytree(TestCase):
                 return x // 3
 
             self.assertEqual(
-                py_pytree.tree_flatten(py_pytree.tree_flatten(pytree, f), invf),
+                py_pytree.tree_map(py_pytree.tree_map(pytree, f), invf),
                 pytree,
             )
 
-            cases = [
-                [()],
-                ([],),
-                {"a": ()},
-                {"a": 1, "b": [{"c": 2}]},
-                {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
-            ]
-            for case in cases:
-                run_test(case)
+        cases = [
+            [()],
+            ([],),
+            {"a": ()},
+            {"a": 1, "b": [{"c": 2}]},
+            {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
+        ]
+        for case in cases:
+            run_test(case)
 
     def test_tree_only(self):
         self.assertEqual(
@@ -408,7 +410,7 @@ TreeSpec(TupleVariable, None, [*,
             py_pytree._register_pytree_node(
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),
-                lambda xs, _: Dummy(*xs),
+                lambda xs, _: DummyType(*xs),
                 to_dumpable_context=lambda context: "moo",
             )
 
@@ -421,7 +423,7 @@ TreeSpec(TupleVariable, None, [*,
         py_pytree._register_pytree_node(
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: Dummy(*xs),
+            lambda xs, _: DummyType(*xs),
             to_dumpable_context=lambda context: DummyType,
             from_dumpable_context=lambda dumpable_context: None,
         )
