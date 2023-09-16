@@ -180,25 +180,6 @@ class BaseListVariable(VariableTracker):
             comps,
         ).add_options(options)
 
-    # List-like implementations for pytree
-    def __len__(self):
-        return len(self.items)
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            index = SliceVariable(
-                [
-                    ConstantVariable(index.start),
-                    ConstantVariable(index.stop),
-                    ConstantVariable(index.step),
-                ]
-            )
-        elif isinstance(index, int):
-            index = ConstantVariable(index)
-        else:
-            raise TypeError("Invalid index type. Must be int or slice.")
-        return self.getitem_const(index)
-
 
 class RangeVariable(BaseListVariable):
     def __init__(self, items, **kwargs):
