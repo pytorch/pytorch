@@ -370,8 +370,6 @@ inductor_override_kwargs = {
     "linalg.solve_triangular": {"check_gradient": False},
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
-    # grad calculation below fails for both the aten and the compiled implementation.
-    "linalg.eig": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops
@@ -546,6 +544,7 @@ class TestInductorOpInfo(TestCase):
                         "reference_in_float": False,
                         "check_gradient": requires_grad,
                         "check_has_compiled": no_python,
+                        "output_process_fn_grad": sample_input.output_process_fn_grad,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
                     self.check_model_cuda(
