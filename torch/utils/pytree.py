@@ -13,6 +13,7 @@ collection support for PyTorch APIs.
 """
 
 import functools
+import pickle
 from typing import (
     Any,
     Callable,
@@ -48,6 +49,8 @@ __all__ = [
     "tree_any_only",
     "broadcast_prefix",
     "_broadcast_to_and_flatten",
+    "treespec_dumps",
+    "treespec_loads",
 ]
 
 
@@ -728,6 +731,16 @@ def _broadcast_to_and_flatten(
         )
     except ValueError:
         return None
+
+
+def treespec_dumps(treespec: PyTreeSpec) -> bytes:
+    """Serialize a treespec to bytes."""
+    return pickle.dumps(treespec)
+
+
+def treespec_loads(serialized: bytes) -> PyTreeSpec:
+    """Deserialize a treespec from bytes."""
+    return pickle.loads(serialized)
 
 
 class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
