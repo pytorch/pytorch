@@ -316,6 +316,8 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)
+        print(f"left: {left}")
+        print(f"right: {right}")
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
@@ -341,9 +343,9 @@ class SizeVarAllocator:
         """return the smaller of left and right, and guard on that choice"""
         lv = self.size_hint(left)
         rv = self.size_hint(right)
-        if self.shape_env.evaluate_expr(sympy.Eq(lv, rv)):
+        if self.shape_env._maybe_evaluate_static(sympy.Eq(lv, rv)):
             return self.guard_equals(left, right)
-        elif self.shape_env.evaluate_expr(sympy.Lt(lv, rv)):
+        elif self.shape_env._maybe_evaluate_static(sympy.Lt(lv, rv)):
             self.guard_lt(left, right)
             return left
         else:
@@ -369,7 +371,6 @@ class SizeVarAllocator:
         while any(s.name.startswith("ps") for s in free_symbols):
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols
-
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr) -> int:

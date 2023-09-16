@@ -978,15 +978,33 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
-        if isinstance(r, sympy.Expr):
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
+        print(f"guard_int: r: {r}")
+        print(f"guard_int: type(r): {type(r)}")
+        print(f"r.count_ops(visual=True): {r.count_ops(visual=True)}")
+        if isinstance(r, sympy.Integer):
+            return int(r)
+        elif isinstance(r, sympy.Symbol) and self.shape_env.is_unbacked_symint(r):
             return r
-        else:
-            try:
-                return int(r)
-            except Exception:
-                log.warning("Failed to convert to int: %s", r)
-                raise
+        elif (
+            isinstance(r, sympy.Expr) and \
+            all(isinstance(s, sympy.Integer) or self.shape_env.is_unbacked_symint(s) for s in r.atoms()) and \
+            all(
+                (
+                    s.name in {"ADD", "SUB", "MUL", "NEG"}
+                )
+                for s in r.count_ops(visual=True).atoms()
+            )
+        ):
+            # Expression will always evaluate to int if:
+            # 1. it involves only integers (including unbacked symints)
+            # 2. it only has add/sub/mul/neg operations
+            return r
+        try:
+            return int(r)
+        except Exception:
+            log.warning("Failed to convert to int: %s", r)
+            raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
@@ -1001,7 +1019,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
         if isinstance(r, sympy.core.relational.Relational):
             # NOTE: we do this unbacked symint replacement only to resolve bool guard,
             # so any default value > 1 would work.
@@ -3758,7 +3776,7 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):  # , return_expr_if_has_unbacked_symint_and_concrete_val_is_int=False):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None, allow_return_unbacked_symint=False):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -3825,7 +3843,7 @@ class ShapeEnv:
                 # TODO: dedupe this with _maybe_evaluate_static
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                    if torch._dynamo.config.capture_scalar_outputs:
+                    if allow_return_unbacked_symint:
                         return new_expr
                     else:
                         raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
@@ -3837,22 +3855,21 @@ class ShapeEnv:
                 if isinstance(expr, (sympy.Eq, sympy.Ne)):
                     expr = sympy.Not(expr)
 
-            if not self.has_unbacked_symint(orig_expr):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    self._maybe_guard_eq(expr, bool(concrete_val))
-                    # TODO: If we successfully eliminate a symbol via equality, it
-                    # is not actually necessary to save a guard for the equality,
-                    # as we will implicitly generate a guard when we match that
-                    # input against the symbol
-                elif isinstance(concrete_val, sympy.Integer):
-                    # WARNING: we cannot actually do simplifications on guards
-                    # on floating point values, because Sympy generally does not
-                    # think expressions on integers can ever be equal to floating
-                    # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
-                    # very clear algebraic laws that hold for floating point, such
-                    # simplifications are error prone anyway, so be sure not to
-                    # maybe_guard_eq in those cases.
-                    self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                self._maybe_guard_eq(expr, bool(concrete_val))
+                # TODO: If we successfully eliminate a symbol via equality, it
+                # is not actually necessary to save a guard for the equality,
+                # as we will implicitly generate a guard when we match that
+                # input against the symbol
+            elif isinstance(concrete_val, sympy.Integer):
+                # WARNING: we cannot actually do simplifications on guards
+                # on floating point values, because Sympy generally does not
+                # think expressions on integers can ever be equal to floating
+                # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+                # very clear algebraic laws that hold for floating point, such
+                # simplifications are error prone anyway, so be sure not to
+                # maybe_guard_eq in those cases.
+                self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
             if concrete_val is sympy.true:
                 g = expr

@@ -7114,6 +7114,38 @@ class CommonTemplate:
             actual = compiled(x)
             self.assertEqual(ref, actual)
 
+    def test_tolist_repeat_interleave(self):
+        def f(x):
+            repeats = x[0][1].item()
+            torch.export.constrain_as_size(repeats)
+            return torch.repeat_interleave(x, repeats)
+
+        with (
+            torch._dynamo.config.patch(
+                dynamic_shapes=True,
+                capture_dynamic_output_shape_ops=True,
+                capture_scalar_outputs=True,
+            ),
+        ):
+            compiled = torch.compile(f, fullgraph=True, dynamic=True)
+            x = torch.tensor([[1, 2], [3, 4]], dtype = torch.int64, device="cuda")
+            code = run_and_get_triton_code(compiled, x)
+            print(f"code: {code}")
+            # FileCheck() \
+            #     .check("buf0 = arg0_1[0].item()") \
+            #     .check("buf1 = arg0_1[1].item()") \
+            #     .check("buf4 = empty_strided((buf0 + buf1, ), (1, ), device='cuda', dtype=torch.float32)") \
+            #     .check("buf2 = reinterpret_tensor(buf4, (math.floor(buf0), ), (1, ), 0)  # alias") \
+            #     .check("buf3 = reinterpret_tensor(buf4, (math.floor(buf1), ), (1, ), buf0)  # alias") \
+            #     .run(code)
+
+            ref = f(x)
+            actual = compiled(x)
+            # actual, = call([x])
+            print(f"ref: {ref}, actual: {actual}")
+            self.assertEqual(ref, actual)
+
+
 
 @dataclasses.dataclass
 class TestFailure:

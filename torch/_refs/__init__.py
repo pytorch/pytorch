@@ -4614,7 +4614,7 @@ def zeros(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    size = utils.extract_shape_from_varargs(size, validate=False)
+    size = utils.extract_shape_from_varargs(size)
 
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -4666,7 +4666,7 @@ def ones(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    size = utils.extract_shape_from_varargs(size, validate=False)
+    size = utils.extract_shape_from_varargs(size)
 
     if dtype is None:
         dtype = torch.get_default_dtype()

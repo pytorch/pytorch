@@ -2219,7 +2219,7 @@ class Layout(IRNode):
             stride_ordered[order[i]] = V.graph.sizevars.size_hint(self.stride[i])
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            if V.graph.sizevars.shape_env.evaluate_expr(sympy.Gt(stride_ordered[i], stride_ordered[i + 1])):
+            if V.graph.sizevars.shape_env._maybe_evaluate_static(sympy.Gt(stride_ordered[i], stride_ordered[i + 1])):
                 return False
         return True
 
