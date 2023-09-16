@@ -63,7 +63,8 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
          )
       );
   cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
-  return cpu_tensor.contiguous();
+  // Make sure that NC11 strides follow formula of contiguous tensor.
+  return cpu_tensor.contiguous().resize_(dims, c10::MemoryFormat::Contiguous);
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor, c10::optional<ScalarType> dtype) {

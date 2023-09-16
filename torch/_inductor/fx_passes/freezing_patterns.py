@@ -7,8 +7,12 @@ from ..._dynamo.utils import counters
 from .. import config
 from ..pattern_matcher import (
     _return_true,
+    CallFunction,
+    Ignored,
     inference_graph,
     init_once_fakemode,
+    KeywordArg,
+    Match,
     PatternMatcherPass,
     register_graph_pattern,
     register_replacement,
@@ -39,6 +43,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     # unnecessary nodes, but may need a good method to chose the rounds number.
     # works like: conv+binary+binary.
     binary_folding = counters["inductor"]["binary_folding"]
+    fake_tensor_prop(gm, aot_example_inputs, True)
+
+    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_convs(gm)
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
@@ -50,7 +57,11 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
             break
         binary_folding = counters["inductor"]["binary_folding"]
 
+    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_convs(gm)
+
     constant_fold(gm)
+    fake_tensor_prop(gm, aot_example_inputs, True)
+
     for pattern in pass_patterns:
         pattern.apply(gm.graph)
 
@@ -158,3 +169,24 @@ def addmm_patterns_init():
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
     )
+
+
+def same_dtype(match):
+    return match.output_node().args[0].meta["val"].dtype == match.kwargs["dtype"]
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.prims.convert_element_type.default,
+        Ignored(),
+        KeywordArg("dtype"),
+    ),
+    pass_dict=pass_patterns[0],
+    extra_check=same_dtype,
+)
+def unnecessary_dtype_convert(match: Match, **kwargs):
+    """Remove unnecessary dtype conversion op, probably left as a result of Conv-Bn folding"""
+    graph = match.graph
+    node = match.output_node()
+    node.replace_all_uses_with(node.args[0])
+    graph.erase_node(node)

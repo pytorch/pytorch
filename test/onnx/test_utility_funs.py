@@ -169,7 +169,10 @@ class TestUnconvertibleOps(pytorch_test_common.ExportTestCase):
 @parameterized.parameterized_class(
     [
         {"opset_version": opset}
-        for opset in range(_constants.ONNX_BASE_OPSET, _constants.ONNX_MAX_OPSET + 1)
+        for opset in range(
+            _constants.ONNX_BASE_OPSET,
+            _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET + 1,
+        )
     ],
     class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_opset_{params_dict['opset_version']}",
 )

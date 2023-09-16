@@ -31,10 +31,13 @@ install_ubuntu() {
     maybe_libomp_dev=""
   fi
 
-  # TODO: Remove this once nvidia package repos are back online
-  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
-  # shellcheck disable=SC2046
-  sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+  # HACK: UCC testing relies on libnccl library from NVIDIA repo, and version 2.16 crashes
+  # See https://github.com/pytorch/pytorch/pull/105260#issuecomment-1673399729
+  if [[ "$UBUNTU_VERSION" == "20.04"* && "$CUDA_VERSION" == "11.8"* ]]; then
+    maybe_libnccl_dev="libnccl2=2.15.5-1+cuda11.8 libnccl-dev=2.15.5-1+cuda11.8 --allow-downgrades --allow-change-held-packages"
+  else
+    maybe_libnccl_dev=""
+  fi
 
   # Install common dependencies
   apt-get update
@@ -63,6 +66,7 @@ install_ubuntu() {
     libasound2-dev \
     libsndfile-dev \
     ${maybe_libomp_dev} \
+    ${maybe_libnccl_dev} \
     software-properties-common \
     wget \
     sudo \

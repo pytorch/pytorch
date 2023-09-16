@@ -30,19 +30,23 @@ except (unittest.SkipTest, ImportError) as e:
         sys.exit(0)
     raise
 
+
 bin_ops_under_test = [
     torch._foreach_add,
     torch._foreach_mul,
     torch._foreach_sub,
     torch._foreach_div,
     torch._foreach_maximum,
+    aten._foreach_copy,
 ]
+
 un_ops_under_test = [torch._foreach_reciprocal, torch._foreach_neg, torch._foreach_sign]
 compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
 all_ops = parametrize(
     "op", bin_ops_under_test + un_ops_under_test, name_fn=lambda f: f.__name__
 )
 bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
+scalar_bin_ops = parametrize("op", bin_ops_under_test[:4], name_fn=lambda f: f.__name__)
 decomp_ops = parametrize("op", compose_ops, name_fn=lambda f: f.__name__)
 
 
@@ -115,7 +119,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_single_scalar(self, op):
         self._test_single_scalar(op)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
@@ -143,7 +147,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_scheduler_fusion_scalar(self, op):
         def fn(a0, a1):
             c = op([a0, a1], 3.4)
@@ -160,7 +164,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_broadcasting(self, op):
         def fn(a0, a1, b0, b1):
             return op([a0, a1], [b0, b1])
@@ -223,11 +227,13 @@ class ForeachTests(TestCase):
         actual = fn_opt(*inputs)
         expected = fn(*inputs)
         self.assertEqual(actual, expected)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_kernel_split_arg_limit_list(self, op):
+        # NB: foeach_copy won't pass this test because it will dce one set of buffers
+
         def fn(a, b):
             return op(a, b)
 
@@ -246,7 +252,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     @unittest.skip(
         "Triton recursion depth exceeded: https://github.com/openai/triton/issues/1763"
     )
@@ -309,7 +315,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_non_foreach_consumer_scalar(self, op):
         def fn(a0, a1):
             c = op([a0, a1], 4.7)
@@ -349,7 +355,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_non_foreach_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
             c0 = torch.mul(a0, b0)
@@ -401,7 +407,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda()
-    @bin_ops
+    @scalar_bin_ops
     def test_non_foreach_consumer_producer_scalar(self, op):
         def fn(a0, a1, b0, b1):
             c0 = torch.add(a0, b0)
@@ -480,6 +486,64 @@ class ForeachTests(TestCase):
         )
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @bin_ops
+    def test_2d_blocking(self, op):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 40, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(40, 10, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+
+    @requires_cuda()
+    @bin_ops
+    def test_2d_blocking_partitioning(self, op):
+        def fn(a0, a1, b0, b1):
+            return op([a0, a1], [b0, b1])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(40, 30, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(30, 40, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
+    @requires_cuda()
+    @bin_ops
+    def test_2d_blocking_partitioning_elems(self, op):
+        """2D blocking should be grouped by number of yelems"""
+
+        def fn(a0, a1, a2, b0, b1, b2):
+            return op([a0, a1, a2], [b0, b1, b2])
+
+        self.check_model_cuda(
+            fn,
+            (
+                torch.rand(10, 20, device="cuda:0"),
+                torch.rand(30, 20, device="cuda:0"),
+                torch.rand(10, 30, device="cuda:0"),
+                torch.rand(20, 10, device="cuda:0").t(),
+                torch.rand(20, 30, device="cuda:0").t(),
+                torch.rand(30, 10, device="cuda:0").t(),
+            ),
+        )
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
 
 if __name__ == "__main__":

@@ -299,6 +299,58 @@ TEST_F(VulkanAPITest, copy_to_texture) {
   }
 }
 
+void test_copy_to_texture_bool(const at::IntArrayRef input_shape) {
+  using namespace at::native::vulkan;
+  auto cpu = at::randint(0, 2, input_shape, at::TensorOptions(at::kCPU).dtype(at::kBool));
+  auto in_vulkan = cpu.vulkan();
+
+  auto out_vulkan = in_vulkan.cpu();
+  auto check = at::equal(cpu, out_vulkan.cpu());
+
+  if (!check) {
+    std::cout << "Copy texture to bool failed on input_shape " << input_shape << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool_mul4_hw) {
+  // Uses the shader: image_to_nchw_quantized_mul4 ((H * W) % 4 == 0)
+  // ch % 4 != 0,  ch < 4
+  test_copy_to_texture_bool({5, 1, 2, 2});
+  test_copy_to_texture_bool({17, 2, 4, 2});
+  test_copy_to_texture_bool({9, 3, 3, 8});
+
+  // ch % 4 != 0, ch > 5
+  test_copy_to_texture_bool({7, 17, 4, 8});
+  test_copy_to_texture_bool({8, 6, 2, 4});
+  test_copy_to_texture_bool({13, 31, 4, 57});
+
+  // 3d, 2d, 1d
+  test_copy_to_texture_bool({17, 31, 4});
+  test_copy_to_texture_bool({64, 16});
+  test_copy_to_texture_bool({8});
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool_mul4_chw) {
+  // Uses the shader: image_to_nchw_quantized_mul4 ((H * W) % 4 == 0)
+  // ch % 4 == 0
+  test_copy_to_texture_bool({5, 16, 2, 16});
+  test_copy_to_texture_bool({8, 8, 2, 2});
+  test_copy_to_texture_bool({16, 31, 4});
+}
+
+TEST_F(VulkanAPITest, copy_to_texture_bool) {
+  // Uses the shader: image_to_nchw_uint ((H * W) % 4 != 0)
+  test_copy_to_texture_bool({13, 1, 3, 5});
+  test_copy_to_texture_bool({13, 7, 1, 5});
+  test_copy_to_texture_bool({13, 8, 2, 5});
+  test_copy_to_texture_bool({13, 31, 2, 57});
+
+  test_copy_to_texture_bool({67, 19, 7});
+  test_copy_to_texture_bool({229, 213});
+  test_copy_to_texture_bool({1902});
+}
+
 TEST_F(VulkanAPITest, adaptive_avg_pool2d) {
   c10::InferenceMode mode;
 
@@ -551,6 +603,26 @@ TEST_F(VulkanAPITest, addmm_expand) {
   const auto bias_cpu = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_cpu = at::rand({1, 1280}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu = at::rand({1280, 1000}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, addmm_expand2) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({9}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({17, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({6, 9}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
   const auto m1_vulkan = m1_cpu.vulkan();
@@ -3849,16 +3921,9 @@ TEST_F(VulkanAPITest, sum_dim_keepdim_4d) {
   test_sum_dim({9, 5, 7, 11}, {-2, -3, -4}, true);
 }
 
-TEST_F(VulkanAPITest, uniform) {
-  float a_min = -8.2f;
-  float a_max = -1.4f;
-
-  auto a_vulkan =
-      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
-  a_vulkan.uniform_(a_min, a_max);
+void test_uniform(at::Tensor a_vulkan, const float a_min, const float a_max) {
   auto a_cpu = a_vulkan.cpu();
-
-  ASSERT_TRUE(a_cpu.max().item<float>() < a_max);
+  ASSERT_TRUE(a_cpu.max().item<float>() <= a_max);
   ASSERT_TRUE(a_cpu.min().item<float>() >= a_min);
 
   // Verify range, also perform a loose check with on histogram distribution.
@@ -3882,6 +3947,86 @@ TEST_F(VulkanAPITest, uniform) {
   ASSERT_TRUE(
       (b_hist - expected_per_bin).abs().max().item<float>() <=
       (expected_per_bin * 0.05));
+}
+
+TEST_F(VulkanAPITest, uniform) {
+  float a_min = -8.2f;
+  float a_max = -1.4f;
+  auto a_vulkan =
+      at::rand({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.uniform_(a_min, a_max);
+  test_uniform(a_vulkan, a_min, a_max);
+}
+
+TEST_F(VulkanAPITest, rand_like) {
+  float a_min = 0.0f;
+  float a_max = 1.0f;
+  auto a_vulkan =
+      at::zeros({8, 7, 12, 10}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::rand_like(a_vulkan);
+  // verify that the input are still all zeros (not in-place)
+  ASSERT_TRUE(at::mean(a_vulkan.cpu()).item<float>() == 0.0);
+  test_uniform(out_vulkan, a_min, a_max);
+}
+
+void test_normal(at::Tensor out_vulkan, const float mean, const float std) {
+  // Verify the distribution is normal. The difference between given mean vs generated mean should be within 5% of standard deviation, and the same for standard deviation itself.
+  ASSERT_TRUE(std::abs(at::mean(out_vulkan.cpu()).item<float>() - mean) < std::abs(std) * 0.05);
+  ASSERT_TRUE(std::abs(at::std(out_vulkan.cpu()).item<float>() - std) < std::abs(std) * 0.05);
+}
+
+TEST_F(VulkanAPITest, normal_) {
+  float a_mean = -10.0;
+  float a_std = 2.0;
+
+  auto a_vulkan =
+      at::zeros({3, 4, 5, 6}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.normal_(a_mean, a_std);
+
+  test_normal(a_vulkan, a_mean, a_std);
+}
+
+TEST_F(VulkanAPITest, normal_large) {
+  float a_mean = 1.0;
+  float a_std = 0.001;
+
+  auto a_vulkan =
+      at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  a_vulkan.normal_(a_mean, a_std);
+
+  test_normal(a_vulkan, a_mean, a_std);
+}
+
+TEST_F(VulkanAPITest, normal_error) {
+  float a_mean = 1.0;
+  float a_std = -1;
+
+  auto a_vulkan =
+      at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  EXPECT_THROW(a_vulkan.normal_(a_mean, a_std), ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, randn_like) {
+  float a_mean = 0.0;
+  float a_std = 1.0;
+
+  auto a_vulkan =
+      at::zeros({8, 7, 6, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::randn_like(a_vulkan);
+  // verify that the input are still all zeros (not in-place)
+  ASSERT_TRUE(at::mean(a_vulkan.cpu()).item<float>() == 0.0);
+  test_normal(out_vulkan, a_mean, a_std);
+}
+
+TEST_F(VulkanAPITest, randn_like_large) {
+  float a_mean = 0.0;
+  float a_std = 1.0;
+
+  auto a_vulkan =
+      at::zeros({80, 70, 60, 50}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
+  const auto out_vulkan = at::randn_like(a_vulkan);
+
+  test_normal(out_vulkan, a_mean, a_std);
 }
 
 void test_t(const at::IntArrayRef input_shape) {
@@ -6443,16 +6588,40 @@ void test_linear(
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, linear_2d) {
+TEST_F(VulkanAPITest, linear_2d_flat) {
   test_linear({1, 37}, {41, 37}, {41});
 }
 
-TEST_F(VulkanAPITest, linear_3d) {
+TEST_F(VulkanAPITest, linear_2d_small) {
+  test_linear({2, 3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_2d_large) {
+  test_linear({49, 37}, {23, 37}, {23});
+}
+
+TEST_F(VulkanAPITest, linear_3d_flat) {
   test_linear({1, 1, 37}, {41, 37}, {41});
 }
 
-TEST_F(VulkanAPITest, linear_4d) {
+TEST_F(VulkanAPITest, linear_3d_small) {
+  test_linear({2, 3, 4}, {5, 4}, {5});
+}
+
+TEST_F(VulkanAPITest, linear_3d_large) {
+  test_linear({23, 17, 41}, {15, 41}, {15});
+}
+
+TEST_F(VulkanAPITest, linear_4d_flat) {
   test_linear({1, 1, 1, 37}, {41, 37}, {41});
+}
+
+TEST_F(VulkanAPITest, linear_4d_small) {
+  test_linear({2, 3, 4, 5}, {6, 5}, {6});
+}
+
+TEST_F(VulkanAPITest, linear_4d_large) {
+  test_linear({9, 13, 11, 17}, {23, 17}, {23});
 }
 
 TEST_F(VulkanAPITest, lstm_success) {

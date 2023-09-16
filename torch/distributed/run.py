@@ -454,8 +454,8 @@ def get_args_parser() -> ArgumentParser:
         "--standalone",
         action=check_env,
         help="Start a local standalone rendezvous backend that is represented by a C10d TCP store "
-        "on port 29400. Useful when launching single-node, multi-worker job. If specified "
-        "--rdzv-backend, --rdzv-endpoint, --rdzv-id are auto-assigned; any explicitly set values "
+        "on a free port. Useful when launching single-node, multi-worker job. If specified "
+        "--rdzv-backend, --rdzv-endpoint, --rdzv-id are auto-assigned and any explicitly set values "
         "are ignored.",
     )
 
@@ -781,7 +781,7 @@ def run_script_path(training_script: str, *training_script_args: str):
 def run(args):
     if args.standalone:
         args.rdzv_backend = "c10d"
-        args.rdzv_endpoint = "localhost:29400"
+        args.rdzv_endpoint = "localhost:0"
         args.rdzv_id = str(uuid.uuid4())
         log.info(
             "\n**************************************\n"
