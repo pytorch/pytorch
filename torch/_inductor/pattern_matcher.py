@@ -12,6 +12,7 @@ import torch
 import torch._guards
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch.fx import Node
@@ -1002,7 +1003,9 @@ def fx_to_pattern(
 @torch.no_grad()
 def inference_graph(fn, args):
     """Build a normalized inference graph, for use with fx_to_pattern"""
-    gm = make_fx(fn, select_decomp_table())(*args)
+    # TODO - look into using aot autograd, asserting no mutating ops here
+    with enable_python_dispatcher():
+        gm = make_fx(fn, select_decomp_table())(*args)
     gm.graph.eliminate_dead_code()
     gm.recompile()
     return gm

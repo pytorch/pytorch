@@ -23,10 +23,6 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
-)
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
@@ -311,19 +307,17 @@ def map_autograd(f, num_mapped_args, *args):
 
 
 @map_impl.py_impl(ProxyTorchDispatchMode)
-def map_proxy_torch_dispatch_mode(f, num_mapped, *args):
-    mode = _get_current_dispatch_mode()
-    assert mode is not None, "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if mode.enable_tracing:
-            return trace_map(mode, map_impl, f, num_mapped, *args)
-        else:
-            return map_impl(f, num_mapped, *args)
+def map_proxy_torch_dispatch_mode(mode, f, num_mapped, *args):
+    if mode.enable_tracing:
+        return trace_map(mode, map_impl, f, num_mapped, *args)
+    else:
+        return map_impl(f, num_mapped, *args)
 
 
 @map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(f, num_mapped, *args):
-    return map_dense(f, num_mapped, *args)
+def map_fake_tensor_mode(mode, f, num_mapped, *args):
+    with mode:
+        return map_dense(f, num_mapped, *args)
 
 
 @map_impl.py_impl(DispatchKey.Functionalize)
