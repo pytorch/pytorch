@@ -1498,7 +1498,7 @@ def forward(self, arg0_1, arg1_1):
         def make_dummy_fn(op):
             exec(f"temp = lambda x: x.{op}()")
             return temp
-        
+
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
             self.assertEqual(foo(inp, make_dummy_fn("cos"), make_dummy_fn("sin")), exp_out)
