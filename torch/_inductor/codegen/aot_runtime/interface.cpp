@@ -49,9 +49,9 @@ AOTInductorError AOTInductorModelContainerDelete(
 
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    AOTInductorTensorHandle inputs_handle,
+    AOTInductorTensorHandle input_handles,
     size_t num_inputs,
-    AOTInductorTensorHandle outputs_handle,
+    AOTInductorTensorHandle output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
@@ -61,14 +61,14 @@ AOTInductorError AOTInductorModelContainerRun(
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
 
-  const auto* inputs = reinterpret_cast<const at::Tensor*>(inputs_handle);
+  auto* inputs = reinterpret_cast<at::Tensor*>(input_handles);
   std::vector<at::Tensor> input_tensors;
   input_tensors.reserve(num_inputs);
   for (size_t i = 0; i < num_inputs; i++) {
     input_tensors.push_back(inputs[i]);
   }
 
-  auto* outputs = reinterpret_cast<at::Tensor*>(outputs_handle);
+  auto* outputs = reinterpret_cast<at::Tensor*>(output_handles);
   std::vector<at::Tensor> output_tensors;
   output_tensors.reserve(num_outputs);
   for (size_t i = 0; i < num_outputs; i++) {

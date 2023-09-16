@@ -52,9 +52,9 @@ AOTInductorError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    AOTInductorTensorHandle inputs_handle,
+    AOTInductorTensorHandle input_handles,
     size_t num_inputs,
-    AOTInductorTensorHandle outputs_handle,
+    AOTInductorTensorHandle output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
