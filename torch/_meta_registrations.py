@@ -417,6 +417,42 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
+@register_meta(aten.segment_reduce.default)
+def meta_segment_reduce(
+    data: Tensor,
+    reduce: str,
+    *,
+    lengths: Optional[Tensor] = None,
+    indices: Optional[Tensor] = None,
+    offsets: Optional[Tensor] = None,
+    axis: int = 0,
+    unsafe: bool = False,
+    initial=None,
+) -> Tensor:
+    if indices is not None:
+        raise NotImplementedError(
+            "segment_reduce(): indices based reduction is not supported yet."
+        )
+
+    def segment_reduce_lengths_tensor(lengths_shape):
+        return torch.empty(
+            lengths_shape + data.shape[axis + 1 :],
+            dtype=data.dtype,
+            device="meta",
+            memory_format=torch.contiguous_format,
+        )
+
+    if lengths is not None:
+        return segment_reduce_lengths_tensor(lengths.shape)
+    # FIXME should probably check that lengths and offset aren't both set, but
+    # the ATen implementation neglects this too
+    if offsets is not None:
+        # lengths == torch.diff(offsets)
+        lengths_shape = offsets.shape[:-1] + (offsets.shape[-1] - 1,)
+        return segment_reduce_lengths_tensor(lengths_shape)
+    raise RuntimeError("segment_reduce(): Either lengths or offsets must be defined.")
+
+
 @register_meta([aten.max.default, aten.max.unary_out])
 @out_wrapper()
 def meta_max(self):
@@ -3318,27 +3354,6 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
     if device_hint(offsets) == "cpu":
         bag_size = offsets.new_empty(offsets.size())
     return output, offset2bag, bag_size, max_indices
-
-
-@register_meta(aten._embedding_bag_dense_backward.default)
-def meta_embedding_bag_dense_backward(
-    grad,
-    indices,
-    offset2bag,
-    bag_size,
-    maximum_indices,
-    num_weights,
-    scale_grad_by_freq,
-    mode,
-    per_sample_weights,
-    padding_idx=-1,
-):
-    torch._check(
-        grad.dtype in (torch.half, torch.bfloat16, torch.float, torch.double),
-        lambda: f"grad is not floating point, got {grad.dtype}",
-    )
-    index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
-    return index_grad_weight
 
 
 def _get_reduction_dtype(input, dtype, promote_int_to_long=True):

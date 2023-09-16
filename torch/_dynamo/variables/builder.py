@@ -44,6 +44,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConvertIntSource,
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
@@ -712,6 +713,46 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, torch.SymBool):
+            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
+            # user provided SymBool with a SymInt in dynamo.
+
+            # Concretely,
+            # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
+            # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
+            # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
+            # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
+
+            value_hint = value.node.require_hint()
+            new_source = ConvertIntSource(self.source)
+
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                int(value_hint),
+                new_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symint),
+                source=new_source,
+            )
+
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                new_source,
+                new_symint,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=new_symint,
+            )
+            self.tx.output.tracked_fakes.append(
+                TrackedFake(new_symint, new_source, None)
+            )
+            return SymNodeVariable(
+                sym_node_proxy,
+                new_symint == 1,
             )
         else:
             result = UserDefinedObjectVariable(
