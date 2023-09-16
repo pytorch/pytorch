@@ -198,11 +198,10 @@ class OpSchema:
         if is_tensor:
             return True
 
-        is_list_like = isinstance(arg, list)
-        if not is_list_like:
+        if not isinstance(arg, list):
             return False
 
-        return all(isinstance(e, DTensorSpec) or e is None for e in self.args_schema)
+        return all(isinstance(e, DTensorSpec) or e is None for e in arg)
 
     def __hash__(self) -> int:
         # Only hash args and kwargs that op indicates to hash
