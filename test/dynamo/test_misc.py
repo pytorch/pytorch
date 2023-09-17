@@ -1339,6 +1339,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
                 continue
+            if op is operator.imatmul and (t1_np or t2_np):
+                # skip
+                # in numpy, in place matmul does not work single
+                # dimensional arrays
+                continue
             t1 = torch.rand(5)
             if t1_np:
                 t1 = t1.numpy()

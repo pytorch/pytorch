@@ -1523,6 +1523,14 @@ def _automatic_dynamic(e, tx, name, static_shapes):
     if static_shapes:
         return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
 
+    # We preserve the dynamism of inputs. For example, when users call
+    # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
+    if any(isinstance(s, SymInt) for s in e.size()):
+        return [
+            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+            for s in e.size()
+        ], [None] * e.dim()
+
     # Prep for automatic dynamic
     frame_state_entry = None
     if name not in tx.output.frame_state:
