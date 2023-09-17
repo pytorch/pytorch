@@ -43,19 +43,6 @@ def from_fun_old(t):
         return torch._from_functional_tensor(t)
     return t
 
-def from_fun(x):
-    if not isinstance(x, torch.Tensor):
-        return x
-    torch._sync(x)
-    return torch._from_functional_tensor(x)
-
-def to_fun(x):
-    if not isinstance(x, torch.Tensor):
-        return x
-    out = torch._to_functional_tensor(x)
-    torch._mirror_autograd_meta_to(x, out)
-    return out
-
 def _fake_map(f, x, *args):
     from functorch.experimental._map import _stack_pytree, _unstack_pytree
     x_pytrees = _unstack_pytree(x)
