@@ -1,6 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
-import functools
+import sys
 import unittest
 
 import torch
@@ -12,19 +12,30 @@ from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.utils import aot_inductor_launcher
 
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
-aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 try:
     try:
-        from . import test_torchinductor
+        from .test_torchinductor import copy_tests
     except ImportError:
-        import test_torchinductor
-except unittest.SkipTest:
+        from test_torchinductor import copy_tests
+except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
     raise
@@ -519,9 +530,7 @@ class AOTInductorTestABICompatibile(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
-test_torchinductor.copy_tests(
-    AOTInductorTestsTemplate, AOTInductorTestABICompatibile, "abi_compatible"
-)
+copy_tests(AOTInductorTestsTemplate, AOTInductorTestABICompatibile, "abi_compatible")
 
 
 class AOTInductorTestNonABICompatible(TestCase):
@@ -530,7 +539,7 @@ class AOTInductorTestNonABICompatible(TestCase):
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
-test_torchinductor.copy_tests(
+copy_tests(
     AOTInductorTestsTemplate, AOTInductorTestNonABICompatible, "non_abi_compatible"
 )
 
