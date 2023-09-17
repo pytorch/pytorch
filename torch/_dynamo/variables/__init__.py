@@ -10,7 +10,12 @@ from .ctx_manager import (
     GradModeVariable,
     WithExitFunctionVariable,
 )
-from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
+from .dicts import (
+    ConstDictVariable,
+    CustomizedDictVariable,
+    DataClassVariable,
+    DefaultDictVariable,
+)
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -63,6 +68,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "DataClassVariable",
+    "CustomizedDictVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",

@@ -4,7 +4,11 @@ from typing import cast, Optional, Sequence
 import torch
 
 import torch.distributed.distributed_c10d as c10d
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import (
+    OpSchema,
+    OutputSharding,
+    RuntimeSchemaInfo,
+)
 from torch.distributed._tensor.ops.common_rules import pointwise_rule, reduction_rule
 from torch.distributed._tensor.ops.utils import (
     as_list,
@@ -37,7 +41,8 @@ def default_reduction_rule(op_schema: OpSchema) -> OutputSharding:
     [
         aten.sum.default,
         aten.sum.dim_IntList,
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def sum_rule(op_schema: OpSchema) -> OutputSharding:
     args_schema = op_schema.args_schema
@@ -52,7 +57,9 @@ def sum_rule(op_schema: OpSchema) -> OutputSharding:
     )
 
 
-@register_prop_rule([aten._log_softmax.default, aten._softmax.default])
+@register_prop_rule(
+    [aten._log_softmax.default, aten._softmax.default], schema_info=RuntimeSchemaInfo(1)
+)
 def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     input_spec, softmax_dim, _ = op_schema.args_schema
     input_spec = cast(DTensorSpec, input_spec)
@@ -67,7 +74,8 @@ def softmax_rule(op_schema: OpSchema) -> OutputSharding:
     [
         aten._log_softmax_backward_data.default,
         aten._softmax_backward_data.default,
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(2),
 )
 def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     grad_out_spec, out_spec, softmax_dim, _ = op_schema.args_schema
@@ -83,7 +91,9 @@ def softmax_bwd_rule(op_schema: OpSchema) -> OutputSharding:
     return pointwise_rule(op_schema)
 
 
-@register_prop_rule([aten.mean.default, aten.mean.dim, aten.mean.out])
+@register_prop_rule(
+    [aten.mean.default, aten.mean.dim, aten.mean.out], schema_info=RuntimeSchemaInfo(1)
+)
 def mean_rule(op_schema: OpSchema) -> OutputSharding:
     args_schema = op_schema.args_schema
     input_spec = cast(DTensorSpec, args_schema[0])
@@ -111,7 +121,8 @@ def mean_rule(op_schema: OpSchema) -> OutputSharding:
         aten.var.default,
         aten.var.dim,
         aten.var.out,
-    ]
+    ],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def var_rule(op_schema: OpSchema) -> OutputSharding:
     args_schema = op_schema.args_schema
@@ -129,7 +140,10 @@ def var_rule(op_schema: OpSchema) -> OutputSharding:
     )
 
 
-@register_prop_rule([aten.var.correction, aten.var.correction_out])
+@register_prop_rule(
+    [aten.var.correction, aten.var.correction_out],
+    schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
+)
 def var_correction_rule(op_schema: OpSchema) -> OutputSharding:
     args_schema = op_schema.args_schema
     input_spec = cast(DTensorSpec, args_schema[0])
