@@ -334,16 +334,6 @@ def rand_like(self, *, dtype=None, device=None, **kwargs):
     )
 
 
-@register_decomposition(aten.randn_like)
-def randn_like(self, *, dtype=None, device=None, **kwargs):
-    return torch.randn(
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    )
-
-
 @register_decomposition(aten.full_like)
 def full_like(
     self,

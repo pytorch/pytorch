@@ -1062,8 +1062,6 @@ aten::randn.generator_with_names
 aten::randn.generator_with_names_out
 aten::randn.names
 aten::randn.names_out
-aten::randn_like
-aten::randn_like.out
 aten::random
 aten::random.from
 aten::random.from_out
