@@ -326,6 +326,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten._reshape_alias,
             aten.rad2deg,
             aten.rad2deg_,
+            aten.randint,
+            aten.randint.low,
             aten.renorm,
             aten.renorm_,
             aten.rot90,

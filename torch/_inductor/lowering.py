@@ -1676,7 +1676,6 @@ def warn_triton_random():
 
 fallback_rand = fallback_handler(aten.rand)
 fallback_randn = fallback_handler(aten.randn)
-make_fallback(aten.randint)
 
 
 @register_lowering(aten.rand)

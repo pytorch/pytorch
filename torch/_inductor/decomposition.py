@@ -390,11 +390,6 @@ def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
     )
 
 
-@register_decomposition(aten.randint.default)
-def randint(high, size, **kwargs):
-    return aten.randint.low(0, high, size, **kwargs)
-
-
 # The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
 # scale and zero_point is scalar or scalar tensor
 @register_decomposition(quantized_decomposed.quantize_per_tensor.default)
