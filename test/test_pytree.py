@@ -16,6 +16,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
+GlobalPoint = namedtuple("GlobalPoint", ["x", "y"])
+
+
 class GlobalDummyType:
     def __init__(self, x, y):
         self.x = x
@@ -772,11 +775,16 @@ class TestCxxPytree(TestCase):
         self.assertTrue(spec == cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
-        Point = namedtuple("Point", ["x", "y"])
-        spec = cxx_pytree.tree_structure(Point(0, 1))
+        spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec, spec)
+
+        LocalPoint = namedtuple("LocalPoint", ["x", "y"])
+        spec = cxx_pytree.tree_structure(LocalPoint(0, 1))
+
+        with self.assertRaises(AttributeError):
+            cxx_pytree.treespec_dumps(spec)
 
     def test_pytree_custom_type_serialize(self):
         cxx_pytree.register_pytree_node(
