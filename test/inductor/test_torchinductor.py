@@ -7046,7 +7046,7 @@ class CommonTemplate:
             return out
 
         device = "cpu"
-        tensor = torch.zeros((1,), dtype=torch.double, device=device)
+        tensor = torch.rand((1,), dtype=torch.double, device=device)
         index = torch.tensor([0], dtype=torch.long, device=device)
         source = torch.rand((1,), dtype=torch.double, device=device)
         self.common(
