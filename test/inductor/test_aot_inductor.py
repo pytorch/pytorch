@@ -11,7 +11,13 @@ from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.utils import aot_inductor_launcher
 
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, TestCase
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_FBCODE,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
