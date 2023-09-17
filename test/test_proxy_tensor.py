@@ -1559,8 +1559,6 @@ make_fx_failures = {
 }
 
 fake_tensor_failures = {
-    # FakeTensor fallback doesn't work
-    xfail('_segment_reduce', 'lengths'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
@@ -1597,7 +1595,6 @@ symbolic_tensor_failures = {
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
