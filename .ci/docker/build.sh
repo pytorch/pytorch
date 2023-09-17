@@ -324,6 +324,7 @@ fi
 # Build image
 docker build \
        --no-cache \
+       --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
