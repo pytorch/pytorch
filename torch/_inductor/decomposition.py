@@ -288,12 +288,6 @@ def lift(self):
     return self
 
 
-@register_decomposition([aten.bernoulli.default])
-def bernoulli(self, *, generator=None):
-    assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < self
-
-
 @register_decomposition([aten.fmin, prims.fmin])
 def fmin(self, other):
     return torch.where(torch.isnan(other) | (other > self), self, other)

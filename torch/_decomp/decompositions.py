@@ -3907,6 +3907,12 @@ def multilabel_margin_loss_forward(
     return z, is_target
 
 
+@register_decomposition([aten.bernoulli])
+def bernoulli(self, *, generator=None):
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < self
+
+
 # scaled_dot_product_attention used to be decomposed in pre-autograd, given that
 # it calls _scaled_dot_product_attention_math and
 # _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
