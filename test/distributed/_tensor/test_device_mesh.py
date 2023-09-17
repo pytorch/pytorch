@@ -271,6 +271,24 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["DP"]), mesh_2d)
         self.assertEqual(mesh_resources.get_parent_mesh(mesh_2d["TP"]), mesh_2d)
 
+    @with_comms
+    def test_get_parent_mesh_dim_exist(self):
+        mesh_shape = (2, 4)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh_2d["DP"]), 0)
+        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
+
+    @with_comms
+    def test_get_parent_mesh_dim_not_exist(self):
+        mesh_shape = (self.world_size,)
+        mesh = init_device_mesh(self.device_type, mesh_shape)
+
+        self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh), None)
+
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
     @property
