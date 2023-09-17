@@ -194,11 +194,6 @@ def all(input):
     return torch.logical_not(torch.any(torch.logical_not(input)))
 
 
-@register_decomposition([aten.all.dim])
-def all_dim(input, dim, keepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
-
-
 @register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)

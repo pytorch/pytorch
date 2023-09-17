@@ -4020,6 +4020,21 @@ def scaled_dot_product_flash_attention(
     )
 
 
+@register_decomposition([aten.all.dim])
+def all_dim(input, dim, keepdim=False):
+    all_dim_output = torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
+
+    # From https://pytorch.org/docs/stable/generated/torch.all.html
+    #
+    # "This function matches the behaviour of NumPy in returning output of dtype
+    # bool for all supported dtypes except uint8. For uint8 the dtype of output
+    # is uint8 itself."
+    if input.dtype == torch.uint8:
+        all_dim_output = all_dim_output.to(dtype=torch.uint8)
+
+    return all_dim_output
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

@@ -46,7 +46,6 @@ aten::addmv_
 aten::alias
 aten::all
 aten::all.all_out
-aten::all.dim
 aten::all.out
 aten::amax
 aten::amax.out

@@ -1800,6 +1800,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs._conversions.chalf',
         '_refs._conversions.cfloat',
         '_refs._conversions.cdouble',
+        '_refs.all',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.mvlgamma',
