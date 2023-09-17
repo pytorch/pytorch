@@ -740,7 +740,7 @@ def treespec_dumps(treespec: PyTreeSpec) -> bytes:
 
 def treespec_loads(serialized: bytes) -> PyTreeSpec:
     """Deserialize a treespec from bytes."""
-    return pickle.loads(serialized)
+    return pickle.loads(serialized)  # type: ignore[no-any-return]
 
 
 class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
