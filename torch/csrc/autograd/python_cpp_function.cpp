@@ -33,8 +33,8 @@ PyObject* THPCppFunction_call(
     return PyErr_Format(PyExc_TypeError, "keyword arguments are not supported");
   }
 
-  int num_inputs = PyTuple_GET_SIZE(args);
-  int num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
+  auto num_inputs = PyTuple_GET_SIZE(args);
+  auto num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
   if (num_inputs != num_inputs_required) {
     return PyErr_Format(
         PyExc_TypeError,
@@ -62,14 +62,14 @@ PyObject* THPCppFunction_call(
   }
   END_HANDLE_TH_ERRORS
 
-  int num_outputs = output.size();
+  auto num_outputs = output.size();
   if (num_outputs == 1) {
     // assume we want to unpack one element tuples for now
     return THPVariable_Wrap(output[0]);
   }
 
-  THPObjectPtr tuple(PyTuple_New(num_outputs));
-  for (int i = 0; i != num_outputs; ++i) {
+  THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(num_outputs)));
+  for (size_t i = 0; i != num_outputs; ++i) {
     PyTuple_SET_ITEM(tuple.get(), i, THPVariable_Wrap(output[i]));
   }
   return tuple.release();

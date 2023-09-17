@@ -115,7 +115,6 @@
 #include <c10/macros/Macros.h>
 
 #include <c10/util/AlignOf.h>
-#include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
