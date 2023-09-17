@@ -1022,7 +1022,8 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   SmallVectorImpl& operator=(const SmallVectorImpl& RHS);
 
-  SmallVectorImpl& operator=(SmallVectorImpl&& RHS);
+  SmallVectorImpl& operator=(SmallVectorImpl&& RHS) noexcept(
+      std::is_nothrow_move_constructible<T>::value);
 
   bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
@@ -1127,7 +1128,9 @@ SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
 }
 
 template <typename T>
-SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(SmallVectorImpl<T>&& RHS) {
+SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
+    SmallVectorImpl<T>&&
+        RHS) noexcept(std::is_nothrow_move_constructible<T>::value) {
   // Avoid self-assignment.
   if (this == &RHS)
     return *this;
@@ -1339,7 +1342,9 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
     return *this;
   }
 
-  SmallVector(SmallVector&& RHS) : SmallVectorImpl<T>(N) {
+  SmallVector(SmallVector&& RHS) noexcept(
+      std::is_nothrow_move_constructible<T>::value)
+      : SmallVectorImpl<T>(N) {
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
@@ -1360,7 +1365,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                                    .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
-  const SmallVector& operator=(const Container& RHS) {
+  SmallVector& operator=(const Container& RHS) {
     this->assign(RHS.begin(), RHS.end());
     return *this;
   }
@@ -1370,7 +1375,8 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
 
-  SmallVector& operator=(SmallVector&& RHS) {
+  SmallVector& operator=(SmallVector&& RHS) noexcept(
+      std::is_nothrow_move_constructible<T>::value) {
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
@@ -1396,7 +1402,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                                    .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
-  const SmallVector& operator=(Container&& C) {
+  SmallVector& operator=(Container&& C) {
     this->assign(C.begin(), C.end());
     return *this;
   }
