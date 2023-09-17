@@ -181,14 +181,6 @@ aten::digamma.out
 aten::digamma_
 aten::dist
 aten::dist.out
-aten::div.Scalar
-aten::div.Scalar_mode
-aten::div.Scalar_mode_out
-aten::div.Scalar_out
-aten::div.Tensor
-aten::div.Tensor_mode
-aten::div.out
-aten::div.out_mode
 aten::div_.Scalar
 aten::div_.Scalar_mode
 aten::div_.Tensor

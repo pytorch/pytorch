@@ -236,6 +236,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.detach,
             aten.diag_embed,
             aten.diagonal_backward,
+            aten.div.Tensor_mode,
             aten.dot,
             aten.vdot,
             aten.elu,
