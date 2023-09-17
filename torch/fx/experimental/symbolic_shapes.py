@@ -979,9 +979,6 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
-        print(f"guard_int: r: {r}")
-        print(f"guard_int: type(r): {type(r)}")
-        print(f"r.count_ops(visual=True): {r.count_ops(visual=True)}")
         if isinstance(r, sympy.Integer):
             return int(r)
         elif isinstance(r, sympy.Symbol) and self.shape_env.is_unbacked_symint(r):
@@ -3459,17 +3456,7 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
-            # print(f"self.var_to_range: {self.var_to_range}")
-            # for s, r in self.var_to_range.items():
-            #     print(f"s: {s}, type(s): {type(s)}, r: {r}, type(r): {type(r)}")
-            # print(f"k: {k}, type(k): {type(k)}, k in self.var_to_range: {k in self.var_to_range}, str(k) in self.var_to_range: {str(k) in self.var_to_range}, self.var_to_range: {self.var_to_range}")
-            # # vr = self.var_to_range[k]
-            # TODO(yf225): this is nuts, I don't understand why simple lookup doesn't work.
-            vr = None
-            for s in self.var_to_range:
-                if str(s) == str(k):
-                    vr = self.var_to_range[s]
-            assert vr is not None
+            vr = self.var_to_range[k]
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
@@ -3838,8 +3825,6 @@ class ShapeEnv:
 
             expr = orig_expr
 
-            print(f"here1: expr: {expr}")
-
             static_expr = self._maybe_evaluate_static(expr)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
@@ -3848,17 +3833,8 @@ class ShapeEnv:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
-            print(f"here2: expr: {expr}")
-
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
-                for s in expr.atoms():
-                    print(f"s: {s}, id(s): {id(s)}, type(s): {type(s)}")
-
-                print(f"self.var_to_range: {self.var_to_range}")
-                for s in self.var_to_range.keys():
-                    print(f"self.var_to_range: s: {s}, id(s): {id(s)}, type(s): {type(s)}")
-
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
                     if allow_return_unbacked_symint:

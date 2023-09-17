@@ -25,6 +25,7 @@ from typing import (
 )
 from unittest.mock import patch
 import sys
+import copy
 
 import sympy
 from sympy import Expr, Integer
@@ -1662,12 +1663,6 @@ class ExpandView(BaseView):
     def _normalize_size(x, new_size):
         """Replace `-1` with correct sizes"""
         new_size = list(map(sympy.expand, new_size))
-        # TODO(yf225): fix up the i3 symbol to use the original symbol object, i.e. prevent copying of symbols
-        # we should add a new method that does expand + dedup
-        for i in range(len(new_size)):
-            for s in new_size[i].free_symbols:
-                if str(s) in V.graph.sizevars.shape_env.name_to_var:
-                    new_size[i] = new_size[i].replace(s, V.graph.sizevars.shape_env.name_to_var[str(s)])
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
         assert len(new_size) == len(old_size)
@@ -1867,25 +1862,7 @@ class View(GenericView):
         if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
             return x
 
-        print(f"old_size: {old_size}, new_size: {new_size}")
-
-        # TODO(yf225): this is likely wrong, but how to not do fancy indexing and fall back the right way?
-        # maybe there is a way to impl this for unbacked symint, maybe can swap with default value 2 (or different value (prime numbers) for different symint) and reason through it
-        # old_size: [4, i3], new_size: [4*i3]
-        has_unbacked = False
-        # for e in new_size:
-        #     for s in e.free_symbols:
-        #         if str(s).startswith("i"):
-        #             has_unbacked = True
-        #             break
-
-        # for e in old_size:
-        #     for s in e.free_symbols:
-        #         if str(s).startswith("i"):
-        #             has_unbacked = True
-        #             break
-
-        if 0 in new_size or has_unbacked:
+        if 0 in new_size:
 
             def fake_reindex(index):
                 return tuple([0] * len(old_size))
@@ -3772,23 +3749,24 @@ class DynamicScalar(ExternKernelAlloc):
     """
     The result of a call to aten._local_scalar_dense.
     """
+
+    # NOTE: pretend to be a type that SymPy understands
+    __sympy__ = True
+
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        # TODO(yf225): we somehow end up with different torch.SymInts of the same name `i3` in the system
-        # and evaluate_expr on `i3 - i3` will not resolve to 0 :(.
-        # We need to dedup the symbols, maybe by making evaluate_expr replace symbols of the same name to the exact same symbol object
-        # Is this caused by deep-copying the ShapeEnv environment?
-        self.symval = V.graph.current_node.meta['val']
-        print(f"ir.py: self.symval: {self.symval}, id(self.symval): {id(self.symval)}, type(self.symval):{type(self.symval)}")
-        print(f"ir.py: self.symval.node.expr: {self.symval.node.expr}, id(self.symval.node.expr): {id(self.symval.node.expr)}, type(self.symval.node.expr):{type(self.symval.node.expr)}")
+        # TODO: maybe we should handle it at downstream IR's create instead
+        # TODO: or maybe in this class's __new__ method, do deepcopy(symval) and then ExternKernel.__init__(self) ?
 
-    def should_allocate(self):
-        return False
+        super().__init__(layout, inputs, constant_args)
+        self.symbol = V.graph.current_node.meta['val']
+
+    def __hash__(self):
+        return hash(self.symbol.node.expr)
 
     def has_side_effects(self):
         # Prevents dead code elimination, because the Python scalar value might be reused later
@@ -3800,7 +3778,7 @@ class DynamicScalar(ExternKernelAlloc):
 
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")
-        wrapper.writeline(f"{self.symval} = {self.get_name()}")
+        wrapper.writeline(f"{self.symbol} = {self.get_name()}")
 
     @classmethod
     def create(cls, x: "TensorBox"):
@@ -3811,24 +3789,28 @@ class DynamicScalar(ExternKernelAlloc):
             inputs=[x],
         )
 
-    # TODO(yf225): add more operations (see sympy Integer) or just pass through
+    def __getattr__(self, name):
+        # if attr is not found on the DynamicScalar object, then forward to the underlying Symbol object
+        return getattr(self.symbol.node.expr, name)
+
+    # TODO: add more operations (see sympy.Integer)
     def __add__(self, other):
-        return self.symval.node.expr + other
+        return self.symbol.node.expr + other
 
     def __mul__(self, other):
-        return self.symval.node.expr * other
+        return self.symbol.node.expr * other
 
     def __rmul__(self, other):
-        return self.symval.node.expr * other
+        return self.symbol.node.expr * other
 
     def __truediv__(self, other):
-        return self.symval.node.expr / other
+        return self.symbol.node.expr / other
 
     def __sub__(self, other):
-        return self.symval.node.expr - other
+        return self.symbol.node.expr - other
 
     def __str__(self):
-        return str(self.symval)
+        return str(self.symbol)
         # return self.get_name()
 
     __repr__ = __str__
