@@ -20,14 +20,21 @@ from typing import (
     overload,
     Sequence,
     Set,
+    ParamSpec,
     Tuple,
     Type,
     TypeVar,
     Union,
 )
 
+T = TypeVar("T")
+S = TypeVar("S", bound="torch.Tensor")
+P = ParamSpec("P")
+ReturnVal = TypeVar("ReturnVal", covariant=True)  # return value (always covariant)
+
 import torch
-from torch import Tensor
+from torch.autograd.graph import Node as _Node
+from torch.storage import TypedStorage, UntypedStorage
 from torch.types import (
     _bool,
     _complex,
@@ -44,6 +51,7 @@ from torch.types import (
     Storage,
     SymInt,
 )
+from torch import Size, Generator, memory_format, Stream
 
 class Tensor(torch._C._TensorBase):
     requires_grad: _bool
