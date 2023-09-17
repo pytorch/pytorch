@@ -562,7 +562,8 @@ Tensor angle_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor mvlgamma_backward(const Tensor& grad, const Tensor& self, int64_t p) {
-  Tensor args = at::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
+  Tensor args =
+      at::arange(-static_cast<double>(p) / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return grad * args.digamma_().sum(-1);
 }
@@ -644,7 +645,7 @@ Tensor div_tensor_other_backward(
 Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
-    Tensor other) {
+    const Tensor& other) {
   return div_tensor_other_backward(grad, self, other, c10::nullopt);
 }
 
@@ -1600,7 +1601,7 @@ Tensor renorm_jvp(
     int64_t dim,
     const Scalar& maxnorm) {
   auto self_sizes = self_p.sizes();
-  dim = c10::maybe_wrap_dim(dim, static_cast<int64_t>(self_sizes.size()));
+  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(self_sizes.size()));
 
   at::DimVector reduce_dims(self_sizes.size());
   std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
@@ -4609,10 +4610,10 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   if (ggI.defined() && training) {
     auto ggI_sum = sum_exclude_dim1(ggI);
     auto ggIinmu_sum = sum_exclude_dim1(ggI * input_sub_mu);
-    auto all_sub =
-        ((ggI_sum * gO_sum).div_(M))
-            .sub_(sum_exclude_dim1(gO * ggI))
-            .add_((sigma2_eps_neg_1 * gOinmu_sum * ggIinmu_sum).mul_(3. / M));
+    auto all_sub = ((ggI_sum * gO_sum).div_(M))
+                       .sub_(sum_exclude_dim1(gO * ggI))
+                       .add_((sigma2_eps_neg_1 * gOinmu_sum * ggIinmu_sum)
+                                 .mul_(3. / static_cast<double>(M)));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(M);
     auto gI_1t =
         (ggIinmu_sum * sigma2_eps_neg_3_2).div_(M) * (gO_sum.div(M) - gO);
@@ -4755,10 +4756,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     auto ggI_sum = ggI_expanded.sum(1, true);
     auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
 
-    auto all_sub =
-        ((ggI_sum * gxhat_sum).div_(N))
-            .sub_((ggI_expanded * gxhat).sum(1, true))
-            .add_((sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum).mul_(3. / N));
+    auto all_sub = ((ggI_sum * gxhat_sum).div_(N))
+                       .sub_((ggI_expanded * gxhat).sum(1, true))
+                       .add_((sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum)
+                                 .mul_(3. / static_cast<double>(N)));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
     auto gI_1t =
         (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
@@ -4987,7 +4988,8 @@ Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad) {
       negated_pad.cbegin(),
       negated_pad.cend(),
       negated_pad.begin(),
-      std::negate());
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
+      std::negate<c10::SymInt>());
   return at::constant_pad_nd_symint(grad, negated_pad, 0);
 }
 

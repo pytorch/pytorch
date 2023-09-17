@@ -222,7 +222,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   //     shared by multiple Tensors. See Note [ Using ForwardGrad ]
   // Any transition from not_initialized to initialized
   // must be protected by mutex_
-  std::shared_ptr<ForwardGrad> fw_grad_;
+  mutable std::shared_ptr<ForwardGrad> fw_grad_;
 
   // The hooks_ field is actually reused by both python and cpp logic
   // For both cases, we have a data structure, cpp_hooks_list_ (cpp)
@@ -308,7 +308,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
       TORCH_INTERNAL_ASSERT(self_impl);
-      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       set_requires_grad(requires_grad, self_impl);
     }
     TORCH_CHECK(
@@ -765,7 +764,6 @@ inline Variable make_variable(
         data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl->set_autograd_meta(
             std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
@@ -777,7 +775,6 @@ inline Variable make_variable(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
           /*version_counter=*/0,
           /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
             data_impl_copy.get(), requires_grad));

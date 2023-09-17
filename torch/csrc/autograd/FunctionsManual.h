@@ -151,7 +151,7 @@ at::Tensor div_tensor_self_backward(
 at::Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
-    Tensor other);
+    const Tensor& other);
 template <typename T>
 at::Tensor div_tensor_self_backward(
     const Tensor& grad,
