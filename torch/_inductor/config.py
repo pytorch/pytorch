@@ -433,6 +433,9 @@ class aot_inductor:
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
 
+    # Wether to codegen abi compatible model.so
+    abi_compatible = is_fbcode()
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
