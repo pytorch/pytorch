@@ -351,3 +351,9 @@ def test_class_getitem_38() -> None:
     match = "Type subscription requires python >= 3.9"
     with pytest.raises(TypeError):  # , match=match):
         np.dtype[Any]
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

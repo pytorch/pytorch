@@ -1075,6 +1075,75 @@ class TestExport(TestCase):
         exp_source_fns = [("cos", "cos"), ("sin", "sin")]
         self.assertEqual(actual_source_fns, exp_source_fns)
 
+    def test_lift_constants(self) -> None:
+        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
+
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 1)
+        self.assertEqual(len(ep.state_dict), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        nodes = list(ep.graph.nodes)
+
+        for node in nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 3)
+        self.assertEqual(len(ep.state_dict), 3)
+
+        # These constants should be placed after the param/buffers
+        self.assertTrue(
+            nodes[1].name in ep.graph_signature.inputs_to_buffers and
+            nodes[2].name in ep.graph_signature.inputs_to_buffers
+        )
+
+    def test_preserve_shape_dynamism_for_unused_inputs(self):
+        @dataclass
+        class Input:
+            f: torch.Tensor
+            p: torch.Tensor
+
+        torch._export.utils.register_dataclass_as_pytree_node(Input)
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Input):
+                return x.f + 1
+
+        mod = Module()
+        example_inputs = (Input(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
+        ep_static = export(mod, example_inputs)
+        for node in ep_static.graph.nodes:
+            if node.op == 'placeholder':
+                for s in node.meta['val'].shape:
+                    self.assertIsInstance(s, int)
+
+        x = example_inputs[0]
+        constraints = [dynamic_dim(x.f, 0), dynamic_dim(x.p, 0)]
+        ep_dynamic = export(mod, example_inputs, constraints=constraints)
+        for node in ep_dynamic.graph.nodes:
+            if node.op == 'placeholder':
+                for i, s in enumerate(node.meta['val'].shape):
+                    if i == 0:
+                        self.assertIsInstance(s, torch.SymInt)
+                    else:
+                        self.assertIsInstance(s, int)
 
 if __name__ == '__main__':
     run_tests()

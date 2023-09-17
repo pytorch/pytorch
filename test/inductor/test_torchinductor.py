@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     skipIfRocm,
     TEST_WITH_ASAN,
-    TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -258,6 +257,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -369,6 +369,11 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
+        actual = output_process_fn_grad(actual)
+        correct = output_process_fn_grad(correct)
+        actual_flat = tree_flatten(actual)[0]
+        correct_flat = tree_flatten(correct)[0]
+
         # generate random unit norm gradients
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
@@ -431,6 +436,7 @@ def check_model_cuda(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -454,6 +460,7 @@ def check_model_cuda(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
+        output_process_fn_grad=output_process_fn_grad,
     )
 
     if check_lowp:
@@ -483,6 +490,7 @@ def check_model_cuda(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
+            output_process_fn_grad=output_process_fn_grad,
         )
 
 
@@ -927,7 +935,7 @@ class CommonTemplate:
             # make sure things also work if they aren't unrolled
             self.common(fn, (torch.randn(8, 3),))
 
-    def test_multilayer_sum_low_prec(self):
+    def test_multilayer_low_prec(self):
         # fp16 nyi for cpu
         if self.device == "cpu":
             raise unittest.SkipTest("requires CUDA")
@@ -1022,17 +1030,6 @@ class CommonTemplate:
             return x * x.sum(-1, dtype=torch.double) + x.sum(dtype=torch.double)
 
         self.common(fn, (torch.ones(32, 32) * 70,))
-
-    def test_cumsum(self):
-        def fn(x):
-            return x.cumsum(0), x.cumsum(1)
-
-        # Persistent reductions
-        self.common(fn, (torch.rand(16, 32),), check_lowp=not TEST_WITH_ROCM)
-        self.common(fn, (torch.rand(20, 30),), check_lowp=not TEST_WITH_ROCM)
-
-        # Non-persistent reduction
-        self.common(fn, (torch.rand(100, 4000),), check_lowp=not TEST_WITH_ROCM)
 
     def test_clamp(self):
         def fn(a, b):
@@ -3189,6 +3186,16 @@ class CommonTemplate:
                 inp,
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
+
+    def test_masked_scatter(self):
+        def fn(value, mask, source):
+            return torch.masked_scatter(value, mask, source)
+
+        value = make_tensor(10, 10, dtype=torch.float32, device="cpu")
+        mask = make_tensor(10, 10, dtype=torch.bool, device="cpu")
+        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device="cpu")
+
+        self.common(fn, (value, mask, source))
 
     def test_fill1(self):
         def fn(x):

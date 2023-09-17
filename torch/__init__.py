@@ -26,6 +26,7 @@ def _running_with_deploy():
 from ._utils import _import_dotted_name, classproperty
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+from ._utils_internal import _functionalize_sync as _sync
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
@@ -174,13 +175,13 @@ def _load_global_deps() -> None:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
-        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        # As PyTorch is not purelib, but nvidia-*-cu12 is
         cuda_libs: Dict[str, str] = {
             'cublas': 'libcublas.so.*[0-9]',
             'cudnn': 'libcudnn.so.*[0-9]',
-            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
-            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
-            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9]',
             'cufft': 'libcufft.so.*[0-9]',
             'curand': 'libcurand.so.*[0-9]',
             'cusolver': 'libcusolver.so.*[0-9]',
