@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/Lerp.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/Lerp.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
