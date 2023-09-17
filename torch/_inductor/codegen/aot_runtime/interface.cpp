@@ -1,7 +1,5 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/inductor/aot_runtime/interface.h>
 #include <torch/csrc/inductor/aot_runtime/model_container.h>
-#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -54,9 +52,9 @@ AOTInductorError AOTInductorModelContainerDelete(
 
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    AOTInductorTensorHandle input_handles,
+    AtenTensorHandle* input_handles,
     size_t num_inputs,
-    AOTInductorTensorHandle output_handles,
+    AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
@@ -66,18 +64,16 @@ AOTInductorError AOTInductorModelContainerRun(
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
 
-  auto* inputs = reinterpret_cast<at::Tensor*>(input_handles);
-  std::vector<at::Tensor> input_tensors;
-  input_tensors.reserve(num_inputs);
+  std::vector<torch::aot_inductor::RAIIAtenTensorHandle> inputs;
+  inputs.reserve(num_inputs);
   for (size_t i = 0; i < num_inputs; i++) {
-    input_tensors.push_back(inputs[i]);
+    inputs.push_back(torch::aot_inductor::create_raii_tensor_handle(input_handles[i]));
   }
 
-  auto* outputs = reinterpret_cast<at::Tensor*>(output_handles);
-  std::vector<at::Tensor> output_tensors;
-  output_tensors.reserve(num_outputs);
+  std::vector<torch::aot_inductor::RAIIAtenTensorHandle> outputs;
+  outputs.reserve(num_outputs);
   for (size_t i = 0; i < num_outputs; i++) {
-    output_tensors.push_back(outputs[i]);
+    outputs.push_back(torch::aot_inductor::create_raii_tensor_handle(output_handles[i]));
   }
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
@@ -88,7 +84,7 @@ AOTInductorError AOTInductorModelContainerRun(
 
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<std::vector<int64_t>>* shapes;
-    container->run(input_tensors, output_tensors, &shapes, stream, proxy_executor);
+    container->run(inputs, outputs, &shapes, stream, proxy_executor);
     for (size_t i = 0; i < num_outputs; i++) {
       ret_output_sizes[i] = shapes->at(i).data();
       ret_output_ndims[i] = shapes->at(i).size();

@@ -66,10 +66,10 @@ TEST(AotInductorTest, BasicTest) {
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  AOTInductorTensorHandle inputs_handle =
-      reinterpret_cast<AOTInductorTensorHandle>(inputs.data());
-  AOTInductorTensorHandle outputs_handle =
-      reinterpret_cast<AOTInductorTensorHandle>(outputs.data());
+  AtenTensorHandle inputs_handle =
+      reinterpret_cast<AtenTensorHandle>(inputs.data());
+  AtenTensorHandle outputs_handle =
+      reinterpret_cast<AtenTensorHandle>(outputs.data());
 
   std::vector<const int64_t*> output_sizes(outputs.size());
   std::vector<int64_t> output_ndims(outputs.size());

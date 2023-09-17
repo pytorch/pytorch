@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+
 #ifdef __GNUC__
 #define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
@@ -31,9 +33,6 @@ using AOTInductorModelContainerHandle = AOTInductorModelContainerOpaque*;
 struct AOTInductorStreamOpaque;
 using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 
-struct AOTInductorTensorOpaque;
-using AOTInductorTensorHandle = AOTInductorTensorOpaque*;
-
 struct AOTInductorProxyExecutorOpaque;
 using AOTInductorProxyExecutorHandle = AOTInductorProxyExecutorOpaque*;
 
@@ -53,9 +52,9 @@ AOTInductorError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    AOTInductorTensorHandle input_handles,
+    AtenTensorHandle* input_handles,
     size_t num_inputs,
-    AOTInductorTensorHandle output_handles,
+    AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
