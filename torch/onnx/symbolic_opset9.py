@@ -1203,7 +1203,7 @@ def split(
 def unsafe_split(
     g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None
 ):
-    return split(g, self, split_size_or_sizes, dim, _outputs)
+    return split(g, self, split_size_or_sizes, dim, False, _outputs)
 
 
 @_onnx_symbolic("aten::split_with_sizes")

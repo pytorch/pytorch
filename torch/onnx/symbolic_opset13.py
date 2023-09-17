@@ -702,8 +702,8 @@ def repeat_interleave(
         g.op("Shape", repeats),
         value_t=torch.tensor([1], dtype=torch.long),
     )
-    r_splits = split(g, repeats, reps_like, 0)
-    i_splits = split(g, input, reps_like, dim)
+    r_splits = split(g, repeats, reps_like, 0, False)
+    i_splits = split(g, input, reps_like, dim, False)
 
     output_sizes[dim], input_sizes[dim] = -1, 1
 
