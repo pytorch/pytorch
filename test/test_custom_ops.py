@@ -17,6 +17,7 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
 from torch._utils_internal import get_file_path_2
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.optests.compile_check import operator_compile_check
 from typing import *  # noqa: F403
@@ -341,6 +342,10 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(AssertionError, "not completely traceable"):
             operator_compile_check(f, (x,), {})
 
+    @unittest.skipIf(
+        TEST_CUDA and not SM70OrLater,
+        "Triton only supports devices of CUDA Capability >= 7.0",
+    )
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_operator_compile_check_op(self, device, dtype, op):
         for sample_input in op.sample_inputs(
