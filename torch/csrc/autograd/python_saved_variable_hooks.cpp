@@ -64,8 +64,7 @@ void PyDefaultSavedVariableHooks::push_hooks(
 }
 
 void PyDefaultSavedVariableHooks::pop_hooks() {
-  PyObject *pack_hook(nullptr), *unpack_hook(nullptr);
-  std::tie(pack_hook, unpack_hook) = at::SavedTensorDefaultHooks::get_hooks();
+  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::get_hooks();
   TORCH_INTERNAL_ASSERT(pack_hook != nullptr && unpack_hook != nullptr);
   if (Py_IsInitialized()) {
     py::gil_scoped_acquire gil;
@@ -76,8 +75,7 @@ void PyDefaultSavedVariableHooks::pop_hooks() {
 }
 
 std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-  PyObject *pack_hook(nullptr), *unpack_hook(nullptr);
-  std::tie(pack_hook, unpack_hook) = at::SavedTensorDefaultHooks::get_hooks();
+  auto [pack_hook, unpack_hook] = at::SavedTensorDefaultHooks::get_hooks();
   if (!pack_hook || !unpack_hook) {
     return nullptr;
   }
