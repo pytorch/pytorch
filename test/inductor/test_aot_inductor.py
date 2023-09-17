@@ -15,18 +15,15 @@ from torch.testing._internal.common_utils import IS_FBCODE, TEST_WITH_ROCM, Test
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
-aten = torch.ops.aten
-
-try:
-    try:
-        from .test_torchinductor import copy_tests
-    except ImportError:
-        from test_torchinductor import copy_tests
-except (unittest.SkipTest, ImportError) as e:
-    sys.stderr.write(f"{type(e)}: {e}\n")
+if IS_WINDOWS and IS_CI:
+    sys.stderr.write(
+        "Windows CI does not have necessary dependencies for test_torchinductor yet\n"
+    )
     if __name__ == "__main__":
         sys.exit(0)
-    raise
+    raise unittest.SkipTest("requires sympy/functorch/filelock")
+
+from inductor.test_torchinductor import copy_tests
 
 
 class AOTInductorModelRunner:
