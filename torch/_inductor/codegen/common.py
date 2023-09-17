@@ -952,9 +952,7 @@ class Kernel(CodeGen):
             @staticmethod
             def store(name, index, value, mode=None):
                 self.store_buffer_names.add(name)
-                # Option 2: Keep the loop fusion, record the store buffer
-                # into self.cse.store_cache when mode is "atomic_add".
-                if mode is None or mode == "atomic_add":
+                if mode is None:
                     self.cse.store_cache[name] = value
                     if self.current_node:
                         for other_name in self.current_node.get_mutations():

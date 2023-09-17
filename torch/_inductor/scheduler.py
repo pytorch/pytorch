@@ -1485,16 +1485,16 @@ class Scheduler:
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
 
-        # # Option 1: Break the the loop fusion.
-        # if (
-        #     isinstance(node1, SchedulerNode)
-        #     and isinstance(node2, SchedulerNode)
-        #     and isinstance(node2._body, ir.LoopBody)
-        # ):
-        #     # If any buffer used by node2 is a mutation of node1, disable the fusion of node1 and node2
-        #     for key in node2._body.reads_name2expr.keys():
-        #         if key in node1.get_mutations():
-        #             return False
+        # Option 1: Break the the loop fusion.
+        if (
+            isinstance(node1, SchedulerNode)
+            and isinstance(node2, SchedulerNode)
+            and isinstance(node2._body, ir.LoopBody)
+        ):
+            # If any buffer used by node2 is a mutation of node1, disable the fusion of node1 and node2
+            for key in node2._body.reads_name2expr.keys():
+                if key in node1.get_mutations():
+                    return False
 
         if node2.is_template():
             return False  # only epilogues
