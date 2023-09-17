@@ -551,9 +551,7 @@ class TestCxxPytree(TestCase):
 
     def test_flatten_unflatten_odict(self):
         def run_test(odict):
-            expected_spec = cxx_pytree.tree_structure(
-                OrderedDict.fromkeys(odict, value=0)
-            )
+            expected_spec = cxx_pytree.tree_structure(OrderedDict.fromkeys(odict, 0))
             values, treespec = cxx_pytree.tree_flatten(odict)
             self.assertTrue(isinstance(values, list))
             self.assertEqual(values, list(odict.values()))
@@ -609,7 +607,7 @@ class TestCxxPytree(TestCase):
 
     def test_flatten_unflatten_dict(self):
         def run_test(dct):
-            expected_spec = cxx_pytree.tree_structure(dict.fromkeys(dct, value=0))
+            expected_spec = cxx_pytree.tree_structure(dict.fromkeys(dct, 0))
             values, treespec = cxx_pytree.tree_flatten(dct)
             self.assertTrue(isinstance(values, list))
             self.assertEqual(values, list(dct.values()))
