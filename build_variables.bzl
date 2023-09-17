@@ -71,6 +71,7 @@ def libtorch_generated_sources(gencode_pattern):
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
+    "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
