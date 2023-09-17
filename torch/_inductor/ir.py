@@ -3759,9 +3759,7 @@ class DynamicScalar(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
-        # TODO: maybe we should handle it at downstream IR's create instead
-        # TODO: or maybe in this class's __new__ method, do deepcopy(symval) and then ExternKernel.__init__(self) ?
-
+        # TODO: alternative: maybe we should handle it at downstream IR's create instead
         super().__init__(layout, inputs, constant_args)
         self.symbol = V.graph.current_node.meta['val']
 

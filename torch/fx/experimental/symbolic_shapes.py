@@ -978,6 +978,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
+        # TODO(yf225): maybe gate with dynamo capture scalar output config
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
         if isinstance(r, sympy.Integer):
             return int(r)
@@ -1016,6 +1017,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
+        # TODO(yf225): maybe gate with dynamo capture scalar output config
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
         if isinstance(r, sympy.core.relational.Relational):
             # NOTE: we do this unbacked symint replacement only to resolve bool guard,
@@ -2155,7 +2157,6 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
-        self.name_to_var: Dict[str, sympy.Symbol] = {}
         # Maps symbolic ints to their min/max range for runtime checks.
         # This is because we assume a graph generated with N=2 is general enough
         # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
@@ -2718,7 +2719,6 @@ class ShapeEnv:
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         self.var_to_range[symbol] = self._default_unspecified_value_range()
-        self.name_to_var[str(symbol)] = symbol
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
@@ -3424,12 +3424,6 @@ class ShapeEnv:
         If unbacked_only == True, then we only do substitutions on
         unbacked SymInts (leaving regular hinted integers alone).
         """
-        # TODO(yf225): assert we don't have duplicated symbols of same name in `expr`
-        # i.e. all same-name symbols should have same id()
-        # TODO(yf225): to observe duplicated symbols, try the repeat_interleave test case
-        # and print traceback at /data/users/willfeng/miniconda3/lib/python3.11/site-packages/sympy-1.12-py3.11.egg/sympy/core/symbol.py Symbol __new__ method
-
-        # breakpoint()
         expr = self.simplify(expr)
         symbols = list(expr.free_symbols)
 
@@ -3460,7 +3454,6 @@ class ShapeEnv:
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
-            # breakpoint()
             if (
                 vr.lower < (-sys.maxsize - 1) // 2 or
                 (unbacked_only and k in self.var_to_val)
@@ -3774,9 +3767,6 @@ class ShapeEnv:
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        # if self.has_unbacked_symint(orig_expr):
-        #     concrete_val = self.size_hint(orig_expr, replace_unbacked_with_default_size_hint=True)
-        # elif hint is None:
         if hint is None:
             concrete_val = self.size_hint(orig_expr)
         else:

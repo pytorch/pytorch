@@ -316,11 +316,7 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)
-        print(f"left: {left}")
-        print(f"right: {right}")
-        # NOTE: sympy has trouble resolving `Eq(4*i3 + 4, 4*i3 + 4)` to True, so try another way instead
-        # TODO(yf225): do we really need this?
-        assert self.shape_env.evaluate_expr(sympy.Eq(left-right, 0))
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
@@ -377,6 +373,7 @@ class SizeVarAllocator:
 
     def size_hint(self, expr: Expr) -> int:
         out = self.symbolic_hint(expr)
+        # TODO(yf225): maybe gate with dynamo capture scalar output config
         if isinstance(out, sympy.Expr):
             return out
         else:

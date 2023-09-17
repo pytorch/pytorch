@@ -550,11 +550,7 @@ def local_scalar_dense(fake_mode, func, arg):
     if is_float_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        print(f"func: {func}, arg: {arg}")
-        # TODO(yf225): interesting here - we should reuse this symint in ir.py
         symint = fake_mode.shape_env.create_unbacked_symint()
-        print(f"fake_tensor.py: symint: {symint}, id(symint): {id(symint)}, type(symint): {type(symint)}")
-        print(f"fake_tensor.py: symint.node.expr: {symint.node.expr}, id(symint.node.expr): {id(symint.node.expr)}, type(symint.node.expr): {type(symint.node.expr)}")
         # TODO(yf225): we are assuming all .item / .tolist are passed in as positive sizes (i.e. no negative indexing)
         # TODO(yf225): why do we need this? and why should we set lower to 2 instead of 1?
         # 1. should this produce a guard? why or why not?
