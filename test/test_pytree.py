@@ -16,6 +16,12 @@ from torch.testing._internal.common_utils import (
 )
 
 
+class GlobalDummyType:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+
 class TestPytree(TestCase):
     def test_treespec_equality(self):
         self.assertTrue(
@@ -773,20 +779,29 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec, spec)
 
     def test_pytree_custom_type_serialize(self):
-        class DummyType:
+        cxx_pytree.register_pytree_node(
+            GlobalDummyType,
+            lambda dummy: ([dummy.x, dummy.y], None),
+            lambda xs, _: GlobalDummyType(*xs),
+        )
+        spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
+        serialized_spec = cxx_pytree.treespec_dumps(spec)
+        roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
+        self.assertEqual(roundtrip_spec, spec)
+
+        class LocalDummyType:
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
 
         cxx_pytree.register_pytree_node(
-            DummyType,
+            LocalDummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: DummyType(*xs),
+            lambda xs, _: LocalDummyType(*xs),
         )
-        spec = cxx_pytree.tree_structure(DummyType(0, 1))
-        serialized_spec = cxx_pytree.treespec_dumps(spec)
-        roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
-        self.assertEqual(roundtrip_spec, spec)
+        spec = cxx_pytree.tree_structure(LocalDummyType(0, 1))
+        with self.assertRaises(AttributeError):
+            serialized_spec = cxx_pytree.treespec_dumps(spec)
 
     def test_pytree_serialize_bad_input(self):
         with self.assertRaises(TypeError):
