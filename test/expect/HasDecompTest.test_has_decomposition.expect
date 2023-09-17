@@ -791,7 +791,6 @@ aten::hamming_window.periodic_alpha_out
 aten::hamming_window.periodic_out
 aten::hann_window
 aten::hann_window.out
-aten::hann_window.periodic
 aten::hann_window.periodic_out
 aten::hardshrink_backward
 aten::hardshrink_backward.grad_input

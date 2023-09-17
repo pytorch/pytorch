@@ -4020,6 +4020,31 @@ def scaled_dot_product_flash_attention(
     )
 
 
+@register_decomposition(aten.hann_window.periodic)
+def hann_window_periodic(
+    window_length: int,
+    periodic: bool,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: Optional[bool] = None,
+) -> Tensor:
+    # aten::hann_window.periodic(int window_length, bool periodic, ...) -> Tensor
+    if window_length == 1:
+        hann_window = torch.ones(size=(1,))
+    else:
+        N = window_length + (1 if periodic else 0)
+        hann_window = torch.narrow(
+            torch.pow(torch.sin((torch.arange(0, N) * torch.pi) / (N - 1)), 2),
+            dim=0,
+            start=0,
+            length=window_length,
+        )
+
+    return hann_window.to(dtype=dtype, device=device)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
