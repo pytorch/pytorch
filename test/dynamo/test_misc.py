@@ -7416,7 +7416,9 @@ ShapeEnv not equal: field values don't match:
             def inner(a, b, res_dtype):
                 print(a, b, res_dtype)
                 self.assertEqual(torch.result_type(a, b), res_dtype)
-            inner(torch.tensor(1, device="cpu"), 1., torch.get_default_dtype()) 
+
+            inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
+
         torch.set_default_dtype(torch.float)
         foo()
         torch.set_default_dtype(torch.double)
