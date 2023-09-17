@@ -811,6 +811,16 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
+
+        if len([x for x in output if isinstance(x, SymNodeVariable)]) > 8:
+            from ..exc import SkipFrameBasedOnHueristic
+
+            raise SkipFrameBasedOnHueristic(
+                f"because {self.source.name()} is a list of integers of len > 16"
+                " with atleast 8 elements changing value between different frame invocations."
+                " This function is prone to recompilations."
+            )
+
         result = self.list_type(value)(
             output, mutable_local=MutableLocal(), guards=guards
         )

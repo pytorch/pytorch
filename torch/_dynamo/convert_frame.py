@@ -491,7 +491,7 @@ def _compile(
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
-                log.debug(
+                log.info(
                     "Skipping frame %s %s \
                     %s %s",
                     e,
@@ -502,6 +502,7 @@ def _compile(
                 if one_graph:
                     log.debug("No graph captured with one_graph=True")
                 return None
+
         output_codes.add(out_code)
 
         def log_bytecode(prefix, name, filename, line_no, code):
@@ -590,6 +591,7 @@ def _compile(
             ):
                 guard_count = len(output.guards)
                 graph_op_count = output.count_calls()
+                graph_non_getitem_op_count = output.count_non_getitem_op_calls()
                 graph_node_count = len(output.graph.nodes)
                 graph_input_count = len(output.placeholders)
                 entire_frame_compile_time = frame_phase_timing[frame_key].get(
@@ -602,6 +604,7 @@ def _compile(
                 guard_count = None
                 graph_op_count = None
                 graph_node_count = None
+                graph_non_getitem_op_count = None
                 graph_input_count = None
                 entire_frame_compile_time = None
                 backend_compile_time = None
@@ -614,6 +617,7 @@ def _compile(
                 cache_size.num_cache_entries,
                 guard_count,
                 graph_op_count,
+                graph_non_getitem_op_count,
                 graph_node_count,
                 graph_input_count,
                 entire_frame_compile_time,
@@ -621,6 +625,7 @@ def _compile(
                 fail_reason,
             )
             log_compilation_event(metrics)
+            log.info(metrics)
 
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):

@@ -55,6 +55,7 @@ from .current_scope_id import enter_new_scope
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
+    SkipFrameBasedOnHueristic,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -593,6 +594,14 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def count_calls(self):
         return count_calls(self.graph)
 
+    def count_non_getitem_op_calls(self):
+        c = 0
+        for n in self.graph.nodes:
+            if "call" in n.op:
+                if not (n.op == "call_function" and n.target == operator.getitem):
+                    c += 1
+        return c
+
     def is_empty_graph(self):
         return len(list(self.graph.nodes)) == 0
 
@@ -767,6 +776,11 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         raise AssertionError("unreachable")
 
+    def skip_frame_based_on_heurtisic(self) -> Optional[str]:
+        if len(self.guards) > 1000 and self.count_non_getitem_op_calls() < 50:
+            return "because there are > 1000 guards but < 50 ops. This function is likely not worth compiling."
+        return None
+
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
@@ -782,6 +796,9 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.compile_subgraph_reason = reason
 
         log.debug("COMPILING GRAPH due to %s", reason)
+
+        if skip_reason := self.skip_frame_based_on_heurtisic():
+            raise SkipFrameBasedOnHueristic(skip_reason)
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")

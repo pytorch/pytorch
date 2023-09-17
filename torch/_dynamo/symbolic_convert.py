@@ -696,7 +696,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except Unsupported:
+        except Unsupported as e:
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise
@@ -2464,6 +2464,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
+        if skip_reason := self.output.skip_frame_based_on_heurtisic():
+            # This is somewhat unwanted. he hueristic is based on the
+            # accumulated graph till now. If at the end of inlining of a
+            # function, we find that that accumulated graph till now is bad
+            # candidate, there is no easy way to tell which function in the call
+            # stack should be skipped.
+            #
+            # We solve this here by just causing a graph break here for Inlined
+            # function. Dynamo will renter the child frame and will eventually
+            # find the offending function in the call stack in subsequent
+            # Cpython frame invocations.
+            unimplemented(skip_reason)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

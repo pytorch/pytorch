@@ -41,6 +41,10 @@ class SkipFrame(TorchDynamoException):
     pass
 
 
+class SkipFrameBasedOnHueristic(SkipFrame):
+    pass
+
+
 class TorchRuntimeError(TorchDynamoException):
     pass
 
