@@ -98,7 +98,7 @@ void fuseNNPACKConvRelu(repr::NNModule* nn) {
     if (op.engine() != "NNPACK") {
       return false;
     }
-    caffe2::string algo = "AUTO";
+    std::string algo = "AUTO";
     for (const auto &arg : op.arg()) {
       if (arg.name() == "algo") {
         algo = arg.s();
