@@ -765,8 +765,10 @@ aten::frexp.Tensor
 aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
-aten::full_like
-aten::full_like.out
+aten::full
+aten::full.names
+aten::full.names_out
+aten::full.out
 aten::gather
 aten::gather.out
 aten::geqrf

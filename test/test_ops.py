@@ -1826,6 +1826,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.fliplr',
         '_refs.flipud',
         '_refs.float_power',
+        '_refs.full',
         '_refs.hsplit',
         '_refs.hstack',
         '_refs.isclose',

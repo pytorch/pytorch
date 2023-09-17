@@ -5257,7 +5257,6 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
-@register_decomposition(aten.full)
 @out_wrapper()
 def full(
     shape: ShapeType,

@@ -71,6 +71,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 decomps_to_exclude = [
     aten._unsafe_index,
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten.full_like,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -341,28 +342,6 @@ def randn_like(self, *, dtype=None, device=None, **kwargs):
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
-
-
-@register_decomposition(aten.full_like)
-def full_like(
-    self,
-    fill_value,
-    *,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    requires_grad=False,
-    memory_format=torch.preserve_format,
-):
-    return torch.full(
-        [*self.size()],
-        fill_value,
-        dtype=dtype or self.dtype,
-        layout=layout or self.layout,
-        device=device or self.device,
-        requires_grad=requires_grad,
     )
 
 

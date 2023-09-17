@@ -4020,6 +4020,28 @@ def scaled_dot_product_flash_attention(
     )
 
 
+@register_decomposition(aten.full_like)
+def full_like(
+    self,
+    fill_value,
+    *,
+    dtype=None,
+    layout=None,
+    device=None,
+    pin_memory=False,
+    requires_grad=False,
+    memory_format=torch.preserve_format,
+):
+    return torch.full(
+        [*self.size()],
+        fill_value,
+        dtype=dtype or self.dtype,
+        layout=layout or self.layout,
+        device=device or self.device,
+        requires_grad=requires_grad,
+    ).to(memory_format=memory_format)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

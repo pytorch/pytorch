@@ -243,10 +243,6 @@ aten::fmod.Tensor
 aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
-aten::full
-aten::full.names
-aten::full.names_out
-aten::full.out
 aten::gcd
 aten::gcd.out
 aten::gcd_
