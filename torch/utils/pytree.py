@@ -735,12 +735,23 @@ def _broadcast_to_and_flatten(
 
 def treespec_dumps(treespec: PyTreeSpec) -> bytes:
     """Serialize a treespec to bytes."""
+    if not isinstance(treespec, PyTreeSpec):
+        raise TypeError(
+            f"treespec_dumps(spec): Expected `spec` to be instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
+        )
     return pickle.dumps(treespec)
 
 
 def treespec_loads(serialized: bytes) -> PyTreeSpec:
     """Deserialize a treespec from bytes."""
-    return pickle.loads(serialized)  # type: ignore[no-any-return]
+    treespec = pickle.loads(serialized)
+    if not isinstance(treespec, PyTreeSpec):
+        raise TypeError(
+            f"treespec_loads(serialized): Expected to return an instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
+        )
+    return treespec
 
 
 class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
@@ -749,8 +760,8 @@ class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
 
 
 class PyTreeLeafSpec(optree.PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
-    def __new__(cls) -> "PyTreeLeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+    def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
+        return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
 
 
 LeafSpec = PyTreeLeafSpec
