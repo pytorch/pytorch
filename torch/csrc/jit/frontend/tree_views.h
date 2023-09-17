@@ -1260,7 +1260,7 @@ inline Expr pep604union_to_union(const Expr& expr) {
       expr.range(),
       Var::create(expr.range(), Ident::create(expr.range(), "Union")),
       List<Expr>::create(expr.range(), members));
-  return synthesised_union;
+  return std::move(synthesised_union);
 }
 
 } // namespace jit
