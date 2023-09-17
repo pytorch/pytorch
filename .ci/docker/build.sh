@@ -71,6 +71,9 @@ if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
+elif [[ "$image" == *cuda*linter* ]]; then
+  # Use a separate Dockerfile for linter to keep a small image size
+  DOCKERFILE="linter-cuda/Dockerfile"
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
@@ -264,6 +267,11 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CONDA_CMAKE=yes
     ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter)
+    ANACONDA_PYTHON_VERSION=3.9
+    CUDA_VERSION=11.8
+    CONDA_CMAKE=yes
+    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
@@ -316,7 +324,6 @@ fi
 # Build image
 docker build \
        --no-cache \
-       --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "PROTOBUF=${PROTOBUF:-}" \
        --build-arg "LLVMDEV=${LLVMDEV:-}" \
