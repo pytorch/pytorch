@@ -7410,6 +7410,20 @@ ShapeEnv not equal: field values don't match:
         )
         self._replay_and_check(main)
 
+    def test_default_dtype_change(self):
+        @torch.compile
+        def foo():
+            def inner(a, b, res_dtype):
+                print(a, b, res_dtype)
+                self.assertEqual(torch.result_type(a, b), res_dtype)
+
+            inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
+
+        torch.set_default_dtype(torch.float)
+        foo()
+        torch.set_default_dtype(torch.double)
+        foo()
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):
