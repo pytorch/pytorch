@@ -7,7 +7,6 @@
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <string>
-#include <iostream>
 
 using namespace torch;
 using namespace at;
@@ -357,7 +356,6 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   if (py::isinstance<c10::DispatchKey>(handler)) {
     // NB: not redispatch, as that will permanently remove the python
     // dispatcher for subsequent redispatches
-    std::cerr << "[PythonDispatcher_redispatch] op=[" << op.operator_name() << "], key=[" << c10::toString(py::cast<c10::DispatchKey>(handler)) << "]" << std::endl;
     op.callBoxedForDispatchKey(py::cast<c10::DispatchKey>(handler), *stack);
     return;
   }

@@ -240,7 +240,7 @@ and output of type {type(ret)}. But expected types to match."""
 class AliasInfo:
     alias_set: Set[str]
     is_write: bool
-    name: str
+    name: Optional[str]
 
 @dataclass
 class SchemaInfo:
@@ -338,7 +338,7 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         assert len(arg_indices) == 1
         idx = arg_indices[0]
         arg_info = schema_info.args[idx]
-        if arg_info.name in new_kwargs:
+        if arg_info.name is not None and arg_info.name in new_kwargs:
             return new_kwargs[arg_info.name]
         return new_args[idx]
 
