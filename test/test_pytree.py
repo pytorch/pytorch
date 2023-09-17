@@ -202,7 +202,7 @@ class TestPytree(TestCase):
                 return x // 3
 
             self.assertEqual(
-                py_pytree.tree_map(py_pytree.tree_map(pytree, f), invf),
+                py_pytree.tree_map(invf, py_pytree.tree_map(f, pytree)),
                 pytree,
             )
 
