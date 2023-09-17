@@ -517,7 +517,6 @@ aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
-aten::unsafe_split.Tensor
 aten::unsafe_split_with_sizes
 aten::unsafe_split_with_sizes.out
 aten::unsqueeze
