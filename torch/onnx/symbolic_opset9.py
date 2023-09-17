@@ -1216,7 +1216,9 @@ def split_with_sizes(
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
         )
-    parsed_drop_remainder = symbolic_helper._get_const(drop_remainder, "b", "drop_remainder")    
+    parsed_drop_remainder = symbolic_helper._get_const(
+        drop_remainder, "b", "drop_remainder"
+    )
     if parsed_drop_remainder:
         return symbolic_helper._unimplemented(
             "split_with_sizes", "drop_remainder=True not supported"
