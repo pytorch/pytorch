@@ -37,7 +37,6 @@ def call_torch_function(
 ):
     # signature:
     # def __torch_function__(cls, func, types, args=(), kwargs=None):
-    print(torch_function_var)
     tf_args = (torch_function_type, fn, types, TupleVariable(list(args)))
     return tx.inline_user_function_return(torch_function_var, tf_args, kwargs)
 
@@ -199,13 +198,14 @@ class TensorWithTFOverrideVariable(VariableTracker):
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
         if tx.output.torch_function_enabled:
-            from . import GetAttrVariable
+            import torch
+            from .builder import SourcelessBuilder
 
             options = VariableTracker.propagate(self, args, kwargs.values())
-            args = list(args)
+            args = [self] + list(args)
             # [Note: __torch_function__] Currently we only support methods that are defined on tensor
             # we will graph break in other cases this will need a bigger overhaul of extracting methods/comparing them for equality
-            func_var = GetAttrVariable(self, name, **options)
+            func_var = SourcelessBuilder()(tx, getattr(torch.Tensor, name))
             all_args = args + tree_flatten(kwargs)[0]
             types = TupleVariable(
                 [

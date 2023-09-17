@@ -24,6 +24,9 @@ class SigmoidToExpSubclass(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
+        if func == torch.Tensor.sigmoid:
+            super().__torch_function__(torch.Tensor.exp, types, args, kwargs)
+
         return super().__torch_function__(func, types, args, kwargs)
 
 
