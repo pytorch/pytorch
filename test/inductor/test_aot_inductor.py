@@ -29,7 +29,16 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-from inductor.test_torchinductor import copy_tests
+try:
+    try:
+        from .test_torchinductor import copy_tests
+    except ImportError:
+        from test_torchinductor import copy_tests
+except (unittest.SkipTest, ImportError) as e:
+    sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 
 class AOTInductorModelRunner:
