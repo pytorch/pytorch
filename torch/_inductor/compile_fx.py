@@ -1006,9 +1006,11 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
-        # Since handle_dynamo_export_graph will trigger compile_fx again,
-        # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
-        model_ = pre_grad_passes(model_, example_inputs_)
+        if not config.from_export:
+            # Since handle_dynamo_export_graph will trigger compile_fx again,
+            # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
+            # If we come from export, the graph is already in aten IR, so pre-grad passes is no-op.
+            model_ = pre_grad_passes(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
