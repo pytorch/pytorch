@@ -1043,8 +1043,6 @@ aten::rand.generator_with_names_out
 aten::rand.names
 aten::rand.names_out
 aten::rand.out
-aten::rand_like
-aten::rand_like.out
 aten::randint
 aten::randint.generator
 aten::randint.generator_out
