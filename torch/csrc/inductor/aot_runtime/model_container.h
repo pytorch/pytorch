@@ -36,7 +36,10 @@ namespace aot_inductor {
 
 class AOTInductorModelContainer {
  public:
-  AOTInductorModelContainer(size_t num_models, bool is_cpu = false) {
+  AOTInductorModelContainer(
+      size_t num_models,
+      bool is_cpu = false,
+      std::optional<std::string> cubin_dir = std::nullopt) {
     LOG(INFO) << "Constructing an AOTInductorModelContainer with " << num_models
               << " model instances";
     TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
@@ -45,7 +48,7 @@ class AOTInductorModelContainer {
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create(constants_));
+      models_.push_back(AOTInductorModel::Create(constants_, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 

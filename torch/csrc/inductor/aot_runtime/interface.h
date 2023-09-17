@@ -17,11 +17,11 @@ using AOTInductorError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
 #define AOTI_RUNTIME_FAILURE 1
 
-#define AOT_INDUCTOR_ERROR_CHECK(call)                                    \
-  if ((call) != AOTI_RUNTIME_SUCCESS) {                                   \
-    throw std::runtime_error(                                             \
-        std::string(#call " API call failed at ") + __FILE__ + ", line" + \
-        std::to_string(__LINE__));                                        \
+#define AOT_INDUCTOR_ERROR_CHECK(call)                                     \
+  if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
+    throw std::runtime_error(                                              \
+        std::string(#call " API call failed at ") + __FILE__ + ", line " + \
+        std::to_string(__LINE__));                                         \
   }
 
 extern "C" {
@@ -43,7 +43,8 @@ using AOTInductorProxyExecutorHandle = AOTInductorProxyExecutorOpaque*;
 AOTInductorError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
-    bool is_cpu = false);
+    bool is_cpu = false,
+    const char* cubin_dir = nullptr);
 
 // Deletes the AOTInductor model container.
 AOTInductorError AOTInductorModelContainerDelete(

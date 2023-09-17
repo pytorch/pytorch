@@ -7,7 +7,6 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -223,8 +222,8 @@ int NodeTask::getReentrantDepth() const {
 }
 
 CheckpointValidGuard::CheckpointValidGuard(
-    const std::shared_ptr<const GraphTask>& graph_task) {
-  prev_checkpoint_valid_state = checkpoint_valid;
+    const std::shared_ptr<const GraphTask>& graph_task)
+    : prev_checkpoint_valid_state(checkpoint_valid) {
   checkpoint_valid =
       graph_task->can_checkpoint() && prev_checkpoint_valid_state;
 }
@@ -384,8 +383,8 @@ void Engine::thread_init(
   }
 }
 
-GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
-  last_graph_task_ = std::move(current_graph_task);
+GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task)
+    : last_graph_task_(std::move(current_graph_task)) {
   current_graph_task = std::move(graph_task);
 }
 GraphTaskGuard::~GraphTaskGuard() {
@@ -539,7 +538,8 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         break;
       }
 
-      if (!(local_graph_task = task.base_.lock())) {
+      local_graph_task = task.base_.lock();
+      if (!local_graph_task) {
         // GraphTask for function is no longer valid, skipping further
         // execution.
         continue;
@@ -623,8 +623,8 @@ void Engine::reentrant_thread_init() {
     auto task = tp_shared->graphtasks_queue_.front();
     tp_shared->graphtasks_queue_.pop();
     lk.unlock();
-    std::shared_ptr<GraphTask> graph_task;
-    if (!(graph_task = task.lock())) {
+    std::shared_ptr<GraphTask> graph_task = task.lock();
+    if (!graph_task) {
       LOG(INFO) << "GraphTask has expired, skipping reentrant execution";
       continue;
     }
@@ -671,7 +671,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
-    future_result_->markCompleted(std::move(vars));
+    future_result_->markCompleted(vars);
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
   }
@@ -809,7 +809,9 @@ void set_device(int device) {
              c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
-        impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
+        impl->setDevice(at::Device(
+            static_cast<c10::DeviceType>(i),
+            static_cast<c10::DeviceIndex>(device)));
       }
     }
   }
@@ -1013,7 +1015,7 @@ void Engine::evaluate_function(
     fn.release_variables();
   }
 
-  int num_outputs = outputs.size();
+  auto num_outputs = outputs.size();
   if (num_outputs == 0) { // Note: doesn't acquire the mutex
     // Records leaf stream (if applicable)
     // See Note [Streaming backwards]
@@ -1162,9 +1164,9 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   validate_outputs(
       root_edges,
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<variable_list&>(inputs),
       [](const std::string& msg) { return msg; });
   if (accumulate_grad && create_graph) {
@@ -1586,7 +1588,7 @@ void GraphTask::init_to_execute(
       // In terms of populating the rest of exec_info though, you can basically
       // think of this as the same as setting `needed_` is true directly.
       if (!info.captures_) {
-        info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
+        info.captures_ = std::make_unique<std::vector<ExecInfo::Capture>>();
       }
       info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }
