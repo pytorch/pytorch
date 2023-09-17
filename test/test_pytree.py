@@ -1,5 +1,6 @@
 # Owner(s): ["module: pytree"]
 
+import pickle
 import unittest
 from collections import namedtuple, OrderedDict
 
@@ -783,7 +784,7 @@ class TestCxxPytree(TestCase):
         LocalPoint = namedtuple("LocalPoint", ["x", "y"])
         spec = cxx_pytree.tree_structure(LocalPoint(0, 1))
 
-        with self.assertRaises(AttributeError):
+        with self.assertRaises(pickle.PicklingError):
             cxx_pytree.treespec_dumps(spec)
 
     def test_pytree_custom_type_serialize(self):
