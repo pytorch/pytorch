@@ -268,7 +268,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl)
-      override {
+      final {
     TORCH_CHECK(
         !requires_grad ||
             isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
