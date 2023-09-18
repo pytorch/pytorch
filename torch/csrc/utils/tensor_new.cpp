@@ -211,6 +211,7 @@ void recursive_store(
     if (is_symfloat) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymFloat>();
+      TORCH_INTERNAL_ASSERT(elementSize == 8);
       *(double*)data = val.guard_float(__FILE__, __LINE__);
       return;
     }
