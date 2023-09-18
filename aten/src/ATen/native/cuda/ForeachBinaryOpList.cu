@@ -173,9 +173,9 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
     if (!can_use_fast_route(tensors1, tensors2, DIVISION_OP)) {     \
       return at::native::foreach_tensor_##NAME##_list_kernel_slow_( \
           tensors1, tensors2);                                      \
-    }                                                               \
+    }
                                                                     \
-    FUNCTION##_<OP>(tensors1, tensors2);                            \
+    FUNCTION##_<OP>(t1, t2);                            \
   }                                                                 \
                                                                     \
   std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(     \

@@ -37,7 +37,7 @@ bool has_bool_tensor(TensorList tensors) {
 // - Tensor lists must be non-empty.
 // - All TensorLists and ScalarLists must have the same number of elements.
 // - Corresponding tensors must have the same size.
-void check_foreach_api_restrictions(TensorList tensors) {
+(TensorList tensors) {
   TORCH_CHECK(!tensors.empty(), "Tensor list must have at least one tensor.");
 }
 
@@ -106,8 +106,8 @@ void check_foreach_api_restrictions(
 // Please, make sure to call check_foreach_api_restrictions before calling this
 // method. There is a set of preconditions that have to be satisfied.
 bool check_fast_path_restrictions(
-    ArrayRef<TensorList> tensorLists,
-    ArrayRef<Scalar> scalarList = {},
+    std::vector<std::vector<Tensor>> tensorLists,
+    std::vector<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
   const auto expected_dtype = tensorLists[0][0].dtype();
   const auto expected_device = tensorLists[0][0].device();
@@ -128,21 +128,35 @@ bool check_fast_path_restrictions(
 
   // Check if corresponding tensors in tensor lists have the same sizes and
   // strides.
-  for (const auto& tensor_list : tensorLists) {
-    for (const auto j : c10::irange(tensorLists[0].size())) {
-      if (tensorLists[0][j].sizes() != tensor_list[j].sizes()) {
+  int list_index = 0;
+  for (auto list_iter = tensorLists[0].begin(); list_iter < tensorLists[0].end();) {
+    IntArrayRef ref_sizes = list_iter->sizes();
+    bool is_zero_sized = list_iter->numel() == 0;
+    for (size_t j = 1; j < tensorLists.size(); j++) {
+      if (ref_sizes != tensorLists[j][list_index].sizes() ||
+          list_iter->strides() != tensorLists[j][list_index].strides()) {
         return false;
       }
-      if (tensorLists[0][j].strides() != tensor_list[j].strides()) {
-        return false;
+      // filter out 0-sized tensors for each list we are comparing to
+      if (is_zero_sized) {
+        tensorLists[j].erase(tensorLists[j].begin() + list_index);
       }
+    }
+
+    // lastly, filter out 0-sized tensors for the first reference list and the scalarlist
+    if (is_zero_sized) {
+      scalarList.erase(scalarList.begin() + list_index);
+      list_iter = tensorLists[0].erase(list_iter);
+    } else {
+      list_iter++;
+      list_index++;
     }
   }
 
   // This function has already checked that `tensorList[j][i]` for all j, i has
   // the same dtype using `is_tensor_okay` function above. This means we only
   // need to check if {tensorList[0][0], tensorList[0][1], tensorList[0][2],
-  // ...} do type promotion with scalarLIst.
+  // ...} do type promotion with scalarList.
   for (const auto i : c10::irange(tensorLists[0].size())) {
     // For division, integer inputs will result in float.
     if (does_op_promote_integer_inputs_to_float) {
@@ -206,11 +220,15 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
 }
 
 bool can_use_fast_route(
-    ArrayRef<TensorList> tensorLists,
+    ArrayRef<ArrayRef<Tensor>> tensorLists,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
+    std::vector<std::vector<Tensor>> tensorLists_vec;
+    for (auto tensorList : tensorLists) {
+      tensorLists_vec.emplace_back(tensorList.vec());
+    }
   return check_fast_path_restrictions(
-      tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
+      tensorLists_vec, scalarList.vec(), does_op_promote_integer_inputs_to_float);
 }
 
 bool can_use_fast_route(
