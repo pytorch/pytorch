@@ -2245,7 +2245,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         result = skipfiles.check(func.get_filename())
         if result.skipped:
-            log.debug("SKIPPING %s, reason: %s", func.get_function(), result.reason)
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,
                 produce_trampoline_autograd_bwd,
@@ -2260,9 +2259,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 produce_trampoline_autograd_bwd,
             ]:
                 # Known sound
-                return
+                return skipfiles.SkipResult(False, "allowlist in dynamo known function")
             unimplemented(
-                f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
+                f"'inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}, skip reason: {result.reason}'"
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
@@ -2272,7 +2271,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"call torch._dynamo.disable() wrapped function {func.get_function()}"
             )
         else:
-            log.debug("INLINING %s, reason: %s", func.get_function(), result.reason)
+            return result
 
     @staticmethod
     def inline_call_(
@@ -2282,7 +2281,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             func,
             (UserFunctionVariable, NestedUserFunctionVariable),
         )
-        InliningInstructionTranslator.check_inlineable(func)
+        result = InliningInstructionTranslator.check_inlineable(func)
+        assert result.skipped is False
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -2323,7 +2323,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 return f"TRACE inlined call {code.co_name} from {header}\n{line}"
 
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
-        log.debug("INLINING %s%s", code, suffix)
+        log.debug("INLINING %s%s, inline reason: %s", code, suffix, result.reason)
 
         # Detect inline GraphModule calls in order to propgate node metadata,
         # by checking if the first argument (self) is a variable tracking a GraphModule.

@@ -528,6 +528,7 @@ class VariableBuilder:
         ):
             return SkipFilesVariable(
                 value,
+                skipfiles.check(getfile(value)).reason,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )

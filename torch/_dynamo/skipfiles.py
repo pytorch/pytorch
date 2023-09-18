@@ -298,28 +298,26 @@ class SkipResult:
 def check(filename):
     """Should skip this file?"""
     if filename is None:
-        return SkipResult(True, "The function's filename is None.")
+        return SkipResult(True, "filename is None")
     if filename in FILENAME_ALLOWLIST:
         return SkipResult(
             False,
-            "The function's filename is allowlisted in skipfiles.FILENAME_ALLOWLIST.",
+            "allowlisted in skipfiles.FILENAME_ALLOWLIST",
         )
     if is_torch_inline_allowed(filename):
         return SkipResult(
             False,
-            "The function's module is allowlisted in skipfiles.SUBMODULE_ALLOWLIST.",
+            "allowlisted in skipfiles.SUBMODULE_ALLOWLIST",
         )
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
         return SkipResult(
             True,
-            "The function's file is in an fbcode directory that should be skipped according skipfiles.FBCODE_SKIP_DIRS.",
+            "should be skipped according skipfiles.FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
-        return SkipResult(
-            True, "The function should be skipped according skipfiles.SKIP_DIRS."
-        )
+        return SkipResult(True, "should be skipped according skipfiles.SKIP_DIRS")
     else:
-        return SkipResult(False, "Inlining by default.")
+        return SkipResult(False, "inlining by default")
 
 
 # skip common third party libs
