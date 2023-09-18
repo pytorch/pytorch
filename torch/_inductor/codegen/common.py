@@ -477,6 +477,7 @@ class KernelArgs:
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
+        self.unbacked_symints = set()
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -623,6 +624,12 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
+
+        for s in sorted(self.unbacked_symints, key=str):
+            s_str = str(s)
+            arg_defs.append(s_str)
+            call_args.append(s_str)
+            precompile_args.append(SizeArg(s_str, s))
 
         return arg_defs, call_args, precompile_args
 

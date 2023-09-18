@@ -3751,6 +3751,7 @@ class DynamicScalar(ExternKernelAlloc):
     """
 
     # NOTE: pretend to be a type that SymPy understands
+    # TODO(yf225): add a `dyn_scalar = sympy.sympify(dyn_scalar)`` test for this class, to make sure it always works
     __sympy__ = True
 
     def __init__(
@@ -3759,20 +3760,32 @@ class DynamicScalar(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
-        # TODO: alternative: maybe we should handle it at downstream IR's create instead
         super().__init__(layout, inputs, constant_args)
         self.symbol = V.graph.current_node.meta['val']
+        V.graph.sizevars.shape_env.unbacked_symint_to_buf[self.symbol.node.expr] = self.get_name()
 
     def __hash__(self):
         return hash(self.symbol.node.expr)
 
-    def has_side_effects(self):
-        # Prevents dead code elimination, because the Python scalar value might be reused later
-        return True
+    # TODO(yf225): to remove `has_side_effects` and `can_free`, the consumption side of DynamicScalar
+    # needs to insert this buffer into its own `reads` dependencies (e.g. by adding it into the `inputs` arg? but some IRs actually don't have `inputs` concept :(  )
+    # otherwise we see a dependency structure like:
+    # ```
+    # node: ExternKernelSchedulerNode(name='buf0'), node.read_writes.reads: {StarDep(name='arg0_1')}
+    # node: ExternKernelSchedulerNode(name='buf1'), node.read_writes.reads: {StarDep(name='arg0_1')}
+    # node: SchedulerNode(name='buf2'), node.read_writes.reads: {MemoryDep('arg1_1', 2*ModularIndexing(c0, 1, 2) + ModularIndexing(c1, 1, 2), {c0: 2*i6, c1: 2*i7})}
+    # ```
+    # where buf2 don't know that it needs to depend on buf0 and buf1
+    #
+    # Some solutions:
+    # 1. add the dep handling into `extract_read_writes` (i.e. "if DynamicScalar masquared as symint, then add dependency")
+    # def has_side_effects(self):
+    #     # Prevents dead code elimination, because the Python scalar value might be reused later
+    #     return True
 
-    def can_free(self):
-        # Prevents buffer freeing, because the Python scalar value might be reused later
-        return False
+    # def can_free(self):
+    #     # Prevents buffer freeing, because the Python scalar value might be reused later
+    #     return False
 
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")
@@ -3806,12 +3819,6 @@ class DynamicScalar(ExternKernelAlloc):
 
     def __sub__(self, other):
         return self.symbol.node.expr - other
-
-    def __str__(self):
-        return str(self.symbol)
-        # return self.get_name()
-
-    __repr__ = __str__
 
 
 @dataclasses.dataclass

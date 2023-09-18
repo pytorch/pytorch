@@ -653,6 +653,10 @@ class SchedulerNode(BaseSchedulerNode):
 
     def codegen(self, index_vars):
         var_ranges = self.ranges_from_index_vars(index_vars)
+        for v in var_ranges.values():
+            V.kernel.args.unbacked_symints.update(
+                [s for s in v.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
+            )
         try:
             with V.set_ops_handler(
                 SimplifyIndexing(V.get_ops_handler(), var_ranges)

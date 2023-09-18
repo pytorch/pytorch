@@ -2179,6 +2179,7 @@ class ShapeEnv:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        self.unbacked_symint_to_buf: Dict[sympy.Symbol, str] = {}
         # Similar to guards, but these MUST evaluate to true and can
         # only be evaluated at runtime midway through (i.e., they always
         # involve unbacked symints)

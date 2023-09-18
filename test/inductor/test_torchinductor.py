@@ -7051,7 +7051,7 @@ class CommonTemplate:
         self.assertTrue(called)
 
     def test_tolist_tile(self):
-        def f(x):
+        def f(x, y):
             a, b = x[0].tolist()
             torch.export.constrain_as_size(a)
             torch.export.constrain_as_size(b)
@@ -7066,19 +7066,20 @@ class CommonTemplate:
         ):
             compiled = torch.compile(f, fullgraph=True, dynamic=True)
             x = torch.tensor([[1, 2], [3, 4]], device=self.device)
-            code = run_and_get_triton_code(compiled, x)
+            y = torch.randn((2, 2), device=self.device)
+            code = run_and_get_triton_code(compiled, x, y)
             FileCheck() \
                 .check("buf0 = reinterpret_tensor(arg0_1, (), (), 0).item()") \
-                .check("i8 = buf0") \
+                .check("i6 = buf0") \
                 .check("buf1 = reinterpret_tensor(arg0_1, (), (), 1).item()") \
-                .check("i9 = buf1") \
-                .check("buf2 = empty_strided((2*i8, 2*i9), (2*i9, 1), device='cuda', dtype=torch.int64)") \
-                .check("triton_poi_fused_repeat_0_xnumel = 4*i8*i9") \
-                .check("triton_poi_fused_repeat_0.run(arg0_1, buf2, i9, triton_poi_fused_repeat_0_xnumel, grid=grid(triton_poi_fused_repeat_0_xnumel), stream=stream0)") \
+                .check("i7 = buf1") \
+                .check("buf2 = empty_strided((2*i6, 2*i7), (2*i7, 1), device='cuda', dtype=torch.int64)") \
+                .check("triton_poi_fused_repeat_0_xnumel = 4*i6*i7") \
+                .check("triton_poi_fused_repeat_0.run(arg0_1, buf2, i6, i7, triton_poi_fused_repeat_0_xnumel, grid=grid(triton_poi_fused_repeat_0_xnumel), stream=stream0)") \
                 .run(code)
 
-            ref = f(x)
-            actual = compiled(x)
+            ref = f(x, y)
+            actual = compiled(x, y)
             self.assertEqual(ref, actual)
 
     def test_tolist_zeros_cat(self):
@@ -7100,14 +7101,14 @@ class CommonTemplate:
             code = run_and_get_triton_code(compiled, x)
             FileCheck() \
                 .check("buf0 = reinterpret_tensor(arg0_1, (), (), 0).item()") \
-                .check("i8 = buf0") \
+                .check("i6 = buf0") \
                 .check("buf1 = reinterpret_tensor(arg0_1, (), (), 1).item()") \
-                .check("i9 = buf1") \
-                .check("buf4 = empty_strided((i8 + i9, ), (1, ), device='cuda', dtype=torch.float32)") \
-                .check("buf2 = reinterpret_tensor(buf4, (math.floor(i8), ), (1, ), 0)  # alias") \
-                .check("triton_poi_fused_zeros_0.run(buf2, i8, grid=grid(i8), stream=stream0)") \
-                .check("buf3 = reinterpret_tensor(buf4, (math.floor(i9), ), (1, ), i8)  # alias") \
-                .check("triton_poi_fused_zeros_1.run(buf3, i9, grid=grid(i9), stream=stream0)") \
+                .check("i7 = buf1") \
+                .check("buf4 = empty_strided((i6 + i7, ), (1, ), device='cuda', dtype=torch.float32)") \
+                .check("buf2 = reinterpret_tensor(buf4, (i6, ), (1, ), 0)  # alias") \
+                .check("triton_poi_fused_zeros_0.run(buf2, i6, i6, grid=grid(i6), stream=stream0)") \
+                .check("buf3 = reinterpret_tensor(buf4, (i7, ), (1, ), i6)  # alias") \
+                .check("triton_poi_fused_zeros_1.run(buf3, i7, i7, grid=grid(i7), stream=stream0)") \
                 .run(code)
 
             ref = f(x)
@@ -7130,19 +7131,16 @@ class CommonTemplate:
             compiled = torch.compile(f, fullgraph=True, dynamic=True)
             x = torch.tensor([[1, 2], [3, 4]], dtype = torch.int64, device="cuda")
             code = run_and_get_triton_code(compiled, x)
-            print(f"code: {code}")
-            # FileCheck() \
-            #     .check("buf0 = arg0_1[0].item()") \
-            #     .check("buf1 = arg0_1[1].item()") \
-            #     .check("buf4 = empty_strided((buf0 + buf1, ), (1, ), device='cuda', dtype=torch.float32)") \
-            #     .check("buf2 = reinterpret_tensor(buf4, (math.floor(buf0), ), (1, ), 0)  # alias") \
-            #     .check("buf3 = reinterpret_tensor(buf4, (math.floor(buf1), ), (1, ), buf0)  # alias") \
-            #     .run(code)
+            FileCheck() \
+                .check("buf0 = reinterpret_tensor(arg1_1, (), (), 1).item()") \
+                .check("i3 = buf0") \
+                .check("buf1 = empty_strided((4*i3, ), (1, ), device='cuda', dtype=torch.int64)") \
+                .check("triton_poi_fused_clone_view_0_xnumel = 4*i3") \
+                .check("triton_poi_fused_clone_view_0.run(arg1_1, buf1, i3, triton_poi_fused_clone_view_0_xnumel, grid=grid(triton_poi_fused_clone_view_0_xnumel), stream=stream0)") \
+                .run(code)
 
             ref = f(x)
             actual = compiled(x)
-            # actual, = call([x])
-            print(f"ref: {ref}, actual: {actual}")
             self.assertEqual(ref, actual)
 
 

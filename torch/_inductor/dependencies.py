@@ -198,6 +198,12 @@ class _RecordLoadStoreInner(V.MockHandler):
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
 
+        # if range has unbacked symint, add the dependency to the buffer that produces the symint
+        for v in self._var_ranges.values():
+            for s in v.free_symbols:
+                if s in V.graph.sizevars.shape_env.unbacked_symint_to_buf:
+                    self._reads.add(StarDep(V.graph.sizevars.shape_env.unbacked_symint_to_buf[s]))
+
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Expr, ...]]:

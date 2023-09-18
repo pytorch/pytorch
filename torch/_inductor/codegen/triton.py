@@ -730,9 +730,6 @@ class IterationRangesEntry(IterationRanges):
             V.kernel.body.writeline(line)
 
     def _codegen(self):
-        V.kernel.unbacked_symints.update(
-            [s for s in self.expr.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
-        )
         self.writeline(f"{self.name} = " + texpr(V.kernel.rename_indexing(self.expr)))
         return self.name
 
@@ -785,7 +782,6 @@ class TritonKernel(Kernel):
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
-        self.unbacked_symints = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         # Upper bounds for indirect_indexing and their str representation
@@ -1301,9 +1297,6 @@ class TritonKernel(Kernel):
         return sympy_symbol(str(var))
 
     def load(self, name: str, index: sympy.Expr):
-        self.unbacked_symints.update(
-            [s for s in index.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
-        )
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
@@ -1375,9 +1368,6 @@ class TritonKernel(Kernel):
         return result_var
 
     def store(self, name, index, value, mode=None):
-        self.unbacked_symints.update(
-            [s for s in index.free_symbols if V.graph.sizevars.shape_env.is_unbacked_symint(s)]
-        )
         var = self.args.output(name)
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
@@ -1930,14 +1920,6 @@ class TritonKernel(Kernel):
                     arg.name, V.graph.sizevars.inv_precomputed_replacements[arg.expr]
                 )
 
-        # NOTE: pass all unbacked symints used by the kernel into the kernel
-        # TODO(yf225): should we disable autotune for kernels that takes unbacked symints, to reduce size-mismatch recompilation overhead?
-        for k in sorted(self.unbacked_symints, key=str):
-            arg = str(k)
-            sizearg = SizeArg(arg, k)
-            signature.append(sizearg)
-            argdefs.append(arg)
-
         mutated_args = set()
         for mutation in self.mutations:
             if mutation in self.args.input_buffers:
@@ -2095,8 +2077,6 @@ class TritonKernel(Kernel):
     def call_kernel(self, name: str, node: IRNode = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
-
-        call_args.extend(sorted(self.unbacked_symints, key=str))
 
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
