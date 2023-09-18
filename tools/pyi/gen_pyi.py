@@ -1190,6 +1190,8 @@ def gen_pyi(
             "double",
             "float16",
             "bfloat16",
+            "float8_e4m3fn",
+            "float8_e5m2",
             "half",
             "uint8",
             "int8",

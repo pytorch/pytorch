@@ -1226,6 +1226,51 @@ class FakeTensor(torch.Tensor):
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
+def get_tensor_hash(x):
+    if isinstance(x, torch.Tensor):
+        return tuple(x.shape), tuple(x.stride())
+    return x
+
+import optree
+def hash_op(func, args, kwargs):
+    flatten = tree_flatten((args, kwargs))[0]
+    return func, tuple(get_tensor_hash(x) for x in flatten)
+
+cache = {}
+
+def cache_dispatch(dispatch):
+    def _dispatch(self, func, types, args=(), kwargs=None):
+        if func == torch.ops.prim.device.default:
+            return dispatch(self, func, types, args, kwargs)
+        arg_hash = hash_op(func, args, kwargs)
+        if arg_hash not in cache:
+            # print(func, args, kwargs)
+            output_tensor = dispatch(self, func, types, args, kwargs)
+            if isinstance(output_tensor, FakeTensor):
+                metadata = (
+                    output_tensor.shape,
+                    output_tensor.stride(),
+                    output_tensor.dtype,
+                    output_tensor.device,
+                )
+                cache[arg_hash] = metadata
+            return output_tensor
+        else:
+            metadata = cache[arg_hash]
+            return FakeTensor(
+                self,
+                torch.empty_strided(
+                    metadata[0],
+                    metadata[1],
+                    dtype=metadata[2],
+                    device='meta'
+                ),
+                device=metadata[3],
+            )
+    return _dispatch
+
+
+cnt = 0
 
 class FakeTensorMode(TorchDispatchMode):
     def __init__(
@@ -1234,10 +1279,15 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_non_fake_inputs=False,
         shape_env=None,
+        static_shapes=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
+        if static_shapes is not None:
+            self.static_shapes = static_shapes
+        else:
+            self.static_shapes = shape_env is None
 
         import torch._functorch.config
 
@@ -1321,6 +1371,7 @@ class FakeTensorMode(TorchDispatchMode):
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
 
+    @cache_dispatch
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
         log.debug("%s %s %s", func, args, kwargs)
@@ -1344,6 +1395,11 @@ class FakeTensorMode(TorchDispatchMode):
             )
             incr = IncrementRecursionCount()
 
+        global cnt
+        cnt += 1
+        if cnt % 1000 == 0:
+            print(cnt)
+        # print(func)
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
         if func in {
@@ -1758,7 +1814,7 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         tensor,
         *,
-        static_shapes=False,
+        static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
@@ -1768,6 +1824,8 @@ class FakeTensorMode(TorchDispatchMode):
         memoized_only=False,
     ):
         shape_env = self.shape_env
+        if static_shapes is None:
+            static_shapes = self.static_shapes
         if static_shapes:
             assert (
                 dynamic_dims is None
