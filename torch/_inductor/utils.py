@@ -266,6 +266,15 @@ def convert_shape_to_symint(
         for i in lst
     ]
 
+def deterministic_torch_manual_seed(*args, **kwargs):
+        from torch._C import default_generator
+
+        seed = 1337
+        import torch.cuda
+
+        if not torch.cuda._is_in_bad_fork():
+            torch.cuda.manual_seed_all(seed)
+        return default_generator.manual_seed(seed)
 
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
@@ -732,10 +741,10 @@ class DeferredLineBase:
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index):
-    sms = torch.cuda.get_device_properties(index).multi_processor_count
-    if sms < 80:  # V100
-        log.warning("not enough SMs to use max_autotune_gemm mode")
+def is_modern_gpu(index):
+    cc_major = torch.cuda.get_device_capability(index)[0]
+    if cc_major < 8:  # V100
+        log.warning("Compute capability too small to use max_autotune_gemm mode")
         return False
     return True
 
@@ -764,9 +773,17 @@ def _use_autotune_backend(backend: str) -> bool:
 def use_triton_template(layout, *, enable_int32=False):
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32]
     if enable_int32:
-        layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    return _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "TRITON"
+        layout_dtypes.append(torch.int32)
+    return (
+        (
+            config.max_autotune
+            or config.max_autotune_gemm
+            or config.search_autotune_cache
+        )
+        and "TRITON" in config.max_autotune_gemm_backends.upper().split(",")
+        and layout.device.type == "cuda"
+        and layout.dtype in layout_dtypes
+        and is_modern_gpu(layout.device.index or 0)
     )
 
 

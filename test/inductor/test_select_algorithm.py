@@ -254,6 +254,7 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @patch.object(select_algorithm, "VERIFY", dict(atol=2e-1, rtol=5e-2))
     @skipIfRocm
     @patches
     def test_mm_dropout(self):
@@ -344,9 +345,51 @@ class TestSelectAlgorithm(TestCase):
         caller_str = str(caller)
         self.assertEqual(caller_str, f"TritonTemplateCaller({module_path}, extra)")
 
+    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patches
+    def test_mm_fp16_acc(self):
+        cfg = torch.backends.cuda.matmul
+        restore = cfg.allow_fp16_reduced_precision_reduction
+        try:
+            cfg.allow_fp16_reduced_precision_reduction = True
+
+            @torch.compile
+            def foo(a, b):
+                return torch.mm(a, b)
+
+            foo(
+                torch.randn(8, 32, device="cuda", dtype=torch.float16),
+                torch.randn(32, 8, device="cuda", dtype=torch.float16),
+            )
+
+            self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        finally:
+            cfg.allow_fp16_reduced_precision_reduction = restore
+
+    @patch.object(select_algorithm, "VERIFY", dict(atol=5e-2, rtol=5e-2))
+    @patches
+    def test_bmm_fp16_acc(self):
+        cfg = torch.backends.cuda.matmul
+        restore = cfg.allow_fp16_reduced_precision_reduction
+        try:
+            cfg.allow_fp16_reduced_precision_reduction = True
+
+            @torch.compile
+            def foo(a, b):
+                return torch.bmm(a, b)
+
+            foo(
+                torch.randn(2, 8, 32, device="cuda", dtype=torch.float16),
+                torch.randn(2, 32, 8, device="cuda", dtype=torch.float16),
+            )
+
+            self.check_counter(counters["inductor"]["select_algorithm_autotune"], 1)
+        finally:
+            cfg.allow_fp16_reduced_precision_reduction = restore
+
 
 if __name__ == "__main__":
-    from torch._inductor.utils import is_big_gpu
+    from torch._inductor.utils import is_modern_gpu
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
+    if IS_LINUX and HAS_CUDA and is_modern_gpu(0):
         run_tests()

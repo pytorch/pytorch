@@ -41,7 +41,7 @@ from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
-from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
+from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache, deterministic_torch_manual_seed
 from torch._subclasses.fake_tensor import FakeTensorMode
 
 from torch.utils import _pytree as pytree
@@ -375,17 +375,6 @@ def nothing(f):
 @functools.lru_cache(None)
 def patch_torch_manual_seed():
     """Make torch manual seed deterministic. Helps with accuracy testing."""
-
-    def deterministic_torch_manual_seed(*args, **kwargs):
-        from torch._C import default_generator
-
-        seed = 1337
-        import torch.cuda
-
-        if not torch.cuda._is_in_bad_fork():
-            torch.cuda.manual_seed_all(seed)
-        return default_generator.manual_seed(seed)
-
     torch.manual_seed = deterministic_torch_manual_seed
 
 

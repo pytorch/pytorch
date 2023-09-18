@@ -11,6 +11,7 @@ import contextlib
 import re
 import os
 
+from unittest.mock import patch
 from collections import defaultdict
 from importlib import import_module
 from torch.utils._pytree import tree_map
@@ -67,6 +68,7 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
 )
+from torch._inductor.utils import deterministic_torch_manual_seed
 from torch._subclasses.fake_utils import outputs_alias_inputs
 
 import torch._prims as prims
@@ -111,6 +113,7 @@ def reduction_dtype_filter(op):
     if 'dtype' not in argspec.kwonlyargs:
         return False
     return True
+
 
 # Create a list of operators that are a subset of _ref_test_ops but don't have a
 # numpy ref to compare them too, If both CPU and CUDA are compared to numpy
@@ -648,7 +651,7 @@ class TestCommon(TestCase):
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
     @ops(_ops_and_refs, dtypes=OpDTypes.none)
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
+    @patch.object(torch, "manual_seed", deterministic_torch_manual_seed)
     def test_out_warning(self, device, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
@@ -777,7 +780,7 @@ class TestCommon(TestCase):
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
     @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
-    @skipIfTorchInductor("Inductor does not support complex dtype yet")
+    @patch.object(torch, "manual_seed", deterministic_torch_manual_seed)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
