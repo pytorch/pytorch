@@ -95,7 +95,10 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         return
 
     # Check if the input is Conv
-    input_node = bn_node.args[0]
+    if bn_node.args:
+        input_node = bn_node.args[0]
+    else:
+        input_node = bn_node.kwargs["input"]
     if input_node.op != "call_module":
         return
     if not hasattr(gm, input_node.target):
@@ -123,8 +126,12 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         bn_get_node = graph.create_node(
             op="get_attr", target=bn_node.target, name="get_bn"
         )
+        if conv_node.args:
+            conv_input = conv_node.args[0]
+        else:
+            conv_input = conv_node.kwargs["input"]
         # prepare args for the fused function
-        args = (bn_get_node, conv_get_node, conv_node.args[0])
+        args = (bn_get_node, conv_get_node, conv_input)
         # create a new node
         new_node = graph.create_node(
             op="call_function",
