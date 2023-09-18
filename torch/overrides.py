@@ -1446,7 +1446,7 @@ def wrap_torch_function(dispatcher: Callable):
 
     return inner
 
-def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
+def _get_overloaded_args(relevant_args: Iterable[Any], get_type_fn: Callable[[Any], Type] = None) -> List[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -1468,6 +1468,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
         Iterable of array-like arguments to check for __torch_function__
         methods.
 
+    get_type_fn : callable, optional
+        Function to call on each argument in relevant_args to get its type.
+
     Returns
     -------
     overloaded_args : list
@@ -1477,6 +1480,9 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     .. _NEP-0018:
        https://numpy.org/neps/nep-0018-array-function-protocol.html
     """
+    if get_type_fn is None:
+        get_type_fn = type
+
     # If torch function is not enabled, there are no overloaded types
     if not torch._C._is_torch_function_enabled():
         return []
@@ -1484,7 +1490,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     overloaded_types: Set[Type] = set()
     overloaded_args: List[Any] = []
     for arg in relevant_args:
-        arg_type = type(arg)
+        arg_type = get_type_fn(arg)
         # We only collect arguments if they have a unique type, which ensures
         # reasonable performance even with a long list of possibly overloaded
         # arguments.
@@ -1502,7 +1508,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
                 # This ensures "subclasses before superclasses".
                 index = len(overloaded_args)
                 for i, old_arg in enumerate(overloaded_args):
-                    if issubclass(arg_type, type(old_arg)):
+                    if issubclass(arg_type, get_type_fn(old_arg)):
                         index = i
                         break
                 overloaded_args.insert(index, arg)

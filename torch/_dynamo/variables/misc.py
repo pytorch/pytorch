@@ -568,12 +568,16 @@ class GetAttrVariable(VariableTracker):
         if is_original_tensor_torch_function:
             # Instead of tracing inside torch.Tensor.__torch_function__,
             # record the `call_function` or `call_method` call into the graph.
-            from . import TorchVariable
+            from . import ConstantVariable, ConstDictVariable, TorchVariable
 
             original_torch_or_getattr_variable = args[0]
             new_args = args[2].items
-            new_kwargs = args[3].items
-            options = VariableTracker.propagate(self, new_args, new_kwargs.values())
+            if not isinstance(args[3], ConstantVariable):
+                new_kwargs = args[3].items
+                options = VariableTracker.propagate(self, new_args, new_kwargs)
+            else:
+                new_kwargs = ConstDictVariable(dict(), dict).items
+                options = VariableTracker.propagate(self, new_args, [args[3]])
             # Disable __torch_function__ here to prevent the clone of the
             # example tensor from going into the override.
             with torch._C.DisableTorchFunctionSubclass():
