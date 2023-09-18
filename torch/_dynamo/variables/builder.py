@@ -114,7 +114,9 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
+    GetAttrFunctionVariable,
     GetAttrVariable,
+    GetSetDescriptorVariable,
     InspectSignatureVariable,
     LambdaVariable,
     NumpyVariable,
@@ -670,6 +672,17 @@ class VariableBuilder:
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
+            )
+        elif isinstance(value, types.GetSetDescriptorType):
+            return GetSetDescriptorVariable(
+                value, guards=self.make_guards(GuardBuilder.ID_MATCH)
+            )
+        elif isinstance(value, types.MethodWrapperType) and value.__name__ == "__get__":
+            return GetAttrFunctionVariable(
+                value,
+                value.__self__.__name__,
+                source=self.source,
+                guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
