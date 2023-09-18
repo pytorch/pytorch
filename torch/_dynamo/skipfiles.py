@@ -153,6 +153,10 @@ FILENAME_ALLOWLIST |= {
 FILENAME_ALLOWLIST |= {
     _module_dir(torch) + "_higher_order_ops/cond.py",
 }
+FILENAME_ALLOWLIST |= {
+    _module_dir(torch) + "_dynamo/compiled_autograd.py",
+}
+
 
 # TODO (zhxchen17) Make exportdb importable here.
 FILENAME_ALLOWLIST |= set(

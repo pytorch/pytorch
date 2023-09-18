@@ -220,6 +220,12 @@ def dynamo_interceding_fn_wrapper(*args, fn):
 
 @_invoke_in_backward_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(*args, fn, reenter):
+    import torch._functorch.aot_autograd
+
+    assert len(args) == 1
+    grad = args[0]
+    assert isinstance(grad, torch.Tensor)
+
     mode = _get_current_dispatch_mode()
     if isinstance(fn, functools.partial):
         fn.__name__ = fn.func.__name__  # type: ignore[attr-defined]
@@ -233,14 +239,18 @@ def inner_trace(*args, fn, reenter):
         fn = functools.partial(dynamo_interceding_fn_wrapper, fn=fn)
         fn.__name__ = fn.func.__name__
 
-    args = pytree.tree_map(torch._functorch.aot_autograd.from_fun, args)
-    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
+    is_func = torch._is_functional_tensor(grad)
+    if is_func:
+        grad = torch._functorch.aot_autograd.from_fun(grad)
+
+    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (grad,))
     out_proxy = mode.tracer.create_proxy(
         "call_function", fn, proxy_args, {}, name="invocation"
     )
-    args = original_fn(*args)
-    args = track_tensor_tree(args, out_proxy, constant=None, tracer=mode.tracer)
-    return pytree.tree_map(torch._functorch.aot_autograd.to_fun, args)
+    grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
+    return (
+        pytree.tree_map(torch._functorch.aot_autograd.to_fun, grad) if is_func else grad
+    )
 
 
 @_invoke_in_backward_op.py_impl(FakeTensorMode)
@@ -250,6 +260,8 @@ def inner_fake(*args, fn, reenter):
 
 @_invoke_in_backward_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _invoke_in_backward_op_dense(*args, fn, reenter):
+    if reenter:
+        return _invoke_in_backward_op(*args, fn=fn, reenter=False)
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
     return fn(*args)

@@ -533,6 +533,7 @@ class SideEffects:
     def is_empty(self):
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
+            or self.tensor_hooks
             or self.save_for_backward
         )
 
