@@ -4,6 +4,7 @@
 
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aot_runtime/interface.h>
+#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/torch.h>
 
 namespace torch {
@@ -66,10 +67,10 @@ TEST(AotInductorTest, BasicTest) {
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  AtenTensorHandle inputs_handle =
-      reinterpret_cast<AtenTensorHandle>(inputs.data());
-  AtenTensorHandle outputs_handle =
-      reinterpret_cast<AtenTensorHandle>(outputs.data());
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::borrow_tensors_to_handles(input_tensors);
+  std::vector<AtenTensorHandle> output_handles =
+      torch::aot_inductor::borrow_tensors_to_handles(output_tensors);
 
   std::vector<const int64_t*> output_sizes(outputs.size());
   std::vector<int64_t> output_ndims(outputs.size());
@@ -78,9 +79,9 @@ TEST(AotInductorTest, BasicTest) {
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,
-      inputs_handle,
+      input_handles.data(),
       inputs.size(),
-      outputs_handle,
+      output_handles.data(),
       outputs.size(),
       stream_handle,
       proxy_executor_handle,
