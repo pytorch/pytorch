@@ -478,6 +478,7 @@ class KernelArgs:
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
         # keep track of unbacked symints used in this kernel
+        # (e.g. for codegen'ing the kernel arg list)
         self.unbacked_symints = set()
 
     def __repr__(self):

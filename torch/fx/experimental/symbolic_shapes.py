@@ -3538,7 +3538,10 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
-            if not torch._dynamo.config.capture_scalar_outputs:
+            # if `config.capture_scalar_outputs`` is true, allow unbacked symint in size hint
+            if torch._dynamo.config.capture_scalar_outputs:
+                return r
+            else:
                 raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
@@ -3800,6 +3803,7 @@ class ShapeEnv:
                 # Attempt to eliminate the unbacked SymInt
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                    # if `config.capture_scalar_outputs`` is true, allow unbacked symint in evaluated expression
                     if torch._dynamo.config.capture_scalar_outputs:
                         return new_expr
                     else:
