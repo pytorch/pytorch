@@ -184,6 +184,8 @@ class TestPytree(TestCase):
             {"a": 0, "b": [{"c": 1}]},
             {"a": 0, "b": [1, {"c": 2}, torch.randn(3)], "c": (torch.randn(2, 3), 1)},
         ]
+        for case in cases:
+            run_test(case)
 
     def test_treemap(self):
         def run_test(pytree):
