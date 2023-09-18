@@ -18,7 +18,6 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 
 namespace c10 {
 
-// TODO: move this to C10 and make it C10_API
 class C10_API TaskThreadPoolBase {
  public:
   virtual void run(std::function<void()> func) = 0;
@@ -37,13 +36,7 @@ class C10_API TaskThreadPoolBase {
 
   virtual ~TaskThreadPoolBase() noexcept = default;
 
-  static size_t defaultNumThreads() {
-    auto num_threads = std::thread::hardware_concurrency();
-#if defined(_M_X64) || defined(__x86_64__)
-    num_threads /= 2;
-#endif
-    return num_threads;
-  }
+  static size_t defaultNumThreads();
 };
 
 class C10_API ThreadPool : public c10::TaskThreadPoolBase {

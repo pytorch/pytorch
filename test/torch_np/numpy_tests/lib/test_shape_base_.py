@@ -93,7 +93,6 @@ class TestTakeAlongAxis:
         actual = take_along_axis(a, ai, axis=1)
         assert_equal(actual.shape, ai.shape)
 
-    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/pull/107875")
     def test_broadcast(self):
         """Test that non-indexing dimensions are broadcast in both directions"""
         a = np.ones((3, 4, 1))

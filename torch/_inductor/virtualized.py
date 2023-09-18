@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
-from typing import Any
+from typing import Any, Callable, Union
 from unittest.mock import patch
 
 import sympy
@@ -23,8 +25,8 @@ class Virtualized:
     This allows us to swap in different op implementations in codegen.
     """
 
-    def __init__(self, vname, default):
-        self._key = f"__torchinductor_{vname}"
+    def __init__(self, vname: str, default):
+        self._key: str = f"__torchinductor_{vname}"
         self._default = default
 
     def _set_handler(self, value):
@@ -54,7 +56,7 @@ class NullHandler:
     pass
 
 
-def _arg_str(a):
+def _arg_str(a) -> str:
     if isinstance(a, sympy.Expr):
         return sympy_str(a)
     return str(a)
@@ -73,11 +75,11 @@ class MockHandler:
         return inner
 
     @staticmethod
-    def masked(mask, body, other):
+    def masked(mask, body, other) -> str:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod
-    def indirect_indexing(index_var, size, check=True):
+    def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
         return sympy_symbol(f"({str(index_var)})")
 
     @classmethod
@@ -102,7 +104,7 @@ class KernelFormatterHandler:
         self.var_counter = itertools.count()
 
     @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None):
+    def ir_to_string(ir_fn, index, rindex=None) -> str:
         from .ir import FlexibleLayout
 
         args = [index, rindex] if rindex is not None else [index]
@@ -127,7 +129,7 @@ class KernelFormatterHandler:
             result = ir_fn(*args)
             return formatter.getvalue(result)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name) -> Callable[..., str]:
         def inner(*args, **kwargs):
             line = getattr(self.parent_handler, name)(*args, **kwargs)
             if name == "indirect_indexing":
@@ -139,7 +141,9 @@ class KernelFormatterHandler:
 
         return inner
 
-    def reduction(self, dtype, src_dtype, reduction_type, value):
+    def reduction(
+        self, dtype, src_dtype, reduction_type, value
+    ) -> Union[tuple[str, ...], str]:
         line = self.parent_handler.reduction(dtype, src_dtype, reduction_type, value)
         num_values = reduction_num_outputs(reduction_type)
         varnames = [f"tmp{next(self.var_counter)}" for _ in range(num_values)]
@@ -263,18 +267,18 @@ class _V:
     KernelFormatterHandler = KernelFormatterHandler
     WrapperHandler = WrapperHandler
 
-    set_ops_handler = _ops._set_handler
-    get_ops_handler = _ops._get_handler
-    set_graph_handler = _graph._set_handler
-    set_real_inputs = _real_inputs._set_handler
-    get_real_inputs = _real_inputs._get_handler
-    set_fake_mode = _fake_mode._set_handler
-    get_fake_mode = _fake_mode._get_handler
-    set_kernel_handler = _kernel._set_handler
-    set_debug_handler = _debug._set_handler
-    set_interpreter_handler = _interpreter._set_handler
-    set_aot_compilation = _aot_compilation._set_handler
-    get_aot_compilation = _aot_compilation._get_handler
+    set_ops_handler: Callable[[Any], Any] = _ops._set_handler
+    get_ops_handler: Callable[[], Any] = _ops._get_handler
+    set_graph_handler: Callable[[Any], Any] = _graph._set_handler
+    set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
+    get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
+    set_fake_mode: Callable[[Any], Any] = _fake_mode._set_handler
+    get_fake_mode: Callable[[], Any] = _fake_mode._get_handler
+    set_kernel_handler: Callable[[Any], Any] = _kernel._set_handler
+    set_debug_handler: Callable[[Any], Any] = _debug._set_handler
+    set_interpreter_handler: Callable[[Any], Any] = _interpreter._set_handler
+    set_aot_compilation: Callable[[Any], Any] = _aot_compilation._set_handler
+    get_aot_compilation: Callable[[], Any] = _aot_compilation._get_handler
 
     @property
     def ops(self) -> MockHandler:  # type: ignore[valid-type]
