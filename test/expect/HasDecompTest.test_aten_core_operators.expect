@@ -486,7 +486,6 @@ aten::sqrt_
 aten::squeeze
 aten::squeeze.dim
 aten::squeeze.dims
-aten::std.correction
 aten::std.correction_out
 aten::std_mean.correction
 aten::sub.Scalar
