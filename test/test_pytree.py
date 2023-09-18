@@ -359,7 +359,7 @@ TreeSpec(TupleVariable, None, [*,
         _register_pytree_node(
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: Dummy(*xs),
+            lambda xs, _: DummyType(*xs),
             to_dumpable_context=lambda context: "moo",
             from_dumpable_context=lambda dumpable_context: None,
         )
@@ -381,7 +381,7 @@ TreeSpec(TupleVariable, None, [*,
             _register_pytree_node(
                 DummyType,
                 lambda dummy: ([dummy.x, dummy.y], None),
-                lambda xs, _: Dummy(*xs),
+                lambda xs, _: DummyType(*xs),
                 to_dumpable_context=lambda context: "moo",
             )
 
@@ -394,7 +394,7 @@ TreeSpec(TupleVariable, None, [*,
         _register_pytree_node(
             DummyType,
             lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: Dummy(*xs),
+            lambda xs, _: DummyType(*xs),
             to_dumpable_context=lambda context: DummyType,
             from_dumpable_context=lambda dumpable_context: None,
         )
