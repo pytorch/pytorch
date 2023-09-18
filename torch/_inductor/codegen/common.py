@@ -477,6 +477,7 @@ class KernelArgs:
         self.output_buffers = dict()
         self.inplace_buffers = dict()
         self.sizevars = sizevars or dict()
+        # keep track of unbacked symints used in this kernel
         self.unbacked_symints = set()
 
     def __repr__(self):
@@ -625,6 +626,7 @@ class KernelArgs:
             call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
 
+        # pass unbacked symints used by triton kernel into the triton kernel
         for s in sorted(self.unbacked_symints, key=str):
             s_str = str(s)
             arg_defs.append(s_str)

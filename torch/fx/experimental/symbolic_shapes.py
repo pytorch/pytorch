@@ -978,8 +978,7 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        # TODO(yf225): maybe gate with dynamo capture scalar output config
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         if isinstance(r, sympy.Integer):
             return int(r)
         elif isinstance(r, sympy.Symbol) and self.shape_env.is_unbacked_symint(r):
@@ -1017,8 +1016,7 @@ class SymNode:
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        # TODO(yf225): maybe gate with dynamo capture scalar output config
-        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node, allow_return_unbacked_symint=True)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
         if isinstance(r, sympy.core.relational.Relational):
             # NOTE: we do this unbacked symint replacement only to resolve bool guard,
             # so any default value > 1 would work.
@@ -2731,10 +2729,6 @@ class ShapeEnv:
         return symbol.name.startswith("i")
 
     @record_shapeenv_event()
-    def has_unbacked_symint(self, expr: sympy.Expr) -> bool:
-        return any(self.is_unbacked_symint(s) for s in expr.free_symbols)
-
-    @record_shapeenv_event()
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
@@ -3416,8 +3410,7 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(
-        self, expr: "sympy.Expr", *, unbacked_only: bool = False,
-        compute_hint: bool = False
+        self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3426,6 +3419,7 @@ class ShapeEnv:
         unbacked SymInts (leaving regular hinted integers alone).
         """
         expr = self.simplify(expr)
+
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
@@ -3563,10 +3557,7 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            r = self._maybe_evaluate_static(
-                result_expr,
-                compute_hint=True,
-            )
+            r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
         return result_expr
@@ -3764,7 +3755,7 @@ class ShapeEnv:
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
-    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None, allow_return_unbacked_symint=False):
+    def evaluate_expr(self, orig_expr: "sympy.Expr", hint=None, fx_node=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -3828,7 +3819,7 @@ class ShapeEnv:
                 # TODO: dedupe this with _maybe_evaluate_static
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
-                    if allow_return_unbacked_symint:
+                    if torch._dynamo.config.capture_scalar_outputs:
                         return new_expr
                     else:
                         raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)

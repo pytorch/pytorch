@@ -1872,11 +1872,12 @@ class TritonKernel(Kernel):
 
         size_hints = []
         for numel in self.numels:
-            hint_maybe_expr = V.graph.sizevars.size_hint(numel)
-            if isinstance(hint_maybe_expr, sympy.Expr):
-                hint = 32
-            else:
-                hint = next_power_of_2(hint_maybe_expr)
+            r = V.graph.sizevars.size_hint(numel)
+            if isinstance(r, sympy.Expr):
+                assert all(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in r.free_symbols)
+                # replace unbacked symints with default int value, for triton autotuning size hint purpose
+                r = sympy.expand(r.xreplace({s: sympy.Integer(32) for s in r.free_symbols}))
+            hint = next_power_of_2(r)
             size_hints.append(hint)
         if self.persistent_reduction:
             assert self.inside_reduction
@@ -2077,7 +2078,6 @@ class TritonKernel(Kernel):
     def call_kernel(self, name: str, node: IRNode = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
-
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
