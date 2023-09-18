@@ -279,7 +279,7 @@ RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
         "but there already was one. We will override the existing pystub.");
   }
   kAbstractImplPyStubs()[op_name] = pymodule;
-  return RegistrationHandleRAII([guard = this->guard_, this, op_name] {
+  return RegistrationHandleRAII([guard = this->guard_, op_name] {
     std::lock_guard<std::mutex> lock(guard->mutex);
     if (!guard->alive.load()) {
       return;
