@@ -5,7 +5,6 @@ from ..source import AttrSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
-from .user_defined import UserDefinedClassVariable
 
 # [Note: __torch_function__] This feature is partially supported with many rough edges (contact mlazos with issues):
 # At a high level, a torch function tensor subclass is represented as a TensorWithTFOverrideVariable, which dispatches
