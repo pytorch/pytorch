@@ -964,20 +964,18 @@ class TestExport(TestCase):
 
         inp = torch.ones(5, 5)
         exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
 
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
 
         exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
         # This seems fine because the exported program is generalized to work for dynamic shapes.
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
 
         exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, 'Cannot provide constraints for already exported program.'):
-            _ = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         # Reexported program should still work for dynamic shapes.
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
 
     def test_retrace_graph_level_meta_preservation(self):
@@ -996,13 +994,15 @@ class TestExport(TestCase):
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
-        re_exported = torch._export.export(stateful_module, (inp,))
+        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
         self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5))))
 
         re_exported_v2 = torch._export.export(exported, (inp,))
-        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
-        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
+        # Because when we re-export without any constraints, we lose the shape constraints from previous round.
+        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0)
+        with self.assertRaisesRegex(RuntimeError, r"Input arg0_1.shape\[0\] is specialized at 7"):
+            re_exported_v2(torch.ones(6, 5))
 
     def test_constrain_as_size_error(self):
 
