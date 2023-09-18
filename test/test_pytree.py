@@ -147,17 +147,17 @@ class TestPytree(TestCase):
         self.assertEqual(result, expected)
 
     def test_flatten_unflatten_dict(self):
-        def run_test(tup):
+        def run_test(dct):
             expected_spec = TreeSpec(
-                dict, list(tup.keys()), [LeafSpec() for _ in tup.values()]
+                dict, list(dct.keys()), [LeafSpec() for _ in dct.values()]
             )
-            values, treespec = tree_flatten(tup)
+            values, treespec = tree_flatten(dct)
             self.assertTrue(isinstance(values, list))
-            self.assertEqual(values, list(tup.values()))
+            self.assertEqual(values, list(dct.values()))
             self.assertEqual(treespec, expected_spec)
 
             unflattened = tree_unflatten(values, treespec)
-            self.assertEqual(unflattened, tup)
+            self.assertEqual(unflattened, dct)
             self.assertTrue(isinstance(unflattened, dict))
 
         run_test({})
