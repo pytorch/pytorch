@@ -55,7 +55,6 @@ from .current_scope_id import enter_new_scope
 from .exc import (
     BackendCompilerFailed,
     exceptions_allowed_to_be_fallback,
-    SkipFrameBasedOnHueristic,
     unimplemented,
     unimplemented_with_warning,
 )
@@ -222,6 +221,16 @@ class WrapperBackend:
 Scope = Dict[str, object]
 
 
+@dataclass
+class DebugInfo:
+    """
+    Stores debug info that can be used to make decisions like when to skip
+    compiling a compilation frame.
+    """
+
+    num_symints_from_list_of_integers: int = 0
+
+
 class OutputGraph(Checkpointable[OutputGraphState]):
     """
     Wrapper class to hold outputs of InstructionTranslator.  Mainly the
@@ -356,6 +365,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         # where inlining of a function changes the global state (because of the
         # presence of torch.no_grad) and there is a graph break.
         self.save_global_state()
+
+        self.debug_info = DebugInfo()
 
     # This gets its own helper function so guards DEBUG logs are more
     # informative
@@ -776,11 +787,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         raise AssertionError("unreachable")
 
-    def skip_frame_based_on_heurtisic(self) -> Optional[str]:
-        if len(self.guards) > 1000 and self.count_non_getitem_op_calls() < 50:
-            return "because there are > 1000 guards but < 50 ops. This function is likely not worth compiling."
-        return None
-
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
@@ -796,9 +802,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         self.compile_subgraph_reason = reason
 
         log.debug("COMPILING GRAPH due to %s", reason)
-
-        if skip_reason := self.skip_frame_based_on_heurtisic():
-            raise SkipFrameBasedOnHueristic(skip_reason)
 
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")

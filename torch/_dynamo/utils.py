@@ -519,6 +519,7 @@ class CompilationMetrics:
     graph_input_count: Optional[int]
     entire_frame_compile_time_s: Optional[float]
     backend_compile_time_s: Optional[float]
+    num_symints_from_list_of_integers: Optional[int]
     fail_reason: Optional[str]
 
 

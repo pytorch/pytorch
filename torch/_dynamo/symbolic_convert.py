@@ -696,7 +696,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
-        except Unsupported as e:
+        except Unsupported:
             if self.empty_checkpoint():
                 log.debug("empty checkpoint")
                 raise
@@ -2041,6 +2041,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             )
 
+            self.collect_debug_info_from_symbolic_locals(f_locals)
+
             self.init_local_index_guards_hack()
 
             self._freevars_ids = dict()
@@ -2083,6 +2085,16 @@ class InstructionTranslator(InstructionTranslatorBase):
                     )
                 ]
                 self.output.guards.update(index_guards)
+
+    def collect_debug_info_from_symbolic_locals(self, f_locals):
+        # Count number of SymNodeVariable in symbolic_locals where the value is a list/tuple
+        self.output.debug_info.num_symints_from_list_of_integers = 0
+        for key, value in self.symbolic_locals.items():
+            if isinstance(f_locals[key], (list, tuple)):
+                list_vt = value
+                for vt in list_vt:
+                    if isinstance(vt, SymNodeVariable):
+                        self.output.debug_info.num_symints_from_list_of_integers += 1
 
     def run(self):
         super().run()
@@ -2464,18 +2476,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()
         self.instruction_pointer = None
-        if skip_reason := self.output.skip_frame_based_on_heurtisic():
-            # This is somewhat unwanted. he hueristic is based on the
-            # accumulated graph till now. If at the end of inlining of a
-            # function, we find that that accumulated graph till now is bad
-            # candidate, there is no easy way to tell which function in the call
-            # stack should be skipped.
-            #
-            # We solve this here by just causing a graph break here for Inlined
-            # function. Dynamo will renter the child frame and will eventually
-            # find the offending function in the call stack in subsequent
-            # Cpython frame invocations.
-            unimplemented(skip_reason)
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):

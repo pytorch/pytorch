@@ -600,6 +600,9 @@ def _compile(
                 backend_compile_time = frame_phase_timing[frame_key].get(
                     "backend_compile", None
                 )
+                num_symints_from_list_of_integers = (
+                    output.debug_info.num_symints_from_list_of_integers
+                )
             else:
                 guard_count = None
                 graph_op_count = None
@@ -608,6 +611,7 @@ def _compile(
                 graph_input_count = None
                 entire_frame_compile_time = None
                 backend_compile_time = None
+                num_symints_from_list_of_integers = None
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -622,6 +626,7 @@ def _compile(
                 graph_input_count,
                 entire_frame_compile_time,
                 backend_compile_time,
+                num_symints_from_list_of_integers,
                 fail_reason,
             )
             log_compilation_event(metrics)
