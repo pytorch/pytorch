@@ -8,8 +8,10 @@ from .lists import TupleVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 # [Note: __torch_function__] This feature is partially supported with many rough edges (contact mlazos with issues):
+# At a high level, a torch function tensor subclass is represented as a TensorWithTFOverrideVariable, which dispatches
+# __torch_function__ on attribute accesses, method calls, and torch API calls.
 # The following is not supported:
-# - triggering __torch_function__ on tensor subclass attribute access
+# - triggering __torch_function__ on tensor subclass non-tensor custom attributes
 # - graph breaking on mutating guardable tensor properties within a __torch_function__ context, this can cause
 # excessive recompiles in certain degenerate cases
 # - Matching the exact eager behavior of *ignoring* __torch_function__ objects in non-tensor argument positions of Torch API calls
@@ -18,7 +20,11 @@ from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 # - static method impls of __torch_function__ on custom objects; this will trigger on torch API calls with the object as
 # any argument
 # - triggering __torch_function__ on torch API calls with tensor subclass arguments
+# - __torch_function__ calls on base tensor attribute access and method calls for tensor subclass instances
 # - matches the dispatch ordering behavior of eager __torch_function__ with subclass/object argumnents in any argument position
+
+# See https://docs.google.com/document/d/1WBxBSvW3NXhRp9ncmtokJloMLCtF4AYNhJaffvHe8Kw/edit#heading=h.vacn73lozd9w
+# for more information on the design.
 
 # To enable subclass behavior, add your tensor subclass type to traceable_tensor_subclasses in dynamo/config.py
 
