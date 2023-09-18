@@ -77,9 +77,10 @@ TORCH_LIBRARY_FRAGMENT(custom, m) {
     m.def("op2", custom_op2);
     m.def("op_with_defaults(Tensor tensor, float scalar = 1, int repeat = 1) -> Tensor[]", custom_op);
     m.def("op_with_autograd(Tensor var1, int mul, Tensor var2, Tensor? var3=None) -> Tensor", custom_op_with_autograd);
+    m.def("sin(Tensor x) -> Tensor");
+    m.impl_abstract_pystub("sin", "my_custom_ops2");
     m.def("nonzero(Tensor x) -> Tensor");
     m.impl_abstract_pystub("nonzero", "my_custom_ops");
-    m.impl_abstract_pystub("sin", "my_custom_ops2");
 }
 
 TORCH_LIBRARY_IMPL(custom, CPU, m) {
