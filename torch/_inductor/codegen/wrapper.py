@@ -1090,11 +1090,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         """
                     )
                 else:
+                    # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                     self.prefix.splice(
                         """
-                            auto tmp_input_handles = borrow_raii_tensor_handles(input_handles);
+                            auto tmp_input_handles = raii_handles_to_raw_handles(input_handles);
                             auto inputs = borrow_handles_to_tensors(tmp_input_handles);
-                            auto tmp_output_handles = borrow_raii_tensor_handles(output_handles);
+                            auto tmp_output_handles = raii_handles_to_raw_handles(output_handles);
                             auto outputs = borrow_handles_to_tensors(tmp_output_handles);
                         """
                     )

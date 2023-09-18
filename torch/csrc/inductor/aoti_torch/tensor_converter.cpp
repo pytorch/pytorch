@@ -24,13 +24,6 @@ std::vector<AtenTensorHandle> borrow_tensors_to_handles(
   return result;
 }
 
-std::vector<AtenTensorHandle> steal_tensors_to_handles(
-    std::vector<at::Tensor>& tensors) {
-  auto result = borrow_tensors_to_handles(tensors);
-  tensors.clear();
-  return result;
-}
-
 std::vector<at::Tensor> borrow_handles_to_tensors(
     std::vector<AtenTensorHandle>& handles) {
   std::vector<at::Tensor> result;
@@ -39,16 +32,6 @@ std::vector<at::Tensor> borrow_handles_to_tensors(
     auto tensor = *tensor_handle_to_tensor_pointer(handle);
     result.emplace_back(std::move(tensor));
   }
-  return result;
-}
-
-std::vector<at::Tensor> steal_handles_to_tensors(
-    std::vector<AtenTensorHandle>& handles) {
-  auto result = borrow_handles_to_tensors(handles);
-  for (auto handle : handles) {
-    aoti_torch_delete_tensor_object(handle);
-  }
-  handles.clear();
   return result;
 }
 

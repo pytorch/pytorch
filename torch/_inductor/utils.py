@@ -1193,9 +1193,9 @@ aot_inductor_launcher = """
         AOTInductorStreamHandle stream_handle =
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
 
-        std::vector<AtenTensorHandle> inputs_handle =
+        std::vector<AtenTensorHandle> input_handles =
             torch::aot_inductor::borrow_tensors_to_handles(input_tensors);
-        std::vector<AtenTensorHandle> outputs_handle =
+        std::vector<AtenTensorHandle> output_handles =
             torch::aot_inductor::borrow_tensors_to_handles(output_tensors);
 
         std::vector<const int64_t*> output_sizes(output_tensors.size());
@@ -1204,9 +1204,9 @@ aot_inductor_launcher = """
 
         AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
             container_handle,
-            inputs_handle.data(),
+            input_handles.data(),
             input_tensors.size(),
-            outputs_handle.data(),
+            output_handles.data(),
             output_tensors.size(),
             stream_handle,
             proxy_executor_handle,

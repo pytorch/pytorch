@@ -39,11 +39,6 @@ class AOTInductorModelContainer {
       size_t num_models,
       bool is_cpu = false,
       std::optional<std::string> cubin_dir = std::nullopt) {
-    // LOG(INFO) << "Constructing an AOTInductorModelContainer with " <<
-    // num_models
-    //          << " model instances";
-    // TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
-
     constants_ = std::make_shared<ConstantMap>();
     models_.reserve(num_models);
     available_models_.reserve(num_models);

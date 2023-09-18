@@ -342,7 +342,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   }
 };
 
-// TODO: will update RAIIAtenTensorHandle's implementation and change this
+// TODO: will update RAIIAtenTensorHandle to unique_ptr and change this
 inline RAIIAtenTensorHandle create_raii_tensor_handle(AtenTensorHandle handle) {
   return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
     AOTI_TORCH_ERROR_CHECK(
@@ -350,15 +350,15 @@ inline RAIIAtenTensorHandle create_raii_tensor_handle(AtenTensorHandle handle) {
   });
 }
 
-// TODO: will update RAIIAtenTensorHandle's implementation and change this
-std::vector<AtenTensorHandle> borrow_raii_tensor_handles(
+// TODO: will update RAIIAtenTensorHandle to unique_ptr and change this
+std::vector<AtenTensorHandle> raii_handles_to_raw_handles(
     std::vector<RAIIAtenTensorHandle>& raii_handles) {
-  std::vector<AtenTensorHandle> result;
-  result.reserve(raii_handles.size());
+  std::vector<AtenTensorHandle> raw_handles;
+  raw_handles.reserve(raii_handles.size());
   for (auto& handle : raii_handles) {
-    result.push_back(handle.get());
+    raw_handles.push_back(handle.get());
   }
-  return result;
+  return raw_handles;
 }
 
 class AOTICudaStreamGuard {

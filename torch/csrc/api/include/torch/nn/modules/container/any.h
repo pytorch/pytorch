@@ -8,6 +8,7 @@
 #include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
@@ -339,7 +340,7 @@ std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
       !std::is_void<ReturnType>::value,
       "AnyModule cannot store modules that return void "
       "(you can return a dummy value).");
-  return std::make_unique<
+  return torch::make_unique<
       AnyModuleHolder<decay_t<ModuleType>, ArgumentTypes...>>(
       std::move(module));
 }

@@ -676,6 +676,7 @@ struct ThreadLocalResults {
 class PythonTracer final : public python_tracer::PythonTracerBase {
  public:
   PythonTracer(torch::profiler::impl::RecordQueue* queue);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PythonTracer() override;
 
   static int pyProfileFn(
@@ -816,6 +817,7 @@ void PythonTracer::stop() {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonTracer::~PythonTracer() {
   if (active_) {
     TORCH_WARN("`PythonTracer::stop()` was not called.");
