@@ -105,7 +105,8 @@ class TestPatternMatcherBase(TestCase):
                 quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
                 prepare_model = prepare_pt2e(export_model, quantizer)
                 prepare_model(*inputs)
-                convert_model = convert_pt2e(prepare_model).eval()
+                convert_model = convert_pt2e(prepare_model)
+                torch.ao.quantization.move_exported_model_to_eval(convert_model)
                 _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
