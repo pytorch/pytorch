@@ -353,6 +353,7 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+    "inductor/test_max_autotune",  # Testing, probably revert later
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -1289,7 +1290,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[ShardedTest]:
+def get_selected_tests(options) -> List[str]:
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -1652,6 +1653,18 @@ def main():
                 options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
             )
 
+        def __str__(self):
+            s = f"Name: {self.name}\n"
+            s += "  Parallel tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
+            )
+            s += "  Serial tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if must_serial(test)
+            )
+            return s.strip()
+
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
@@ -1672,6 +1685,9 @@ def main():
         ),
     ]
 
+    for test_batch in test_batches:
+        print(test_batch)
+
     if options.dry_run:
         return
 
@@ -1689,8 +1705,14 @@ def main():
         # Actually run the tests
         start_time = time.time()
         for test_batch in test_batches:
-            print(f"Starting test batch '{test_batch.name}'")
-            metrics_dict[f"{test_batch.name}_start_time"] = time.time() - start_time
+            elapsed_time = time.time() - start_time
+            print(
+                f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
+            )
+            print(
+                f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
+            )
+            metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
             run_tests(
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
@@ -1711,19 +1733,21 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
+        all_failures = [failure for batch in test_batches for failure in batch.failures]
+
         if IS_CI:
             emit_metric("td_experiment_1", metrics_dict)
 
-    all_failures = [failure for batch in test_batches for failure in batch.failures]
+            num_tests = len(selected_tests)
+            for test, _ in all_failures:
+                test_stats = aggregated_heuristics.get_test_stats(test)
+                test_stats["num_total_tests"] = num_tests
 
-    num_tests = len(selected_tests)
+                print("Emiting td_test_failure_stats")
+                emit_metric("td_test_failure_stats", test_stats)
+
     if len(all_failures):
-        for test, err in all_failures:
-            test_stats = aggregated_heuristics.get_test_stats(test)
-            test_stats["num_total_tests"] = num_tests
-
-            emit_metric("td_test_failure_stats", test_stats)
-
+        for _, err in all_failures:
             print_to_stderr(err)
 
         # A disabled test is expected to fail, so there is no need to report a failure here

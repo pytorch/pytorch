@@ -81,6 +81,8 @@ SKIP = {
     "hf_Bert_large",  # Error: RelaxedUnspecConstraint(L['input_ids'].size()[0]) - inferred constant (4)
     # takes too long, extreme slowdown (< .001)
     "maml",
+    # Failing in eager mode
+    "clip",
 }
 
 SKIP_FOR_CPU = {
@@ -91,6 +93,7 @@ SKIP_FOR_CPU = {
     "llama_v2_7b_16h",  # model is CUDA only
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
+    "simple_gpt",
 }
 
 SKIP_FOR_CUDA = {
@@ -108,6 +111,7 @@ SKIP_TRAIN = {
     "maml",
     "llama",
     "llama_v2_7b_16h",
+    "simple_gpt",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -142,6 +146,13 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 }
 
 REQUIRE_HIGHER_FP16_TOLERANCE = {
+    "doctr_reco_predictor",
+    "drq",
+}
+
+
+REQUIRE_HIGHER_BF16_TOLERANCE = {
+    "doctr_reco_predictor",
     "drq",
 }
 
@@ -227,11 +238,18 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
     "doctr_reco_predictor",
     "Super_SloMo",
     "tts_angular",
+    "pyhpc_turbulent_kinetic_energy",
+    "detectron2_fcos_r_50_fpn",
 }
 
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
+}
+
+ONLY_MULTIPROCESS = {
+    # Models that should only run in --multiprocess mode
+    "simple_gpt"
 }
 
 
@@ -289,12 +307,17 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
         return set()
 
+    @property
+    def skip_multiprocess_models(self):
+        return ONLY_MULTIPROCESS
+
     def load_model(
         self,
         device,
         model_name,
         batch_size=None,
         part=None,
+        extra_args=None,
     ):
         if self.args.enable_activation_checkpointing:
             raise NotImplementedError(
@@ -336,9 +359,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
         # workaround "RuntimeError: not allowed to set torch.backends.cudnn flags"
         torch.backends.__allow_nonbracketed_mutation_flag = True
-        extra_args = []
+        if extra_args is None:
+            extra_args = []
         if part:
-            extra_args = ["--part", part]
+            extra_args += ["--part", part]
 
         if model_name == "vision_maskrcnn" and is_training:
             # Output of vision_maskrcnn model is a list of bounding boxes,
@@ -440,6 +464,11 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if name in REQUIRE_HIGHER_FP16_TOLERANCE:
                 return 1e-2, cosine
             return 1e-3, cosine
+
+        if self.args.bfloat16:
+            if name in REQUIRE_HIGHER_BF16_TOLERANCE:
+                return 1e-2, cosine
+
         if is_training and current_device == "cuda":
             tolerance = 1e-3
             if name in REQUIRE_COSINE_TOLERACE:

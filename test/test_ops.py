@@ -1752,6 +1752,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.equal',
         '_refs.full',
         '_refs.full_like',
+        '_refs.is_complex',
         '_refs.to',
         '_refs.mvlgamma',
         '_refs.ones',
@@ -1851,6 +1852,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.square',
         '_refs.stft',
         '_refs.T',
+        '_refs.take_along_dim',
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
@@ -1879,6 +1881,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.imag',
         '_refs.reshape_as',
         '_refs.view_as',
+        '_refs.view_as_complex'  # TorchInductor does not support complex at the moment.
     }
 
     @parametrize("op", ref_ops_names)
@@ -1891,7 +1894,7 @@ class TestRefsOpsInfo(TestCase):
         else:
             # Intentionally don't use assertIn to avoid printing the
             # (very large) container
-            self.assertTrue(op in self.ref_db_names, msg="{op} not in ref_db_names")
+            self.assertTrue(op in self.ref_db_names, msg=f"{op} not in ref_db_names")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
@@ -1935,7 +1938,6 @@ fake_skips = (
     "to_sparse",  # Could not run 'aten::_to_sparse' with arguments from the 'Meta' backend
     "tensor_split",  # The tensor has a non-zero number of elements, but its data is not allocated yet
     "repeat_interleave",  # cannot repeat_interleave a meta tensor without output_size
-    "_segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
     "nn.functional.one_hot",
@@ -1990,7 +1992,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("_segment_reduce", "lengths"),
     xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
     xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip('nn.functional.ctc_loss'),
@@ -2181,4 +2182,5 @@ instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
+    TestCase._default_dtype_check_enabled = True
     run_tests()

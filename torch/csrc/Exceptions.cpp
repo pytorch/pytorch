@@ -20,14 +20,17 @@ PyObject *THPException_FatalError, *THPException_LinAlgError,
   if (!(cond))            \
   return false
 bool THPException_init(PyObject* module) {
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_FatalError =
           PyErr_NewException("torch.FatalError", nullptr, nullptr));
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
 
   // Set the doc string here since _add_docstr throws malloc errors if tp_doc is
   // modified for an error class.
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_LinAlgError = PyErr_NewExceptionWithDoc(
           "torch._C._LinAlgError",
@@ -54,6 +57,7 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) ==
       0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_OutOfMemoryError = PyErr_NewExceptionWithDoc(
           "torch.cuda.OutOfMemoryError",
@@ -64,6 +68,7 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_DistError = PyErr_NewExceptionWithDoc(
           "torch.distributed.DistError",
@@ -73,6 +78,7 @@ could not be completed because the input matrix is singular.",
   ASSERT_TRUE(
       PyModule_AddObject(module, "_DistError", THPException_DistError) == 0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_DistBackendError = PyErr_NewExceptionWithDoc(
           "torch.distributed.DistBackendError",
@@ -83,6 +89,7 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_DistBackendError", THPException_DistBackendError) == 0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_DistNetworkError = PyErr_NewExceptionWithDoc(
           "torch.distributed.DistNetworkError",
@@ -93,6 +100,7 @@ could not be completed because the input matrix is singular.",
       PyModule_AddObject(
           module, "_DistNetworkError", THPException_DistNetworkError) == 0);
 
+  // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_DistStoreError = PyErr_NewExceptionWithDoc(
           "torch.distributed.DistStoreError",
@@ -217,42 +225,42 @@ void translate_exception_to_python(const std::exception_ptr& e_ptr) {
 }
 
 IndexError::IndexError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 TypeError::TypeError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 ValueError::ValueError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 NotImplementedError::NotImplementedError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 AttributeError::AttributeError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
 }
 
 LinAlgError::LinAlgError(const char* format, ...) {
-  va_list fmt_args;
+  va_list fmt_args{};
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
@@ -288,8 +296,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
   auto& warning_buffer = internal_handler_.warning_buffer_;
 
   if (!warning_buffer.empty()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject *type, *value, *traceback;
+    PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
     pybind11::gil_scoped_acquire gil;
     auto result = 0;
     if (in_exception_) {
@@ -313,7 +320,7 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
             /*category=*/map_warning_to_python_type(warning),
             /*message=*/msg.c_str(),
             /*filename=*/source_location.file,
-            /*lineno=*/source_location.line,
+            /*lineno=*/static_cast<int>(source_location.line),
             /*module=*/nullptr,
             /*registry=*/nullptr);
       } else {
@@ -344,7 +351,6 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       throw python_error();
     }
     if (in_exception_) {
-      // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
       PyErr_Restore(type, value, traceback);
     }
   }

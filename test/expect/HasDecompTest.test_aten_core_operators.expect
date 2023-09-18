@@ -139,10 +139,6 @@ aten::clamp_max.Tensor_out
 aten::clamp_max.out
 aten::clamp_max_
 aten::clamp_max_.Tensor
-aten::clamp_min
-aten::clamp_min.Tensor
-aten::clamp_min.Tensor_out
-aten::clamp_min.out
 aten::clamp_min_
 aten::clamp_min_.Tensor
 aten::clone
@@ -486,7 +482,6 @@ aten::sqrt_
 aten::squeeze
 aten::squeeze.dim
 aten::squeeze.dims
-aten::std.correction
 aten::std.correction_out
 aten::std_mean.correction
 aten::sub.Scalar
@@ -517,7 +512,6 @@ aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
-aten::unsafe_split.Tensor
 aten::unsafe_split_with_sizes
 aten::unsafe_split_with_sizes.out
 aten::unsqueeze

@@ -20,7 +20,14 @@ __all__ = [
 ]
 
 # TODO: maybe remove torch.float32
-SUPPORTED_DTYPES = [torch.uint8, torch.int8, torch.int32, torch.float16, torch.float32]
+SUPPORTED_DTYPES = [
+    torch.uint8,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.float16,
+    torch.float32,
+]
 SUPPORTED_QSCHEMES = [
     torch.per_tensor_affine,
     torch.per_tensor_symmetric,
