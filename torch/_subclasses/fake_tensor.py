@@ -1231,7 +1231,7 @@ def get_tensor_hash(x):
         return tuple(x.shape), tuple(x.stride()), x.dtype
     return x
 
-import optree
+# import optree
 def hash_op(func, args, kwargs):
     flatten = tree_flatten((args, kwargs))[0]
     return func, tuple(get_tensor_hash(x) for x in flatten)
