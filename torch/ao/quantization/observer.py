@@ -485,8 +485,8 @@ class MinMaxObserver(UniformQuantizationObserverBase):
             eps=eps,
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
-        self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs).detach())
-        self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs).detach())
+        self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
+        self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs))
         if (
             self.qscheme == torch.per_tensor_symmetric
             and self.reduce_range
@@ -1183,6 +1183,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
             assert (
                 combined_min.numel() == 1 and combined_max.numel() == 1
             ), "histogram min/max values must be scalar."
+
+            # TODO: For some reason, this is required for it to pass torchscript test
+            # combined_min and combined_max should already have requires_grad set to False
+            combined_min, combined_max = combined_min.detach(), combined_max.detach()
+
             combined_histogram = torch.histc(
                 x, self.bins, min=combined_min, max=combined_max  # type: ignore[arg-type]
             )
