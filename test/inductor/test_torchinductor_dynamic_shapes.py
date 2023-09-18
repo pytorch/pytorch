@@ -8,6 +8,7 @@ import unittest
 from functools import partial
 
 import torch
+import sympy
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch._inductor import ir
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(

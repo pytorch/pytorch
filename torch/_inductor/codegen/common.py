@@ -626,7 +626,7 @@ class KernelArgs:
             call_args.append(outer)
             precompile_args.append(SizeArg(inner, outer))
 
-        # pass unbacked symints used by triton kernel into the triton kernel
+        # pass unbacked symints used by kernel into the kernel
         for s in sorted(self.unbacked_symints, key=str):
             s_str = str(s)
             arg_defs.append(s_str)

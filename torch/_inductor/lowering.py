@@ -2268,7 +2268,10 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    return ir.DynamicScalar.create(data)
+    symbol = V.graph.current_node.meta['val'].node.expr
+    ret = ir.DynamicScalar.create(data, symbol)
+    V.graph.sizevars.shape_env.unbacked_symint_to_buf[symbol] = ret.get_name()
+    return ret
 
 
 def _full(fill_value, device, dtype, size):

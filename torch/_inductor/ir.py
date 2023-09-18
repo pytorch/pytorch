@@ -24,8 +24,6 @@ from typing import (
     Union,
 )
 from unittest.mock import patch
-import sys
-import copy
 
 import sympy
 from sympy import Expr, Integer
@@ -2165,7 +2163,7 @@ class Layout(IRNode):
         ), f"size={size}, stride={stride}"
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, (DynamicScalar, Expr, int)) for s in size)
+        assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -3750,50 +3748,37 @@ class DynamicScalar(ExternKernelAlloc):
     The result of a call to aten._local_scalar_dense.
     """
 
-    # NOTE: pretend to be a type that SymPy understands
-    # TODO(yf225): add a `dyn_scalar = sympy.sympify(dyn_scalar)`` test for this class, to make sure it always works
+    # When output of .item or .tolist (i.e. DynamicScalar object) is passed as part of size arg to another operator,
+    # Inductor will need to reason about the object's symbolic value compared to other SymPy values in the program.
+    # To make this reasoning easier, we pretend that the DynamicScalar object is a SymPy object. We achieve it with:
+    # 1. Setting __sympy__ = True.
+    # 2. Redirecting __hash__ to the underlying SymPy symbol object.
+    # 3. If an attribute is not found on the DynamicScalar object itself, then we forward it to the underlying SymPy symbol object.
     __sympy__ = True
 
     def __init__(
         self,
+        symbol,
         layout,
         inputs,
         constant_args=(),
     ):
         super().__init__(layout, inputs, constant_args)
-        self.symbol = V.graph.current_node.meta['val']
-        V.graph.sizevars.shape_env.unbacked_symint_to_buf[self.symbol.node.expr] = self.get_name()
+        self.symbol = symbol
+        # ensure that SymPy thinks this object is equivalent to its underlying SymPy symbol
+        assert id(self) == id(sympy.sympify(self))
 
     def __hash__(self):
-        return hash(self.symbol.node.expr)
-
-    # TODO(yf225): to remove `has_side_effects` and `can_free`, the consumption side of DynamicScalar
-    # needs to insert this buffer into its own `reads` dependencies (e.g. by adding it into the `inputs` arg? but some IRs actually don't have `inputs` concept :(  )
-    # otherwise we see a dependency structure like:
-    # ```
-    # node: ExternKernelSchedulerNode(name='buf0'), node.read_writes.reads: {StarDep(name='arg0_1')}
-    # node: ExternKernelSchedulerNode(name='buf1'), node.read_writes.reads: {StarDep(name='arg0_1')}
-    # node: SchedulerNode(name='buf2'), node.read_writes.reads: {MemoryDep('arg1_1', 2*ModularIndexing(c0, 1, 2) + ModularIndexing(c1, 1, 2), {c0: 2*i6, c1: 2*i7})}
-    # ```
-    # where buf2 don't know that it needs to depend on buf0 and buf1
-    #
-    # Some solutions:
-    # 1. add the dep handling into `extract_read_writes` (i.e. "if DynamicScalar masquared as symint, then add dependency")
-    # def has_side_effects(self):
-    #     # Prevents dead code elimination, because the Python scalar value might be reused later
-    #     return True
-
-    # def can_free(self):
-    #     # Prevents buffer freeing, because the Python scalar value might be reused later
-    #     return False
+        return hash(self.symbol)
 
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")
         wrapper.writeline(f"{self.symbol} = {self.get_name()}")
 
     @classmethod
-    def create(cls, x: "TensorBox"):
+    def create(cls, x: "TensorBox", symbol: sympy.Symbol):
         return DynamicScalar(
+            symbol=symbol,
             layout=FixedLayout(
                 torch.device("cpu"), x.get_dtype(), [1], [1]
             ),
@@ -3802,23 +3787,23 @@ class DynamicScalar(ExternKernelAlloc):
 
     def __getattr__(self, name):
         # if attr is not found on the DynamicScalar object, then forward to the underlying Symbol object
-        return getattr(self.symbol.node.expr, name)
+        return getattr(self.symbol, name)
 
     # TODO: add more operations (see sympy.Integer)
     def __add__(self, other):
-        return self.symbol.node.expr + other
+        return self.symbol + other
 
     def __mul__(self, other):
-        return self.symbol.node.expr * other
+        return self.symbol * other
 
     def __rmul__(self, other):
-        return self.symbol.node.expr * other
+        return self.symbol * other
 
     def __truediv__(self, other):
-        return self.symbol.node.expr / other
+        return self.symbol / other
 
     def __sub__(self, other):
-        return self.symbol.node.expr - other
+        return self.symbol - other
 
 
 @dataclasses.dataclass
