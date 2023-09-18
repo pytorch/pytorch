@@ -1,3 +1,6 @@
+import operator
+import types
+
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.fx import (
@@ -5,7 +8,6 @@ from torch.fx import (
     Node,
 )
 from torch.nn.utils.fusion import fuse_conv_bn_weights
-import operator
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
 
@@ -166,13 +168,14 @@ def fold_bn_weights_into_conv_node(
     setattr(m, weight_attr_name, fused_weight)
     if conv_bias_node is not None:
         bias_attr_name = conv_bias_node.target
+        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
     else:
         bias_attr_name = weight_attr_name + "_bias"
+        setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
         with m.graph.inserting_before(conv_node):
             get_bias_node = m.graph.get_attr(bias_attr_name)
         # NOTE: here we assume the bias of conv is not quantized!
         conv_args[2] = get_bias_node
-    setattr(m, bias_attr_name, fused_bias)  # type: ignore[arg-type]
     conv_node.args = tuple(conv_args)
 
     # native_batch_norm has 3 outputs, we expect getitem calls on the output
@@ -431,3 +434,20 @@ def _replace_literals_with_existing_placeholders(
         new_args = tuple(new_args)
         node.args = new_args
     return gm
+
+# TODO: Handle this in export itself and don't wrap the model in another GraphModule
+# in prepare and convert
+def _disallow_eval_train(model: GraphModule):
+    """
+    Disallow calling `model.train()` or `model.eval()` on the given GraphModule.
+    This is useful for exported models, where these methods don't actually behave as expected.
+    """
+    def _train(self, mode: bool = True):
+        raise NotImplementedError("Calling train() is not supported yet.")
+
+    def _eval(self, mode: bool = True):
+        raise NotImplementedError("Calling eval() is not supported yet.")
+
+    model.train = types.MethodType(_train, model)  # type: ignore[method-assign]
+    model.eval = types.MethodType(_eval, model)  # type: ignore[method-assign]
+    return model
