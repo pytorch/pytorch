@@ -5,6 +5,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
