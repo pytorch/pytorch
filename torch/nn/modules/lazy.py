@@ -15,7 +15,7 @@ class _LazyProtocol(Protocol):
     def _register_load_state_dict_pre_hook(self, hook):
         ...
 
-    def register_forward_pre_hook(self, hook):
+    def register_forward_pre_hook(self, hook, *, prepend=False, with_kwargs=False):
         ...
 
     def _lazy_load_hook(
@@ -176,7 +176,7 @@ class LazyModuleMixin:
         # Mypy doesnt like this super call in a mixin
         super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
-        self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters)
+        self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters, with_kwargs=True)
         warnings.warn('Lazy modules are a new feature under heavy development '
                       'so changes to the API or functionality can happen at any moment.')
 
@@ -237,7 +237,7 @@ class LazyModuleMixin:
                 return True
         return False
 
-    def _infer_parameters(self: _LazyProtocol, module, input):
+    def _infer_parameters(self: _LazyProtocol, module, args, kwargs=None):
         r"""Infers the size and initializes the parameters according to the
         provided input batch.
         Given a module that contains parameters that were declared inferrable
@@ -247,7 +247,8 @@ class LazyModuleMixin:
         The module is set into evaluation mode before running the forward pass in order
         to avoid saving statistics or calculating gradients
         """
-        module.initialize_parameters(*input)
+        kwargs = kwargs if kwargs else {}
+        module.initialize_parameters(*args, **kwargs)
         if module.has_uninitialized_params():
             raise RuntimeError(f'module {self._get_name()} has not been fully initialized')
         module._initialize_hook.remove()

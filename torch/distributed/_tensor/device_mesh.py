@@ -42,7 +42,7 @@ class _MeshEnv:
         return self.mesh_stack[-1]
 
     def create_child_mesh(
-        self, device_mesh: "DeviceMesh", mesh_dim: int
+        self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
     ) -> "DeviceMesh":
         # swap the current dim to the last dim then reshape to flatten out other
         # dims, so we can just extract the list of ranks which contains cur_rank.
@@ -53,7 +53,10 @@ class _MeshEnv:
 
         for mesh_1d in pg_ranks_by_dim:
             sub_mesh = DeviceMesh(
-                device_mesh.device_type, mesh_1d, _init_process_groups=False
+                device_mesh.device_type,
+                mesh_1d,
+                mesh_dim_names=(mesh_dim_name,),
+                _init_process_groups=False,
             )
             if cur_rank in mesh_1d:
                 res_sub_mesh = sub_mesh
@@ -65,6 +68,22 @@ class _MeshEnv:
 
     def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
         return self.child_to_parent_mapping.get(device_mesh, None)
+
+    def get_parent_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
+        """
+        Return the index of the mesh dim in the parent mesh.
+        The device_mesh passed in needs to be sliced out from a parent mesh.
+        """
+        parent_mesh = self.get_parent_mesh(device_mesh)
+        child_mesh_dim_names = device_mesh.mesh_dim_names
+        if parent_mesh and child_mesh_dim_names:
+            assert (
+                len(child_mesh_dim_names) == 1
+            ), "The child mesh can only be a 1D mesh."
+            child_mesh_dim_name = child_mesh_dim_names[0]
+            if parent_mesh.mesh_dim_names:
+                return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
+        return None
 
 
 mesh_resources: _MeshEnv = _MeshEnv()
@@ -290,12 +309,12 @@ class DeviceMesh:
                           mesh_dim_names=["dp", "tp"])
                           )
         ```
-        Calling mesh["dp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
-        Calling mesh["dp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
-        Calling mesh["tp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
-        Calling mesh["tp"] on rank 1, 3 would return a 1D child DeviceMesh:([1, 3]).
-        Calling mesh["tp"] on rank 2, 5 would return a 1D child DeviceMesh:([2, 5]).
-        Calling mesh["tp"] on rank 4, 7 would return a 1D child DeviceMesh:([4, 7]).
+        Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
+        Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
+        Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
+        Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
+        Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
+        Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
         """
         if self.mesh.ndim <= 1:
             raise RuntimeError(
@@ -312,7 +331,7 @@ class DeviceMesh:
                 f"Available mesh dimensions are: {self.mesh_dim_names}",
             )
         mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
-        submesh = mesh_resources.create_child_mesh(self, mesh_dim)
+        submesh = mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
         return submesh
 
@@ -369,7 +388,7 @@ def init_device_mesh(
     Kwargs:
         mesh_dim_names: Optional[Tuple[str]]: A tuple of mesh dim names to be assigned to each dimension
         of the multi-dimensional array that describes the layout of devices. Its length must match the length
-        of `mesh_shape`.
+        of `mesh_shape`. Each string in mesh_dim_names must be unique.
 
     Returns:
         A :class:`DeviceMesh` object
@@ -381,13 +400,21 @@ def init_device_mesh(
         >>> # xdoctest: +SKIP
         >>> from torch.distributed._tensor.device_mesh import init_device_mesh
         >>>
-        >>> one_d_mesh = init_device_mesh("cuda", mesh_shape=(8,))
-        >>> two_d_mesh = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
+        >>> mesh_1d = init_device_mesh("cuda", mesh_shape=(8,))
+        >>> mesh_2d = init_device_mesh("cuda", mesh_shape=(2, 8), mesh_dim_names=("dp", "tp"))
     """
-    if mesh_dim_names is not None and len(mesh_shape) != len(mesh_dim_names):
-        raise RuntimeError(
-            f"Please provide a mesh_dim_name to each mesh_dim! Found {len(mesh_dim_names)} instead of {len(mesh_shape)}."
-        )
+    if mesh_dim_names is not None:
+        if len(set(mesh_dim_names)) != len(mesh_dim_names):
+            raise RuntimeError(
+                "Each mesh_dim_name must be uqique.",
+                f"Found repeated mesh_dim_name in mesh_dim_names {mesh_dim_names}",
+            )
+
+        if len(mesh_shape) != len(mesh_dim_names):
+            raise RuntimeError(
+                "mesh_shape and mesh_dim_names should have same length!",
+                f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
+            )
 
     mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
     device_mesh = DeviceMesh(

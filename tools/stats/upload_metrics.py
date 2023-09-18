@@ -85,6 +85,7 @@ def emit_metric(
         EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
+        EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),
         EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
         EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
         EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),

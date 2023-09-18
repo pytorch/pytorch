@@ -353,6 +353,7 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+    "inductor/test_max_autotune",  # Testing, probably revert later
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -1289,7 +1290,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[ShardedTest]:
+def get_selected_tests(options) -> List[str]:
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -1652,6 +1653,18 @@ def main():
                 options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
             )
 
+        def __str__(self):
+            s = f"Name: {self.name}\n"
+            s += "  Parallel tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
+            )
+            s += "  Serial tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if must_serial(test)
+            )
+            return s.strip()
+
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
@@ -1671,6 +1684,9 @@ def main():
             True,
         ),
     ]
+
+    for test_batch in test_batches:
+        print(test_batch)
 
     if options.dry_run:
         return

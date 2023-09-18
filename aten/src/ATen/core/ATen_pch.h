@@ -115,7 +115,6 @@
 #include <c10/macros/Macros.h>
 
 #include <c10/util/AlignOf.h>
-#include <c10/util/Array.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Backtrace.h>
@@ -155,7 +154,6 @@
 #include <c10/util/quint2x4.h>
 #include <c10/util/quint4x2.h>
 #include <c10/util/quint8.h>
-#include <c10/util/reverse_iterator.h>
 #include <c10/util/safe_numerics.h>
 #include <c10/util/string_utils.h>
 #include <c10/util/string_view.h>

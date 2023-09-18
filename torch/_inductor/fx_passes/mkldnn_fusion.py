@@ -1006,7 +1006,6 @@ if torch._C._has_mkldnn:
                     if free_symbols(batch_size)
                     else batch_size,
                 )
-                packed_weight_inputs = (transpose_weight_node, batch_size)
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
                     if is_bf16_weight

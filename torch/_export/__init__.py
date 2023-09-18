@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import io
 import re
@@ -53,6 +54,7 @@ from .exported_program import (
 from .passes.add_runtime_assertions_for_constraints_pass import (
     _AddRuntimeAssertionsForInlineConstraintsPass,
 )
+from .passes.lift_constant_tensor_pass import lift_constant_tensor_pass
 from .passes.replace_sym_size_ops_pass import _ReplaceSymSizeOpPass
 from .passes.replace_view_ops_with_view_copy_ops_pass import (
     ReplaceViewOpsWithViewCopyOpsPass,
@@ -101,6 +103,17 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 DECOMP_TABLE = core_aten_decompositions()
+
+
+# TODO(zhxchen17) This is not needed if we output pre_dispatch graph upfront from export().
+@contextmanager
+def _disable_decomp_table():
+    global DECOMP_TABLE
+    prev, DECOMP_TABLE = DECOMP_TABLE, {}
+    try:
+        yield
+    finally:
+        DECOMP_TABLE = prev
 
 
 @compatibility(is_backward_compatible=False)
@@ -155,9 +168,6 @@ def capture_pre_autograd_graph(
             **kwargs,
         )[0]
 
-        for n in m.graph.nodes:
-            n.meta["is_torch_exported"] = True
-
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
 
@@ -202,13 +212,6 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_mode
 
 
-def _safe_to_skip_dynamo(gm: torch.fx.GraphModule):
-    for node in gm.graph.nodes:
-        if "is_torch_exported" in node.meta:
-            return True
-    return False
-
-
 def _replace_param_buffer_names(param_buffer_table, sig):
     def replace(x):
         return param_buffer_table.get(x, x)
@@ -242,9 +245,29 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 if path == root and ty is root_cls:
                     add_root = False
             if add_root:
-                # TODO(zhxchen17) normalize all the way down to dot strings.
-                node.meta["nn_module_stack"] = {root_key: (root, root_cls), **nn_module_stack}
+                def normalize_path(path):
+                    try:
+                        parts = []
 
+                        class Path:
+                            def __getattr__(self, name):
+                                parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
+
+                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                node.meta["nn_module_stack"] = {
+                    key: (normalize_path(path), ty)
+                    for key, (path, ty) in nn_module_stack.items()
+                }
 
 def export(
     f: Callable,
@@ -284,35 +307,21 @@ def export(
     # We convert to nn.Module because __call__ of ExportedProgram
     # is untracable right now.
     if isinstance(f, ExportedProgram):
-        if len(constraints) > 0:
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                "Cannot provide constraints for already exported program."
-            )
         f = f.module()
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            # TODO Horrible hack to skip dynamo
-            if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
-                if len(constraints) > 0:
-                    raise UserError(
-                        UserErrorType.INVALID_INPUT,
-                        "Cannot provide constraints for already exported program."
-                    )
-                gm_torch_level = f
-            else:
-                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
-                    gm_torch_level, _ = torch._dynamo.export(
-                        f,
-                        constraints=constraints,
-                        assume_static_by_default=True,
-                        tracing_mode="symbolic",
-                    )(
-                        *args,
-                        **kwargs,
-                    )
+            with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
+                gm_torch_level, _ = torch._dynamo.export(
+                    f,
+                    constraints=constraints,
+                    assume_static_by_default=True,
+                    tracing_mode="symbolic",
+                )(
+                    *args,
+                    **kwargs,
+                )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
@@ -320,11 +329,11 @@ def export(
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using constrain_as_*(). {str(e)}")
 
-    params_buffers: OrderedDict[str, Union[torch.Tensor, torch.nn.Parameter]] = OrderedDict()
-    for name, param in gm_torch_level.named_parameters():
+    params_buffers: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {}
+    for name, param in gm_torch_level.named_parameters(remove_duplicate=False):
         params_buffers[name] = param
 
-    for name, buffer in gm_torch_level.named_buffers():
+    for name, buffer in gm_torch_level.named_buffers(remove_duplicate=False):
         params_buffers[name] = buffer
 
     fake_args, fake_kwargs, fake_mode = _convert_input_to_fake(gm_torch_level, args, kwargs)
@@ -343,7 +352,7 @@ def export(
     # When aot_export lifts the params, we lose the nn_module_stack
     # and source_fn from the param nodes as they are treated as fresh inputs
     # Therefore, we manually extract them before calling into aot_export
-    params_buffers_to_node_meta = OrderedDict()
+    params_buffers_to_node_meta = {}
     for node in gm_torch_level.graph.nodes:
         target = node.target
         meta = node.meta
@@ -373,6 +382,7 @@ def export(
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
+    assert isinstance(out_spec, pytree.TreeSpec)
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
@@ -388,22 +398,23 @@ def export(
     )
     gm_torch_level.recompile()
 
-    param_buffer_table = {}
+    param_buffer_table: Dict[str, str] = {}
     if isinstance(f, torch.nn.Module):
-        param_lookup = {}
-        buffer_lookup = {}
-        for name, param in f.named_parameters():
-            param_lookup[id(param)] = name
-        for name, buffer in f.named_buffers():
-            buffer_lookup[id(buffer)] = name
-        for dynamo_name, dynamo_param in gm_torch_level.named_parameters():
+        param_lookup: Dict[int, List[str]] = {}
+        buffer_lookup: Dict[int, List[str]] = {}
+        for name, param in f.named_parameters(remove_duplicate=False):
+            param_lookup.setdefault(id(param), []).append(name)
+        for name, buffer in f.named_buffers(remove_duplicate=False):
+            buffer_lookup.setdefault(id(buffer), []).append(name)
+        for dynamo_name, dynamo_param in gm_torch_level.named_parameters(remove_duplicate=False):
             assert dynamo_name not in param_buffer_table
             if id(dynamo_param) in param_lookup:
-                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
-        for dynamo_name, dynamo_buffer in gm_torch_level.named_buffers():
+                param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+
+        for dynamo_name, dynamo_buffer in gm_torch_level.named_buffers(remove_duplicate=False):
             assert dynamo_name not in param_buffer_table
             if id(dynamo_buffer) in buffer_lookup:
-                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
+                param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
 
     if isinstance(f, torch.nn.Module):
         _normalize_nn_module_stack(gm_torch_level, type(f))
@@ -483,8 +494,6 @@ def export(
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
 
-        node.meta["is_torch_exported"] = True
-
     range_constraints, equality_constraints = _process_constraints(
         gm,
         export_graph_signature,
@@ -493,6 +502,7 @@ def export(
 
     if isinstance(f, torch.nn.Module):
         _replace_param_buffer_names(param_buffer_table, export_graph_signature)
+        params_buffers = {param_buffer_table.get(name, name): tensor for name, tensor in params_buffers.items()}
 
     module_call_signatures = {fqn: ModuleCallSignature(inputs=[], outputs=[], **specs) for fqn, specs in module_call_specs.items()}
 
@@ -509,8 +519,7 @@ def export(
         # TODO(zhxchen17) Remove this field.
         CallSpec(in_spec, orig_out_spec),
         # TODO(zhxchen17) Return empty state_dict for functions.
-        {param_buffer_table.get(name, name): tensor for name, tensor in params_buffers.items()}
-        if isinstance(f, torch.nn.Module) else param_buffer_table,
+        params_buffers,
         range_constraints,
         equality_constraints,
         [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
@@ -522,6 +531,7 @@ def export(
         exported_program = exported_program._transform(
             _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints, equality_constraints)
         )
+    exported_program = lift_constant_tensor_pass(exported_program)
 
     return exported_program._transform(_ReplaceSymSizeOpPass())
 
@@ -626,7 +636,6 @@ def aot_compile(
     Returns:
         Path to the generated shared library, and the exported program
     """
-    from torch._inductor.compile_fx import compile_fx_aot
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
@@ -635,11 +644,46 @@ def aot_compile(
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
-    param_buffer_values = list(ep.state_dict.values())
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]
     )
-    all_args = (*param_buffer_values, *flat_example_inputs)
 
-    so_path = torch._inductor.aot_compile(ep.graph_module, list(all_args), options)
-    return so_path, ep
+    unlifted_module = ep.module()
+    unlifted_module.graph.set_codegen(torch.fx.CodeGen())  # type: ignore[attr-defined]
+    unlifted_module.recompile()
+    options = (
+        {"from_export": True}
+        if options is None
+        else {**options, "from_export": True}
+    )
+    so_path = torch._inductor.aot_compile(unlifted_module, flat_example_inputs, options)  # type: ignore[arg-type]
+
+    user_inputs = []
+    user_outputs = []
+    for node in unlifted_module.graph.nodes:
+        if node.op == "placeholder":
+            user_inputs.append(node.name)
+        elif node.op == "output":
+            user_outputs = [arg.name for arg in node.args[0]]
+
+    unlifted_ep = ExportedProgram(
+        unlifted_module,
+        unlifted_module.graph,
+        ExportGraphSignature(
+            parameters=[],
+            buffers=[],
+            user_inputs=user_inputs,
+            user_outputs=user_outputs,
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
+        ),
+        call_spec=copy.deepcopy(ep.call_spec),
+        state_dict={},
+        range_constraints=copy.deepcopy(ep.range_constraints),
+        equality_constraints=copy.deepcopy(ep.equality_constraints),
+        module_call_graph=ep.module_call_graph,
+    )
+
+    return so_path, unlifted_ep
