@@ -1772,7 +1772,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         extern_kernel_node_index = len(V.graph.extern_kernel_nodes) - 1
 
         self.writeline(
-            f"proxy_executor->call_function("
+            f"aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
             f"{len(int_call_args)}, "
             f"{int_args_var}, "
