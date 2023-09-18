@@ -193,3 +193,9 @@ def test_plausible_finfo():
         assert_(info.nmant > 1)
         assert_(info.minexp < -1)
         assert_(info.maxexp > 1)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
