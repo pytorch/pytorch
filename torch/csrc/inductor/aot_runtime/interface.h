@@ -56,9 +56,13 @@ AOTInductorError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    AtenTensorHandle* input_handles, // array of input tensor handles
+    // array of raw AtenTensorHandle for input tensors, and will be stolen by
+    // RAIIAtenTensorHandle
+    AtenTensorHandle* input_handles,
     size_t num_inputs,
-    AtenTensorHandle* output_handles, // array of output tensor handles
+    // array of raw AtenTensorHandle for output tensors, and will be stolen by
+    // RAIIAtenTensorHandle
+    AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
