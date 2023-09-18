@@ -4,6 +4,10 @@
 #include <mutex>
 #include <shared_mutex>
 
+// WARNING: Be careful when adding new includes here. This header will be used
+// in model.so, and should not refer to any aten/c10 headers except the stable
+// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
+// applies to other files under torch/csrc/inductor/aot_runtime/.
 #include <torch/csrc/inductor/aot_runtime/model.h>
 
 // At codegen time, we write out a binary file called constants.bin.
@@ -24,8 +28,8 @@ using CUDAPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
   void* data_ptr;
-  ATOI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
-  auto deleter = [](void* ptr) { ATOI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
+  AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return CUDAPtr(data_ptr, deleter);
 }
 } // anonymous namespace
@@ -111,7 +115,7 @@ class AOTInductorModelContainer {
         internal_ptr = constants_ptr + constants_internal_offset[i];
         // Copy data to GPU memory
         // TODO: Handle shared storage case.
-        ATOI_RUNTIME_CUDA_CHECK(cudaMemcpy(
+        AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
             internal_ptr,
             _binary_constants_bin_start + bytes_read,
             data_size,
@@ -144,7 +148,8 @@ class AOTInductorModelContainer {
           0 // device index, should read it from cudaStream_t?
           ));
       constants_->emplace(
-          std::move(name), std::move(create_raii_tensor_handle(tensor_handle)));
+          std::move(name),
+          std::move(steal_tensor_handle_to_raii_handle(tensor_handle)));
     }
   }
 

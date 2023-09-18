@@ -876,7 +876,7 @@ Value* Value::setDebugName(const std::string& name) {
     if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
       if (name.find_first_not_of("0123456789", last_dot_pos + 1) ==
           std::string::npos) {
-        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        suffix = c10::stoll(name.substr(last_dot_pos + 1));
         name_base = name.substr(0, last_dot_pos);
       }
     }
