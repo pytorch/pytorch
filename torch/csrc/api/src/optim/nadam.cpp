@@ -117,8 +117,11 @@ Tensor NAdam::step(LossClosure closure) {
       }
 
       // calculate the momentum cache \mu^{t} and \mu^{t+1}
-      auto mu = beta1 * (1. - 0.5 * (pow(0.96, state.step() * options.momentum_decay())));
-      auto mu_next = beta1 * (1. - 0.5 * (pow(0.96, (state.step() + 1) * options.momentum_decay())));
+      auto mu = beta1 *
+          (1. - 0.5 * (pow(0.96, state.step() * options.momentum_decay())));
+      auto mu_next = beta1 *
+          (1. -
+           0.5 * (pow(0.96, (state.step() + 1) * options.momentum_decay())));
 
       // update mu_product
       state.mu_product(state.mu_product() * mu);
@@ -129,10 +132,8 @@ Tensor NAdam::step(LossClosure closure) {
       Tensor denom = (exp_avg_sq / bias_correction2).sqrt().add(options.eps());
 
       auto mu_product_next = state.mu_product() * mu_next;
-      p.addcdiv_(
-        grad, denom, (-lr * (1. - mu) / (1. - state.mu_product())));
-      p.addcdiv_(
-          exp_avg, denom, (-lr * mu_next) / (1. - mu_product_next));
+      p.addcdiv_(grad, denom, (-lr * (1. - mu) / (1. - state.mu_product())));
+      p.addcdiv_(exp_avg, denom, (-lr * mu_next) / (1. - mu_product_next));
     }
   }
   return loss;

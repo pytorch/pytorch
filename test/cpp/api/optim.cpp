@@ -279,6 +279,10 @@ TEST(OptimTest, XORConvergence_Adagrad) {
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
 }
 
+TEST(OptimTest, XORConvergence_NAdam) {
+  ASSERT_TRUE(test_optimizer_xor<NAdam>(NAdamOptions(0.1).weight_decay(1e-6)));
+}
+
 TEST(OptimTest, XORConvergence_RMSprop) {
   ASSERT_TRUE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
 }
@@ -311,6 +315,22 @@ TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_NAdam) {
+  check_exact_values<NAdam>(NAdamOptions(1.0), expected_parameters::NAdam());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_NAdamWithWeightDecay) {
+  check_exact_values<NAdam>(
+      NAdamOptions(1.0).weight_decay(1e-2),
+      expected_parameters::NAdam_with_weight_decay());
+}
+
+TEST(OptimTest, ProducesPyTorchValues_NAdamWithWeightDecayAndAMomentumDecay) {
+  check_exact_values<NAdam>(
+      NAdamOptions(1.0).weight_decay(1e-6).momentum_decay(0.9),
+      expected_parameters::NAdam_with_weight_decay_and_momentum_decay());
 }
 
 TEST(OptimTest, XORConvergence_AdamW) {
