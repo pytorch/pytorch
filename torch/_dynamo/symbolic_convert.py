@@ -783,7 +783,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             name = name.replace(".", "implicit")
         assert name not in self.cell_and_freevars()
         if name not in self.symbolic_locals:
-            unimplemented("undefined LOAD_FAST")
+            raise NameError(f"name '{name} is not defined'")
         self.push(self.symbolic_locals[name])
         if name.startswith("___stack"):
             self.symbolic_locals.pop(name)
