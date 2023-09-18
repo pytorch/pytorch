@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict
 
 import torch
 from torch._dynamo.runtime import get_registered_device_runtimes, get_runtime_for_device
