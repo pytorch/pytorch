@@ -745,7 +745,7 @@ namespace std {
 
 template <>
 struct hash<c10::OperatorHandle> {
-  size_t operator()(c10::OperatorHandle op) const noexcept {
+  size_t operator()(const c10::OperatorHandle& op) const noexcept {
     return std::hash<void*>{}(static_cast<void*>(op.operatorDef_));
   }
 };

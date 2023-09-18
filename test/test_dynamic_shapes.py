@@ -1829,6 +1829,7 @@ class TestDimConstraints(TestCase):
         dim_constraints.add(s5 >= 2)
 
         dim_constraints.solve()
+        dim_constraints.remove_redundant_dynamic_results()
         self.assertEqual(dim_constraints._static_results, {
             "L['c'].size()[0] == 8",
             "L['d'].size()[0] == 8",
@@ -1843,7 +1844,6 @@ class TestDimConstraints(TestCase):
         })
         self.assertEqual(dim_constraints._dynamic_results, {
             "dynamic_dim(L['e'], 1) == dynamic_dim(L['c'], 1)",
-            "2 <= dynamic_dim(L['c'], 1)",
             "dynamic_dim(L['d'], 1) == dynamic_dim(L['c'], 1)",
         })
 
@@ -1877,9 +1877,6 @@ def specializations(a, b, c, d, e, f):
         expected_dynamic = '''
 def specify_constraints(a, b, c, d, e, f):
     return [
-        # c:
-        dynamic_dim(c, 1),
-
         # d:
         dynamic_dim(d, 1) == dynamic_dim(c, 1),
 

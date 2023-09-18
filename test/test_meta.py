@@ -631,7 +631,6 @@ meta_function_expected_failures = {
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.one_hot : {i64},
-    torch._segment_reduce : {f64, f16, bf16, f32},
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
@@ -804,7 +803,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.segment_reduce.default : {bf16, f32, f16, f64},
     aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
@@ -1302,6 +1300,30 @@ class TestMeta(TestCase):
         self.assertEqual(r.shape, t.shape)
         self.assertEqual(r.dtype, t.dtype)
         self.assertEqual(r.storage().data_ptr(), 0)
+
+    def test_embedding_bag_byte_prepack(self):
+        batch_size = 10
+        num_embeddings = 80
+        embedding_dim = [128, 256, 512]
+        res_shape = [[batch_size, num_embeddings, ed + 8] for ed in embedding_dim]
+        for ed, rs in zip(embedding_dim, res_shape):
+            weight = torch.randn(batch_size, num_embeddings, ed, dtype=torch.float32)
+            res = torch.ops.quantized.embedding_bag_byte_prepack(weight.to(device="meta"))
+            self.assertEqual(res.shape, rs)
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res.untyped_storage().data_ptr(), 0)
+
+    def test_embedding_bag_byte_unpack(self):
+        batch_size = 10
+        num_embeddings = 80
+        embedding_dim = [128, 256, 512]
+        res_shape = [[batch_size, num_embeddings, ed] for ed in embedding_dim]
+        for ed, rs in zip(embedding_dim, res_shape):
+            packed_weight = torch.randn(batch_size, num_embeddings, ed + 8, dtype=torch.float32)
+            res = torch.ops.quantized.embedding_bag_byte_unpack(packed_weight.to(device="meta"))
+            self.assertEqual(res.shape, rs)
+            self.assertEqual(res.dtype, torch.float32)
+            self.assertEqual(res.untyped_storage().data_ptr(), 0)
 
 instantiate_device_type_tests(TestMeta, globals())
 

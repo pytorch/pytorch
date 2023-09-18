@@ -438,8 +438,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.skip_dynamic_fx_test(
-        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. Name:'n13__5' Status Message:"
-        "slice.cc:193 FillVectorsFromInput Starts must be a 1-D array"
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_zero(self):
         class Model(torch.nn.Module):
@@ -982,6 +983,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
         "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
         "https://github.com/huggingface/transformers/issues/21013"
+        "This can be addressed by using GPT2Config, but it is not now supported by FakeTensor exporting."
     )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -1046,14 +1048,120 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
+    def test_fake_tensor_mode_huggingface_google_t5(self):
+        config = transformers.T5Config(
+            vocab_size=8096, d_model=64, num_layers=2, num_heads=2
+        )
+        batch, seq = 4, 256
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones((batch, seq), dtype=torch.bool)
+            decoder_input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "decoder_input_ids": decoder_input_ids,
+            }
+
+        def create_model():
+            return transformers.T5Model(config).eval()
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_google_t5",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    def test_fake_tensor_mode_huggingface_openai_whisper(self):
+        config = transformers.WhisperConfig(
+            vocab_size=8096,
+            num_mel_bins=40,
+            encoder_layers=2,
+            encoder_attention_heads=2,
+            decoder_layers=2,
+            decoder_attention_heads=2,
+            decoder_ffn_dim=384,
+            encoder_ffn_dim=384,
+            d_model=64,
+            decoder_start_token_id=8001,
+            pad_token_id=8000,
+            bos_token_id=8000,
+            eos_token_id=8000,
+            begin_suppress_tokens=[220, 8000],
+        )
+        feature_extractor = transformers.WhisperFeatureExtractor(feature_size=40)
+        device = "cpu"
+        batch = 4
+
+        def create_model() -> nn.Module:
+            return transformers.AutoModel.from_config(config).to(device).eval()
+
+        def create_args():
+            return ()
+
+        def create_kwargs():
+            input_features = torch.randn(
+                (
+                    batch,
+                    feature_extractor.feature_size,
+                    feature_extractor.nb_max_frames,
+                ),
+                dtype=torch.float32,
+            )
+            decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
+            return {
+                "input_features": input_features,
+                "decoder_input_ids": decoder_input_ids,
+                "return_dict": False,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "openai_whisper",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
     @pytorch_test_common.xfail(
-        "Constant tensor is not supported in FakeTensorMode export."
+        "AssertionError: whole graph export entails exactly one guard export"
     )
+    def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
+        config = transformers.MptConfig(
+            vocab_size=8096, d_model=64, n_heads=2, n_layers=3
+        )
+        batch, seq = 4, 256
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+        def create_model():
+            return transformers.MptModel(config).eval()
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_mosaicml_mpt",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
     @pytorch_test_common.skip_dynamic_fx_test(
         "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
-    )
-    @pytorch_test_common.skip_load_checkpoint_after_model_creation(
-        "HF Bloom model does not need `model.load_state_dict` to work."
     )
     def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
         config = transformers.BloomConfig()

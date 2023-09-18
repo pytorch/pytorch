@@ -2,16 +2,23 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import os
 import sys
 from typing import Tuple
 
+import onnxruntime
+
 import torch
-import torch.onnx
+import torch._dynamo.backends.registry
 from parameterized import parameterized
 from torch import nn
+from torch.onnx import (
+    _OrtBackend as OrtBackend,
+    _OrtBackendOptions as OrtBackendOptions,
+    ExportOptions,
+)
 
-from torch.onnx._internal.onnxruntime import make_aot_ort, OrtBackend
 from torch.testing._internal import common_utils
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,14 +26,101 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
 
 
+def make_aot_ort(dynamic: bool = False):
+    ort_backend = OrtBackend(
+        options=OrtBackendOptions(
+            export_options=ExportOptions(
+                dynamic_shapes=dynamic,
+            )
+        )
+    )
+    return ort_backend, ort_backend
+
+
 class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+        OrtBackend.clear_cached_instances()
 
     def tearDown(self):
         super().tearDown()
         torch._dynamo.reset()
+        OrtBackend.clear_cached_instances()
+
+    def test_torch_compile_backend_registration(self):
+        self.assertIn("onnxrt", torch._dynamo.backends.registry.list_backends())
+        backend = torch._dynamo.backends.registry.lookup_backend("onnxrt")
+        self.assertEqual(backend.__module__, "torch.onnx._internal.onnxruntime")
+
+    def _test_torch_compile_backend_caching_assert_reused(
+        self, options: OrtBackendOptions
+    ):
+        self.assertFalse(OrtBackend.get_cached_instances())  # assert setUp/tearDown
+        new_backend = OrtBackend.get_cached_instance_for_options(options)
+        reused_backend = OrtBackend.get_cached_instance_for_options(options)
+        self.assertEqual(len(OrtBackend.get_cached_instances()), 1)
+        self.assertIs(reused_backend, new_backend)
+        if options is None or options.ort_session_options is None:
+            # OrtBackendOptions.ort_session_options is a pybind11 object that
+            # cannot be pickled via dataclasses.asdict
+            self.assertEqual(
+                new_backend,
+                OrtBackend.get_cached_instance_for_options(
+                    dataclasses.asdict(options) if options else None
+                ),
+            )
+
+    @parameterized.expand(
+        [
+            (None,),
+            (OrtBackendOptions(),),
+            (OrtBackendOptions(use_aot_autograd=True),),
+            (OrtBackendOptions(use_aot_autograd=False),),
+            (OrtBackendOptions(preallocate_output=True),),
+            (OrtBackendOptions(preallocate_output=False),),
+            (OrtBackendOptions(infer_execution_providers=True),),
+            (OrtBackendOptions(infer_execution_providers=False),),
+            (OrtBackendOptions(preferred_execution_providers=["A", "B", "C"]),),
+            (
+                OrtBackendOptions(
+                    preferred_execution_providers=["A", "B", ("C", {"option": "value"})]
+                ),
+            ),
+            (OrtBackendOptions(default_execution_providers=["Something"]),),
+            (
+                OrtBackendOptions(
+                    export_options=ExportOptions(
+                        dynamic_shapes=True,
+                    )
+                ),
+            ),
+            (
+                OrtBackendOptions(
+                    use_aot_autograd=False,
+                    export_options=ExportOptions(
+                        op_level_debug=True,
+                        dynamic_shapes=True,
+                    ),
+                ),
+            ),
+        ]
+    )
+    def test_torch_compile_backend_caching_assert_reused(
+        self, options: OrtBackendOptions
+    ):
+        self._test_torch_compile_backend_caching_assert_reused(options)
+
+    @parameterized.expand(
+        [
+            (OrtBackendOptions(ort_session_options=onnxruntime.SessionOptions()),),
+        ]
+    )
+    def test_torch_compile_backend_caching_assert_not_reused(
+        self, options: OrtBackendOptions
+    ):
+        with self.assertRaises(AssertionError):
+            self._test_torch_compile_backend_caching_assert_reused(options)
 
     def _test_model_numerically(
         self,

@@ -185,6 +185,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    :meth:`Tensor.reciprocal_`,None
    :meth:`Tensor.refine_names`,See documentation
    :meth:`Tensor.register_hook`,None
+   :meth:`Tensor.register_post_accumulate_grad_hook`,None
    :meth:`Tensor.rename`,See documentation
    :meth:`Tensor.rename_`,See documentation
    :attr:`Tensor.requires_grad`,None

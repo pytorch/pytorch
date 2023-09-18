@@ -76,12 +76,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  pytorch-linux-focal-py3-clang7-android-ndk-r19c-build:
-    name: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
+  pytorch-linux-focal-py3-clang9-android-ndk-r19c-build:
+    name: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
     uses: ./.github/workflows/_android-full-build-test.yml
     with:
-      build-environment: pytorch-linux-focal-py3-clang7-android-ndk-r19c-build
-      docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      build-environment: pytorch-linux-focal-py3-clang9-android-ndk-r19c-build
+      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r19c
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },

@@ -145,10 +145,10 @@ class C10_API SymInt {
   // number can be used to diagnose overspecialization.
   int64_t guard_int(const char* file, int64_t line) const;
 
-  // Distinguish actual symbolic values from large negative integers.
+  // Distinguish actual symbolic values from constants stored on the heap
   bool is_symbolic() const {
     return is_heap_allocated() &&
-        toSymNodeImplUnowned()->large_negative_int() == 0;
+        !toSymNodeImplUnowned()->constant_int().has_value();
   }
 
   // N.B. It's important to keep this definition in the header
@@ -215,15 +215,10 @@ class C10_API SymInt {
       return c10::make_optional(data_);
     }
     auto* node = toSymNodeImplUnowned();
-    int64_t c = node->large_negative_int();
-    if (c != 0) {
-      return c10::make_optional(c);
+    if (auto c = node->constant_int()) {
+      return c;
     }
-    c10::optional<int64_t> d = node->maybe_as_int();
-    if (d.has_value()) {
-      return d;
-    }
-    return c10::nullopt;
+    return node->maybe_as_int();
   }
 
   // Return whether the integer is directly coercible to a SymInt
