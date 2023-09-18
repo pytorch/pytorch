@@ -437,18 +437,19 @@ struct GlobalStateGuard {
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
+    _default_dtype = at::get_default_dtype();
   }
 
   inline bool check() {
     auto& ctx = at::globalContext();
-    return (
-        _grad_mode == at::GradMode::is_enabled() &&
-        _torch_function == torch::torch_function_enabled() &&
-        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-        _allow_tf32 == ctx.allowTF32CuBLAS() &&
-        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
-        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
-        _num_threads == at::get_num_threads());
+    return (_grad_mode == at::GradMode::is_enabled() &&
+            _torch_function == torch::torch_function_enabled() &&
+            _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+            _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+            _num_threads == at::get_num_threads()) &&
+        _default_dtype == at::get_default_dtype();
   }
 
   bool _grad_mode;
@@ -458,6 +459,7 @@ struct GlobalStateGuard {
   bool _allow_fp16_reduce;
   bool _allow_bf16_reduce;
   int _num_threads;
+  caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 
