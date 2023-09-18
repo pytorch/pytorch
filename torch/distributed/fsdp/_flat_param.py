@@ -1312,7 +1312,8 @@ class FlatParamHandle:
             padded_unsharded_flat_param = self._all_gather_flat_param(
                 unsharded_flat_param
             )
-            self._use_unsharded_flat_param(padded_unsharded_flat_param)
+
+        self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def _unshard_in_backward(
         self,
@@ -1332,7 +1333,8 @@ class FlatParamHandle:
             padded_unsharded_flat_param = self._all_gather_flat_param(
                 unsharded_flat_param
             )
-            self._use_unsharded_flat_param(padded_unsharded_flat_param)
+
+        self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def needs_unshard(self) -> bool:
         """Returns if the handle's flat parameter needs to be unsharded."""
