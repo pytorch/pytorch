@@ -554,6 +554,7 @@ API Reference
 .. autofunction:: constrain_as_value
 .. autofunction:: save
 .. autofunction:: load
+.. autofunction:: register_dataclass
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 
