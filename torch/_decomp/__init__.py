@@ -357,6 +357,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,
+            aten.split.Tensor,
             aten.std.correction,
             aten.stack,
             aten.t,
