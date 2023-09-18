@@ -6,6 +6,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 import sympy
 from sympy import Expr
 
+import torch._dynamo.config
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
@@ -373,14 +374,12 @@ class SizeVarAllocator:
 
     def size_hint(self, expr: Expr) -> int:
         out = self.symbolic_hint(expr)
-        # TODO(yf225): maybe gate with dynamo capture scalar output config
-        if isinstance(out, sympy.Expr):
+        if torch._dynamo.config.capture_scalar_outputs and isinstance(out, sympy.Expr):
             return out
-        else:
-            try:
-                return int(out)
-            except Exception:
-                log.debug("failed on: %s", out)
+        try:
+            return int(out)
+        except Exception:
+            log.debug("failed on: %s", out)
 
     def size_hints(self, exprs: List[Expr]) -> Tuple[int, ...]:
         return tuple(self.size_hint(x) for x in exprs)

@@ -1092,13 +1092,12 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith(("s", "ps")):
+            elif var.name.startswith(("s", "ps", "i")):
                 pass
             else:
-                if not V.graph.sizevars.shape_env.is_unbacked_symint(var):
-                    # var is one of xN, yN or rN
-                    assert var.name[0] in "xyr", var.name
-                    mask_vars.add(f"{var.name[0]}mask")
+                # var is one of xN, yN or rN
+                assert var.name[0] in "xyr", var.name
+                mask_vars.add(f"{var.name[0]}mask")
 
         need_dense = (
             config.triton.dense_indexing
