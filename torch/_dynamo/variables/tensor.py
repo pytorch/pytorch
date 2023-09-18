@@ -1,3 +1,4 @@
+import functools
 import inspect
 import operator
 import types
@@ -9,6 +10,9 @@ except ModuleNotFoundError:
     np = None
 
 
+import itertools
+import weakref
+
 import sympy
 
 import torch._numpy as tnp
@@ -19,10 +23,11 @@ import torch.random
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
+from ..compiled_autograd import _invoke_in_backward
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
-from ..source import AttrSource
+from ..source import AttrSource, GlobalSource
 from ..utils import (
     fqn,
     get_custom_getattr,
@@ -667,7 +672,59 @@ class TensorVariable(VariableTracker):
             )
             if not self.source:
                 # Intermediary
-                unimplemented("Intermediary tensors with registered hooks - NYI")
+
+                # This function is only invoked if the passed-in func has no source,
+                # useful for intermediary created functions.
+                def _lifted_fn_src(name):
+                    base = name
+                    for i in itertools.count():
+                        if name not in tx.output.global_scope:
+                            src = GlobalSource(name)
+                            tx.output.guards.add(
+                                src.make_guard(GuardBuilder.WEAKREF_ALIVE)
+                            )
+                            tx.output.install_global(name, weakref.ref(fn))
+                            break
+                        name = f"{base}_{i}"
+                    return src
+
+                # Either we have a source already, or we must make a weakref to the original fn
+                # and reference that.
+                src = fn_var.source if fn_var.source else _lifted_fn_src(name)
+
+                from .builder import GraphArg
+
+                # This wraps our user provided fn with a function that intercedes and
+                # uses our `invoke` higher order op to record a hook invocation in bwd graph.
+                fn = functools.partial(_invoke_in_backward, fn=fn, reenter=True)
+
+                # This little piece of logic ensures we only ever lift a given hook up once
+                # this important, because a dynamo->aot_autograd invariant is no duplicate sources in inputs.
+                hook_proxy = None
+                for node in tx.output.root_tracer.graph.nodes:
+                    if node.op == "placeholder":
+                        if "source" in node.meta:
+                            if node.meta["source"] == src:
+                                hook_proxy = node.meta["proxy"]
+                                break
+
+                if hook_proxy is None:
+                    hook_proxy = tx.output.root_tracer.create_graph_input(
+                        name, type(fn), source=src
+                    )
+                    hook_proxy.node.meta["source"] = src
+                    grapharg = GraphArg(src, fn, False, None)
+                    hook_proxy.node.meta["grapharg"] = grapharg
+                    hook_proxy.node.meta["proxy"] = hook_proxy
+                # this is a stepping stone implementation for now, the real POR to avoid recompiling on hook identity
+                # is to add an op in forward that is persisted through functionalization, and stashes hooks in a well defined
+                # place - this allows relaxing specialization from hook identity to # of hooks (and their positions)
+                self.as_proxy().register_hook(hook_proxy)
+
+                if fn_var.source:
+                    tx.output.guards.add(
+                        fn_var.source.make_guard(GuardBuilder.ID_MATCH)
+                    )
             else:
                 assert (
                     fn_var.source

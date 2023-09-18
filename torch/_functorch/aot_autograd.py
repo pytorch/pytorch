@@ -10,6 +10,8 @@ from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
+import types
+import functools
 
 from functorch import make_fx
 
@@ -742,7 +744,10 @@ def run_functionalized_fw_and_collect_metadata(
     @wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
+        def valid_input(a):
+            # Insanely sus, talk to folks about this
+            return isinstance(a, KNOWN_TYPES) or callable(flat_args[-1])
+        assert all(valid_input(a) for a in flat_args)
 
         input_info: List[InputAliasInfo] = []
         output_info: List[OutputAliasInfo] = []
@@ -2914,8 +2919,32 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 torch._guards.TracingContext.get().fw_metadata = fw_metadata
 
             with TracingContext.report_output_strides() as fwd_output_strides:
+                kept_flat_args = []
+                kept_input_pos = []
+                unused_nodes = []
+                compile_bwd = True
+                for i, node in enumerate(fw_module.graph.nodes):
+                    if node.op == "placeholder":
+                        # This should be as simple as rejecting nodes without users. Unfortunately,
+                        # there are a ton of edge cases here https://github.com/pytorch/pytorch/issues/97894, activation
+                        # checkpointing, etc. So we just skip what should be a nice invariant, in favor of explicitly rejecting
+                        # functions.
+                        # if (len(node.users) == 0))
+                        if isinstance(adjusted_flat_args[i], (types.FunctionType, functools.partial)):
+                            unused_nodes.append(node)
+                            # We cannot lower a graph to inductor/bwd compilation if we:
+                            # a) Have bwd hooks
+                            # b) are not in compiled autograd
+                            compile_bwd = False
+                        else:
+                            kept_flat_args.append(adjusted_flat_args[i])
+                            kept_input_pos.append(i)
+                for un in unused_nodes:
+                    # Note - we could do this inline, but this is far easier to debug and computationally the same.
+                    fw_module.graph.erase_node(un)
+
                 compiled_fw_func = aot_config.fw_compiler(
-                    fw_module, adjusted_flat_args
+                    fw_module, kept_flat_args
                 )
 
         # NB: It's important to compile backwards ahead of time, as this may
@@ -2987,9 +3016,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
+        kept_fw_input_pos = kept_input_pos
         compiled_bw = compiled_bw_func
         metadata = fw_metadata
         num_symints_saved_for_bw = _num_symints_saved_for_bw
+        bypass_compile_bwd = not compile_bwd
 
         @staticmethod
         def _compiled_autograd_key(ctx):
@@ -3007,9 +3038,15 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             # (*mutated_inputs, *fw_outs, *fw_intermediate_bases, *saved_tensors, *saved_symints)
             # - Note that in the synthetic bases case, mutated_inputs will correspond to an updated version
             #   of the original view, and not the synthetic base
+
+
+            # Trim unused args
+            kept_args = []
+            for kept_pos in CompiledFunction.kept_fw_input_pos:
+                kept_args.append(args[kept_pos])
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw,
-                args,
+                kept_args,
                 disable_amp=disable_amp,
             )
 
@@ -3195,11 +3232,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     return tuple(out)
                 ctx.maybe_clear_saved_tensors()
                 if CompiledFunction.compiled_bw is None:
-                    context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
+                    if CompiledFunction.bypass_compile_bwd and not ctx._is_compiled_autograd_tracing():
+                        CompiledFunction.compiled_bw = bw_module
+                    else:
+                        context = torch._C._DisableAutocast if disable_amp else nullcontext
+                        with tracing(saved_context), context(), track_graph_compiling(aot_config, "backward"):
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
+                            )
 
                 out = call_func_with_args(
                     CompiledFunction.compiled_bw,
