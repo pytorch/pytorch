@@ -227,6 +227,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.binary_cross_entropy_with_logits,
             aten.celu,
             aten.celu_,
+            aten.clamp_max,
             aten.clamp_min,
             aten.col2im,
             aten.count_nonzero,
