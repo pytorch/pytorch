@@ -151,7 +151,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   }
   auto tensor_lists = std::vector<std::vector<Tensor>>{nonempty_tensors};
 
-  const auto n_nonempty_tensors = nonempty_tensors.size();
+  const int n_nonempty_tensors = nonempty_tensors.size();
   auto max_chunks_per_tensor = -1;
 
   for (int t = 0; t < n_nonempty_tensors; t++) {
@@ -163,7 +163,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   }
   const auto options = tensors[0].options();
   auto output_per_non_empty_tensor = at::zeros(
-      {n_nonempty_tensors * static_cast<unsigned long>(max_chunks_per_tensor)},
+      {n_nonempty_tensors * max_chunks_per_tensor},
       options.dtype(toOpMathType(nonempty_tensors[0].scalar_type())));
   auto ret_per_non_empty_tensor = at::empty({n_nonempty_tensors}, options);
 

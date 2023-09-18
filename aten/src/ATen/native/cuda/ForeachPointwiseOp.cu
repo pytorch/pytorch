@@ -173,7 +173,7 @@ std::vector<Tensor> foreach_pointwise_op(
                                                                         \
     std::pair<bool, bool> p = can_use_fast_route(                       \
       {input, tensors1, tensors2}, scalar);                             \
-    bool can_use_fast_route_ = p.first;                                 \
+    bool can_use_fast_route = p.first;                                 \
     bool has_empty_tensors = p.second;                                  \
                                                                         \
     if (!can_use_fast_route ||                                          \
@@ -201,7 +201,7 @@ std::vector<Tensor> foreach_pointwise_op(
                                                                         \
     std::pair<bool, bool> p = can_use_fast_route(                       \
       {input, tensors1, tensors2}, scalar);                             \
-    bool can_use_fast_route_ = p.first;                                 \
+    bool can_use_fast_route = p.first;                                 \
     bool has_empty_tensors = p.second;                                  \
                                                                         \
     if (!can_use_fast_route ||                                          \
@@ -230,7 +230,7 @@ std::vector<Tensor> foreach_pointwise_op(
                                                                          \
     std::pair<bool, bool> p = can_use_fast_route(                        \
       {input, tensors1, tensors2}, scalars);                             \
-    bool can_use_fast_route_ = p.first;                                  \
+    bool can_use_fast_route = p.first;                                  \
     bool has_empty_tensors = p.second;                                   \
                                                                          \
     if (!can_use_fast_route ||                                           \
@@ -260,7 +260,7 @@ std::vector<Tensor> foreach_pointwise_op(
                                                                          \
     std::pair<bool, bool> p = can_use_fast_route(                        \
       {input, tensors1, tensors2}, scalars);                             \
-    bool can_use_fast_route_ = p.first;                                  \
+    bool can_use_fast_route = p.first;                                  \
     bool has_empty_tensors = p.second;                                   \
                                                                          \
     if (!can_use_fast_route ||                                           \
@@ -291,7 +291,7 @@ std::vector<Tensor> foreach_pointwise_op(
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
     std::pair<bool, bool> p = can_use_fast_route(                         \
       {input, tensors1, tensors2});                                       \
-    bool can_use_fast_route_ = p.first;                                   \
+    bool can_use_fast_route = p.first;                                   \
     bool has_empty_tensors = p.second;                                    \
                                                                           \
     if (!can_use_fast_route ||                                            \
@@ -319,7 +319,7 @@ std::vector<Tensor> foreach_pointwise_op(
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
     std::pair<bool, bool> p = can_use_fast_route(                         \
       {input, tensors1, tensors2}, scalars);                              \
-    bool can_use_fast_route_ = p.first;                                   \
+    bool can_use_fast_route = p.first;                                   \
     bool has_empty_tensors = p.second;                                    \
                                                                           \
     if (!can_use_fast_route ||                                            \

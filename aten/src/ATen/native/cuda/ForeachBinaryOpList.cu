@@ -216,7 +216,7 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors1, tensors2);                \
     std::pair<bool, bool> p = can_use_fast_route(                      \
-      tensors1, tensors2, alpha);                                      \
+      {tensors1, tensors2}, alpha);                                    \
     bool can_use_fast_route = p.first;                                 \
     bool has_empty_tensors = p.second;                                 \
     if (!can_use_fast_route) {                                         \
@@ -238,7 +238,7 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
     check_foreach_api_restrictions(tensors1, tensors2);                \
     std::pair<bool, bool> p = can_use_fast_route(                      \
-      tensors1, tensors2, alpha);                                      \
+      {tensors1, tensors2}, alpha);                                    \
     bool can_use_fast_route = p.first;                                 \
     bool has_empty_tensors = p.second;                                 \
     if (!can_use_fast_route) {                                         \

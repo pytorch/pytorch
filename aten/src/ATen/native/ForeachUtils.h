@@ -270,7 +270,7 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
-// returns two bools: can_use_fast_route, has_empty_tensor
+// returns two bools: can_use_fast_route, has_empty_tensors
 std::pair<bool, bool> can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
@@ -279,7 +279,7 @@ std::pair<bool, bool> can_use_fast_route(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
-// returns two bools: can_use_fast_route, has_empty_tensor
+// returns two bools: can_use_fast_route, has_empty_tensors
 std::pair<bool, bool> can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,

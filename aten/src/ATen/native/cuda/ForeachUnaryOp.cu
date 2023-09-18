@@ -427,12 +427,12 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
     return at::native::foreach_tensor_zero_slow_(tensors);
   }
 
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   if (has_empty_tensors) {
-    tensor_lists = filter_out_empty_tensors({tensors});
-  } else {
-    tensor_lists.emplace_back(tensors.vec());
+    tensors = filter_out_empty_tensors(tensors);
   }
+
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  tensor_lists.emplace_back(tensors.vec());
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half,
