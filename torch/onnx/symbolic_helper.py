@@ -1262,7 +1262,7 @@ def _repeat_interleave_split_helper(g: jit_utils.GraphContext, self, reps, dim):
         from torch.onnx.symbolic_opset13 import split
 
         repeats = g.op("Constant", value_t=torch.tensor([1] * reps))
-        split_out = split(g, self, repeats, dim, _outputs=reps)
+        split_out = split(g, self, repeats, dim, False, _outputs=reps)
     return split_out if reps > 1 else [split_out]
 
 
