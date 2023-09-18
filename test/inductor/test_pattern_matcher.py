@@ -839,7 +839,9 @@ class TestPaternMatcher(TestCase):
                     continue
 
                 self.assertEqual(
-                    pattern_pp, PatternPrettyPrinter.run(search_fn_pattern)
+                    pattern_pp,
+                    PatternPrettyPrinter.run(search_fn_pattern),
+                    msg=f"Found mismatched pattern {key}. Run gen_attention_patterns.py",
                 )
 
 
