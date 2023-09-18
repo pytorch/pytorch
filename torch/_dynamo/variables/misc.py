@@ -666,6 +666,14 @@ class GetSetDescriptorVariable(VariableTracker):
             return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
                 self.desc.__get__
             )
+        else:
+            return super().var_getattr(tx, name)
+
+    def is_python_constant(self):
+        return True
+
+    def as_python_constant(self):
+        return self.desc
 
 
 class PythonModuleVariable(VariableTracker):
