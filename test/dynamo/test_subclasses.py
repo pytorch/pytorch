@@ -30,11 +30,14 @@ class SigmoidToExpSubclass(torch.Tensor):
         return super().__torch_function__(func, types, args, kwargs)
 
 
-class IgnoreShapeSubclass(torch.Tensor):
+class DummyShapeSubclass(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        if func == torch.Tensor.shape.__get__:
+            return torch.Size((1, 1))
 
         return super().__torch_function__(func, types, args, kwargs)
 
@@ -117,7 +120,7 @@ GLOBAL_TEST_SUBCLASSES = {
     PassthroughMulSubclass,
     MockSubclass,
     SigmoidToExpSubclass,
-    IgnoreShapeSubclass,
+    DummyShapeSubclass,
 }
 compile_full_eager = torch.compile(backend="eager", fullgraph=True)
 
@@ -323,10 +326,10 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_call_on_attr(self):
         x = torch.ones(2, 2)
-        wrapped = x.as_subclass(IgnoreShapeSubclass)
+        wrapped = x.as_subclass(DummyShapeSubclass)
 
         def fn(w):
-            return w.dtype
+            return w.shape
 
         fn_opt = compile_full_eager(fn)
 

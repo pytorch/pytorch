@@ -9,6 +9,7 @@ import logging
 import operator
 import re
 import types
+from types import GetSetDescriptorType, MethodWrapperType
 from typing import List, NamedTuple, Optional, Union
 
 try:
@@ -132,6 +133,8 @@ from .tensor import (
 )
 from .torch import tensor_dunder_fns, torch_special_class_types, TorchVariable
 from .torch_function import (
+    GetAttrFunctionVariable,
+    GetSetDescriptorVariable,
     is_torch_function_user_object,
     TensorWithTFOverrideVariable,
     TorchFunctionObjectVariable,
@@ -719,14 +722,15 @@ class VariableBuilder:
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif (
-            str(type(value)) == "<class 'method-wrapper'>"
+            isinstance(value, MethodWrapperType)
             and value.__self__.__objclass__ == torch._C._TensorBase
+            and value.__name__ == "__get__"
         ):
-            from .torch_function import GetAttrFunctionVariable
-
             return GetAttrFunctionVariable(
                 value, value.__self__.__name__, source=self.source
             )
+        elif isinstance(value, GetSetDescriptorType):
+            return GetSetDescriptorVariable(value, source=self.source)
         elif isinstance(value, torch.SymBool):
             # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
             # user provided SymBool with a SymInt in dynamo.

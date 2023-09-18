@@ -607,6 +607,7 @@ class BuiltinVariable(VariableTracker):
                 if res is not None:
                     return res
 
+        breakpoint()
         handler = getattr(self, f"call_{self.fn.__name__}", None)
         if handler:
             try:
@@ -1141,6 +1142,7 @@ class BuiltinVariable(VariableTracker):
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)
             else:
+                breakpoint()
                 return VariableBuilder(tx, source)(member).add_guards(guards)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
             member = obj.value.__dict__[name]

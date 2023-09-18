@@ -96,6 +96,20 @@ class GetAttrFunctionVariable(VariableTracker):
         return self.get_fn
 
 
+class GetSetDescriptorVariable(VariableTracker):
+    def __init__(self, desc, **kwargs):
+        super().__init__(**kwargs)
+        self.desc = desc
+
+    def var_getattr(self, tx, name):
+        if name == "__get__":
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, self.source)(self.desc.__get__)
+        else:
+            super().var_getattr(tx, name)
+
+
 class TensorWithTFOverrideVariable(VariableTracker):
     """
     Represents a tensor subclass instance with a __torch_function__ override.
@@ -159,7 +173,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
         if name in banned_attrs:
             unimplemented(
-                f"Accessing method {name} on a tensor subclass with a __torch_function__ override is not supported"
+                f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
 
         if tx.output.torch_function_enabled:
