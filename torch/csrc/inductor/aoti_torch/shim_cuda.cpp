@@ -2,23 +2,23 @@
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 
-AOTITorchError aoti_torch_get_current_cuda_stream(
-    void** ret,
-    int32_t device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    cudaStream_t cuda_stream = c10::cuda::getCurrentCUDAStream(device_index);
-    *ret = reinterpret_cast<void*>(cuda_stream);
-  });
-}
-
-AOTITorchError aoti_torch_set_current_cuda_stream(
+AOTITorchError aoti_torch_create_cuda_stream_guard(
+    CUDAStreamGuardHandle* ret_guard,
     void* stream,
     int32_t device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    cudaStream_t cuda_stream = static_cast<cudaStream_t>(stream);
-    c10::cuda::setCurrentCUDAStream(
-        at::cuda::getStreamFromExternal(cuda_stream, device_index));
+    at::cuda::CUDAStreamGuard* guard =
+        new at::cuda::CUDAStreamGuard(at::cuda::getStreamFromExternal(
+            static_cast<cudaStream_t>(stream), device_index));
+    *ret_guard = reinterpret_cast<CUDAStreamGuardHandle>(guard);
   });
+}
+
+AOTITorchError aoti_torch_delete_cuda_stream_guard(
+    CUDAStreamGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
+      { delete reinterpret_cast<at::cuda::CUDAStreamGuard*>(guard); });
 }

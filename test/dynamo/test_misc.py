@@ -7073,6 +7073,26 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
 
+    def test_torch_device_python_type(self):
+        def fn(target):
+            target_device = target.device
+            self.assertIsInstance(target_device, torch.device)
+            a = torch.zeros(2, 3, device=target_device)
+            b = torch.zeros(2, 3, device=target_device)
+            c = torch.zeros(2, 3, device=target_device)
+            return a + b + c
+
+        from torch._dynamo.variables import TorchVariable
+
+        device = torch.device("cpu")
+        expected_variable = TorchVariable(device)
+        self.assertEqual(expected_variable.python_type(), type(device))
+
+        opt_func = torch._dynamo.optimize("inductor")(fn)
+        a = torch.tensor([2, 3], device=device)
+        res = opt_func(a)
+        self.assertIsInstance(res, torch.Tensor)
+
     def test_itertools_accumulate_tensors_default_sum(self):
         def fn(a, b, c, d, x):
             l = [a, b, c, d, x]
