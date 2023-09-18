@@ -192,24 +192,24 @@ class TestPytree(TestCase):
             def f(x):
                 return x * 3
 
-            sm1 = sum(map(tree_flatten(pytree)[0], f))
-            sm2 = tree_flatten(tree_map(f, pytree))[0]
+            sm1 = sum(map(f, tree_flatten(pytree)[0]))
+            sm2 = sum(tree_flatten(tree_map(f, pytree))[0])
             self.assertEqual(sm1, sm2)
 
             def invf(x):
                 return x // 3
 
-            self.assertEqual(tree_flatten(tree_flatten(pytree, f), invf), pytree)
+            self.assertEqual(tree_map(invf, tree_map(f, pytree)), pytree)
 
-            cases = [
-                [()],
-                ([],),
-                {"a": ()},
-                {"a": 1, "b": [{"c": 2}]},
-                {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
-            ]
-            for case in cases:
-                run_test(case)
+        cases = [
+            [()],
+            ([],),
+            {"a": ()},
+            {"a": 1, "b": [{"c": 2}]},
+            {"a": 0, "b": [2, {"c": 3}, 4], "c": (5, 6)},
+        ]
+        for case in cases:
+            run_test(case)
 
     def test_tree_only(self):
         self.assertEqual(tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"])
