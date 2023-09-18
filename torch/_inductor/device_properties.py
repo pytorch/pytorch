@@ -54,14 +54,3 @@ def get_device_properties(device: torch.device = torch.device("cuda")):
         return {}
     else:
         return _compile_worker_device_properties[device.type][_device(device)]
-
-
-def get_device_capability(
-    device: Optional[Union[torch.device, int]] = None
-) -> Tuple[int, int]:
-    if isinstance(device, int):
-        device = torch.device("cuda", device)
-    elif device is None:
-        device = torch.device("cuda")
-    p = get_device_properties(device)
-    return p.major, p.minor
