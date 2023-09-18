@@ -6,7 +6,6 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 import torch
 import torch.nn.functional as F
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -17,7 +16,6 @@ from torch.ao.quantization.quantizer import (
 from torch.ao.quantization.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
-    _node_only_used_for_sym_size,
 )
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions
@@ -51,6 +49,23 @@ OperatorPatternType = List[Callable]
 OperatorPatternType.__module__ = (
     "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
 )
+
+AnnotatorType = Callable[
+    [
+        torch.fx.GraphModule,
+        Optional[QuantizationConfig],
+        Optional[Callable[[Node], bool]],
+    ],
+    Optional[List[List[Node]]],
+]
+OP_TO_ANNOTATOR: Dict[str, AnnotatorType] = {}
+
+
+def register_annotator(op: str):
+    def decorator(annotator: AnnotatorType):
+        OP_TO_ANNOTATOR[op] = annotator
+
+    return decorator
 
 
 class OperatorConfig(NamedTuple):
@@ -145,91 +160,55 @@ def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
+@register_annotator("linear")
 def _annotate_linear(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
     filter_fn: Optional[Callable[[Node], bool]] = None,
 ) -> Optional[List[List[Node]]]:
-    module_partitions = get_source_partitions(
-        gm.graph, [torch.nn.Linear, torch.nn.functional.linear], filter_fn
-    )
+    annotated_partitions = []
     input_act_qspec = get_input_act_qspec(quantization_config)
     output_act_qspec = get_output_act_qspec(quantization_config)
     weight_qspec = get_weight_qspec(quantization_config)
     bias_qspec = get_bias_qspec(quantization_config)
-    annotated_partitions = []
-    for partitions in module_partitions.values():
-        for p in partitions:
-            annotated_partitions.append(p.nodes)
-            act_nodes = [
-                n for n in p.input_nodes if not _node_only_used_for_sym_size(n, p.nodes)
-            ]
-            if len(act_nodes) > 1:
-                raise ValueError(
-                    f"Multiple activation nodes found for partition {p} {act_nodes}"
-                )
-            if len(act_nodes) == 0:
-                raise ValueError(f"No activation node found for partition {p}")
-            act_node = act_nodes[0]
-            output_node = p.output_nodes[0]
-            weight_node = None
-            bias_node = None
-            for node in p.params:
-                weight_or_bias = getattr(gm, node.target)  # type: ignore[arg-type]
-                if weight_or_bias.ndim == 2:  # type: ignore[attr-defined]
-                    weight_node = node
-                if weight_or_bias.ndim == 1:  # type: ignore[attr-defined]
-                    bias_node = node
-            if weight_node is None:
-                raise ValueError("No weight found in Linear pattern")
-            # find use of act node within the matched pattern
-            act_use_node = None
-            # When doing tracing with dynamic shape, we end up with sym_size nodes
-            # This nodes do not need quantization, so skip those.
-            # We can also have quant workflow throw exception when sym_size nodes
-            # are annotated.
-            # This is not specific to linear, so in future diffs we should streamline
-            # this.
-            weight_node_users = list(
-                filter((lambda x: (_is_sym_size_node(x) is False)), weight_node.users)
-            )
-            weight_use_node_in_p = set(weight_node_users).intersection(set(p.nodes))
-            if len(weight_use_node_in_p) != 1:
-                raise ValueError(
-                    f"Could not find a valid use of act node. All uses {weight_use_node_in_p}"
-                )
-            weight_use_node = weight_use_node_in_p.pop()
+    for node in gm.graph.nodes:
+        if node.op != "call_function" or node.target != torch.ops.aten.linear.default:
+            continue
+        if filter_fn and not filter_fn(node):
+            continue
+        act_node = node.args[0]
+        weight_node = node.args[1]
+        bias_node = None
+        if len(node.args) > 2:
+            bias_node = node.args[2]
 
-            act_node_users = list(
-                filter((lambda x: (_is_sym_size_node(x) is False)), act_node.users)
+        if _is_annotated([node]) is False:  # type: ignore[list-item]
+            _annotate_input_qspec_map(
+                node,
+                act_node,
+                input_act_qspec,
             )
-            act_use_node_in_p = set(act_node_users).intersection(set(p.nodes))
-            if len(act_use_node_in_p) != 1:
-                raise ValueError(
-                    f"Could not find a valid use of act node. All uses {act_use_node_in_p}"
-                )
-            act_use_node = act_use_node_in_p.pop()
-            if _is_annotated([act_use_node]) is False:  # type: ignore[list-item]
+            _annotate_input_qspec_map(
+                node,
+                weight_node,
+                weight_qspec,
+            )
+            nodes_to_mark_annotated = [node, weight_node]
+            if bias_node:
                 _annotate_input_qspec_map(
-                    act_use_node,
-                    act_node,
-                    input_act_qspec,
+                    node,
+                    bias_node,
+                    bias_qspec,
                 )
-            if bias_node and _is_annotated([bias_node]) is False:
-                _annotate_output_qspec(bias_node, bias_qspec)
-            if _is_annotated([weight_node]) is False:  # type: ignore[list-item]
-                _annotate_input_qspec_map(
-                    weight_use_node,
-                    weight_node,
-                    weight_qspec,
-                )
-            if _is_annotated([output_node]) is False:
-                _annotate_output_qspec(output_node, output_act_qspec)
-            nodes_to_mark_annotated = list(p.nodes)
+                nodes_to_mark_annotated.append(bias_node)
+            _annotate_output_qspec(node, output_act_qspec)
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
+            annotated_partitions.append(nodes_to_mark_annotated)
+
     return annotated_partitions
 
 
+@register_annotator("conv2d")
 def _annotate_conv2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -275,6 +254,7 @@ def _annotate_conv2d(
     return annotated_partitions
 
 
+@register_annotator("conv2d_relu")
 def _annotate_conv2d_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -333,6 +313,7 @@ def _annotate_conv2d_relu(
     return annotated_partitions
 
 
+@register_annotator("conv2d_bn")
 def _annotate_conv2d_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -386,6 +367,7 @@ def _annotate_conv2d_bn(
     return annotated_partitions
 
 
+@register_annotator("conv2d_bn_relu")
 def _annotate_conv2d_bn_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -445,6 +427,7 @@ def _annotate_conv2d_bn_relu(
     return annotated_partitions
 
 
+@register_annotator("gru_io_only")
 def _annotate_gru_io_only(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -496,6 +479,7 @@ def _annotate_gru_io_only(
     return annotated_partitions
 
 
+@register_annotator("max_pool2d")
 def _annotate_max_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -546,6 +530,7 @@ def _annotate_max_pool2d(
     return annotated_partitions
 
 
+@register_annotator("adaptive_avg_pool2d")
 def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -595,6 +580,7 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
+@register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -640,6 +626,7 @@ def _annotate_add_relu(
     return annotated_partitions
 
 
+@register_annotator("add")
 def _annotate_add(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -676,6 +663,7 @@ def _annotate_add(
     return annotated_partitions
 
 
+@register_annotator("mul_relu")
 def _annotate_mul_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -721,6 +709,7 @@ def _annotate_mul_relu(
     return annotated_partitions
 
 
+@register_annotator("mul")
 def _annotate_mul(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -757,21 +746,50 @@ def _annotate_mul(
     return annotated_partitions
 
 
-OP_TO_ANNOTATOR = {
-    "linear": _annotate_linear,
-    "conv2d": _annotate_conv2d,
-    "conv2d_relu": _annotate_conv2d_relu,
-    "conv2d_bn": _annotate_conv2d_bn,
-    "conv2d_bn_relu": _annotate_conv2d_bn_relu,
-    "max_pool2d": _annotate_max_pool2d,
-    "add": _annotate_add,
-    "add_relu": _annotate_add_relu,
-    "mul": _annotate_mul,
-    "mul_relu": _annotate_mul_relu,
-    "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
-    # input output only gru
-    "gru_io_only": _annotate_gru_io_only,
-}
+# TODO: remove Optional in return type, fix annotated_partitions logic
+@register_annotator("cat")
+def _annotate_cat(
+    gm: torch.fx.GraphModule,
+    quantization_config: Optional[QuantizationConfig],
+    filter_fn: Optional[Callable[[Node], bool]] = None,
+) -> Optional[List[List[Node]]]:
+    cat_partitions = get_source_partitions(gm.graph, [torch.cat], filter_fn)
+    cat_partitions = list(itertools.chain(*cat_partitions.values()))
+    annotated_partitions = []
+    for cat_partition in cat_partitions:
+        cat_node = cat_partition.output_nodes[0]
+        if _is_annotated([cat_node]):
+            continue
+
+        if cat_node.target != torch.ops.aten.cat.default:
+            # TODO: change this to AnnotationException
+            raise Exception(
+                f"Expected cat node: torch.ops.aten.cat.default, but found {cat_node.target}"
+                " please check if you are calling the correct capture API"
+            )
+
+        annotated_partitions.append(cat_partition.nodes)
+
+        input_act_qspec = get_input_act_qspec(quantization_config)
+        inputs = cat_node.args[0]
+
+        input_qspec_map = {}
+        input_act0 = inputs[0]
+        if isinstance(input_act0, Node):
+            input_qspec_map[input_act0] = input_act_qspec
+
+        shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))
+        for input_act in inputs[1:]:
+            input_qspec_map[input_act] = shared_with_input0_qspec
+
+        output_act_qspec = shared_with_input0_qspec
+
+        cat_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            input_qspec_map=input_qspec_map,
+            output_qspec=output_act_qspec,
+            _annotated=True,
+        )
+    return annotated_partitions
 
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:

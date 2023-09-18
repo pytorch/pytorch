@@ -70,7 +70,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   // right (but ideally, this would just be precomputed in FunctionSchema
   // itself).  (NB: minus one in the loop is because we're testing if the
   // *next* argument is kwarg-only before we advance the starting index)
-  int64_t kwarg_only_start = arguments.size();
+  int64_t kwarg_only_start = static_cast<int64_t>(arguments.size());
   for (; kwarg_only_start > 0; kwarg_only_start--) {
     const auto& arg = schema.arguments()[kwarg_only_start - 1];
     if (!arg.kwarg_only()) {
@@ -79,7 +79,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   }
 
   // Find the first positional argument that isn't defaulted
-  auto is_default = [&](int64_t idx) -> bool {
+  auto is_default = [&](size_t idx) -> bool {
     const auto& arg = schema.arguments()[idx];
     if (!arg.default_value().has_value()) {
       return false;
@@ -102,7 +102,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   auto args =
       py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
 
-  auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
+  auto schemaAwareToPyObject = [&](size_t idx) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
       const auto& t = arg.real_type();
@@ -271,7 +271,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   c10::optional<PyObject*> mb_obj =
       var.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status;
+  c10::impl::PyInterpreterStatus status{};
   if (mb_obj.has_value()) {
     auto obj = *mb_obj;
     if (obj) {
@@ -627,7 +627,7 @@ static PyObject* THPVariable_make_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(data),
+      data,
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -643,13 +643,15 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, "
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "DispatchKeySet _extra_dispatch_keys=None)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "DispatchKeySet _extra_dispatch_keys=None)",
   });
-  ParsedArgs<13> parsed_args{};
+  ParsedArgs<14> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -689,6 +691,9 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // resizable (have to define a custom allocator in that case)
   Tensor tensor;
   if (r.idx == 0) {
+    TORCH_CHECK(
+        !r.toDispatchKeySetOptional(13),
+        "This overload of _make_wrapper_subclass does not support _extra_dispatch_keys");
     tensor = at::for_blob(nullptr, r.intlist(1))
                  .strides(r.intlistOptional(2))
                  .storage_offset(r.toInt64Optional(3))
@@ -717,10 +722,14 @@ static PyObject* THPVariable_make_wrapper_subclass(
         0,
         at::DataPtr{nullptr, r.device(7)},
         /*allocator=*/c10::GetAllocator(c10::kMeta),
-        /*resizeable=*/true};
+        /*resizable=*/true};
 
+    auto keys = c10::DispatchKeySet({options.computeDispatchKey()});
+    if (auto mb_extra_keys = r.toDispatchKeySetOptional(13)) {
+      keys = keys | *mb_extra_keys;
+    }
     tensor = at::detail::make_tensor<TensorImpl>(
-        std::move(storage), options.computeDispatchKey(), options.dtype());
+        std::move(storage), keys, options.dtype());
 
     auto sym_sizes = r.symintlist(1);
     auto sym_strides = r.symintlist(2);
@@ -749,7 +758,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(tensor),
+      tensor,
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -1055,15 +1064,14 @@ PyObject* THPVariable_get_names(PyObject* self, void* unused) {
   // The long-term plan is to return a list of (python) torch.Dimname.
   // However, for now, return a list of string.
   const auto& tensor = THPVariable_Unpack(self);
-  size_t size = tensor.dim();
+  auto size = tensor.dim();
   THPObjectPtr tuple(PyTuple_New(size));
   if (!tuple)
     throw python_error();
 
   const auto dimnames = tensor.names();
   for (const auto i : c10::irange(size)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    PyObject* str;
+    PyObject* str = nullptr;
     if (dimnames[i].type() == at::NameType::WILDCARD) {
       // PyTuple_SET_ITEM steals a reference to the object. When the tuple is
       // deallocated, it'll decrement the refcount on Py_None, which is bad.

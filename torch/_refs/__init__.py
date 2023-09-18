@@ -289,6 +289,7 @@ __all__ = [
     "view_as",
     "vsplit",
     "vstack",
+    "view_as_complex",
     "unflatten",
     "unbind",
     "triu",
@@ -947,6 +948,43 @@ def tanh(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def trunc(a):
     return prims.trunc(a)
+
+
+# TODO: register this as a real ref/decomposition once TorchInductor supports complex!
+def view_as_complex(self: TensorLikeType) -> TensorLikeType:
+    input_dtype = self.dtype
+    torch._check(
+        utils.is_float_dtype(input_dtype),
+        lambda: f"view_as_complex is only supported for floating point"
+        f"tensors, but got a tensor of scalar type: {input_dtype}",
+    )
+    sizes = self.size()
+    torch._check(
+        len(sizes) != 0,
+        lambda: "Input tensor must have one or more dimensions",
+    )
+    torch._check(
+        sizes[-1] == 2,
+        lambda: "Tensor must have a last dimension of size 2",
+    )
+
+    old_strides = self.stride()
+    torch._check(
+        old_strides[-1] == 1,
+        lambda: "Tensor must have a last dimension with stride 1",
+    )
+    dims = old_strides[:-1]
+    torch._check(
+        py_all(stride % 2 == 0 for stride in dims),
+        lambda: "Tensor must have a stride divisible by 2 for all but last dimension",
+    )
+    torch._check(
+        self.storage_offset() % 2 == 0,
+        lambda: "Tensor must have a storage_offset divisible by 2",
+    )
+    return prims.view_element_type(
+        self, utils.corresponding_complex_dtype(input_dtype)
+    ).squeeze(-1)
 
 
 def _make_elementwise_binary_reference(
@@ -4862,8 +4900,8 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
 @register_decomposition(aten.linspace)
 @out_wrapper()
 def linspace(
-    start: NumberType,
-    end: NumberType,
+    start: Union[NumberType, TensorLikeType],
+    end: Union[NumberType, TensorLikeType],
     steps: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -4872,6 +4910,19 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    if isinstance(start, TensorLikeType):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        start = _maybe_convert_to_dtype(start, torch.float64)
+    if isinstance(end, TensorLikeType):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        end = _maybe_convert_to_dtype(end, torch.float64)
+
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
@@ -4890,7 +4941,8 @@ def linspace(
     # steps does not participate in the computation of the dtype
     torch._check_type(
         isinstance(steps, IntLike),
-        lambda: "steps must be int, not float",
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
     assert isinstance(steps, IntLike)  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
@@ -4904,9 +4956,10 @@ def linspace(
     if steps == 0:
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
-        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    if start == end:
-        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+        if isinstance(start, TensorLikeType):
+            return torch.empty((steps,), dtype=dtype, **factory_kwargs).copy_(start)  # type: ignore[arg-type]
+        else:
+            return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
     # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
     rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
@@ -4936,8 +4989,8 @@ def linspace(
 @register_decomposition(aten.logspace)
 @out_wrapper()
 def logspace(
-    start: NumberType,
-    end: NumberType,
+    start: Union[NumberType, TensorLikeType],
+    end: Union[NumberType, TensorLikeType],
     steps: NumberType,
     base: NumberType = 10,
     *,
@@ -4954,8 +5007,20 @@ def logspace(
     if prims.utils.is_integer_dtype(dtype):
         if isinstance(start, FloatLike):
             start = sym_int(start)
+        elif isinstance(start, TensorLikeType):
+            torch._check(
+                start.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
+            start = _maybe_convert_to_dtype(start, dtype)
         if isinstance(end, FloatLike):
             end = sym_int(end)
+        elif isinstance(end, TensorLikeType):
+            torch._check(
+                end.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
+            end = _maybe_convert_to_dtype(end, dtype)
 
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
@@ -4970,8 +5035,8 @@ def logspace(
     if base < 0:
         raise NotImplementedError
     ret = torch.linspace(  # type: ignore[misc]
-        start,
-        end,
+        start,  # type: ignore[arg-type]
+        end,  # type: ignore[arg-type]
         steps,  # type: ignore[arg-type]
         dtype=_dtype,
         layout=layout,
