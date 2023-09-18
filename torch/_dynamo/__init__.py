@@ -1,7 +1,6 @@
 import torch
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
-from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
     allow_in_graph,
@@ -17,6 +16,7 @@ from .decorators import (
     run,
 )
 from .eval_frame import (
+    _reset_guarded_backend_cache,
     explain,
     export,
     is_dynamo_supported,
@@ -65,9 +65,6 @@ def reset() -> None:
     guard_failures.clear()
     graph_break_reasons.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
-    if hasattr(eval_frame.most_recent_backend, "reset"):
-        eval_frame.most_recent_backend.reset()
-    eval_frame.most_recent_backend = None
+    _reset_guarded_backend_cache()
     reset_frame_count()
     torch._C._dynamo.compiled_autograd.clear_cache()
-    code_context.clear()

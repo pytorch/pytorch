@@ -8,7 +8,6 @@ from torch._C._onnx import (
 )
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
-    _deprecation,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -128,13 +127,6 @@ _OrtBackend.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
 producer_version = _C_onnx.PRODUCER_VERSION
-
-
-@_deprecation.deprecated(
-    since="1.12.0", removed_in="2.0", instructions="use `torch.onnx.export` instead"
-)
-def _export(*args, **kwargs):
-    return utils._export(*args, **kwargs)
 
 
 # TODO(justinchuby): Deprecate these logging functions in favor of the new diagnostic module.
