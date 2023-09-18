@@ -8,6 +8,7 @@
 #include <torch/data/worker_exception.h>
 #include <torch/types.h>
 
+#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <c10/util/Exception.h>
@@ -61,14 +62,15 @@ class DataLoaderBase {
         "Attempted to get a new DataLoader iterator "
         "while another iterator is not yet exhausted");
     reset();
-    return Iterator<Batch>(std::make_unique<detail::ValidIterator<Batch>>(
+    return Iterator<Batch>(torch::make_unique<detail::ValidIterator<Batch>>(
         [this] { return this->next(); }));
   }
 
   /// Returns a special "sentinel" iterator that compares equal with a
   /// non-sentinel iterator once the DataLoader is exhausted.
   Iterator<Batch> end() {
-    return Iterator<Batch>(std::make_unique<detail::SentinelIterator<Batch>>());
+    return Iterator<Batch>(
+        torch::make_unique<detail::SentinelIterator<Batch>>());
   }
 
   /// Joins the DataLoader's worker threads and drains internal queues.
@@ -213,10 +215,10 @@ class DataLoaderBase {
   /// `enforce_ordering` option.
   std::unique_ptr<detail::sequencers::Sequencer<Result>> new_sequencer() {
     if (options_.enforce_ordering) {
-      return std::make_unique<detail::sequencers::OrderedSequencer<Result>>(
+      return torch::make_unique<detail::sequencers::OrderedSequencer<Result>>(
           options_.max_jobs);
     }
-    return std::make_unique<detail::sequencers::NoSequencer<Result>>();
+    return torch::make_unique<detail::sequencers::NoSequencer<Result>>();
   }
 
   /// The options the DataLoader was configured with.
