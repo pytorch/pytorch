@@ -502,6 +502,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 
@@ -685,6 +686,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -1440,7 +1442,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/fmha_api.cpp",
+    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.cpp",
 ]
 
 # Files using thrust::sort_by_key need to be linked last

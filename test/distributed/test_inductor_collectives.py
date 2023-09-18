@@ -155,6 +155,52 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allreduce_input_buffer_reuse(self):
+        def func(a, *, tag, ranks, group_size):
+            ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
+            c = torch.relu(a)
+            d = torch.matmul(c, c)
+            e = d + ar
+            return (e,)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = torch.ones(4, 4, device="cuda") + self.rank
+            compiled = torch.compile(func)
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allgather_output_buffer_reuse(self):
+        class Model(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.emb = torch.nn.Embedding(4, 4)
+
+            def forward(self, x, world_size, tag, ranks, group_size):
+                y = self.emb(x)
+                last_dim = y.dim() - 1
+                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                out = torch.cat(torch.chunk(res, world_size, dim=0), dim=last_dim)
+                return out
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            model = Model().cuda()
+            model_compiled = torch.compile(model)
+            inp = torch.tensor([[2, 1, 3, 0]], dtype=torch.long, device="cuda")
+            out = model_compiled(inp, self.world_size, **self.get_world_trs())
+            correct = model(inp, self.world_size, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     def test_allgather_into_tensor_inductor(self):
@@ -247,7 +293,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("buf1_work = dist.all_reduce(buf1") \
             .check("fun_col_impl._register_tensor_work(buf1, buf1_work)") \
             .check("_wait_tensor(buf0)") \
-            .check("return (buf2, )") \
+            .check("return (buf3, )") \
             .run(code)
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
@@ -279,7 +325,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("return (buf3, buf4") \
+            .check("return (buf4, buf5") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -307,14 +353,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("triton_poi__0.run(arg0_1, buf0, buf4") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf5") \
             .check_not("copy_(") \
             .check("buf2 = buf1") \
             .check("buf2_work = dist.all_reduce(buf2") \
             .check("fun_col_impl._register_tensor_work(buf2, buf2_work)") \
             .check("_wait_tensor(buf1)") \
             .check("buf3 = buf1") \
-            .check("return (buf3, buf4, buf5") \
+            .check("return (buf4, buf5, buf6") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -545,7 +591,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("triton_poi__0.run(arg0_1, buf0, buf5") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf6") \
             .check_not("copy_(") \
             .check("buf3_inputs = [buf0,arg0_1]") \
             .check("buf3 = [buf1,buf2]") \
@@ -555,8 +601,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
             .check("_wait_tensor(buf2)") \
-            .check("buf7 = buf2") \
-            .check("return (buf4, buf5, buf6, buf7") \
+            .check("buf8 = buf2") \
+            .check("return (buf5, buf6, buf7, buf9") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
@@ -585,7 +631,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         FileCheck() \
-            .check("triton_poi__0.run(arg0_1, buf0, buf5") \
+            .check("triton_poi__0.run(arg0_1, buf0, buf6") \
             .check_not("copy_(") \
             .check("buf3 = [buf1,buf2]") \
             .check("buf3_work = fun_col_impl._reduce_scatter_tensor_coalesced_fallback("
@@ -594,8 +640,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             .check("_wait_tensor(buf1)") \
             .check("buf4 = buf1") \
             .check("_wait_tensor(buf2)") \
-            .check("buf7 = buf2") \
-            .check("return (buf4, buf5, buf6, buf7") \
+            .check("buf8 = buf2") \
+            .check("return (buf5, buf6, buf7, buf9") \
             .run(code)
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
