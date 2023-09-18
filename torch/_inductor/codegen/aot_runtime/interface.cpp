@@ -52,8 +52,12 @@ AOTInductorError AOTInductorModelContainerDelete(
 
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
+    // array of raw AtenTensorHandle for input tensors, and will be stolen by
+    // RAIIAtenTensorHandle
     AtenTensorHandle* input_handles,
     size_t num_inputs,
+    // array of raw AtenTensorHandle for output tensors, and will be stolen by
+    // RAIIAtenTensorHandle
     AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
@@ -67,13 +71,13 @@ AOTInductorError AOTInductorModelContainerRun(
   std::vector<torch::aot_inductor::RAIIAtenTensorHandle> inputs;
   inputs.reserve(num_inputs);
   for (size_t i = 0; i < num_inputs; i++) {
-    inputs.push_back(torch::aot_inductor::steal_tensor_handle_to_raii_handle(input_handles[i]));
+    inputs.push_back(torch::aot_inductor::steal_tensor_handle_from_raw_to_raii(input_handles[i]));
   }
 
   std::vector<torch::aot_inductor::RAIIAtenTensorHandle> outputs;
   outputs.reserve(num_outputs);
   for (size_t i = 0; i < num_outputs; i++) {
-    outputs.push_back(torch::aot_inductor::steal_tensor_handle_to_raii_handle(output_handles[i]));
+    outputs.push_back(torch::aot_inductor::steal_tensor_handle_from_raw_to_raii(output_handles[i]));
   }
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);

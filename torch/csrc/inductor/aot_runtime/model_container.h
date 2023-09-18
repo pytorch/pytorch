@@ -151,7 +151,7 @@ class AOTInductorModelContainer {
           ));
       constants_->emplace(
           std::move(name),
-          std::move(steal_tensor_handle_to_raii_handle(tensor_handle)));
+          std::move(steal_tensor_handle_from_raw_to_raii(tensor_handle)));
     }
   }
 

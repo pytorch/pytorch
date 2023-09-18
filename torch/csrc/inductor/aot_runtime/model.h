@@ -352,7 +352,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 };
 
 // TODO: will update RAIIAtenTensorHandle to unique_ptr and change this
-inline RAIIAtenTensorHandle steal_tensor_handle_to_raii_handle(
+inline RAIIAtenTensorHandle steal_tensor_handle_from_raw_to_raii(
     AtenTensorHandle handle) {
   return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
     AOTI_TORCH_ERROR_CODE_CHECK(

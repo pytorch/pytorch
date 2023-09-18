@@ -1369,7 +1369,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         kernel = "aoti_torch_" + kernel.split("::")[-1]
         for i, arg in enumerate(args):
-            if arg.startswith("steal_tensor_handle_to_raii_handle("):
+            if arg.startswith("steal_tensor_handle_from_raw_to_raii("):
                 args[i] += ".get()"
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
@@ -1549,7 +1549,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
             )
-            return f"auto {name} = steal_tensor_handle_to_raii_handle({name}_handle);"
+            return f"auto {name} = steal_tensor_handle_from_raw_to_raii({name}_handle);"
         else:
             return (
                 f"{self.declare}{name} = {self.namespace}empty_strided("
@@ -1580,7 +1580,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
             )
-            return f"steal_tensor_handle_to_raii_handle({tmp_name})"
+            return f"steal_tensor_handle_from_raw_to_raii({tmp_name})"
         else:
             args = [name, size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
