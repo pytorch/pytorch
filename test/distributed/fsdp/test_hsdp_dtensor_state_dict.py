@@ -7,13 +7,7 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import (
-    DeviceMesh,
-    DTensor,
-    mesh_resources,
-    Replicate,
-    Shard,
-)
+from torch.distributed._tensor import DTensor, mesh_resources, Replicate, Shard
 from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
@@ -55,14 +49,10 @@ class TestDummyModel(torch.nn.Module):
 
 # TODO: Consolidate DeviceMesh based FSDP and HSDP test cases.
 class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 4
-
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_raises_tp_hsdp_not_supported_error(self):
-        mesh_2d = init_device_mesh(self.device_type, (2, 2))
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         # manually set a fake parent mesh to mesh_2d
         fake_parent_mesh = init_device_mesh(self.device_type, (self.world_size,))
         mesh_resources.child_to_parent_mapping[mesh_2d] = fake_parent_mesh
@@ -77,18 +67,17 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
 
-    def _create_model(self, use_device_mesh=True):
-        device_mesh = init_device_mesh(self.device_type, (2, 2))
-
-        if use_device_mesh:
+    def _create_model(self, device_mesh=None):
+        if device_mesh:
             model = FSDP(
                 TestDummyModel().cuda(),
                 device_mesh=device_mesh,
                 sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             )
         else:
-            intra_node_pg = device_mesh.get_dim_groups(mesh_dim=1)
-            inter_node_pg = device_mesh.get_dim_groups(mesh_dim=0)
+            mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+            intra_node_pg = mesh_2d.get_dim_groups(mesh_dim=1)
+            inter_node_pg = mesh_2d.get_dim_groups(mesh_dim=0)
             model = FSDP(
                 TestDummyModel().cuda(),
                 process_group=(intra_node_pg, inter_node_pg),
@@ -104,9 +93,9 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_hsdp_init_with_device_mesh(self):
-        mesh_tensor = torch.arange(self.world_size).view(2, -1)
-        device_mesh = DeviceMesh(self.device_type, mesh_tensor)
-        model, optim = self._create_model(use_device_mesh=True)
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        print(f"mesh_2d:{mesh_2d}")
+        model, optim = self._create_model(mesh_2d)
 
         FSDP.set_state_dict_type(
             model,
@@ -123,18 +112,19 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
 
         for v in model.state_dict().values():
             self.assertEqual(v.placements, (Replicate(), Shard(0)))
-            self.assertEqual(v.device_mesh, device_mesh)
+            self.assertEqual(v.device_mesh, mesh_2d)
 
         for v in optim.state_dict()["state"].values():
             if isinstance(v, DTensor):
                 self.assertEqual(v.placements, (Replicate(), Shard(0)))
-                self.assertEqual(v.device_mesh, device_mesh)
+                self.assertEqual(v.device_mesh, mesh_2d)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_tensor_state_dict_identical(self, offload_to_cpu):
-        model, optim = self._create_model(use_device_mesh=True)
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        model, optim = self._create_model(mesh_2d)
 
         FSDP.set_state_dict_type(
             model,
@@ -147,7 +137,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         dtensor_sd = model.state_dict()
         dtensor_osd = FSDP.optim_state_dict(model, optim)
 
-        ref_model, ref_optim = self._create_model(use_device_mesh=False)
+        ref_model, ref_optim = self._create_model()
         FSDP.set_state_dict_type(
             ref_model,
             StateDictType.SHARDED_STATE_DICT,
@@ -194,7 +184,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
-        model, optim = self._create_model(use_device_mesh=True)
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        model, optim = self._create_model(mesh_2d)
 
         FSDP.set_state_dict_type(
             model,
@@ -243,7 +234,8 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        model, optim = self._create_model(use_device_mesh=True)
+        mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
+        model, optim = self._create_model(mesh_2d)
 
         FSDP.set_state_dict_type(
             model,
