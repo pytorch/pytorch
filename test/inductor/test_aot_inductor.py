@@ -126,7 +126,6 @@ class AOTInductorModelRunner:
         return list_output_tensors
 
 
-<<<<<<< HEAD
 def check_model(
     self: TestCase,
     model,
