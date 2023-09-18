@@ -1,5 +1,6 @@
 import argparse
 import collections
+import sys
 from pprint import pformat
 from typing import Dict, List, Sequence
 
@@ -79,8 +80,12 @@ FACTORY_PARAMS = (
     f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
 )
 
-# this could be more precise w.r.t list contents etc. How to do Ellipsis?
-INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
+if sys.version_info >= (3, 10):
+    INDICES = (
+        "indices: Union[None, _int, slice, Tensor, List, Tuple, types.EllipsisType]"
+    )
+else:
+    INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
 
 blocklist = [
     "__init_subclass__",
