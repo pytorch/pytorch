@@ -252,7 +252,7 @@ def main() -> None:
             ),
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
     lines = proc.stdout.decode().splitlines()
     for line in lines:
