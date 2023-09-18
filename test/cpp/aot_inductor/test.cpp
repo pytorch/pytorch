@@ -68,9 +68,9 @@ TEST(AotInductorTest, BasicTest) {
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
   std::vector<AtenTensorHandle> input_handles =
-      torch::aot_inductor::borrow_tensors_to_handles(input_tensors);
+      torch::aot_inductor::borrow_tensors_to_handles(inputs);
   std::vector<AtenTensorHandle> output_handles =
-      torch::aot_inductor::borrow_tensors_to_handles(output_tensors);
+      torch::aot_inductor::borrow_tensors_to_handles(outputs);
 
   std::vector<const int64_t*> output_sizes(outputs.size());
   std::vector<int64_t> output_ndims(outputs.size());

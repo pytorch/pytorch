@@ -17,14 +17,16 @@ TORCH_API AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor);
 // borrow_tensors_to_handles is used for turning a vector of aten tensors into
 // a vector of AtenTensorHandles, and then pass that into model.so.
 //
-// Let's start with borrowing instead of stealing for correctness, and optimize
+// Let's start with borrowing ownership instead of stealing, correctness first
+// and then optimize for performance
 TORCH_API std::vector<AtenTensorHandle> borrow_tensors_to_handles(
     std::vector<at::Tensor>& tensors);
 
 // borrow_handles_to_tensors is used for turning a vector of AtenTensorHandles
 // into a vector of aten tensors.
 //
-// Let's start with borrowing instead of stealing for correctness, and optimize
+// Let's start with borrowing ownership instead of stealing, correctness first
+// and then optimize for performance
 TORCH_API std::vector<at::Tensor> borrow_handles_to_tensors(
     std::vector<AtenTensorHandle>& handles);
 
