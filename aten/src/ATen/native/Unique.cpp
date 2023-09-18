@@ -3,7 +3,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/util/irange.h>
@@ -14,7 +13,6 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_unique2_native.h>
-#include <ATen/ops/_unique_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/equal.h>
 #include <ATen/ops/narrow.h>
@@ -26,125 +24,10 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <tuple>
-#include <unordered_map>
-#include <unordered_set>
-
-namespace std {
-template <>
-struct hash<at::BFloat16> {
-  size_t operator()(const at::BFloat16& v) const noexcept {
-    return std::hash<uint16_t>()(v.x);
-  }
-};
-
-template <>
-struct hash<at::Half> {
-  size_t operator()(const at::Half& v) const noexcept {
-    return std::hash<uint16_t>()(v.x);
-  }
-};
-} // namespace std
-
 namespace at {
 namespace native{
 
 namespace {
-
-// Extract the unique elements from [begin, end) into a new Tensor
-template <typename scalar_t>
-Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
-                       bool sorted, const TensorOptions &options) {
-  // Create unordered set of elements
-  auto set = std::unordered_set<scalar_t>(begin, end);
-
-  // Write the output tensor
-  Tensor output = at::empty({static_cast<int64_t>(set.size())}, options);
-  scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
-  std::copy(set.begin(), set.end(), output_data);
-  if (sorted) {
-    std::sort(output_data, output_data + set.size());
-  }
-  return output;
-}
-
-// Specialization for boolean inputs, since we can't construct a set
-// directly from an array of bool as it won't handle invalid byte values.
-// See NOTE [Loading boolean values]
-Tensor unique_elements(const bool* begin, const bool* end,
-                       bool /*sorted*/, const TensorOptions &options) {
-  // Instead of a set, track whether a value has been seen
-  std::array<bool, 2> seen;
-  seen.fill(false);
-
-  for (; begin != end; ++begin) {
-    seen[c10::load(begin)] = true;
-    if (seen[false] && seen[true]) {
-      break;
-    }
-  }
-
-  // Write the output tensor
-  int64_t num_elem = seen[false] + seen[true];
-  Tensor output = at::empty({num_elem}, options);
-  bool *output_data = output.mutable_data_ptr<bool>();
-
-  if (seen[false]) {
-    *output_data++ = false;
-  }
-  if (seen[true]) {
-    *output_data++ = true;
-  }
-  return output;
-}
-
-template <typename scalar_t>
-std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
-    const Tensor& self,
-    const bool sorted,
-    const bool return_inverse,
-    const bool return_counts) {
-  const Tensor& input = self.contiguous();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
-  int64_t numel = input.numel();
-  Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
-  Tensor counts = at::empty({0}, self.options().dtype(kLong));
-  Tensor output = unique_elements(input_data, input_data + numel,
-                                  sorted, input.options());
-  const scalar_t *output_data = output.data_ptr<scalar_t>();
-
-  if (return_inverse || return_counts) {
-    inverse_indices.resize_(input.sizes());
-    int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
-    std::unordered_map<scalar_t, int64_t> inverse_map;
-    inverse_map.reserve(output.numel());
-    for (const auto i : c10::irange(output.numel())) {
-      inverse_map[output_data[i]] = i;
-    }
-    for (const auto i : c10::irange(numel)) {
-      const auto val = c10::load(&input_data[i]);
-      inverse_indices_data[i] = inverse_map[val];
-    }
-    if (return_counts) {
-      std::unordered_map<scalar_t, int64_t> counts_map;
-      counts_map.reserve(output.numel());
-      for (const auto i : c10::irange(output.numel())) {
-        counts_map[output_data[i]] = 0;
-      }
-      for (const auto i : c10::irange(numel)) {
-        const auto val = c10::load(&input_data[i]);
-        counts_map[val] += 1;
-      }
-      counts.resize_(output.sizes());
-      counts.fill_(0);
-      int64_t *counts_data = counts.data_ptr<int64_t>();
-      for (const auto i : c10::irange(output.numel())) {
-        counts_data[i] = counts_map[output_data[i]];
-      }
-    }
-  }
-  return std::make_tuple(output, inverse_indices, counts);
-}
 
 // check whether the element on index i is `unique`,
 // in the sorted sequence, the 1st element is always true.
@@ -166,7 +49,7 @@ template <typename scalar_t>
 struct IsUnique<scalar_t, false> {
   inline bool operator() (scalar_t* data_ptr, int64_t i) {
     if (i == 0) { return true; }
-    return data_ptr[i] != data_ptr[i - 1];
+    return c10::load(&data_ptr[i]) != c10::load(&data_ptr[i - 1]);
   }
 };
 
@@ -174,7 +57,7 @@ template <typename scalar_t>
 struct IsUnique<scalar_t, true> {
   inline bool operator() (scalar_t* data_ptr, int64_t i) {
     if (i == 0) { return true; }
-    return (data_ptr[i] != data_ptr[i - 1])
+    return (c10::load(&data_ptr[i]) != c10::load(&data_ptr[i - 1]))
         && !(_isnan(data_ptr[i]) && _isnan(data_ptr[i - 1]));
   }
 };
@@ -191,6 +74,8 @@ struct IsUnique<scalar_t, true> {
 //
 // This kernel also implements a `equal_nan` flag which has same
 // function as NumPy's unique. Currently this is always disabled.
+//
+// TODO: add `bool` specification, use similar approach as UniqueCub
 //
 template <typename scalar_t, typename CompareOp>
 std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
@@ -276,7 +161,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
 
     for (const auto i : c10::irange(begin, end)) {
       if (is_unique(input_sorted_data, i)) {
-        output_data[offset] = input_sorted_data[i];
+        output_data[offset] = c10::load(&input_sorted_data[i]);
         if (return_counts) {
           unique_index_data[offset] = i;
         }
@@ -481,13 +366,10 @@ std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
     Tensor output, inverse;
-    if (sorted) {
-      std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(
-          self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
-    } else {
-      std::tie(output, inverse, std::ignore) = unique_cpu_template<scalar_t>(
-          self, /* sorted */false, return_inverse, /* return_counts */false);
-    }
+    // The current CPU implementation of unique always sort due to
+    // this is faster than hash table
+    std::tie(output, inverse, std::ignore) = unique_cpu_sorted_template<scalar_t>(
+        self, return_inverse, /* return_counts */false, IsUnique<scalar_t, /* equal_nan */false>());
     return std::make_tuple(output, inverse);
   });
 }
@@ -495,12 +377,10 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
 std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
   return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
-    if (sorted) {
-      return unique_cpu_sorted_template<scalar_t>(
-          self, return_inverse, return_counts, IsUnique<scalar_t, /* equal_nan */ false>());
-    } else {
-      return unique_cpu_template<scalar_t>(self, /* sorted */false, return_inverse, return_counts);
-    }
+    // The current CPU implementation of unique always sort due to
+    // this is faster than hash table
+    return unique_cpu_sorted_template<scalar_t>(
+        self, return_inverse, return_counts, IsUnique<scalar_t, /* equal_nan */ false>());
   });
 }
 
