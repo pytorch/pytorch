@@ -322,7 +322,6 @@ if RUN_CUDA:
         DynamicShapesCudaWrapperCudaTests,
         "cuda_wrapper",
         test_failures_cuda_wrapper,
-        xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":
