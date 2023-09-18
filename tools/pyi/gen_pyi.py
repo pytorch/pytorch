@@ -120,7 +120,7 @@ FACTORY_PARAMS = (
 # NOTE: ellipsis is equal to type[Ellipsis] in stub files.
 _non_recursive_index = "None, _bool, _int, SupportsIndex, slice, ellipsis"
 _recursive_index = (
-    "Tensor, _NestedSequence[Union[_bool, _int]], _NestedSequence[Tensor]]"
+    "Tensor, _NestedSequence[Union[_bool, _int]], _NestedSequence[Tensor]"
 )
 _indices = f"Union[{_non_recursive_index}, {_recursive_index}]"
 INDICES = f"indices: Union[{_indices}, tuple[{_indices}, ...]]"
