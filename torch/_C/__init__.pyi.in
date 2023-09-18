@@ -3,6 +3,7 @@
 import builtins
 from enum import Enum
 from pathlib import Path
+import types
 from typing import (
     Any,
     AnyStr,
