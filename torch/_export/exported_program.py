@@ -337,7 +337,7 @@ def _process_constraints(
         val = placeholder_nodes[input_dim.input_name].meta["val"]
         assert isinstance(val, FakeTensor)
         symint = val.shape[input_dim.dim]
-        assert isinstance(symint, SymInt)
+        assert isinstance(symint, SymInt), f"Expected SymInt but got {symint}: {type(symint)}"
         symbol = symint.node._expr
         range_constraints[symbol] = RangeConstraint(min_val, max_val)
 

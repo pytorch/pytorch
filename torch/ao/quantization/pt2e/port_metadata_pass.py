@@ -17,7 +17,7 @@ from torch.fx.passes.infra.pass_base import PassResult
 
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.WARNING)
+logger.setLevel(logging.ERROR)
 
 __all__ = ["PortNodeMetaForQDQ"]
 

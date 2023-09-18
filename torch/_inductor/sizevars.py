@@ -488,6 +488,9 @@ class SizeVarAllocator:
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
 
+    def free_symbols(self):
+        return set(self.var_to_val.keys()) - set(self.replacements.keys())
+
 
 def join_dimensions(expr: Expr) -> Expr:
     if not isinstance(expr, sympy.Add) or not expr.has(ModularIndexing):

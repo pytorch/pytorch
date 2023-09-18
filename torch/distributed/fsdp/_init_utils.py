@@ -24,7 +24,7 @@ import torch.distributed.fsdp._exec_order_utils as exec_order_utils
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, mesh_resources
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
@@ -201,6 +201,12 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
+    parent_mesh = mesh_resources.get_parent_mesh(device_mesh)
+    if parent_mesh is not None:
+        raise RuntimeError(
+            f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
+            "Hybrid sharding + TP is not supported yet.",
+        )
     return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
@@ -500,6 +506,7 @@ def _init_prefetching_state(
     return state
 
 
+@no_type_check
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
@@ -507,6 +514,13 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
+
+    # TODO: we need to add additional check once we support FSDP + PiPPy.
+    # This check is currently sufficient, since we only support FSDP + TP.
+    if hasattr(state, "_device_mesh"):
+        state._enable_extension = (
+            mesh_resources.get_parent_mesh(state._device_mesh) is not None
+        )
     return state
 
 
@@ -566,6 +580,10 @@ def _init_param_handle_from_module(
         _sync_module_params_and_buffers(
             fully_sharded_module, managed_params, state.process_group
         )
+        if state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            _sync_module_params_and_buffers(
+                fully_sharded_module, managed_params, state._inter_node_pg
+            )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
     return state
 
