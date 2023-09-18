@@ -67,13 +67,13 @@ AOTInductorError AOTInductorModelContainerRun(
   std::vector<torch::aot_inductor::RAIIAtenTensorHandle> inputs;
   inputs.reserve(num_inputs);
   for (size_t i = 0; i < num_inputs; i++) {
-    inputs.push_back(torch::aot_inductor::create_raii_tensor_handle(input_handles[i]));
+    inputs.push_back(torch::aot_inductor::steal_tensor_handle_to_raii_handle(input_handles[i]));
   }
 
   std::vector<torch::aot_inductor::RAIIAtenTensorHandle> outputs;
   outputs.reserve(num_outputs);
   for (size_t i = 0; i < num_outputs; i++) {
-    outputs.push_back(torch::aot_inductor::create_raii_tensor_handle(output_handles[i]));
+    outputs.push_back(torch::aot_inductor::steal_tensor_handle_to_raii_handle(output_handles[i]));
   }
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);

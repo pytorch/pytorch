@@ -3,6 +3,7 @@ import json
 import logging
 import shutil
 import subprocess
+import sys
 import time
 from enum import Enum
 from typing import List, NamedTuple, Optional
@@ -108,7 +109,7 @@ if __name__ == "__main__":
             description="shellcheck is not installed, did you forget to run `lintrunner init`?",
         )
         print(json.dumps(err_msg._asdict()), flush=True)
-        exit(0)
+        sys.exit(0)
 
     args = parser.parse_args()
 

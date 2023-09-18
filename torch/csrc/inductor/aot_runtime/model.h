@@ -6,10 +6,14 @@
 #include <unordered_map>
 #include <vector>
 
+// WARNING: Be careful when adding new includes here. This header will be used
+// in model.so, and should not refer to any aten/c10 headers except the stable
+// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
+// applies to other files under torch/csrc/inductor/aot_runtime/.
 #include <torch/csrc/inductor/aot_runtime/cuda_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#define ATOI_RUNTIME_CHECK(EXPR, MSG) \
+#define AOTI_RUNTIME_CHECK(EXPR, MSG) \
   do {                                \
     bool ok = EXPR;                   \
     if (!ok) {                        \
@@ -20,7 +24,7 @@
 #define AOTI_VECTOR_SIZE_CHECK(vec, expected_size)                      \
   do {                                                                  \
     auto actual_size = vec.size();                                      \
-    ATOI_RUNTIME_CHECK(                                                 \
+    AOTI_RUNTIME_CHECK(                                                 \
         actual_size == expected_size,                                   \
         "expected vector size to be " + std::to_string(expected_size) + \
             ", but got " + std::to_string(actual_size));                \
@@ -58,11 +62,11 @@ class AOTInductorModelBase {
         outputs_info_(num_outputs),
         constants_info_(num_constants),
         cubin_dir_(cubin_dir) {
-    ATOI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished_));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventCreate(&run_finished_));
   }
 
   ~AOTInductorModelBase() noexcept(false) {
-    ATOI_RUNTIME_CUDA_CHECK(cudaEventDestroy(run_finished_));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventDestroy(run_finished_));
   }
 
   AOTInductorModelBase(AOTInductorModelBase&&) = delete;
@@ -83,7 +87,7 @@ class AOTInductorModelBase {
 
     auto* model = static_cast<Model*>(this);
     model->run_impl(inputs, outputs, stream, proxy_executor);
-    ATOI_RUNTIME_CUDA_CHECK(cudaEventRecord(run_finished_, stream));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventRecord(run_finished_, stream));
   }
 
   size_t num_inputs() const {
@@ -174,7 +178,7 @@ class AOTInductorModelBase {
 
   /// Synchronizes completion event.
   void wait_for_completion() {
-    ATOI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(run_finished_));
+    AOTI_RUNTIME_CUDA_CHECK(cudaEventSynchronize(run_finished_));
   }
 
  protected:
@@ -348,7 +352,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 };
 
 // TODO: will update RAIIAtenTensorHandle to unique_ptr and change this
-inline RAIIAtenTensorHandle create_raii_tensor_handle(AtenTensorHandle handle) {
+inline RAIIAtenTensorHandle steal_tensor_handle_to_raii_handle(
+    AtenTensorHandle handle) {
   return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
     AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_delete_tensor_object(static_cast<AtenTensorHandle>(ptr)));
@@ -369,24 +374,18 @@ std::vector<AtenTensorHandle> raii_handles_to_raw_handles(
 class AOTICudaStreamGuard {
  public:
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
-    // store the current stream and set the new stream as current
-    cudaStream_t current_stream;
-    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream(
-        reinterpret_cast<void**>(&current_stream), device_index));
-    stream_ = current_stream;
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_set_current_cuda_stream(stream, device_index));
-  }
-
-  ~AOTICudaStreamGuard() noexcept(false) {
-    // restore the previous stream as current
-    AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_set_current_cuda_stream(stream_, device_index_));
+    CUDAStreamGuardHandle ptr;
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_create_cuda_stream_guard(&ptr, stream, device_index));
+    guard_ =
+        std::unique_ptr<void, std::function<void(void*)>>(ptr, [](void* ptr) {
+          AOTI_TORCH_ERROR_CHECK(aoti_torch_delete_cuda_stream_guard(
+              reinterpret_cast<CUDAStreamGuardHandle>(ptr)));
+        });
   }
 
  private:
-  cudaStream_t stream_;
-  int32_t device_index_;
+  std::unique_ptr<void, std::function<void(void*)>> guard_;
 };
 
 } // namespace aot_inductor
