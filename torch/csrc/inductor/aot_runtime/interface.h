@@ -64,7 +64,7 @@ AOTInductorError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    const AOTInductorTensorHandle inputs_handle,
+    AOTInductorTensorHandle inputs_handle,
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
