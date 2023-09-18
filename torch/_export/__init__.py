@@ -1,3 +1,4 @@
+import copy
 import dataclasses
 import io
 import re
@@ -102,6 +103,17 @@ DEFAULT_EXPORT_DYNAMO_CONFIG = ExportDynamoConfig()
 
 
 DECOMP_TABLE = core_aten_decompositions()
+
+
+# TODO(zhxchen17) This is not needed if we output pre_dispatch graph upfront from export().
+@contextmanager
+def _disable_decomp_table():
+    global DECOMP_TABLE
+    prev, DECOMP_TABLE = DECOMP_TABLE, {}
+    try:
+        yield
+    finally:
+        DECOMP_TABLE = prev
 
 
 @compatibility(is_backward_compatible=False)
@@ -243,9 +255,29 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 if path == root and ty is root_cls:
                     add_root = False
             if add_root:
-                # TODO(zhxchen17) normalize all the way down to dot strings.
-                node.meta["nn_module_stack"] = {root_key: (root, root_cls), **nn_module_stack}
+                def normalize_path(path):
+                    try:
+                        parts = []
 
+                        class Path:
+                            def __getattr__(self, name):
+                                parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
+
+                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                node.meta["nn_module_stack"] = {
+                    key: (normalize_path(path), ty)
+                    for key, (path, ty) in nn_module_stack.items()
+                }
 
 def export(
     f: Callable,
@@ -629,7 +661,6 @@ def aot_compile(
     Returns:
         Path to the generated shared library, and the exported program
     """
-    from torch._inductor.compile_fx import compile_fx_aot
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
@@ -638,11 +669,46 @@ def aot_compile(
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
-    param_buffer_values = list(ep.state_dict.values())
     flat_example_inputs = fx_pytree.tree_flatten_spec(
         combine_args_kwargs(args, kwargs), ep.call_spec.in_spec  # type: ignore[arg-type]
     )
-    all_args = (*param_buffer_values, *flat_example_inputs)
 
-    so_path = torch._inductor.aot_compile(ep.graph_module, list(all_args), options)
-    return so_path, ep
+    unlifted_module = ep.module()
+    unlifted_module.graph.set_codegen(torch.fx.CodeGen())  # type: ignore[attr-defined]
+    unlifted_module.recompile()
+    options = (
+        {"from_export": True}
+        if options is None
+        else {**options, "from_export": True}
+    )
+    so_path = torch._inductor.aot_compile(unlifted_module, flat_example_inputs, options)  # type: ignore[arg-type]
+
+    user_inputs = []
+    user_outputs = []
+    for node in unlifted_module.graph.nodes:
+        if node.op == "placeholder":
+            user_inputs.append(node.name)
+        elif node.op == "output":
+            user_outputs = [arg.name for arg in node.args[0]]
+
+    unlifted_ep = ExportedProgram(
+        unlifted_module,
+        unlifted_module.graph,
+        ExportGraphSignature(
+            parameters=[],
+            buffers=[],
+            user_inputs=user_inputs,
+            user_outputs=user_outputs,
+            inputs_to_parameters={},
+            inputs_to_buffers={},
+            buffers_to_mutate={},
+            backward_signature=None,
+        ),
+        call_spec=copy.deepcopy(ep.call_spec),
+        state_dict={},
+        range_constraints=copy.deepcopy(ep.range_constraints),
+        equality_constraints=copy.deepcopy(ep.equality_constraints),
+        module_call_graph=ep.module_call_graph,
+    )
+
+    return so_path, unlifted_ep

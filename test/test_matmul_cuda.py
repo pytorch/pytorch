@@ -175,8 +175,9 @@ class TestMatmulCuda(TestCase):
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
-@unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def _test_tautological_mm(self, device: str = "cuda",
                               x_dtype: torch.dtype = torch.float8_e4m3fn,
                               y_dtype: torch.dtype = torch.float8_e4m3fn,
@@ -192,6 +193,7 @@ class TestFP8MatmulCuda(TestCase):
             self.assertEqual(out_fp32.amax(), amax_fp8)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def test_float8_basics(self, device) -> None:
         self._test_tautological_mm(device, torch.float8_e4m3fn, torch.float8_e4m3fn, size=16)
         self._test_tautological_mm(device, torch.float8_e4m3fn, torch.float8_e5m2, size=32)
@@ -200,6 +202,7 @@ class TestFP8MatmulCuda(TestCase):
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, torch.float8_e5m2, torch.float8_e5m2)
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def test_float8_out_dtype(self, device) -> None:
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
@@ -207,6 +210,7 @@ class TestFP8MatmulCuda(TestCase):
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, out_dtype=torch.float8_e5m2)
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def test_float8_scale(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=torch.float8_e4m3fn)
@@ -218,6 +222,7 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
@@ -227,6 +232,7 @@ class TestFP8MatmulCuda(TestCase):
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual((amaxb_fp8 - amax_fp8).item(), 4.0)
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     @parametrize("bias", [True, False])
     def test_non_divisible_leading_dim(self, device, bias: torch.bool) -> None:
         x = torch.rand((17, 16), device=device).to(torch.float8_e4m3fn)
@@ -236,6 +242,7 @@ class TestFP8MatmulCuda(TestCase):
             input_bias = torch.rand((16,), device=device).to(torch.half)
         out_fp8, amax_fp8 = torch._scaled_mm(x, y, bias=input_bias)
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def test_float8_bias_relu_edgecase(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.full((k, l), 0.0, device=device).to(torch.float8_e4m3fn)
@@ -244,6 +251,7 @@ class TestFP8MatmulCuda(TestCase):
         outb_fp8, amaxb_fp8 = torch._scaled_mm(x, y, bias=bias)
         self.assertEqual(amaxb_fp8.item(), 3.0)
 
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0), "FP8 is only supported on H100+")
     def test_float32_output_errors_with_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
@@ -253,6 +261,18 @@ class TestFP8MatmulCuda(TestCase):
             RuntimeError,
             "Bias is not supported when out_dtype is set to Float32",
             lambda: torch._scaled_mm(x, y, bias=bias, out_dtype=torch.float32),
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability() >= (9, 0),
+                     "This test is only for devices with compute capability < 9.0")
+    def test_error_message_fp8_non_h100(self, device) -> None:
+        (k, l, m) = (16, 48, 32)
+        x = torch.rand((k, l), device=device).to(torch.float8_e4m3fn)
+        y = torch.rand((m, l), device=device).to(torch.float8_e4m3fn).t()
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"torch\.\_scaled\_mm is only supported on devices with compute capability \>\= 9\.0",
+            lambda: torch._scaled_mm(x, y, out_dtype=torch.float32),
         )
 
 

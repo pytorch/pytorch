@@ -1,5 +1,4 @@
 name,accuracy,graph_breaks
-selecsls42b,pass,8
 adv_inception_v3,pass,8
 beit_base_patch16_224,pass,8
 botnet26t_256,pass,8
@@ -41,6 +40,7 @@ res2next50,pass,8
 resmlp_12_224,pass,8
 resnest101e,pass,8
 rexnet_100,pass,8
+selecsls42b,pass,8
 spnasnet_100,pass,8
 swin_base_patch4_window7_224,pass,8
 swsl_resnext101_32x16d,pass,8

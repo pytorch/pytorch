@@ -328,12 +328,22 @@ class VariableTracker(metaclass=HasPostInit):
             )
         raise unimplemented(f"call_method {self} {name} {args} {kwargs}")
 
+    def rename(self, tx, name):
+        new_name = tx.output.new_var(name)
+        if not self.mutable_local or not isinstance(self.mutable_local, MutableLocal):
+            # This is fine for objects that are not mutable locals
+            self.user_code_variable_name = new_name
+            return self
+        new_vt = self.clone(user_code_variable_name=new_name)
+        return tx.replace_all(self, new_vt)
+
     def __init__(
         self,
         guards: Optional[Set] = None,
         source: Source = None,
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
+        user_code_variable_name: str = None,
     ):
         super().__init__()
         self.guards = guards or set()
@@ -342,6 +352,7 @@ class VariableTracker(metaclass=HasPostInit):
         self.recursively_contains = (
             recursively_contains  # provides hint to replace_all when replacing vars
         )
+        self.user_code_variable_name = user_code_variable_name
 
     def __post_init__(self, *args, **kwargs):
         if self.recursively_contains is None:

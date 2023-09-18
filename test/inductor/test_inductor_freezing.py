@@ -222,7 +222,7 @@ class OptimizeForInferenceTemplate(TestCase):
             foo(mod, x)
 
         with self.assertRaisesRegex(
-            RuntimeError, "Trying to Run Pytorch Eager Module After Dynamo Freezing"
+            RuntimeError, "Trying to run Pytorch Eager Module after Dynamo Freezing"
         ):
             mod(x)
 
@@ -307,8 +307,8 @@ class OptimizeForInferenceTemplate(TestCase):
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "constant"
-                ).check_not("constant").check_next("return").run(code[0])
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2

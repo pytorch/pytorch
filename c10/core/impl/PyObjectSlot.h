@@ -97,7 +97,7 @@ struct C10_API PyObjectSlot {
   // c10::optional
   c10::optional<PyObject*> check_pyobj(
       PyInterpreter* self_interpreter,
-      bool ignore_hermetic_tls) const {
+      bool ignore_hermetic_tls = false) const {
     // Note [Memory ordering on Python interpreter tag]
     impl::PyInterpreter* interpreter =
         pyobj_interpreter_.load(std::memory_order_acquire);

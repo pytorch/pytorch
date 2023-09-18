@@ -110,7 +110,8 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
   }
   c10::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status;
+  c10::impl::PyInterpreterStatus status =
+      c10::impl::PyInterpreterStatus::TAGGED_BY_US;
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
@@ -372,8 +373,8 @@ static PyObject* THPStorage_pynew(
   torch::ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
-  int64_t allocator_arg_idx = 0;
-  int64_t device_arg_idx = 1;
+  int allocator_arg_idx = 0;
+  int device_arg_idx = 1;
 
   if (r.idx > 0) {
     allocator_arg_idx = 1;
