@@ -52,9 +52,9 @@ AOTInductorError AOTInductorModelContainerDelete(
 
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    AtenTensorOpaque** input_handles,
+    AtenTensorHandle* input_handles,
     size_t num_inputs,
-    AtenTensorOpaque** output_handles,
+    AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
