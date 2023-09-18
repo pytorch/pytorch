@@ -23,14 +23,19 @@ extern "C" {
 AOTInductorError AOTInductorModelContainerCreate(
     AOTInductorModelContainerHandle* container_handle,
     size_t num_models,
-    bool is_cpu) {
+    bool is_cpu,
+    const char* cubin_dir) {
   if (num_models == 0) {
-    LOG(ERROR) << "num_models must be positive, but got 0";
+    std::cerr << "Error: num_models must be positive, but got 0" << std::endl;
     return AOTInductorError::Failure;
   }
   CONVERT_EXCEPTION_TO_ERROR_CODE({
+    std::optional<std::string> cubin_dir_opt;
+    if (cubin_dir != nullptr) {
+      cubin_dir_opt.emplace(cubin_dir);
+    }
     auto* container =
-        new torch::aot_inductor::AOTInductorModelContainer(num_models, is_cpu);
+        new torch::aot_inductor::AOTInductorModelContainer(num_models, is_cpu, cubin_dir_opt);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
