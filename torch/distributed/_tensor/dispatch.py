@@ -168,13 +168,13 @@ def _operator_dispatch(
             flat_local_kwargs.append(kwarg)
 
     assert mesh is not None, "found no DeviceMesh from dtensor args!"
-
     op_info = OpInfo(
         mesh,
         OpSchema(
             op_call,
             tree_unflatten(flat_args_schema, args_spec),
             tree_unflatten(flat_kwargs_schema, kwargs_spec),
+            schema_info=sharding_propagator.op_to_schema_info.get(op_call, None),
         ),
         flat_args_schema,
         flat_kwargs_schema,
