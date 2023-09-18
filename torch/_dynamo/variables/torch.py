@@ -198,7 +198,7 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def python_type(self):
-        if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
+        if isinstance(self.value, (torch.Tensor, torch.nn.Module, torch.device)):
             return type(self.value)
         if isinstance(self.value, type):
             return type
