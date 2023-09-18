@@ -1372,7 +1372,7 @@ class FakeTensorMode(TorchDispatchMode):
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
 
-    # @cache_dispatch
+    @cache_dispatch
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
         log.debug("%s %s %s", func, args, kwargs)
