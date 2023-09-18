@@ -75,6 +75,9 @@ extern "C" {
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
 
+struct AOTIProxyExecutorOpaque;
+using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
+
 using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
@@ -181,6 +184,16 @@ aoti_torch_get_current_cuda_stream(void** ret, int32_t device_index);
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_set_current_cuda_stream(void* stream, int32_t device_index);
 #endif
+
+// See `ProxyExecutor Design Note` in ir.py for more details
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+aoti_torch_proxy_executor_call_function(
+    AOTIProxyExecutorHandle proxy_executor,
+    int extern_node_index,
+    int num_ints,
+    int64_t* flatten_int_args,
+    int num_tensors,
+    void** flatten_tensor_args);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <deque>
 #include <future>
 #include <mutex>
 #include <shared_mutex>
@@ -153,7 +155,7 @@ class AOTInductorModelContainer {
       std::vector<RAIIAtenTensorHandle>& outputs,
       std::vector<std::vector<int64_t>>** output_shapes,
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor) {
+      AOTIProxyExecutorHandle proxy_executor) {
     auto* model = get_available_model();
     try {
       model->run(inputs, outputs, stream, proxy_executor);

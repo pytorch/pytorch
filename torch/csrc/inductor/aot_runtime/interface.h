@@ -33,9 +33,6 @@ using AOTInductorModelContainerHandle = AOTInductorModelContainerOpaque*;
 struct AOTInductorStreamOpaque;
 using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 
-struct AOTInductorProxyExecutorOpaque;
-using AOTInductorProxyExecutorHandle = AOTInductorProxyExecutorOpaque*;
-
 // Creates an AOTInductor model container. The parameter num_models
 // specifies the number of model instances that may be run concurrently for
 // the same input model.
@@ -57,7 +54,7 @@ AOTInductorError AOTInductorModelContainerRun(
     AtenTensorHandle* output_handles, // array of output tensor handles
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTInductorProxyExecutorHandle proxy_executor_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle,
     const int64_t** ret_output_sizes,
     int64_t* ret_output_ndims);
 

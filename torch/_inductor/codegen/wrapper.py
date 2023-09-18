@@ -1072,7 +1072,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     std::vector<RAIIAtenTensorHandle>& input_handles,
                     std::vector<RAIIAtenTensorHandle>& output_handles,
                     cudaStream_t stream,
-                    ProxyExecutor* proxy_executor) {
+                    AOTIProxyExecutorHandle proxy_executor) {
                 """
             )
         else:
