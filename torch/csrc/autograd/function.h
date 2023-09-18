@@ -24,11 +24,6 @@
 #include <utility>
 #include <vector>
 
-C10_CLANG_DIAGNOSTIC_PUSH()
-#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
-C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
-#endif
-
 namespace torch {
 namespace autograd {
 
@@ -177,9 +172,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
             name(),
             c10::ArrayRef<const c10::IValue>(
                 inputs_vec.data(), inputs_vec.size()),
-            sequence_nr());
+            static_cast<int64_t>(sequence_nr()));
       } else {
-        guard.before(name(), sequence_nr());
+        guard.before(name(), static_cast<int64_t>(sequence_nr()));
       }
       return apply(std::move(inputs));
     } else {
@@ -203,7 +198,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       c10::SymIntArrayRef shape,
       bool is_tensor_subclass,
       bool is_nested) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
@@ -212,7 +206,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   }
 
   uint32_t add_input_metadata(const at::Tensor& t) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(t);
     return input_nr;
@@ -220,7 +213,6 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   /// Adds a placeholder for an input that will not be used.
   uint32_t add_input_metadata(undefined_input u) noexcept {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back();
     return input_nr;
@@ -597,21 +589,18 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinism in the engine.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   uint64_t topological_nr_ = 0;
 
   // Tracks whether this node has been added as the next_edge of another node
   // via set_next_edge(s), which always calls topological_nr() of all its
   // children See NOTE [ Topological Number ] for why we need this.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable bool has_parent_ = false;
 
   // Id of the thread that created the instance
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   uint64_t thread_id_ = 0;
 
   // Note [Thread Safety on Autograd Node]
@@ -656,14 +645,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // hooks are automatically thread safe), we rely on the user to write thread
   // safe C++ hooks if they want the hook to be correctly applied in
   // multithreading environment.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex mutex_;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   edge_list next_edges_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PyObject* pyobj_ = nullptr; // weak reference
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
 
   // NOTE [Hooks ordering]
@@ -676,15 +661,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //   even if that node won't be executed.
   // - retains_grad_hook are like tensor_pre_hooks except they are always
   //   ordered after all other tensor pre hooks
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> tensor_pre_hooks_;
   std::unordered_map<size_t, std::unique_ptr<FunctionPreHook>>
       retains_grad_hooks_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::SmallVector<InputMetadata, 2> input_metadata_;
 };
 
@@ -706,7 +687,6 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   edge_list next_edges;
   using IterArgs<MakeNextFunctionList>::operator();
   void operator()(const Variable& variable) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.defined()) {
       next_edges.emplace_back(impl::gradient_edge(variable));
     } else {
@@ -714,17 +694,11 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
     }
   }
   void operator()(const Variable* variable) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (variable->defined()) {
-      next_edges.emplace_back(impl::gradient_edge(*variable));
-    } else {
-      next_edges.emplace_back();
-    }
+    operator()(*variable);
   }
   void operator()(const c10::optional<Variable>& variable) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    if (variable.has_value() && variable->defined()) {
-      next_edges.emplace_back(impl::gradient_edge(*variable));
+    if (variable.has_value()) {
+      operator()(*variable);
     } else {
       next_edges.emplace_back();
     }
@@ -783,5 +757,3 @@ struct TypeAndSize {
 
 } // namespace autograd
 } // namespace torch
-
-C10_CLANG_DIAGNOSTIC_POP()

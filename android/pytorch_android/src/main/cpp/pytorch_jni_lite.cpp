@@ -132,7 +132,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     LiteJITCallGuard guard;
     module_ =
-        torch::jit::_load_for_mobile(std::make_unique<MemoryReadAdapter>(
+        torch::jit::_load_for_mobile(torch::make_unique<MemoryReadAdapter>(
             assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     deviceType_ = deviceJniCodeToDeviceType(device);

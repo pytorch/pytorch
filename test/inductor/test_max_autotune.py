@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA, requires_multigpu
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -520,6 +520,7 @@ class TestTuningProcess(TestCase):
 
             tuning_pool.terminate()
 
+    @requires_multigpu()
     def test_tuning_pool_multiple_devices(self):
         with config.patch({"autotune_multi_device": True}):
             valid_devices = ("3", "4")

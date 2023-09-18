@@ -9,7 +9,9 @@ from torch.testing._internal.common_utils import (
 from torch._dynamo.backends.registry import register_backend
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 
+import functools
 import torch
+import unittest
 
 def test_cpu():
     try:
@@ -30,3 +32,9 @@ HAS_CUDA = has_triton()
 @register_backend
 def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+
+HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
+
+requires_multigpu = functools.partial(
+    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+)

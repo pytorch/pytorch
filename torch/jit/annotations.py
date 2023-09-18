@@ -242,7 +242,7 @@ def get_type_line(source):
     type_comment = "# type:"
 
     lines = source.split("\n")
-    lines = [(line_num, line) for line_num, line in enumerate(lines)]
+    lines = list(enumerate(lines))
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
     # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
     # to the hack in torch/_VF.py.
