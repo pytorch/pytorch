@@ -1023,7 +1023,8 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
   SmallVectorImpl& operator=(const SmallVectorImpl& RHS);
 
   SmallVectorImpl& operator=(SmallVectorImpl&& RHS) noexcept(
-      std::is_nothrow_move_constructible<T>::value);
+      std::is_nothrow_move_constructible_v<T>&&
+          std::is_nothrow_destructible_v<T>);
 
   bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
@@ -1129,8 +1130,8 @@ SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
 
 template <typename T>
 SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
-    SmallVectorImpl<T>&&
-        RHS) noexcept(std::is_nothrow_move_constructible<T>::value) {
+    SmallVectorImpl<T>&& RHS) noexcept(std::is_nothrow_move_constructible_v<T>&&
+                                           std::is_nothrow_destructible_v<T>) {
   // Avoid self-assignment.
   if (this == &RHS)
     return *this;
@@ -1343,7 +1344,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
   }
 
   SmallVector(SmallVector&& RHS) noexcept(
-      std::is_nothrow_move_constructible<T>::value)
+      std::is_nothrow_move_assignable_v<SmallVectorImpl<T>>)
       : SmallVectorImpl<T>(N) {
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
@@ -1370,18 +1371,21 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
     return *this;
   }
 
-  SmallVector(SmallVectorImpl<T>&& RHS) : SmallVectorImpl<T>(N) {
+  SmallVector(SmallVectorImpl<T>&& RHS) noexcept(
+      std::is_nothrow_move_assignable_v<SmallVectorImpl<T>>)
+      : SmallVectorImpl<T>(N) {
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
 
   SmallVector& operator=(SmallVector&& RHS) noexcept(
-      std::is_nothrow_move_constructible<T>::value) {
+      std::is_nothrow_move_assignable_v<SmallVectorImpl<T>>) {
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
 
-  SmallVector& operator=(SmallVectorImpl<T>&& RHS) {
+  SmallVector& operator=(SmallVectorImpl<T>&& RHS) noexcept(
+      std::is_nothrow_move_constructible_v<SmallVectorImpl<T>>) {
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
