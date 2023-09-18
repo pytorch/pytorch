@@ -283,7 +283,17 @@ class LoadPlanner:
     >>> class RenamePlanner(DefaultLoadPlanner):
     >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
     >>>         self.original_state_dict = state_dict
-    >>>         super().set_up_planner(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
+    >>>
+    >>>         if self.flatten_sharded_tensors:
+    >>>             state_dict = _flatten_sharded_tensors(state_dict)
+    >>>
+    >>>         if self.flatten_state_dict:
+    >>>             state_dict, self.mappings = flatten_state_dict(state_dict)
+    >>>
+    >>>         self.state_dict = state_dict
+    >>>         self.metadata = metadata
+    >>>         self.is_coordinator = is_coordinator
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix

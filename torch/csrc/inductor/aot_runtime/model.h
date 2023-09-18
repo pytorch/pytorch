@@ -1,13 +1,16 @@
 #pragma once
 
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <ATen/ATen.h>
 
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #define AOT_VECTOR_SIZE_CHECK(vec, expected_size) \
   {                                               \
@@ -37,10 +40,12 @@ class AOTInductorModelBase {
   AOTInductorModelBase(
       size_t num_inputs,
       size_t num_outputs,
-      size_t num_constants)
+      size_t num_constants,
+      std::optional<std::string> cubin_dir)
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
-        constants_info_(num_constants) {
+        constants_info_(num_constants),
+        cubin_dir_(cubin_dir) {
     C10_CUDA_CHECK(cudaEventCreate(&run_finished_));
   }
 
@@ -57,7 +62,7 @@ class AOTInductorModelBase {
   // Passes such as constant-folding may affect how we handle constants.
   // We will revisit it once all the relevant pieces are ready.
   void run(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
       ProxyExecutor* proxy_executor = nullptr) {
@@ -129,6 +134,14 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).data_size;
   }
 
+  std::vector<int64_t> input_shape(int64_t idx) const {
+    return shape(inputs_info_, idx);
+  }
+
+  std::vector<int64_t> output_shape(int64_t idx) const {
+    return shape(outputs_info_, idx);
+  }
+
   /// Returns true if the model is complete.
   bool is_finished() {
     auto event_status = cudaEventQuery(run_finished_);
@@ -151,19 +164,55 @@ class AOTInductorModelBase {
  protected:
   class DimInfo {
    public:
-    DimInfo(int64_t lb, int64_t ub, int64_t* val_ptr)
-        : lower_bound_(lb), upper_bound_(ub), value_ptr_(val_ptr) {}
+    virtual int64_t value() const = 0;
+    virtual void set_value(int64_t val) = 0;
+    virtual int64_t lower_bound() const = 0;
+    virtual int64_t upper_bound() const = 0;
+    virtual ~DimInfo() {}
+  };
+
+  class StaticDimInfo : public DimInfo {
+   public:
+    StaticDimInfo(int64_t val) : value_(val) {}
+
+    int64_t value() const {
+      return value_;
+    }
 
     void set_value(int64_t val) {
-      TORCH_CHECK(
-          val < lower_bound_ || val > upper_bound_,
-          "dim value out of bounds: expected value to be in [",
-          std::to_string(lower_bound_),
-          ", ",
-          std::to_string(upper_bound_),
-          "], but got ",
-          std::to_string(val));
-      *value_ptr_ = val;
+      throw std::runtime_error("cannot change the value of a StaticDim");
+    }
+
+    int64_t lower_bound() const {
+      return value_;
+    }
+
+    int64_t upper_bound() const {
+      return value_;
+    }
+
+   private:
+    const int64_t value_;
+  };
+
+  class DynamicDimInfo : public DimInfo {
+   public:
+    DynamicDimInfo(const char* name, int64_t lb, int64_t ub)
+        : name_(name), lower_bound_(lb), upper_bound_(ub), value_(-1) {}
+
+    void set_value(int64_t val) {
+      if (val != 1 && (val < lower_bound_ || val > upper_bound_)) {
+        throw std::runtime_error(
+            std::string(
+                "dim value out of bounds: expected value to be between (") +
+            std::to_string(lower_bound_) + ", " + std::to_string(upper_bound_) +
+            "), but got " + std::to_string(val));
+      }
+      value_ = val;
+    }
+
+    int64_t value() const {
+      return value_;
     }
 
     int64_t lower_bound() const {
@@ -175,15 +224,40 @@ class AOTInductorModelBase {
     }
 
    private:
-    int64_t lower_bound_;
-    int64_t upper_bound_;
-    int64_t* value_ptr_;
+    const std::string name_;
+    const int64_t lower_bound_;
+    const int64_t upper_bound_;
+    int64_t value_;
   };
+
+  DynamicDimInfo* find_dynamic_dim(const char* name) {
+    auto iter = dynamic_dims_.find(name);
+    if (iter == dynamic_dims_.end()) {
+      throw std::runtime_error(
+          std::string("dynamic_dim `") + name + "` does not exist");
+    }
+    return iter->second.get();
+  }
+
+  DynamicDimInfo* make_dynamic_dim(const char* name, int64_t lb, int64_t ub) {
+    if (dynamic_dims_.find(name) != dynamic_dims_.end()) {
+      throw std::runtime_error(
+          std::string("dynamic_dim `") + name + "` already exists");
+    }
+    auto iter = dynamic_dims_.emplace(
+        name, std::make_unique<DynamicDimInfo>(name, lb, ub));
+    return (iter.first->second).get();
+  }
+
+  StaticDimInfo* make_static_dim(int64_t val) {
+    static_dims_.push_back(std::make_unique<StaticDimInfo>(val));
+    return static_dims_.back().get();
+  }
 
   struct ParamInfo {
     const char* name = nullptr;
     const char* dtype = nullptr;
-    std::vector<DimInfo> shape;
+    std::vector<DimInfo*> shape;
   };
 
   struct ConstInfo {
@@ -201,39 +275,107 @@ class AOTInductorModelBase {
 
   std::shared_ptr<ConstantMap> constants_;
 
+  // A directory with CUDA binary files, e.g. compiled kernels, etc.
+  const std::optional<std::string> cubin_dir_;
+
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can re-use this instance.
   cudaEvent_t run_finished_;
 
+ protected:
+  std::vector<std::unique_ptr<StaticDimInfo>> static_dims_;
+  // A map from dynamic symbol names to their dim info
+  std::unordered_map<std::string, std::unique_ptr<DynamicDimInfo>>
+      dynamic_dims_;
+
  private:
+  std::vector<int64_t> shape(
+      const std::vector<ParamInfo>& params,
+      int64_t idx,
+      bool max = false) const {
+    std::vector<int64_t> shape;
+    const ParamInfo& param = params.at(idx);
+    auto rank = param.shape.size();
+    shape.reserve(rank);
+    for (size_t i = 0; i < rank; i++) {
+      if (max) {
+        shape.push_back(param.shape[i]->upper_bound());
+      } else {
+        shape.push_back(param.shape[i]->value());
+      }
+    }
+    return shape;
+  }
+
   std::vector<int64_t> max_shape(
       const std::vector<ParamInfo>& params,
       int64_t idx) const {
-    std::vector<int64_t> max_shape;
-    const ParamInfo& param = params.at(idx);
-    auto rank = param.shape.size();
-    max_shape.reserve(rank);
-    for (size_t i = 0; i < rank; i++) {
-      max_shape.push_back(param.shape[i].upper_bound());
-    }
-    return max_shape;
+    return shape(params, idx, /*max=*/true);
   }
 };
 
 class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
  public:
-  AOTInductorModel(std::shared_ptr<ConstantMap>);
+  AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
 
   void run_impl(
-      const std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
       ProxyExecutor* proxy_executor = nullptr);
 
   static std::unique_ptr<AOTInductorModel> Create(
-      std::shared_ptr<ConstantMap> constants) {
-    return std::make_unique<AOTInductorModel>(constants);
+      std::shared_ptr<ConstantMap> constants,
+      std::optional<std::string> cubin_dir) {
+    return std::make_unique<AOTInductorModel>(constants, cubin_dir);
   }
+};
+
+#define AOTI_TORCH_ERROR_CHECK(call)                                      \
+  if ((call) != AOTI_TORCH_SUCCESS) {                                     \
+    throw std::runtime_error(                                             \
+        std::string(#call " API call failed at ") + __FILE__ + ", line" + \
+        std::to_string(__LINE__));                                        \
+  }
+
+using RAIIAtenTensorHandle = std::shared_ptr<AtenTensorOpaque>;
+
+inline RAIIAtenTensorHandle create_raii_tensor_handle_for_extern(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
+    // Do nothing for extern tensor handles
+  });
+}
+
+inline RAIIAtenTensorHandle create_raii_tensor_handle_for_temp(
+    AtenTensorHandle handle) {
+  return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_delete_tensor_object(static_cast<AtenTensorHandle>(ptr)));
+  });
+}
+
+class AOTICudaStreamGuard {
+ public:
+  AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
+    // store the current stream and set the new stream as current
+    cudaStream_t current_stream;
+    AOTI_TORCH_ERROR_CHECK(aoti_torch_get_current_cuda_stream(
+        reinterpret_cast<void**>(&current_stream), device_index));
+    stream_ = current_stream;
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_set_current_cuda_stream(stream, device_index));
+  }
+
+  ~AOTICudaStreamGuard() noexcept(false) {
+    // restore the previous stream as current
+    AOTI_TORCH_ERROR_CHECK(
+        aoti_torch_set_current_cuda_stream(stream_, device_index_));
+  }
+
+ private:
+  cudaStream_t stream_;
+  int32_t device_index_;
 };
 
 } // namespace aot_inductor
