@@ -207,8 +207,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -235,7 +233,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "atanh": {f32},
-    "baddbmm": {f16},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
     "cholesky": {f32, f64},
@@ -243,11 +240,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
     "geometric": {f16},
-    "linalg.eig": {f32, f64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
@@ -342,6 +336,7 @@ inductor_override_kwargs = {
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
     ("addr", "cuda", f16): {"reference_in_float": True},
+    ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
     ("asin", "cuda", f16): {"reference_in_float": True},
     ("atanh", "cuda", f16): {"reference_in_float": True},
@@ -377,17 +372,9 @@ inductor_override_kwargs = {
     "linalg.solve_triangular": {"check_gradient": False},
     "linalg.lu_factor": {"check_gradient": False},
     "linalg.lu_factor_ex": {"check_gradient": False},
+    # grad calculation below fails for both the aten and the compiled implementation.
+    "linalg.eig": {"check_gradient": False},
 }
-
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
-
 
 # Always test with all sample for following ops
 inductor_all_samples = {
