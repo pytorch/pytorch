@@ -6,6 +6,9 @@ import torch
 # add some debug printouts
 debug = False
 
+# add inf and NaN checkers
+debug_check_inf_and_nan = False
+
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
@@ -432,7 +435,6 @@ class aot_inductor:
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
-    check_inf_and_nan = False
 
 
 class cuda:

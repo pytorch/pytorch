@@ -482,6 +482,10 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
 
+    def generate_inf_and_nan_checker(self, node):
+        # TODO: Add check for python too.
+        pass
+
     @dynamo_timed
     def generate(self):
         result = IndentedBuffer()

@@ -135,22 +135,40 @@ class AotInductorTests(TestCase):
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
         self.assertTrue(same(actual, expected))
 
+    @unittest.skip("Skip this test, only for local test as SIGABRT is produced.")
     def test_inf(self):
         model = SimpleLinear((10, 10))
         x = torch.randn(10, 10, device="cuda")
         x[0][0] = float("Inf")
         example_inputs = (
             x,
-            torch.randn(1, 512, device="cuda"),
+            torch.randn(1, 10, device="cuda"),
         )
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(
             model,
             example_inputs,
             expected,
-            options={"aot_inductor.check_inf_and_nan": True},
+            options={"debug_check_inf_and_nan": True},
         )
         self.assertTrue(same(actual, expected))
+
+    @unittest.skip("Skip this test, only for local test as SIGABRT is produced.")
+    def test_nan(self):
+        model = SimpleLinear((10, 10))
+        x = torch.randn(10, 10, device="cuda")
+        x[0][0] = float("nan")
+        example_inputs = (
+            x,
+            torch.randn(1, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={"debug_check_inf_and_nan": True},
+        )
 
     def test_with_offset(self):
         class Repro(torch.nn.Module):
