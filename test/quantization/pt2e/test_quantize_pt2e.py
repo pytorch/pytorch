@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
 from torch.ao.quantization import (
     default_dynamic_qconfig,
 )
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch._export import dynamic_dim
 
