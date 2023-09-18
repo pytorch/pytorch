@@ -12,6 +12,7 @@ import tempfile
 import os
 import copy
 import gc
+import threading
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9761,6 +9762,15 @@ class TestAdvancedIndexing(TestCaseMPS):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    def test_nonzero_multi_threading(self):
+        # Test that MPS does not crash if nonzero called concurrently
+        # See https://github.com/pytorch/pytorch/issues/100285
+        x = torch.rand(3, 3, device="mps")
+        t1 = threading.Thread(target=torch.nonzero, args=(x,))
+        t2 = threading.Thread(target=torch.nonzero, args=(x,))
+        t1.start()
+        t2.start()
+
     def test_masked_select(self):
         x = torch.randn(3, 4)
         x_mps = x.to("mps")
@@ -10806,14 +10816,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
-        'nn.functional.batch_norm',
-        'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',
-        '_native_batch_norm_legit',
-        'native_batch_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',

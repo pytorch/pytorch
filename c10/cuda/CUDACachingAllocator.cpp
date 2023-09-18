@@ -3110,6 +3110,10 @@ bool forceUncachedAllocator() {
 }
 
 static void uncached_delete(void* ptr) {
+  if (TORCH_SDT_IS_ENABLED(free)) {
+    TORCH_SDT_WITH_SEMAPHORE(free, ptr);
+  }
+
   const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_memory_deallocation(reinterpret_cast<uintptr_t>(ptr));
@@ -3336,27 +3340,34 @@ class NativeCachingAllocator : public CUDAAllocator {
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device = 0;
     C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    void* r = nullptr;
+    void* devPtr = nullptr;
+    void (*deleteFunc)(void*) = &local_raw_delete;
+    CUDAStream stream = cuda::getCurrentCUDAStream(device);
+
     if (forceUncachedAllocator()) {
+      deleteFunc = &uncached_delete;
+
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
       // if someone tries to use forceUncachedAllocator while capturing.
-      C10_CUDA_CHECK(cudaMalloc(&r, size));
+      C10_CUDA_CHECK(cudaMalloc(&devPtr, size));
       const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
       if (C10_UNLIKELY(interp)) {
-        (*interp)->trace_gpu_memory_allocation(reinterpret_cast<uintptr_t>(r));
+        (*interp)->trace_gpu_memory_allocation(
+            reinterpret_cast<uintptr_t>(devPtr));
       }
-      return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
+    } else {
+      if (size != 0) {
+        // Allocator declars allocate const!?
+        const_cast<NativeCachingAllocator*>(this)->malloc(
+            &devPtr, device, size, stream);
+      }
     }
-    if (size != 0) {
-      if (TORCH_SDT_IS_ENABLED(malloc)) {
-        TORCH_SDT_WITH_SEMAPHORE(malloc, &r, device, size, 0);
-      }
 
-      // Allocator declars allocate const!?
-      const_cast<NativeCachingAllocator*>(this)->malloc(
-          &r, device, size, cuda::getCurrentCUDAStream(device));
+    if (size && TORCH_SDT_IS_ENABLED(malloc)) {
+      TORCH_SDT_WITH_SEMAPHORE(malloc, devPtr, device, size, stream.id());
     }
-    return {r, r, &local_raw_delete, Device(DeviceType::CUDA, device)};
+
+    return {devPtr, devPtr, deleteFunc, Device(DeviceType::CUDA, device)};
   }
   DeleterFnPtr raw_deleter() const override {
     if (forceUncachedAllocator()) {

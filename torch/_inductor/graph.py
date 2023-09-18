@@ -195,6 +195,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
+        self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
         # See `ProxyExecutor Design Note` in ir.py for more details

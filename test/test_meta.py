@@ -631,7 +631,6 @@ meta_function_expected_failures = {
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f16, f64, bf16, f32},
     torch.nn.functional.one_hot : {i64},
-    torch._segment_reduce : {f64, f16, bf16, f32},
     torch.linalg.eig : {f64, f32, c128, c64},
     torch.linalg.eigvals : {f64, f32, c128, c64},
     torch.linalg.lstsq : {f64, f32, c128, c64},
@@ -691,8 +690,8 @@ meta_function_device_expected_failures_only_outplace = defaultdict(dict)
 meta_function_device_skips = defaultdict(dict)
 
 meta_function_device_expected_failures['cpu'] = {
-    torch.native_batch_norm: {bf16, f16},
-    torch._native_batch_norm_legit: {bf16, f16},
+    torch.native_batch_norm: {bf16},
+    torch._native_batch_norm_legit: {bf16},
     torch.native_layer_norm: {bf16},
 }
 
@@ -804,7 +803,6 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.segment_reduce.default : {bf16, f32, f16, f64},
     aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
@@ -836,9 +834,9 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cpu'] = {
-    aten.native_batch_norm.default: {bf16, f16},
-    aten._native_batch_norm_legit.default: {bf16, f16},
-    aten._native_batch_norm_legit.no_stats: {bf16, f16},
+    aten.native_batch_norm.default: {bf16},
+    aten._native_batch_norm_legit.default: {bf16},
+    aten._native_batch_norm_legit.no_stats: {bf16},
     aten.native_layer_norm.default: {bf16},
 }
 

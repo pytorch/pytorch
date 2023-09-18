@@ -604,13 +604,14 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
 
 
 class FunctoolsPartialVariable(VariableTracker):
-    def __init__(self, func, args, keywords, **kwargs):
+    def __init__(self, func, args, keywords, original=None, **kwargs):
         super().__init__(**kwargs)
         self.func = func
         assert isinstance(args, list)
         self.args = args
         assert isinstance(keywords, dict)
         self.keywords = keywords
+        self.original = original
 
         self.guards.update(VariableTracker.propagate(func)["guards"])
         for arg in args:
@@ -628,3 +629,13 @@ class FunctoolsPartialVariable(VariableTracker):
         return self.func.call_function(tx, merged_args, merged_kwargs).add_options(
             options
         )
+
+    def as_python_constant(self):
+        if self.original:
+            return self.original
+        else:
+            return functools.partial(
+                self.func.fn,
+                *[arg.as_python_constant for arg in self.args],
+                **{k: v.as_python_constant() for k, v in self.keywords.items()},
+            )
