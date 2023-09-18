@@ -418,7 +418,7 @@ def test_compose_affine(event_dims):
     if transform.domain.event_dim > 1:
         base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
     dist = TransformedDistribution(base_dist, transforms)
-    assert dist.support.event_dim == max(1, max(event_dims))
+    assert dist.support.event_dim == max(1, *event_dims)
 
 
 @pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)
