@@ -1228,7 +1228,7 @@ class FakeTensor(torch.Tensor):
 
 def get_tensor_hash(x):
     if isinstance(x, torch.Tensor):
-        return tuple(x.shape), tuple(x.stride())
+        return tuple(x.shape), tuple(x.stride()), x.dtype
     return x
 
 import optree
@@ -1257,6 +1257,7 @@ def cache_dispatch(dispatch):
             return output_tensor
         else:
             metadata = cache[arg_hash]
+
             return FakeTensor(
                 self,
                 torch.empty_strided(
@@ -1371,7 +1372,7 @@ class FakeTensorMode(TorchDispatchMode):
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
 
-    @cache_dispatch
+    # @cache_dispatch
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
         log.debug("%s %s %s", func, args, kwargs)
