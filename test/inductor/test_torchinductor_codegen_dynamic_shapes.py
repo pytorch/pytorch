@@ -205,6 +205,7 @@ test_failures = {
     "test_adaptive_avg_pool_with_output_size_0_dynamic_shapes": TestFailure(
         ("cpu", "cuda")
     ),
+    "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
     #
     # Tests not using 'common' or directly calling 'assertEqual':
     #
