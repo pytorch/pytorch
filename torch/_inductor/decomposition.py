@@ -456,7 +456,7 @@ def dequantize_per_tensor_tensor_decomp_impl(
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
 def q_embedding_bag_byte_unpack_decomp(packed):
     def bitcast_u8_to_f32(u8):
-        x, y, z, w = [u8[..., n].to(torch.int32) for n in (0, 1, 2, 3)]
+        x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
         return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
 
     scales = bitcast_u8_to_f32(packed[..., -8:-4])
