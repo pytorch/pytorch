@@ -61,10 +61,9 @@ def _dtensor_init_helper(
         dtype = kwargs.get("dtype", torch.get_default_dtype())
         requires_grad = kwargs.get("requires_grad", False)
 
-        from torch.distributed._tensor.placement_types import DTensorSpec
-        from torch.fx.passes.shape_prop import TensorMetadata
+        from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
-        tensor_meta = TensorMetadata(size, dtype, requires_grad, (0,), None, False, {})
+        tensor_meta = TensorMeta(size, (0,), dtype)
         spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:

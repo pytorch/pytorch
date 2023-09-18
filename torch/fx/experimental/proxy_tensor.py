@@ -760,7 +760,10 @@ def make_fx(f,
             if fake_tensor_mode is None:
                 fake_tensor_mode = FakeTensorMode(
                     allow_fallback_kernels=True,
-                    allow_non_fake_inputs=_allow_non_fake_inputs)
+                    allow_non_fake_inputs=_allow_non_fake_inputs,
+                    shape_env=ShapeEnv(),
+                    static_shapes=True,
+                )
         elif tracing_mode == "symbolic":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)

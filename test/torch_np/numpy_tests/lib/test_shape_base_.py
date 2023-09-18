@@ -826,3 +826,9 @@ def compare_results(res, desired):
     # See also PEP 618 for Python 3.10
     for x, y in zip(res, desired):
         assert_array_equal(x, y)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

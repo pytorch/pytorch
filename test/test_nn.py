@@ -5609,6 +5609,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(input.to(torch.int8), input, dim=-1)
         self.assertEqual(out, 1.)
 
+        # Check broadcasting #109333
+        a = torch.ones(2, 3, dtype=torch.float)
+        b = torch.ones(1, 1, dtype=torch.float)
+        out = F.cosine_similarity(a, b)
+        self.assertEqual(out, torch.ones(2, dtype=torch.float))
+
+        a = torch.ones(2, 3, dtype=torch.float)
+        b = torch.ones(1, dtype=torch.float)
+        out = F.cosine_similarity(a, b)
+        self.assertEqual(out, torch.ones(2, dtype=torch.float))
+
+
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
