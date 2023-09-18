@@ -681,6 +681,7 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
+    @cache_on_self
     def has_atomic_add(self):
         for node in self._body.get_nodes():
             if node.op == "call_method" and node.target == "store":
@@ -1495,26 +1496,30 @@ class Scheduler:
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
 
-        # If node1 is a FusedSchedulerNode which assumes already has fused several scheduler nodes,
-        # we only check the last scheduler node among the FusedSchedulerNode.
-        check_atomic_add_mutation_node1 = (
-            node1.get_nodes()[-1] if isinstance(node1, FusedSchedulerNode) else node1
-        )
         if (
-            isinstance(check_atomic_add_mutation_node1, SchedulerNode)
+            isinstance(node1, (FusedSchedulerNode, SchedulerNode))
             and isinstance(node2, SchedulerNode)
-            and isinstance(check_atomic_add_mutation_node1._body, ir.LoopBody)
             and isinstance(node2._body, ir.LoopBody)
         ):
             # Fix Issue: https://github.com/pytorch/pytorch/issues/108963
             # Disable the fusion of node1 and node2, if:
             # * Any buffer used by node2 is a mutation of node1
             # * Store Buffer of node1 is produced by mode of atomic_add
-            for key in node2._body.reads_name2expr.keys():
+            _check_schedule_node_atomic_add_mutation = (
+                lambda buf, node: isinstance(node, SchedulerNode)
+                and buf in node.get_mutations()
+                and node.has_atomic_add()
+            )
+            for node2_used_buf in node2._body.reads_name2expr.keys():
                 if (
-                    key in check_atomic_add_mutation_node1.get_mutations()
-                    and check_atomic_add_mutation_node1.has_atomic_add()
-                ):
+                    isinstance(node1, FusedSchedulerNode)
+                    and any(
+                        _check_schedule_node_atomic_add_mutation(
+                            node2_used_buf, sub_schedule_node1
+                        )
+                        for sub_schedule_node1 in node1.get_nodes()
+                    )
+                ) or _check_schedule_node_atomic_add_mutation(node2_used_buf, node1):
                     return False
 
         if node2.is_template():
