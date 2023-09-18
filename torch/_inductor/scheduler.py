@@ -681,6 +681,16 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
+    def has_atomic_add(self):
+        for node in self._body.get_nodes():
+            if node.op == "call_method" and node.target == "store":
+                # Check the mode parameter of store node is atomic_add
+                if ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add") or (
+                    len(node.args) == 5 and node.args[4] == "atomic_add"
+                ):
+                    return True
+        return False
+
 
 class FusedSchedulerNode(BaseSchedulerNode):
     """
@@ -1500,22 +1510,10 @@ class Scheduler:
             # Disable the fusion of node1 and node2, if:
             # * Any buffer used by node2 is a mutation of node1
             # * Store Buffer of node1 is produced by mode of atomic_add
-
-            def _store_as_atomic_add(check_node):
-                for node in check_node._body.get_nodes():
-                    if node.op == "call_method" and node.target == "store":
-                        # Check the mode parameter of store node is atomic_add
-                        if (
-                            "mode" in node.kwargs
-                            and node.kwargs["mode"] == "atomic_add"
-                        ) or (len(node.args) == 5 and node.args[4] == "atomic_add"):
-                            return True
-                return False
-
             for key in node2._body.reads_name2expr.keys():
                 if (
                     key in check_atomic_add_mutation_node1.get_mutations()
-                    and _store_as_atomic_add(check_atomic_add_mutation_node1)
+                    and check_atomic_add_mutation_node1.has_atomic_add()
                 ):
                     return False
 
