@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import copy
 import functools
 import importlib
 import itertools
@@ -11,20 +10,11 @@ import weakref
 
 import torch
 
-import torch._dynamo as torchdynamo
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch import nn
 from torch._inductor import config
-from torch._inductor.compile_fx import compile_fx
 from torch._inductor.utils import override_lowering, run_and_get_code
-from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_quantization import (
-    skipIfNoDynamoSupport,
-    skipIfNoONEDNN,
-)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -317,80 +307,12 @@ class OptimizeForInferenceTemplate(TestCase):
             # we unfuse the conv bias, but it should only have one constant in the kernel
             if self.device == "cuda":
                 FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "constant"
-                ).check_not("constant").check_next("return").run(code[0])
+                    "frozen_param"
+                ).check_not("frozen_param").check_next("return").run(code[0])
 
             self.assertEqual(
                 out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
             )
-
-    def test_folded_conv_bn_relu6(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv_bn = ConvBN(3, 32, bias=True, kernel_size=3, stride=2)
-                self.relu6 = torch.nn.ReLU6()
-
-            def forward(self, x):
-                return self.relu6(self.conv_bn(x))
-
-        for dtype in [torch.float16, torch.bfloat16, torch.float32]:
-            if self.device == "cpu" and dtype == torch.float16:
-                continue
-
-            if self.device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
-                continue
-
-            mod = Model().eval().to(self.device).to(dtype)
-
-            x = torch.rand(3, 3, 32, 32).to(self.device).to(dtype)
-
-            @torch.compile()
-            def foo(mod, x):
-                return mod(x)
-
-            with torch.no_grad():
-                out_eager = mod(x)
-                out_optimized_for_infernece, code = run_and_get_code(foo, mod, x)
-
-            # we unfuse the conv bias, but it should only have one constant in the kernel
-            if self.device == "cuda":
-                FileCheck().check_not(".run(").check("conv").check(".run(").check_same(
-                    "constant"
-                ).check_not("constant").check_next("return").run(code[0])
-
-            self.assertEqual(
-                out_optimized_for_infernece, out_eager, atol=1e-2, rtol=1e-2
-            )
-
-    def test_conv_bn_with_conv_multi_users(self):
-        class Model(torch.nn.Module):
-            def __init__(self, in_channels, out_channels, bias=False, **kwargs):
-                super().__init__()
-                self.conv = torch.nn.Conv2d(
-                    in_channels, out_channels, bias=bias, **kwargs
-                )
-                self.bn = torch.nn.BatchNorm2d(
-                    out_channels, eps=0.001, dtype=torch.float
-                )
-
-            def forward(self, x):
-                x = self.conv(x)
-                return self.bn(x), x.relu()
-
-        mod = Model(3, 32, bias=False, kernel_size=3, stride=2).eval().to(self.device)
-
-        x = torch.rand(3, 3, 32, 32).to(self.device)
-
-        @torch.compile()
-        def foo(mod, x):
-            return mod(x)
-
-        with torch.no_grad():
-            out_eager = mod(x)
-            out_compiled = foo(mod, x)
-
-            self.assertEqual(out_eager, out_compiled)
 
     def test_dont_change_dtype_folding(self):
         dtype = torch.float16 if self.device == "cuda" else torch.bfloat16
@@ -671,39 +593,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 del OptimizeForInferenceTemplate
-
-
-@skipIfNoDynamoSupport
-class OptimizeForInferenceQuantizationPT2E(TestCase):
-    @skipIfNoONEDNN
-    def test_functional_constant_folding_after_dynamo_export(self):
-        m = ConvBN(3, 3, kernel_size=3, stride=2).eval().to("cpu")
-        example_inputs = (torch.randn(1, 3, 9, 9).to("cpu"),)
-        export_model, guards = torchdynamo.export(
-            m,
-            *copy.deepcopy(example_inputs),
-            aten_graph=True,
-        )
-
-        quantizer = X86InductorQuantizer()
-        operator_config = xiq.get_default_x86_inductor_quantization_config()
-        quantizer.set_global(operator_config)
-        with torch.no_grad(), config.patch({"implicit_fallbacks": True}):
-            # TODO(leslie) Remove implicit_fallbacks=True after we enable the int8 fusion of
-            # int8_weight -> dequant_per_channel -> convolution
-            self.assertTrue(torch._inductor.config.freezing)
-
-            prepare_model = prepare_pt2e(export_model, quantizer)
-            prepare_model(*example_inputs)
-
-            convert_model = convert_pt2e(prepare_model)
-            convert_model.eval()
-            compiler_model = compile_fx(convert_model, example_inputs)
-
-            # First Run
-            _ = compiler_model(*example_inputs)
-            # Second Run
-            _ = compiler_model(*example_inputs)
 
 
 if __name__ == "__main__":

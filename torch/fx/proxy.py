@@ -155,8 +155,8 @@ class TracerBase:
             # nodes as is the case with in-place foreach ops. During the
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
-            if current_meta.get("in_bwd", False):
-                new_seq_nr = current_meta["seq_nr"]
+            if current_meta.get("in_grad_fn", False):
+                new_seq_nr = current_meta["grad_fn_seq_nr"]
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:

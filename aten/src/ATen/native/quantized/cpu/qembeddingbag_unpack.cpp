@@ -167,6 +167,21 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   return output;
 }
 
+Tensor qembeddingbag_byte_unpack_meta(const Tensor& packed_weight) {
+  const auto packed_weight_sizes = packed_weight.sizes();
+  const auto col_dim = packed_weight_sizes.size() - 1;
+  const int32_t input_columns = packed_weight_sizes[col_dim];
+  // The last 2 values are used to store the FP32 scale and zero_point values
+  // per row.
+  const int32_t output_columns = input_columns - 2 * sizeof(float);
+
+  std::vector<int64_t> output_shape = packed_weight_sizes.vec();
+  output_shape[col_dim] = output_columns;
+
+  at::SymDimVector output_shape_vec(output_shape);
+  return at::empty_symint(output_shape_vec, packed_weight.options().dtype(kFloat), packed_weight.suggest_memory_format());
+}
+
 Tensor _qembeddingbag_nbit_unpack_helper(
     const Tensor& packed_weight,
     int BIT_RATE) {
@@ -269,6 +284,12 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("quantized::embedding_bag_unpack"),
       TORCH_FN(QEmbeddingUnpackWeights::run));
+}
+
+TORCH_LIBRARY_IMPL(quantized, Meta, m) {
+  m.impl(
+      "quantized::embedding_bag_byte_unpack",
+      qembeddingbag_byte_unpack_meta);
 }
 
 } // namespace

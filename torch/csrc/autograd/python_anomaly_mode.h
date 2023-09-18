@@ -3,7 +3,6 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 
 namespace torch {

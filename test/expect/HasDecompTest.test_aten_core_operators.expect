@@ -263,6 +263,8 @@ aten::geometric.out
 aten::geometric_
 aten::glu
 aten::glu.out
+aten::grid_sampler_2d
+aten::grid_sampler_2d.out
 aten::gt.Scalar
 aten::gt.Scalar_out
 aten::gt.Tensor
@@ -358,7 +360,6 @@ aten::mul_.Scalar
 aten::mul_.Tensor
 aten::narrow_copy
 aten::narrow_copy.out
-aten::native_batch_norm
 aten::native_batch_norm.out
 aten::native_dropout
 aten::native_dropout.out

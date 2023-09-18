@@ -4,11 +4,21 @@
 namespace at {
 namespace detail {
 
-template <class ArrayRefType>
-inline void check_size_nonnegative(ArrayRefType size) {
+inline void check_size_nonnegative(ArrayRef<int64_t> size) {
   for (const auto& x : size) {
     TORCH_CHECK(
         x >= 0,
+        "Trying to create tensor with negative dimension ",
+        x,
+        ": ",
+        size);
+  }
+}
+
+inline void check_size_nonnegative(ArrayRef<c10::SymInt> size) {
+  for (const auto& x : size) {
+    TORCH_SYM_CHECK(
+        x.sym_ge(0),
         "Trying to create tensor with negative dimension ",
         x,
         ": ",

@@ -23,15 +23,16 @@ class C10_API SymBool {
     return std::move(ptr_).release();
   }
 
-  // Only valid if is_symbolic()
+  // Only valid if is_heap_allocated()
   SymNode toSymNodeImpl() const;
 
   // Guaranteed to return a SymNode, wrapping using base if necessary
   SymNode wrap_node(const SymNode& base) const;
 
   bool expect_bool() const {
-    TORCH_CHECK(!is_symbolic());
-    return data_;
+    c10::optional<bool> c = maybe_as_bool();
+    TORCH_CHECK(c.has_value());
+    return *c;
   }
 
   SymBool sym_and(const SymBool&) const;
@@ -56,12 +57,19 @@ class C10_API SymBool {
 
   bool has_hint() const;
 
-  C10_ALWAYS_INLINE bool is_symbolic() const {
-    return ptr_;
-  }
-
   bool as_bool_unchecked() const {
     return data_;
+  }
+
+  c10::optional<bool> maybe_as_bool() const {
+    if (!is_heap_allocated()) {
+      return c10::make_optional(data_);
+    }
+    return toSymNodeImplUnowned()->constant_bool();
+  }
+
+  bool is_heap_allocated() const {
+    return ptr_;
   }
 
  private:

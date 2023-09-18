@@ -1567,7 +1567,7 @@ struct TORCH_API ProfileIValueOp : public Node {
   }
 
   void setCallback(std::function<void(std::vector<IValue>&)> callback) {
-    callback_ = callback;
+    callback_ = std::move(callback);
   }
 
  private:

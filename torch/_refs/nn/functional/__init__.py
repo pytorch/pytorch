@@ -177,7 +177,6 @@ def celu(
     return torch.where(a > 0, a, rhs)
 
 
-@register_decomposition(aten.dropout)
 @_inplace_wrapper
 @out_wrapper()
 def dropout(

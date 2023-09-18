@@ -467,6 +467,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
@@ -587,6 +588,10 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
             return out
+
+        # Handle `str` on a user defined function
+        if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
+            return variables.ConstantVariable(value=str(args[0].fn))
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
@@ -1152,7 +1157,14 @@ class BuiltinVariable(VariableTracker):
     ):
         from .distributed import PlacementVariable
 
-        if isinstance(obj, (variables.DataClassVariable, PlacementVariable)):
+        if isinstance(
+            obj,
+            (
+                variables.DataClassVariable,
+                variables.CustomizedDictVariable,
+                PlacementVariable,
+            ),
+        ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
@@ -1174,21 +1186,27 @@ class BuiltinVariable(VariableTracker):
             ):
                 assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
 
-                getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+                try:
+                    getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+                except AttributeError:
+                    getattr_var = None
 
-                # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
-                existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-                existing_fake_attr = variables.builder.wrap_to_fake_tensor_and_record(
-                    existing_attr, tx, source=getattr_var.source, is_tensor=True
-                )
+                if isinstance(getattr_var, variables.TensorVariable):
+                    # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
+                    existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                    existing_fake_attr = (
+                        variables.builder.wrap_to_fake_tensor_and_record(
+                            existing_attr, tx, source=getattr_var.source, is_tensor=True
+                        )
+                    )
 
-                # same tensor identiy, setattr is a no-op
-                mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                if (
-                    existing_fake_attr is assigning_fake_val
-                    and mod_setattr is torch.nn.Module.__setattr__
-                ):
-                    return getattr_var
+                    # same tensor identiy, setattr is a no-op
+                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                    if (
+                        existing_fake_attr is assigning_fake_val
+                        and mod_setattr is torch.nn.Module.__setattr__
+                    ):
+                        return getattr_var
 
             obj.convert_to_unspecialized(tx)
 
@@ -1213,7 +1231,7 @@ class BuiltinVariable(VariableTracker):
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,
-            "Can't call type() on generated custom object. "
+            f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
         )
 
@@ -1364,6 +1382,16 @@ class BuiltinVariable(VariableTracker):
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
+            if (
+                isinstance(right, TensorVariable)
+                and (left.size and right.size) is not None
+                and left.size != right.size
+            ):
+                try:
+                    torch.broadcast_shapes(left.size, right.size)
+                except RuntimeError:
+                    # not broadcastable, can't be compared
+                    _unimplemented()
             return wrap_fx_proxy_cls(
                 type(left),  # handle Ndarrays and Tensors
                 tx,
