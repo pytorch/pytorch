@@ -20,14 +20,18 @@ class TestCustomOperators(TestCase):
         self.assertIn(self.library_path, ops.loaded_libraries)
 
     def test_abstract_impl_pystub(self):
-        # Also just confirm: the module has some meta kernels
-        from torch._subclasses.fake_tensor import FakeTensorMode
-        with FakeTensorMode():
-            x = torch.randn(3, device='cpu')
+        from functorch import make_fx
+        x = torch.randn(3, device='cpu')
+        self.assertNotIn("my_custom_ops", sys.modules.keys())
 
-            self.assertNotIn("my_custom_ops", sys.modules.keys())
-            result = torch.ops.custom.sin.default(x)
-            self.assertIn("my_custom_ops", sys.modules.keys())
+        gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
+        self.assertIn("my_custom_ops", sys.modules.keys())
+
+        self.assertExpectedInline("""\
+def forward(self, arg0_1):
+    nonzero = torch.ops.aten.nonzero.default(arg0_1);  arg0_1 = None
+    return nonzero
+""".strip(), gm.code.strip())
 
     def test_calling_custom_op_string(self):
         output = ops.custom.op2("abc", "def")
