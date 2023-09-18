@@ -16,6 +16,11 @@ install_ubuntu() {
       # gpg-agent is not available by default on 20.04
       apt-get install -y --no-install-recommends gpg-agent
     fi
+    if [[ $UBUNTU_VERSION == 22.04 ]]; then
+        apt-get install -y --no-install-recommends gpg-agent
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' \
+            | sudo tee /etc/apt/preferences.d/rocm-pin-600
+    fi
     apt-get install -y kmod
     apt-get install -y wget
 
