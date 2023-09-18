@@ -135,6 +135,15 @@ def _apply_optim_in_backward(param_group):
     )
 
 
+def _clean_up_fsdp_param_name(name):
+    return ".".join(
+        filter(
+            lambda name: name not in [FSDP_WRAPPED_MODULE, _CHECKPOINT_WRAPPED_MODULE],
+            name.split("."),
+        )
+    )
+
+
 class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -182,15 +191,6 @@ class Test2dParallelIntegration(DTensorTestBase):
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
-    def _clean_up_fsdp_param_name(self, name):
-        return ".".join(
-            filter(
-                lambda name: name
-                not in [FSDP_WRAPPED_MODULE, _CHECKPOINT_WRAPPED_MODULE],
-                name.split("."),
-            )
-        )
-
     def _test_2d_e2e_flow(
         self,
         use_orig_params=False,
@@ -215,8 +215,7 @@ class Test2dParallelIntegration(DTensorTestBase):
             model_2d = input_reshard(model_2d, mesh_2d["TP"], 0)
         # Check named parameters are returning the same name at least.
         param_names_2d = [
-            self._clean_up_fsdp_param_name(name)
-            for name, _ in model_2d.named_parameters()
+            _clean_up_fsdp_param_name(name) for name, _ in model_2d.named_parameters()
         ]
         for name, _ in model.named_parameters():
             name = self._clean_up_fsdp_param_name(name)
@@ -314,8 +313,25 @@ class Test2dParallelIntegration(DTensorTestBase):
 
 
 class TestNew2dParallelIntegration(DTensorTestBase):
+    # TODO: this is duplicate code from above, but once we remove the enable_2d_with_fsdp(),
+    # we will remove the above test class Test2dParallelIntegration.
+    def _compare_params(self, m1, m2):
+        with FSDP.summon_full_params(m1):
+            with FSDP.summon_full_params(m2):
+                for n_p1, n_p2 in zip(m1.named_parameters(), m2.named_parameters()):
+                    p1 = n_p1[1]
+                    p2 = n_p2[1]
+                    if n_p1[0] != n_p2[0]:
+                        self.assertTrue(n_p1[0] in n_p2[0])
+                    name = n_p1[0]
+                    if name == "net2.bias" and self.rank != 0:
+                        continue
+                    if type(p2) is DT:
+                        p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
+                    self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
+
     @with_comms
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_state_enable_extension(self):
         mesh_2d = init_device_mesh(
             self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
@@ -326,6 +342,78 @@ class TestNew2dParallelIntegration(DTensorTestBase):
         )
         fsdp_state = _get_module_fsdp_state(model)
         self.assertEqual(fsdp_state._enable_extension, True)
+
+    def _test_2d_e2e_training(
+        self,
+        use_orig_params=False,
+        recompute_activation=False,
+    ) -> None:
+        torch.manual_seed(0)
+        model = SimpleModel().cuda(self.rank)
+        model = FSDP(model, use_orig_params=use_orig_params)
+        optim = torch.optim.Adam(model.parameters(), lr=0.01)
+
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        model_2d = parallelize_module(SimpleModel().cuda(), tp_mesh, PairwiseParallel())
+        model_2d = FSDP(
+            model_2d,
+            device_mesh=dp_mesh,
+            use_orig_params=use_orig_params,
+        )
+        optim_2d = torch.optim.Adam(model_2d.parameters(), lr=0.01)
+
+        if recompute_activation:
+            model_2d = input_reshard(model_2d, mesh_2d["tp"], 0)
+
+        # Check named parameters are returning the same name at least.
+        param_names_2d = [
+            _clean_up_fsdp_param_name(name) for name, _ in model_2d.named_parameters()
+        ]
+        for name, _ in model.named_parameters():
+            name = _clean_up_fsdp_param_name(name)
+            if name not in param_names_2d:
+                print(name, param_names_2d)
+            self.assertTrue(name in param_names_2d)
+        self._compare_params(model, model_2d)
+
+        # TODO: add additional tests for multi_param_group and optim_in_backward.
+
+        for i in range(5):
+            # Ensure all input across TP ranks are same.
+            # TODO: add a get_group_rank() to DeviceMesh.
+            torch.manual_seed(i + dist.get_rank(dp_mesh.get_dim_groups()[0]))
+            input = torch.rand(4, 5).cuda(self.rank)
+            output = model(input)
+            output_2d = model_2d(input)
+            self.assertEqual(output, output_2d)
+            output.sum().backward()
+            output_2d.sum().backward()
+            optim.step()
+            optim_2d.step()
+            self.assertEqual(model(input), model_2d(input))
+
+        # Ensure all params are still the same after optimizer update.
+        self._compare_params(model, model_2d)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_e2e_training_default(self):
+        self._test_2d_e2e_training()
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_e2e_training_use_orig_params(self):
+        self._test_2d_e2e_training(use_orig_params=True)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_2d_e2e_training_not_use_orig_params(self):
+        self._test_2d_e2e_training(recompute_activation=True)
 
 
 if __name__ == "__main__":
