@@ -3,7 +3,6 @@
 import builtins
 from enum import Enum
 from pathlib import Path
-import types
 from typing import (
     Any,
     AnyStr,
@@ -20,6 +19,7 @@ from typing import (
     Optional,
     overload,
     Sequence,
+    SupportsIndex,
     Set,
     Tuple,
     Type,
@@ -49,6 +49,8 @@ from torch.types import (
     Storage,
     SymInt,
 )
+
+from numpy._typing import _NestedSequence
 
 # This module is defined in torch/csrc/Module.cpp
 

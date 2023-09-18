@@ -1,6 +1,5 @@
 import argparse
 import collections
-import sys
 from pprint import pformat
 from typing import Dict, List, Sequence
 
@@ -80,12 +79,49 @@ FACTORY_PARAMS = (
     f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
 )
 
-if sys.version_info >= (3, 10):
-    INDICES = (
-        "indices: Union[None, _int, slice, Tensor, List, Tuple, types.EllipsisType]"
-    )
-else:
-    INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
+# this could be more precise w.r.t list contents etc. How to do Ellipsis?
+# We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
+#
+# key: (
+#     None
+#     | slice
+#     | ellipsis
+#     | SupportsIndex
+#     | _ArrayLikeInt_co
+#     | tuple[None | slice | ellipsis | _ArrayLikeInt_co | SupportsIndex, ...]
+# )
+#
+# where:
+#
+# _ArrayLikeInt_co = _DualArrayLike[
+#     dtype[Union[bool_, integer[Any]]],
+#     Union[bool, int],
+# ]
+#
+# and
+#
+# _DualArrayLike = Union[
+#     _SupportsArray[_DType],
+#     _NestedSequence[_SupportsArray[_DType]],
+#     _T,
+#     _NestedSequence[_T],
+# ]
+#
+# Moreover, _NestedSequence is a Protocol that matches arbitrary nesting of list/tuple.
+# We can substitute and simplify:
+# _SupportsArray -> Tensor
+# _ArrayLikeInt_co -> [bool | int | | Tensor | NestedSequence[bool | int] | NestedSequence[Tensor]]
+# which leaves us with key: T | tuple[T, ...], where T is:
+# T = (
+#     None | bool | int | slice | ellipsis | SupportsIndex
+#     | Tensor | _NestedSequence[Tensor] | _NestedSequence[bool | int]
+# )
+
+# NOTE: ellipsis is equal to type[Ellipsis] in stub files.
+_non_recursive_index = "None, bool, int, SupportsIndex, slice, ellipsis"
+_recursive_index = "Tensor, _NestedSequence[Union[bool, int]], _NestedSequence[Tensor]]"
+_indices = f"Union[{_non_recursive_index}, {_recursive_index}]"
+INDICES = f"indices: Union[{_indices}, tuple[{_indices}, ...]]"
 
 blocklist = [
     "__init_subclass__",
