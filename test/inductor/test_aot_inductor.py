@@ -126,6 +126,7 @@ class AOTInductorModelRunner:
         return list_output_tensors
 
 
+<<<<<<< HEAD
 def check_model(
     self: TestCase,
     model,
@@ -158,16 +159,19 @@ def check_model_with_multiple_inputs(
     self.assertTrue(same(list_actual, list_expected))
 
 
+class SimpleLinear(torch.nn.Module):
+    def __init__(self, w_dims):
+        super().__init__()
+        self.weight = torch.randn(*w_dims, device="cuda")
+
+    def forward(self, x, y):
+        return x + torch.nn.functional.linear(y, self.weight)
+
+
 @unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
 class AOTInductorTestsTemplate:
     def test_simple(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device="cuda")
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
+        model = SimpleLinear((10, 10))
 
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
@@ -176,19 +180,50 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs)
 
     def test_large(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(250112, 512, device="cuda")
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
+        model = SimpleLinear((250112, 512))
 
         example_inputs = (
             torch.randn(1, 250112, device="cuda"),
             torch.randn(1, 512, device="cuda"),
         )
         self.check_model(Repro(), example_inputs)
+
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_inf(self):
+        model = SimpleLinear((10, 10))
+
+        x = torch.randn(10, 10, device="cuda")
+        x[0][0] = float("Inf")
+        example_inputs = (
+            x,
+            torch.randn(1, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={"debug_check_inf_and_nan": True},
+        )
+        self.assertTrue(same(actual, expected))
+
+    @unittest.skip("Skip this test, only for local test. SIGABRT is produced.")
+    def test_nan(self):
+        model = SimpleLinear((10, 10))
+
+        x = torch.randn(10, 10, device="cuda")
+        x[0][0] = float("nan")
+        example_inputs = (
+            x,
+            torch.randn(1, 10, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={"debug_check_inf_and_nan": True},
+        )
 
     def test_with_offset(self):
         class Repro(torch.nn.Module):
