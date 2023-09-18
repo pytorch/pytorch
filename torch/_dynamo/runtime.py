@@ -5,7 +5,7 @@ import torch
 _device_t = Union[torch.device, str, int, None]
 
 
-class GPURuntimeInterface:
+class RuntimeInterface:
     """
     This is a simple device runtime abstraction for Inductor. It enables custom
     backends to be integrated with Inductor in a device-agnostic semantic.
@@ -60,7 +60,7 @@ class GPURuntimeInterface:
         raise NotImplementedError()
 
 
-class CudaRuntime(GPURuntimeInterface):
+class CudaRuntime(RuntimeInterface):
     class Event:
         def __new__(cls, *args, **kwargs):
             return torch.cuda.Event(*args, **kwargs)
@@ -113,10 +113,10 @@ class CudaRuntime(GPURuntimeInterface):
         return major * 10 + min
 
 
-device_runtimes: Dict[str, GPURuntimeInterface] = {}
+device_runtimes: Dict[str, RuntimeInterface] = {}
 
 
-def register_runtime_for_device(device: str, device_runtime: GPURuntimeInterface):
+def register_runtime_for_device(device: str, device_runtime: RuntimeInterface):
     device_runtimes[device] = device_runtime
 
 
