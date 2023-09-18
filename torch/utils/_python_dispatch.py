@@ -1,3 +1,4 @@
+import importlib
 import contextlib
 from typing import Optional, Union, List, Set, Dict, Any
 
@@ -373,3 +374,14 @@ def return_and_correct_aliasing(func, args, kwargs, out):
         for ((i, r), o) in zip(enumerate(schema_info.outs), out)
     ])
     return outs_to_return
+
+
+def op_registration_pyimport(module, context):
+    try:
+        importlib.import_module(module)
+    except ModuleNotFoundError as ex:
+        raise ModuleNotFoundError(
+            f'Could not import "{module}". The operator "{context}" '
+            f"specified that its abstract impl is located in that module."
+            f"Please check that the module is available and/or installed."
+        ) from ex

@@ -526,7 +526,7 @@ class CustomOp:
                 f"instead, the operator will decompose into its constituents and those "
                 f"can have abstract impls defined on them.")
 
-        if _C._dispatch_has_computed_kernel_for_dispatch_key(self._qualname, "Meta"):
+        if _C._dispatch_has_kernel_for_dispatch_key(self._qualname, "Meta"):
             raise RuntimeError(
                 f"impl_abstract(...): the operator {self._qualname} "
                 f"already has an DispatchKey::Meta implementation via a "
@@ -1076,6 +1076,29 @@ def _find_custom_op(qualname, also_check_torch_library=False):
     overload = get_op(qualname)
     result = custom_op_from_existing(overload)
     return result
+
+
+def get_abstract_impl(qualname):
+    maybe_abstract_impl = get_abstract_impl_from_registry(qualname)
+    if maybe_abstract_impl:
+        return maybe_abstract_impl
+    # No abstract impl registered. Try to see if there's a pystub for it.
+    # This is a bit slow so we do it after the fast-path above
+    did_import = torch._C._dispatch_maybe_import_abstract_impl_pystub(qualname)
+    if did_import:
+        return get_abstract_impl_from_registry(qualname)
+    return None
+
+
+def get_abstract_impl_from_registry(qualname):
+    if qualname not in torch._custom_op.impl.global_registry:
+        return None
+    custom_op = torch._custom_op.impl.global_registry[qualname]
+    if custom_op is None:
+        return None
+    if not custom_op._has_impl("abstract"):
+        return None
+    return custom_op._get_impl("abstract").func
 
 
 def _custom_op_with_schema(qualname, schema):

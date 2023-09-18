@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <chrono>
 #include <list>
 #include <sstream>
@@ -252,6 +253,66 @@ void Dispatcher::deregisterDef_(
   }
 
   cleanup(op, op_name);
+}
+
+namespace {
+
+using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, const char*>;
+AbstractImplPyStubsType& kAbstractImplPyStubs() {
+  static AbstractImplPyStubsType _data;
+  return _data;
+}
+
+}
+
+RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
+  OperatorName op_name,
+  const char* pymodule
+) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  // If there are duplicates, we just let it through and warn about it.
+  // Throwing an error during static initialization causes a crash that
+  // doesn't give any sign of what happened.
+  if (kAbstractImplPyStubs().find(op_name) != kAbstractImplPyStubs().end()) {
+    TORCH_WARN(
+        "Tried to register an abstract impl pystub for ", op_name, " ",
+        "but there already was one. We will override the existing pystub.");
+  }
+  kAbstractImplPyStubs()[op_name] = pymodule;
+  return RegistrationHandleRAII([guard = this->guard_, this, op_name] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
+    kAbstractImplPyStubs().erase(op_name);
+  });
+}
+
+bool Dispatcher::maybeImportAbstractImplPyStub(OperatorName op_name) {
+  const char* pymodule = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(guard_->mutex);
+    auto elt = kAbstractImplPyStubs().find(op_name);
+    if (elt == kAbstractImplPyStubs().end()) {
+      return false;
+    }
+    pymodule = elt->second;
+    // We need to release the lock here because the pyimport will register things to
+    // the dispatcher and that needs to grab the lock. It's possible that someone
+    // will unload the shared library that owns the existing impl_abstract_pystub,
+    // or load a library with a different impl_abstract_pystub for the same operator,
+    // but those will cause other problems so we don't worry about it here.
+  }
+  auto* interpreter = at::impl::PythonOpRegistrationTrampoline::getInterpreter();
+  TORCH_CHECK(
+      interpreter != nullptr,
+      op_name,
+      ": while attempting to run this operator with Meta Tensors: "
+      "the abstract impl for this operator (necessary for Meta Tensors) "
+      "was declared to exist in the Python module ", pymodule,
+      " but Python is not available.");
+  (*interpreter)->op_registration_pyimport(pymodule, "context");
+  return true;
 }
 
 RegistrationHandleRAII Dispatcher::registerImpl(

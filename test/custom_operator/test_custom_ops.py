@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import os.path
+import sys
 import tempfile
 
 import torch
@@ -17,6 +18,16 @@ class TestCustomOperators(TestCase):
 
     def test_custom_library_is_loaded(self):
         self.assertIn(self.library_path, ops.loaded_libraries)
+
+    def test_abstract_impl_pystub(self):
+        # Also just confirm: the module has some meta kernels
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        with FakeTensorMode():
+            x = torch.randn(3, device='cpu')
+
+            self.assertNotIn("my_custom_ops", sys.modules.keys())
+            result = torch.ops.custom.sin.default(x)
+            self.assertIn("my_custom_ops", sys.modules.keys())
 
     def test_calling_custom_op_string(self):
         output = ops.custom.op2("abc", "def")
