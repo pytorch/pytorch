@@ -1145,5 +1145,26 @@ class TestExport(TestCase):
                     else:
                         self.assertIsInstance(s, int)
 
+    def test_constraints_on_retrace(self):
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x.cos()
+                return x.sin()
+
+        inp = torch.ones(7, 5)
+        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        stateful_module = exported.module()
+        self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
+
+        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 2])
+        self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
+        # TODO (tmanlaibaatar) this kinda sucks because now re-exported program can diverge from eager behavior.
+        self.assertFalse(torch.allclose(Foo()(torch.ones(3, 5)), re_exported(torch.ones(3, 5))))
+
 if __name__ == '__main__':
     run_tests()
