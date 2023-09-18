@@ -32,6 +32,7 @@ static PyObject* THPVariable_pynew(
           args,
           kwds,
           "|ObbOz",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(accepted_args),
           &data,
           &requires_grad,

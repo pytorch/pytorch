@@ -8,6 +8,7 @@ try:
 except ModuleNotFoundError:
     np = None
 
+
 import sympy
 
 import torch._numpy as tnp
@@ -35,7 +36,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .lists import ShapeVariable, SizeVariable
+from .lists import SizeVariable
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -228,7 +229,7 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            result = ShapeVariable(sizes, **options)
+            result = SizeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -644,14 +645,40 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "register_hook":
+            # see [On tensor.register_hook]
+            assert len(args) == 1
+            fn_var = args[0]
+
+            if isinstance(fn_var, variables.NestedUserFunctionVariable):
+                # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
+                # This should not be onerous to support when needed.
+                unimplemented("NYI - lambda variables as hooks")
+            elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+                fn = fn_var.as_python_constant()
+                name = fn_var.func.fn.__name__
+            else:
+                fn = fn_var.fn
+                name = fn_var.fn.__name__
+
+            handle_variable = variables.user_defined.RemovableHandleVariable(
+                mutable_local=variables.base.MutableLocal(),
+                **options,
+            )
+            if not self.source:
+                # Intermediary
+                unimplemented("Intermediary tensors with registered hooks - NYI")
+            else:
+                assert (
+                    fn_var.source
+                ), "Unreachable - See unimplemented for lambdas above"
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            return handle_variable
+
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
-            if (
-                name == "new"
-                and len(args) == 1
-                and isinstance(args[0], (SizeVariable, ShapeVariable))
-            ):
+            if name == "new" and len(args) == 1 and isinstance(args[0], SizeVariable):
                 name = "new_empty"
             return wrap_fx_proxy(
                 tx,
@@ -662,6 +689,10 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+
+    def rename(self, tx, name):
+        self.proxy.node._rename(name)
+        return super().rename(tx, name)
 
 
 class SymNodeVariable(VariableTracker):
