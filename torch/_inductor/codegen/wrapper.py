@@ -292,6 +292,7 @@ class WrapperCodeGen(CodeGen):
         self.stride = "stride()"
         self.first_device_guard = True
         self.supports_intermediate_hooks = True
+        self.inf_and_nan_header = False
         self.expr_printer = pexpr
 
         self.write_header()
@@ -992,6 +993,58 @@ class CppWrapperCodeGen(WrapperCodeGen):
             """
         )
 
+    def write_inf_and_nan_header(self):
+        if self.inf_and_nan_header:
+            return
+
+        self.inf_and_nan_header = True
+        self.header.splice(
+            """
+            static inline bool check_has_inf(at::Tensor tensor, bool assertion) {
+              bool has_inf = false;
+
+              auto flattened = tensor.view({-1});
+              for (int64_t i = 0; i < flattened.numel(); i++) {
+                if(std::isinf(flattened[i].item<float>())) {
+                  has_inf = true;
+                  break;
+                }
+              }
+
+              if (assertion) {
+                assert(!has_inf);
+              }
+
+              return has_inf;
+            }
+
+            static inline bool check_has_nan(at::Tensor tensor, bool assertion) {
+              bool has_nan = false;
+
+              auto flattened = tensor.view({-1});
+              for (int64_t i = 0; i < flattened.numel(); i++) {
+                if(std::isnan(flattened[i].item<float>())) {
+                  has_nan = true;
+                  break;
+                }
+              }
+
+              if (assertion) {
+                assert(!has_nan);
+              }
+
+              return has_nan;
+            }
+
+            static inline bool check_inf_and_nan(at::Tensor tensor, bool assertion) {
+              bool has_inf = check_has_inf(tensor, assertion);
+              bool has_nan = check_has_nan(tensor, assertion);
+
+              return has_inf || has_nan;
+            }
+            """
+        )
+
     def mark_output_type(self):
         # mark output type to unwrap tensor back to python scalar
         from ..ir import ShapeAsConstantBuffer
@@ -1345,6 +1398,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.wrapper_call.writeline(
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
+
+    def generate_inf_and_nan_checker(self, nodes):
+        self.write_inf_and_nan_header()
+        for buf in nodes.get_names():
+            self.writeline(f"check_inf_and_nan({buf}, true);")
 
     def codegen_device(self, device):
         from .cpp import DEVICE_TO_ATEN

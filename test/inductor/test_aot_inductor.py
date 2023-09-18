@@ -104,18 +104,19 @@ class AOTInductorModelRunner:
         return list_output_tensors
 
 
+class SimpleLinear(torch.nn.Module):
+    def __init__(self, w_dims):
+        super().__init__()
+        self.weight = torch.randn(*w_dims, device="cuda")
+
+    def forward(self, x, y):
+        return x + torch.nn.functional.linear(y, self.weight)
+
+
 @unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
 class AotInductorTests(TestCase):
     def test_simple(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device="cuda")
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
-
-        model = Repro()
+        model = SimpleLinear((10, 10))
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
@@ -125,21 +126,30 @@ class AotInductorTests(TestCase):
         self.assertTrue(same(actual, expected))
 
     def test_large(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(250112, 512, device="cuda")
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
-
-        model = Repro()
+        model = SimpleLinear((250112, 512))
         example_inputs = (
             torch.randn(1, 250112, device="cuda"),
             torch.randn(1, 512, device="cuda"),
         )
         expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
+
+    def test_inf(self):
+        model = SimpleLinear((10, 10))
+        x = torch.randn(10, 10, device="cuda")
+        x[0][0] = float("Inf")
+        example_inputs = (
+            x,
+            torch.randn(1, 512, device="cuda"),
+        )
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
+            model,
+            example_inputs,
+            expected,
+            options={"aot_inductor.check_inf_and_nan": True},
+        )
         self.assertTrue(same(actual, expected))
 
     def test_with_offset(self):

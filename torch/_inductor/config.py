@@ -432,6 +432,7 @@ class aot_inductor:
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
+    check_inf_and_nan = False
 
 
 class cuda:
