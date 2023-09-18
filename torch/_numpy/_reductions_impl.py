@@ -71,6 +71,9 @@ def argmax(
     *,
     keepdims: KeepDims = False,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"argmax with dtype={a.dtype}.")
+
     axis = _util.allow_only_single_axis(axis)
 
     if a.dtype == torch.bool:
@@ -88,6 +91,9 @@ def argmin(
     *,
     keepdims: KeepDims = False,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"argmin with dtype={a.dtype}.")
+
     axis = _util.allow_only_single_axis(axis)
 
     if a.dtype == torch.bool:
@@ -134,6 +140,9 @@ def amax(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"amax with dtype={a.dtype}")
+
     return a.amax(axis)
 
 
@@ -149,6 +158,9 @@ def amin(
     initial: NotImplementedType = None,
     where: NotImplementedType = None,
 ):
+    if a.is_complex():
+        raise NotImplementedError(f"amin with dtype={a.dtype}")
+
     return a.amin(axis)
 
 

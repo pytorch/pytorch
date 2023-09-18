@@ -782,16 +782,11 @@ def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
 class FakeTensorOpInfoTest(TestCase):
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_fake(self, device, dtype, op):
-        data_dependent_outputs = {
-            'NumpyNMSCustomOp',
-            'NumpyNonzeroCustomOp',
-        }
-
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
-            optests.fake_check(op, args, kwargs, op.name in data_dependent_outputs)
+            optests.fake_check(op, args, kwargs)
 
 
 class FakeTensorConverterTest(TestCase):

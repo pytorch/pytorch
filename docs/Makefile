@@ -18,8 +18,8 @@ figures:
 	@$(PYCMD) source/scripts/build_quantization_configs.py
 
 onnx:
-	@$(PYCMD) source/scripts/onnx/build_onnx_supported_aten_op_csv_table.py
-	@$(PYCMD) source/scripts/onnx/build_onnx_diagnostics_rules_md.py $(SOURCEDIR)/generated/onnx_diagnostics_rules
+	@$(PYCMD) source/scripts/onnx/build_onnx_torchscript_supported_aten_op_csv_table.py
+	@$(PYCMD) source/scripts/onnx/build_onnx_dynamo_diagnostics_rules_md.py $(SOURCEDIR)/generated/onnx_dynamo_diagnostics_rules
 
 opset:
 	@$(PYCMD) source/scripts/build_opsets.py
