@@ -1047,6 +1047,23 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_tensor_symfloat(self):
+        def f(a):
+            r = torch.tensor(a.size(0) ** 2.0)
+            assert r.dtype is torch.float
+            return r
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2))
+        r = str(gm.code).strip()
+        # NB: this specializes, which is fine, the point is to make sure the
+        # dtype inference is correct
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    return lift_fresh_copy""")
+        self.assertEqual(gm._tensor_constant0, torch.tensor(4.0))
+
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
