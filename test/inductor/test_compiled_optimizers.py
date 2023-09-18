@@ -164,6 +164,11 @@ class CompiledOptimizerTests(TestCase):
     # Need to an impl which does not use python scalars
     # test_adamax = make_test(Adamax, lr=0.01)
     test_nadam = make_test(NAdam, lr=0.01)
+    test_nadam_weight_decay = make_test(NAdam, lr=0.01, weight_decay=0.01)
+    test_nadam_momentum_decay = make_test(NAdam, lr=0.01, momentum_decay=6e-3)
+    test_nadam_weight_momentum_decay = make_test(
+        NAdam, lr=0.01, weight_decay=0.01, momentum_decay=6e-3
+    )
     test_rprop = make_test(Rprop, kernel_count=1, lr=0.01)
     test_rmsprop = make_test(RMSprop, kernel_count=1, lr=0.01)
     test_adadelta = make_test(Adadelta, kernel_count=1, lr=0.01)
