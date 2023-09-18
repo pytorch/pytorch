@@ -57,7 +57,7 @@ struct ConcretePyInterpreterVTable final
     torch::impl::dispatch::python_op_registration_trampoline_impl(
         op, key, stack);
   }
-  void op_registration_pyimport(const char* pymodule, const char* context)
+  void op_registration_pyimport(const char* pymodule, std::string context)
       const override {
     py::gil_scoped_acquire gil;
     pybind11::module::import("torch.utils._python_dispatch")

@@ -5,7 +5,7 @@
 namespace at {
 namespace impl {
 
-void metaFallback(
+static void metaFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
     torch::jit::Stack* stack) {

@@ -154,7 +154,7 @@ struct C10_API PyInterpreterVTable {
 
   virtual void op_registration_pyimport(
       const char* pymodule,
-      const char* context) const = 0;
+      std::string context) const = 0;
 
   // Invoke the Python dispatcher to handle this call
   virtual void python_dispatcher(

@@ -39,7 +39,7 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(python_op_registration_trampoline);
   }
 
-  void op_registration_pyimport(const char* pymodule, const char* context)
+  void op_registration_pyimport(const char* pymodule, std::string context)
       const override {
     PANIC(op_registration_pyimport);
   }

@@ -311,7 +311,7 @@ bool Dispatcher::maybeImportAbstractImplPyStub(OperatorName op_name) {
       "the abstract impl for this operator (necessary for Meta Tensors) "
       "was declared to exist in the Python module ", pymodule,
       " but Python is not available.");
-  (*interpreter)->op_registration_pyimport(pymodule, "context");
+  (*interpreter)->op_registration_pyimport(pymodule, toString(op_name));
   return true;
 }
 
