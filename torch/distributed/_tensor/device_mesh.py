@@ -42,7 +42,7 @@ class _MeshEnv:
         return self.mesh_stack[-1]
 
     def create_child_mesh(
-        self, device_mesh: "DeviceMesh", mesh_dim: int
+        self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
     ) -> "DeviceMesh":
         # swap the current dim to the last dim then reshape to flatten out other
         # dims, so we can just extract the list of ranks which contains cur_rank.
@@ -53,7 +53,10 @@ class _MeshEnv:
 
         for mesh_1d in pg_ranks_by_dim:
             sub_mesh = DeviceMesh(
-                device_mesh.device_type, mesh_1d, _init_process_groups=False
+                device_mesh.device_type,
+                mesh_1d,
+                mesh_dim_names=(mesh_dim_name,),
+                _init_process_groups=False,
             )
             if cur_rank in mesh_1d:
                 res_sub_mesh = sub_mesh
@@ -65,6 +68,22 @@ class _MeshEnv:
 
     def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
         return self.child_to_parent_mapping.get(device_mesh, None)
+
+    def get_parent_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
+        """
+        Return the index of the mesh dim in the parent mesh.
+        The device_mesh passed in needs to be sliced out from a parent mesh.
+        """
+        parent_mesh = self.get_parent_mesh(device_mesh)
+        child_mesh_dim_names = device_mesh.mesh_dim_names
+        if parent_mesh and child_mesh_dim_names:
+            assert (
+                len(child_mesh_dim_names) == 1
+            ), "The child mesh can only be a 1D mesh."
+            child_mesh_dim_name = child_mesh_dim_names[0]
+            if parent_mesh.mesh_dim_names:
+                return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
+        return None
 
 
 mesh_resources: _MeshEnv = _MeshEnv()
@@ -312,7 +331,7 @@ class DeviceMesh:
                 f"Available mesh dimensions are: {self.mesh_dim_names}",
             )
         mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
-        submesh = mesh_resources.create_child_mesh(self, mesh_dim)
+        submesh = mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
 
         return submesh
 
