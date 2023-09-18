@@ -163,11 +163,18 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle mat2);
 
 #ifdef USE_CUDA
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_get_current_cuda_stream(void** ret, int32_t device_index);
+
+struct CUDAStreamGuardOpaque;
+using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_set_current_cuda_stream(void* stream, int32_t device_index);
+aoti_torch_create_cuda_stream_guard(
+    CUDAStreamGuardHandle* ret_guard, // returns new reference
+    void* stream,
+    int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 #endif
 
 #ifdef __cplusplus
