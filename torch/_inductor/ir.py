@@ -3752,7 +3752,7 @@ class DynamicScalar(ExternKernelAlloc):
     # Inductor will need to reason about the object's symbolic value compared to other SymPy values in the program.
     # To make this reasoning easier, we pretend that the DynamicScalar object is a SymPy object. We achieve it with:
     # 1. Setting __sympy__ = True.
-    # 2. Redirecting __hash__ to the underlying SymPy symbol object.
+    # 2. Redirecting __hash__ and __eq__ to the underlying SymPy symbol object.
     # 3. If an attribute is not found on the DynamicScalar object itself, then we forward it to the underlying SymPy symbol object.
     __sympy__ = True
 
@@ -3770,6 +3770,9 @@ class DynamicScalar(ExternKernelAlloc):
 
     def __hash__(self):
         return hash(self.symbol)
+
+    def __eq__(self, other):
+        return self.symbol.__eq__(other)
 
     def codegen(self, wrapper):
         wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")

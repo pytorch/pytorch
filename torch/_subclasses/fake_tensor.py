@@ -550,13 +550,7 @@ def local_scalar_dense(fake_mode, func, arg):
     if is_float_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        symint = fake_mode.shape_env.create_unbacked_symint()
-        # TODO(yf225): we are assuming all .item / .tolist are passed in as positive sizes (i.e. no negative indexing)
-        # TODO(yf225): why do we need this? and why should we set lower to 2 instead of 1?
-        # 1. should this produce a guard? why or why not?
-        # 2. why do we need this when user code already has constrain_as_size?
-        torch.fx.experimental.symbolic_shapes.constrain_range(symint, min=2, max=sys.maxsize - 1)
-        return symint
+        return fake_mode.shape_env.create_unbacked_symint()
     elif is_boolean_dtype(arg.dtype):
         return fake_mode.shape_env.create_unbacked_symbool()
     else:

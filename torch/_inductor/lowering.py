@@ -4755,6 +4755,11 @@ def sym_constrain_range(a, min, max):
     return a
 
 
+@register_lowering(aten.sym_constrain_range_for_size)
+def sym_constrain_range_for_size(a, min, max):
+    return sym_constrain_range(a, min, max)
+
+
 @register_lowering(aten.sym_size)
 def sym_size(a, dim):
     return a.get_size()[dim]
