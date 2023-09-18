@@ -197,7 +197,6 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f32, f64},
     "cauchy": {f16},
@@ -207,8 +206,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "geometric": {f16},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
@@ -231,7 +228,6 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "atanh": {f32},
@@ -242,11 +238,8 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.ihfft2": {f16, f32, f64},
     "fft.ihfftn": {f16, f32, f64},
     "geometric": {f16},
-    "linalg.eig": {f32, f64},
     "log_normal": {f16},
     "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
@@ -372,11 +365,6 @@ inductor_override_kwargs = {
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
-    "gradient": {"check_gradient": False},  # segfault on check_gradient
-    # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
-    "linalg.solve_triangular": {"check_gradient": False},
-    "linalg.lu_factor": {"check_gradient": False},
-    "linalg.lu_factor_ex": {"check_gradient": False},
 }
 
 # Always test with all sample for following ops
@@ -551,6 +539,7 @@ class TestInductorOpInfo(TestCase):
                         "reference_in_float": False,
                         "check_gradient": requires_grad,
                         "check_has_compiled": no_python,
+                        "output_process_fn_grad": sample_input.output_process_fn_grad,
                     }
                     adjusted_kwargs.update(overridden_kwargs)
                     self.check_model_cuda(

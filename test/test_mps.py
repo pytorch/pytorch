@@ -85,7 +85,6 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'aminmax': [torch.float32],
         'polar': [torch.float32],
-        '_embedding_bag_dense_backward': [torch.float16, torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -668,7 +667,6 @@ def mps_ops_modifier(ops):
         'linalg.pinv': None,
         'linalg.pinvhermitian': None,
         'nonzero_static': None,
-        '_embedding_bag_dense_backward': None,
 
         # MPS: input sizes must be divisible by output sizes
         'nn.functional.adaptive_avg_pool1d': None,

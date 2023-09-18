@@ -1756,7 +1756,16 @@ Arguments:
           .def(
               "_has_hooks",
               &::c10d::ProcessGroup::hasHooks,
-              py::call_guard<py::gil_scoped_acquire>());
+              py::call_guard<py::gil_scoped_acquire>())
+          .def(
+              "_set_group_name",
+              &::c10d::ProcessGroup::setGroupName,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Sets the process group name. This is an internal C10D method, do not use.")
+          .def_property_readonly(
+              "group_name",
+              &::c10d::ProcessGroup::getGroupName,
+              "(Gets this process group name. It's cluster unique)");
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
