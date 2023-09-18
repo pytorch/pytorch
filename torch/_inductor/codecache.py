@@ -91,13 +91,41 @@ def _compile_end():
 
 log = logging.getLogger(__name__)
 
-
 @functools.lru_cache(None)
 def cache_dir():
+
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
+
+    # Check if the cache was hit
+    if cache_dir:
+        log.info("Cache hit: Using directory from TORCHINDUCTOR_CACHE_DIR environment variable.")
+    else:
+        log.info("Cache miss: TORCHINDUCTOR_CACHE_DIR environment variable not set. Using default directory.")
         cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
-    os.makedirs(cache_dir, exist_ok=True)
+
+    # Otherwise fsspec will try to interpret the path as a remote file system
+    if '://' in cache_dir:
+        try:
+            import fsspec
+        except ImportError as e:
+            raise ImportError("fsspec is required to handle remote file systems but it's not installed.") from e
+
+        # Use fsspec to handle the directory
+        fs = fsspec.filesystem(cache_dir.split(':')[0])
+        # Check if the directory exists
+        if fs.exists(cache_dir):
+            log.info(f"Directory {cache_dir} already exists on remote filesystem.")
+        else:
+            log.info(f"Creating directory {cache_dir} on remote filesystem.")
+            fs.makedirs(cache_dir, exist_ok=True)
+    else:
+        # Use standard os library for local files
+        if os.path.exists(cache_dir):
+            log.info(f"Directory {cache_dir} already exists locally.")
+        else:
+            log.info(f"Creating local directory {cache_dir}.")
+            os.makedirs(cache_dir, exist_ok=True)
+
     return cache_dir
 
 
