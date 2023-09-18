@@ -1168,7 +1168,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             code.writeline(f"int64_t* {name}_size;")
             code.writeline(
-                f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_sizes(&{name}_size, {name}.get()));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(&{name}_size, {name}.get()));"
             )
         else:
             super().codegen_input_size_var_decl(code, name)
@@ -1177,7 +1177,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             code.writeline(f"int64_t* {name}_stride;")
             code.writeline(
-                f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_strides(&{name}_stride, {name}.get()));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(&{name}_stride, {name}.get()));"
             )
         else:
             super().codegen_input_stride_var_decl(code, name)
@@ -1297,7 +1297,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                         output_buffer = output.codegen_reference(self.wrapper_call)
                         if config.aot_inductor.abi_compatible:
                             self.wrapper_call.writeline(
-                                "AOTI_TORCH_ERROR_CHECK(aoti_torch_tensor_copy_("
+                                "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_("
                                 + f"{output_buffer}.get(), outputs[{idx}].get()));",
                             )
                         else:
@@ -1371,7 +1371,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         for i, arg in enumerate(args):
             if arg.startswith("create_raii_tensor_handle("):
                 args[i] += ".get()"
-        self.writeline(f"AOTI_TORCH_ERROR_CHECK({kernel}({', '.join(args)}));")
+        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
@@ -1547,7 +1547,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ]
             self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
             self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
             )
             return f"auto {name} = create_raii_tensor_handle({name}_handle);"
         else:
@@ -1578,7 +1578,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ]
             writer.writeline(f"AtenTensorHandle {tmp_name};")
             writer.writeline(
-                f"AOTI_TORCH_ERROR_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
             )
             return f"create_raii_tensor_handle({tmp_name})"
         else:
@@ -1978,7 +1978,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 if config.aot_inductor.abi_compatible:
                     self.writeline(f"CUdeviceptr {var_name};")
                     self.writeline(
-                        f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_data_ptr(reinterpret_cast<void**>(&{var_name}), {arg}.get()));"
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(reinterpret_cast<void**>(&{var_name}), {arg}.get()));"
                     )
                 else:
                     self.writeline(

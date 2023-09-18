@@ -49,11 +49,11 @@ TEST(AotInductorTest, BasicTest) {
   inputs.push_back(y);
 
   AOTInductorModelContainerHandle container_handle;
-  AOT_INDUCTOR_ERROR_CHECK(
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
       AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
   const int64_t* max_output_sizes;
   int64_t max_output_dim;
-  AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerGetMaxOutputShape(
+  AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerGetMaxOutputShape(
       container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
   c10::IntArrayRef array_size(max_output_sizes, max_output_dim);
@@ -76,7 +76,7 @@ TEST(AotInductorTest, BasicTest) {
 
   AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
 
-  AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+  AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,
       inputs_handle,
       inputs.size(),
@@ -92,7 +92,8 @@ TEST(AotInductorTest, BasicTest) {
   ASSERT_EQ(output_sizes[0][0], 32);
   ASSERT_EQ(output_sizes[0][1], 10);
   ASSERT_TRUE(torch::allclose(results_ref, outputs[0]));
-  AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      AOTInductorModelContainerDelete(container_handle));
 }
 
 } // namespace aot_inductor

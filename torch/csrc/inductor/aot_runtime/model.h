@@ -10,18 +10,24 @@
 #include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#define AOTI_VECTOR_SIZE_CHECK(vec, expected_size) \
-  {                                                \
-    auto actual_size = vec.size();                 \
-    TORCH_CHECK(                                   \
-        actual_size == expected_size,              \
-        "expected vector size to be ",             \
-        std::to_string(expected_size),             \
-        ", but got ",                              \
-        std::to_string(actual_size));              \
-  }
+#define ATOI_RUNTIME_CHECK(EXPR, MSG) \
+  do {                                \
+    bool ok = EXPR;                   \
+    if (!ok) {                        \
+      throw std::runtime_error(MSG);  \
+    }                                 \
+  } while (0)
 
-#define AOTI_TORCH_ERROR_CHECK(call)                                      \
+#define AOTI_VECTOR_SIZE_CHECK(vec, expected_size)                      \
+  do {                                                                  \
+    auto actual_size = vec.size();                                      \
+    ATOI_RUNTIME_CHECK(                                                 \
+        actual_size == expected_size,                                   \
+        "expected vector size to be " + std::to_string(expected_size) + \
+            ", but got " + std::to_string(actual_size));                \
+  } while (0)
+
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                 \
   if ((call) != AOTI_TORCH_SUCCESS) {                                     \
     throw std::runtime_error(                                             \
         std::string(#call " API call failed at ") + __FILE__ + ", line" + \
@@ -345,7 +351,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
 // TODO: will update RAIIAtenTensorHandle to unique_ptr and change this
 inline RAIIAtenTensorHandle create_raii_tensor_handle(AtenTensorHandle handle) {
   return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
-    AOTI_TORCH_ERROR_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_delete_tensor_object(static_cast<AtenTensorHandle>(ptr)));
   });
 }
@@ -366,16 +372,16 @@ class AOTICudaStreamGuard {
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
     // store the current stream and set the new stream as current
     cudaStream_t current_stream;
-    AOTI_TORCH_ERROR_CHECK(aoti_torch_get_current_cuda_stream(
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream(
         reinterpret_cast<void**>(&current_stream), device_index));
     stream_ = current_stream;
-    AOTI_TORCH_ERROR_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_set_current_cuda_stream(stream, device_index));
   }
 
   ~AOTICudaStreamGuard() noexcept(false) {
     // restore the previous stream as current
-    AOTI_TORCH_ERROR_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_set_current_cuda_stream(stream_, device_index_));
   }
 

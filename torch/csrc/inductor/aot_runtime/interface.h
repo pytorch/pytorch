@@ -19,7 +19,7 @@ using AOTInductorError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
 #define AOTI_RUNTIME_FAILURE 1
 
-#define AOT_INDUCTOR_ERROR_CHECK(call)                                     \
+#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
   if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
     throw std::runtime_error(                                              \
         std::string(#call " API call failed at ") + __FILE__ + ", line " + \

@@ -143,7 +143,7 @@ AOTITorchError aoti_torch_empty_strided(
   });
 }
 
-AOTITorchError aoti_torch_from_blob(
+AOTITorchError aoti_torch_tensor_from_blob(
     AtenTensorHandle* ret,
     void* data,
     int64_t ndim,

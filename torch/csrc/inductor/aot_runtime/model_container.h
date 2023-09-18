@@ -132,7 +132,7 @@ class AOTInductorModelContainer {
       }
 
       AtenTensorHandle tensor_handle;
-      AOTI_TORCH_ERROR_CHECK(aoti_torch_from_blob(
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_from_blob(
           &tensor_handle,
           internal_ptr,
           ndim,

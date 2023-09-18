@@ -141,7 +141,8 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
     int32_t device_type,
     int32_t device_index);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_from_blob(
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+aoti_torch_tensor_from_blob(
     AtenTensorHandle* ret, // returns new reference
     void* data,
     int64_t ndim,
