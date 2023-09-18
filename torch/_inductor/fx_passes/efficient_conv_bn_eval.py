@@ -7,7 +7,6 @@ from ..pattern_matcher import (
     CallModuleVarArgs,
     config_flag,
     Match,
-    MULTIPLE,
     register_graph_pattern,
 )
 
@@ -78,7 +77,6 @@ def efficient_conv_bn_eval(
             nn.BatchNorm3d,
             nn.SyncBatchNorm,
         ],
-        users=MULTIPLE,
     ),
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=config_flag("efficient_conv_bn_eval_fx_passes"),

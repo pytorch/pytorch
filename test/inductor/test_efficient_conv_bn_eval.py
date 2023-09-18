@@ -93,7 +93,9 @@ class MultiUserConvOp(nn.Module):
         x = self.bn2(input=self.conv2(self.conv2(x)))
         # this conv-bn pair can use efficient_conv_bn_eval feature
         # just for the first forward of the `self.bn3`
-        x = self.bn3(self.bn3(input=self.conv3(input=x)))
+        # test for multiple users of one computation node
+        x = self.bn3(input=self.conv3(input=x))
+        x = self.bn3(x) + x
         return x
 
 
