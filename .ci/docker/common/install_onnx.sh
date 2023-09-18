@@ -10,7 +10,7 @@ retry () {
 
 # A bunch of custom pip dependencies for ONNX
 pip_install \
-  beartype==0.10.4 \
+  beartype==0.15.0 \
   filelock==3.9.0 \
   flatbuffers==2.0 \
   mock==5.0.1 \

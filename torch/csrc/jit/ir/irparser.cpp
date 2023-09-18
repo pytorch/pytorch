@@ -191,7 +191,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         r.k = AttributeKind::c;
         double imag = 0.0f;
         try {
-          imag = std::stod(str.substr(0, str.size() - 1));
+          imag = c10::stod(str.substr(0, str.size() - 1));
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
@@ -205,7 +205,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
           str.find('e') != std::string::npos) {
         r.k = AttributeKind::f;
         try {
-          r.f = std::stod(str);
+          r.f = c10::stod(str);
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to double";
@@ -216,7 +216,7 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       } else {
         r.k = AttributeKind::i;
         try {
-          r.i = std::stoll(str);
+          r.i = c10::stoll(str);
         } catch (const std::invalid_argument& e) {
           throw ErrorReport(token.range)
               << "Number cannot be converted to integer";
