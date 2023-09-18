@@ -242,7 +242,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
