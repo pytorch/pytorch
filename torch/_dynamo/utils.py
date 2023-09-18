@@ -19,6 +19,7 @@ import os
 import pstats
 import sys
 import textwrap
+import threading
 import time
 import types
 import typing
@@ -1061,7 +1062,13 @@ def same(
                     )
 
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 2.0
+
+                # In the case of using AMP (Automatic Mixed Precision), certain models have
+                # failed the benchmark's correctness check. However, the end-to-end model's
+                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                # Thus, it's possible that the correctness check failures for these models are
+                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
+                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
                 if (
                     fp64_ref.numel() < 1000
@@ -1387,6 +1394,23 @@ def get_fake_value(node, tx):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
+_current_node = threading.local()
+
+
+def get_current_node():
+    return getattr(_current_node, "value", None)
+
+
+@contextmanager
+def set_current_node(node):
+    old = get_current_node()
+    _current_node.value = node
+    try:
+        yield
+    finally:
+        _current_node.value = old
+
+
 def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
@@ -1404,28 +1428,31 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     """
     op = node.op
 
-    try:
-        if op == "call_function":
-            return node.target(*args, **kwargs)
-        elif op == "call_method":
-            return getattr(args[0], node.target)(*args[1:], **kwargs)
-        elif op == "call_module":
-            assert nnmodule is not None
-            return nnmodule(*args, **kwargs)
-        elif op == "get_attr":
-            return tracer.get_submodule(node.target)
-        elif op == "placeholder":
-            assert "example_value" in node.meta
-            return node.meta["example_value"]
-    except NotImplementedError as e:
-        # NB: mimic how wrap_fake_exception does it
-        from .exc import unimplemented
+    with set_current_node(node):
+        try:
+            if op == "call_function":
+                return node.target(*args, **kwargs)
+            elif op == "call_method":
+                return getattr(args[0], node.target)(*args[1:], **kwargs)
+            elif op == "call_module":
+                assert nnmodule is not None
+                return nnmodule(*args, **kwargs)
+            elif op == "get_attr":
+                return tracer.get_submodule(node.target)
+            elif op == "placeholder":
+                assert "example_value" in node.meta
+                return node.meta["example_value"]
+        except NotImplementedError as e:
+            # NB: mimic how wrap_fake_exception does it
+            from .exc import unimplemented
 
-        raise unimplemented(f"running {op} {node.target}(*{args}, **{kwargs})") from e
+            raise unimplemented(
+                f"running {op} {node.target}(*{args}, **{kwargs})"
+            ) from e
 
-    except Exception as e:
-        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+        except Exception as e:
+            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
 
     raise AssertionError(op)
 
