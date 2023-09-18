@@ -43,15 +43,14 @@ _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 
 if config.is_fbcode():
-    from triton.fb import build_paths
-    from triton.fb.build import _run_build_command
-
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
+    from triton.fb import build_paths
+    from triton.fb.build import _run_build_command
 else:
 
     def log_global_cache_errors(*args, **kwargs):
@@ -91,39 +90,45 @@ def _compile_end():
 
 log = logging.getLogger(__name__)
 
-@functools.lru_cache(None)
-def cache_dir():
 
+@functools.lru_cache(None)
+def cache_dir() -> str:
     cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
 
     # Check if the cache was hit
     if cache_dir:
-        log.info("Cache hit: Using directory from TORCHINDUCTOR_CACHE_DIR environment variable.")
+        log.info(
+            "Cache hit: Using directory from TORCHINDUCTOR_CACHE_DIR environment variable."
+        )
     else:
-        log.info("Cache miss: TORCHINDUCTOR_CACHE_DIR environment variable not set. Using default directory.")
+        log.info(
+            "Cache miss: TORCHINDUCTOR_CACHE_DIR environment variable not set. Using default directory."
+        )
         cache_dir = f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}"
 
     # Otherwise fsspec will try to interpret the path as a remote file system
-    if '://' in cache_dir:
+    if "://" in cache_dir:
         try:
             import fsspec
         except ImportError as e:
-            raise ImportError("fsspec is required to handle remote file systems but it's not installed.") from e
+            raise ImportError(
+                "fsspec is required to handle remote file systems but it's not installed."
+            ) from e
 
         # Use fsspec to handle the directory
-        fs = fsspec.filesystem(cache_dir.split(':')[0])
+        fs = fsspec.filesystem(cache_dir.split(":")[0])
         # Check if the directory exists
         if fs.exists(cache_dir):
-            log.info(f"Directory {cache_dir} already exists on remote filesystem.")
+            log.info("Directory %s already exists on remote filesystem.", cache_dir)
         else:
-            log.info(f"Creating directory {cache_dir} on remote filesystem.")
+            log.info("Creating directory %s on remote filesystem.", cache_dir)
             fs.makedirs(cache_dir, exist_ok=True)
     else:
         # Use standard os library for local files
         if os.path.exists(cache_dir):
-            log.info(f"Directory {cache_dir} already exists locally.")
+            log.info("Directory %s already exists locally.", cache_dir)
         else:
-            log.info(f"Creating local directory {cache_dir}.")
+            log.info("Creating local directory %s.", cache_dir)
             os.makedirs(cache_dir, exist_ok=True)
 
     return cache_dir
