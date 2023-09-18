@@ -811,7 +811,6 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
-
         result = self.list_type(value)(
             output, mutable_local=MutableLocal(), guards=guards
         )
