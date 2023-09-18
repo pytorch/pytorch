@@ -13,6 +13,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/equal.h>
 #include <ATen/ops/narrow.h>
