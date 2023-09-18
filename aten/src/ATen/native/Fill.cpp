@@ -55,12 +55,8 @@ Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  // If self and value are on the same device we copy_ which eliminates a D2H sync.
-  if (self.device() == value.device()) {
-    self.copy_(value);
-    return self;
-  }
-  return fill_out(self, value.item());
+  self.copy_(value);
+  return self;
 }
 
 Tensor& fill_quantized_(Tensor& self, const Tensor& value) {
