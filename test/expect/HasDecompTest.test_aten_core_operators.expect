@@ -139,10 +139,6 @@ aten::clamp_max.Tensor_out
 aten::clamp_max.out
 aten::clamp_max_
 aten::clamp_max_.Tensor
-aten::clamp_min
-aten::clamp_min.Tensor
-aten::clamp_min.Tensor_out
-aten::clamp_min.out
 aten::clamp_min_
 aten::clamp_min_.Tensor
 aten::clone
