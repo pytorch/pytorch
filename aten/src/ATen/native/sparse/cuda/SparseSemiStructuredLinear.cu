@@ -343,7 +343,7 @@ Tensor two_four_sgemm_cutlass_dispatch_layouts(
     }
 
     AT_ERROR("two_four_sgemm_cutlass_dispatch_layouts: Combination of ",
-             tensor_a_row_major ? "row-major" : "column_major", "and ",
+             tensor_a_row_major ? "row-major" : "column_major", " and ",
              tensor_b_row_major ? "row-major" : "column_major",
              " layouts for input tensors is not supported");
     return Tensor{};
