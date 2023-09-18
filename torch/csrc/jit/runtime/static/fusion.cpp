@@ -32,7 +32,7 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
   EliminateDeadCode(graph);
-  auto aliasDb = std::make_unique<AliasDb>(graph);
+  auto aliasDb = torch::make_unique<AliasDb>(graph);
   createFusionGroups(graph->block(), aliasDb.get(), min_size);
   ConstantPooling(graph);
   ConstantPropagation(graph);
