@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench_using_profiling
+from .utils import do_bench
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -408,7 +408,7 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts
             start_ts = time.time()
 
-        out = do_bench_using_profiling(fn)
+        out = do_bench(fn)
         torch.cuda.synchronize()  # shake out any CUDA errors
 
         if debug:

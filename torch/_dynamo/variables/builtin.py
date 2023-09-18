@@ -1231,7 +1231,7 @@ class BuiltinVariable(VariableTracker):
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,
-            "Can't call type() on generated custom object. "
+            f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
         )
 

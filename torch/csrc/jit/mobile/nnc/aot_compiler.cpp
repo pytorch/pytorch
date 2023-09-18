@@ -250,7 +250,7 @@ static std::vector<std::vector<int64_t>> parseInputShapes(
     std::vector<int64_t> input_dims;
     input_dims.reserve(input_dims_str.size());
     for (const auto& s : input_dims_str) {
-      input_dims.push_back(c10::stoi(s));
+      input_dims.push_back(std::stoi(s));
     }
     inputs.push_back(input_dims);
   }
@@ -301,7 +301,7 @@ static std::vector<int64_t> parseInputDynamicShapes(
   std::vector<int64_t> dynamic_dims;
   dynamic_dims.reserve(dynamic_dims_list.size());
   for (const auto& dim : dynamic_dims_list) {
-    dynamic_dims.push_back(c10::stoi(dim));
+    dynamic_dims.push_back(std::stoi(dim));
   }
   return dynamic_dims;
 }

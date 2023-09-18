@@ -257,6 +257,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -368,6 +369,11 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
+        actual = output_process_fn_grad(actual)
+        correct = output_process_fn_grad(correct)
+        actual_flat = tree_flatten(actual)[0]
+        correct_flat = tree_flatten(correct)[0]
+
         # generate random unit norm gradients
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
@@ -430,6 +436,7 @@ def check_model_cuda(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -453,6 +460,7 @@ def check_model_cuda(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
+        output_process_fn_grad=output_process_fn_grad,
     )
 
     if check_lowp:
@@ -482,6 +490,7 @@ def check_model_cuda(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
+            output_process_fn_grad=output_process_fn_grad,
         )
 
 
@@ -6058,6 +6067,21 @@ class CommonTemplate:
                 actual = compiled(*inps0)
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
+
+    def test_zero_element_mutation(self):
+        class CustomModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LeakyReLU(negative_slope=5.2955089, inplace=True)
+
+            def forward(self, inputs):
+                return self.layer1(inputs)
+
+        ip_size = [0]
+        input_tensor = torch.randn(ip_size)
+
+        mymodel = CustomModel()
+        self.common(mymodel, (input_tensor,))
 
     def test_lerp(self):
         # non-contiguous inputs for lerp
