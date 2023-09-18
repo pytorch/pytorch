@@ -2,13 +2,9 @@ import torch
 import torch.nn as nn
 
 from torch._dynamo.utils import counters
+from torch._inductor import config as inductor_config
 
-from ..pattern_matcher import (
-    CallModuleVarArgs,
-    config_flag,
-    Match,
-    register_graph_pattern,
-)
+from ..pattern_matcher import CallModuleVarArgs, Match, register_graph_pattern
 
 from .pre_grad import efficient_conv_bn_eval_pass
 
@@ -79,7 +75,8 @@ def efficient_conv_bn_eval(
         ],
     ),
     pass_dict=efficient_conv_bn_eval_pass,
-    extra_check=config_flag("efficient_conv_bn_eval_fx_passes"),
+    extra_check=lambda match: not inductor_config.freezing
+    and inductor_config.efficient_conv_bn_eval_fx_passes,
 )
 def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
     # We matched a BN node

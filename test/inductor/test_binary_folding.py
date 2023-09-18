@@ -159,7 +159,7 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
-    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": False})
+    @inductor_config.patch({"freezing": True})
     def test_conv_bn_folding(self):
         @torch.no_grad()
         def test_conv_fusion(use_bias, module, expect_success):

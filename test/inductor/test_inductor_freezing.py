@@ -269,7 +269,6 @@ class OptimizeForInferenceTemplate(TestCase):
 
             self.assertEqual(out_compiled_no_inference, out_compiled)
 
-    @config.patch({"efficient_conv_bn_eval_fx_passes": False})
     def test_folded_conv_bn(self):
         for use_bias, dtype in itertools.product(
             [True, False], [torch.float16, torch.bfloat16, torch.float32]
