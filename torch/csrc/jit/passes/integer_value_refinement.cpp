@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/integer_value_refinement.h>
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <utility>
 
