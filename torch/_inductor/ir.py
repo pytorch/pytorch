@@ -3745,15 +3745,20 @@ class DeviceCopy(ExternKernelOut):
 
 class DynamicScalar(ExternKernelAlloc):
     """
-    The result of a call to aten._local_scalar_dense.
-    """
-
-    # When output of .item or .tolist (i.e. DynamicScalar object) is passed as part of size arg to another operator,
-    # Inductor will need to reason about the object's symbolic value together with other SymPy values in the program.
-    # To make this reasoning easier, we pretend that the DynamicScalar object is a SymPy object. We achieve it with:
+    # ir.DynamicScalar represents the aten.local_scalar_dense op (used by .item or .tolist).
+    # Output of aten.local_scalar_dense op is a scalar, and it can be passed into a
+    # downstream operator as part of a size arg.
+    #
+    # When it's used downstream as part of a size arg, we have to deal with the fact that
+    # ir.DynamicScalar is an IRNode (for inductor codegen purpose) as well as a SymPy symbol
+    # (for size-related reasoning purpose). Particularly for the latter, Inductor needs to
+    # reason about the object's symbolic value together with other SymPy values in the program.
+    # To make this reasoning easier, we masquerade this DynamicScalar object as a SymPy object.
+    # We achieve this by:
     # 1. Setting __sympy__ = True.
     # 2. Redirecting __hash__ and __eq__ to the underlying SymPy symbol object.
     # 3. If an attribute is not found on the DynamicScalar object itself, then we forward it to the underlying SymPy symbol object.
+    """
     __sympy__ = True
 
     def __init__(
