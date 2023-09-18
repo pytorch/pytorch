@@ -142,9 +142,17 @@ void all_types_complex_half_bfloat16_(
   void foreach_tensor_##NAME##_scalar_kernel_cuda_(                   \
       TensorList tensors, const Scalar& scalar) {                     \
     check_foreach_api_restrictions(tensors);                          \
-    if (!can_use_fast_route(tensors, scalar, DIVISION_OP)) {          \
+    std::pair<bool, bool> p = can_use_fast_route(                     \
+      tensors, scalar, DIVISION_OP);                                  \
+    bool can_use_fast_route = p.first;                                \
+    bool has_empty_tensors = p.second;                                \
+    if (!can_use_fast_route) {                                        \
       return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_( \
           tensors, scalar);                                           \
+    }                                                                 \
+                                                                      \
+    if (has_empty_tensors) {                                          \
+      tensors = filter_out_empty_tensors(tensors);                    \
     }                                                                 \
                                                                       \
     FUNCTION##_<OP>(tensors, scalar);                                 \
@@ -153,9 +161,17 @@ void all_types_complex_half_bfloat16_(
   std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(     \
       TensorList tensors, const Scalar& scalar) {                     \
     check_foreach_api_restrictions(tensors);                          \
-    if (!can_use_fast_route(tensors, scalar, DIVISION_OP)) {          \
+    std::pair<bool, bool> p = can_use_fast_route(                     \
+      tensors, scalar, DIVISION_OP);                                  \
+    bool can_use_fast_route = p.first;                                \
+    bool has_empty_tensors = p.second;                                \
+    if (!can_use_fast_route) {                                        \
       return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(  \
           tensors, scalar);                                           \
+    }                                                                 \
+                                                                      \
+    if (has_empty_tensors) {                                          \
+      tensors = filter_out_empty_tensors(tensors);                    \
     }                                                                 \
                                                                       \
     return FUNCTION<OP>(tensors, scalar);                             \
@@ -181,9 +197,17 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(
     const Scalar& scalar,
     TensorList exponent) {
   check_foreach_api_restrictions(exponent);
-  if (!can_use_fast_route(exponent)) {
+  std::pair<bool, bool> p = can_use_fast_route(exponent);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route) {
     return at::native::foreach_scalar_pow_list_kernel_slow(scalar, exponent);
   }
+
+  if (has_empty_tensors) {
+    exponent = filter_out_empty_tensors(exponent);
+  }
+
   return all_types_complex_half_bfloat16<reverse_power_functor>(
       exponent, scalar);
 }
@@ -205,8 +229,15 @@ void foreach_tensor_sub_scalar_kernel_cuda_(
   check_foreach_api_restrictions(tensors);
   at::native::sub_check(tensors[0], scalar);
 
-  if (!can_use_fast_route(tensors, scalar)) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors, scalar);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route) {
     return at::native::foreach_tensor_sub_scalar_kernel_slow_(tensors, scalar);
+  }
+
+  if (has_empty_tensors) {
+    tensors = filter_out_empty_tensors(tensors);
   }
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -224,8 +255,15 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(
   check_foreach_api_restrictions(tensors);
   at::native::sub_check(tensors[0], scalar);
 
-  if (!can_use_fast_route(tensors, scalar)) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors, scalar);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route) {
     return at::native::foreach_tensor_sub_scalar_kernel_slow(tensors, scalar);
+  }
+
+  if (has_empty_tensors) {
+    tensors = filter_out_empty_tensors(tensors);
   }
 
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(

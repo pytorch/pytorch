@@ -34,7 +34,7 @@ struct LpNormFunctor {
   __device__ __forceinline__ void operator()(
       int chunk_size,
       TensorListMetadata<depth>& tl,
-      opmath_t* output_per_tensor,
+      opmath_t* output_per_non_empty_tensor,
       const int max_chunks_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -85,7 +85,7 @@ struct LpNormFunctor {
     auto final = at::native::cuda_utils::BlockReduceSum(val, s_vals);
 
     if (threadIdx.x == 0) {
-      output_per_tensor
+      output_per_non_empty_tensor
           [(tl.start_tensor_this_launch + tensor_loc) * max_chunks_per_tensor +
            chunk_idx] = final;
     }
@@ -94,20 +94,20 @@ struct LpNormFunctor {
 
 template <typename T, int NormType, typename opmath_t = at::opmath_type<T>>
 __global__ void lpnorm_cleanup(
-    const opmath_t* output_per_tensor,
-    T* ret_per_tensor,
+    const opmath_t* output_per_non_empty_tensor,
+    T* ret_per_non_empty_tensor,
     int max_chunks_per_tensor) {
   __shared__ opmath_t vals[512];
 
   const opmath_t* output_this_tensor =
-      output_per_tensor + blockIdx.x * max_chunks_per_tensor;
+      output_per_non_empty_tensor + blockIdx.x * max_chunks_per_tensor;
   opmath_t val = 0;
   for (int i = threadIdx.x; i < max_chunks_per_tensor; i += blockDim.x) {
     val += output_this_tensor[i];
   }
   opmath_t final = at::native::cuda_utils::BlockReduceSum<opmath_t>(val, vals);
   if (threadIdx.x == 0) {
-    ret_per_tensor[blockIdx.x] = NormType == 1 ? final : ::sqrt(final);
+    ret_per_non_empty_tensor[blockIdx.x] = NormType == 1 ? final : ::sqrt(final);
   }
 }
 
@@ -134,28 +134,39 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
             at::isComplexType(scalar_type);
       });
-  if (!can_use_fast_route(tensors) || has_int_or_complex ||
+  std::pair<bool, bool> pair = can_use_fast_route(tensors);
+  bool can_use_fast_route = pair.first;
+  bool has_empty_tensors = pair.second;
+
+  if (!can_use_fast_route || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
     return foreach_tensor_norm_slow(tensors, ord);
   }
 
-  const int ntensors = tensors.size();
-  int max_chunks_per_tensor = -1;
+  std::vector<Tensor> nonempty_tensors;
+  if (has_empty_tensors) {
+    nonempty_tensors = filter_out_empty_tensors(tensors);
+  } else {
+    nonempty_tensors = tensors.vec();
+  }
+  auto tensor_lists = std::vector<std::vector<Tensor>>{nonempty_tensors};
 
-  for (int t = 0; t < ntensors; t++) {
+  const auto n_nonempty_tensors = nonempty_tensors.size();
+  auto max_chunks_per_tensor = -1;
+
+  for (int t = 0; t < n_nonempty_tensors; t++) {
     int max_chunks_this_tensor =
-        (tensors[t].numel() + kChunkSize - 1) / kChunkSize;
+        (nonempty_tensors[t].numel() + kChunkSize - 1) / kChunkSize;
     if (max_chunks_this_tensor > max_chunks_per_tensor) {
       max_chunks_per_tensor = max_chunks_this_tensor;
     }
   }
   const auto options = tensors[0].options();
-  auto output_per_tensor = at::zeros(
-      {ntensors * max_chunks_per_tensor},
-      options.dtype(toOpMathType(tensors[0].scalar_type())));
-  auto ret_per_tensor = at::empty({ntensors}, options);
+  auto output_per_non_empty_tensor = at::zeros(
+      {n_nonempty_tensors * static_cast<unsigned long>(max_chunks_per_tensor)},
+      options.dtype(toOpMathType(nonempty_tensors[0].scalar_type())));
+  auto ret_per_non_empty_tensor = at::empty({n_nonempty_tensors}, options);
 
-  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
   if (p == static_cast<double>(1)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         kHalf,
@@ -167,15 +178,15 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           multi_tensor_apply<1>(
               tensor_lists,
               LpNormFunctor<scalar_t, 1>(),
-              output_per_tensor.mutable_data_ptr<opmath_t>(),
+              output_per_non_empty_tensor.mutable_data_ptr<opmath_t>(),
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
           const at::cuda::OptionalCUDAGuard device_guard(
-              device_of(output_per_tensor));
+              device_of(output_per_non_empty_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          lpnorm_cleanup<scalar_t, 1><<<ntensors, 512, 0, stream>>>(
-              output_per_tensor.const_data_ptr<opmath_t>(),
-              ret_per_tensor.mutable_data_ptr<scalar_t>(),
+          lpnorm_cleanup<scalar_t, 1><<<n_nonempty_tensors, 512, 0, stream>>>(
+              output_per_non_empty_tensor.const_data_ptr<opmath_t>(),
+              ret_per_non_empty_tensor.mutable_data_ptr<scalar_t>(),
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -190,15 +201,15 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
           multi_tensor_apply<1>(
               tensor_lists,
               LpNormFunctor<scalar_t, 2>(),
-              output_per_tensor.mutable_data_ptr<opmath_t>(),
+              output_per_non_empty_tensor.mutable_data_ptr<opmath_t>(),
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
           const at::cuda::OptionalCUDAGuard device_guard(
-              device_of(output_per_tensor));
+              device_of(output_per_non_empty_tensor));
           auto stream = at::cuda::getCurrentCUDAStream();
-          lpnorm_cleanup<scalar_t, 2><<<ntensors, 512, 0, stream>>>(
-              output_per_tensor.const_data_ptr<opmath_t>(),
-              ret_per_tensor.mutable_data_ptr<scalar_t>(),
+          lpnorm_cleanup<scalar_t, 2><<<n_nonempty_tensors, 512, 0, stream>>>(
+              output_per_non_empty_tensor.const_data_ptr<opmath_t>(),
+              ret_per_non_empty_tensor.mutable_data_ptr<scalar_t>(),
               max_chunks_per_tensor);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
         });
@@ -209,10 +220,18 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         p);
   }
 
+  // correctly assign values to only non-empty slots, as the empty slots should get skipped
+  const auto ntensors = tensors.size();
   std::vector<Tensor> result;
   result.reserve(ntensors);
-  for (const auto& i : c10::irange(ntensors)) {
-    result.emplace_back(ret_per_tensor[i]);
+  int i = 0;
+  for (const auto& j : c10::irange(ntensors)) {
+    if (tensors[j].numel() != 0) {
+      result.emplace_back(ret_per_non_empty_tensor[i]);
+      i++;
+    } else {
+      result.emplace_back(at::empty({0}, options));
+    }
   }
   return result;
 }

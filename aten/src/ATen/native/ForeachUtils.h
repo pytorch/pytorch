@@ -188,6 +188,49 @@ bool check_fast_path_restrictions(
              does_op_promote_integer_inputs_to_float);
 }
 
+// Helper function very similar to _check_tensors_share_sizes_and_strides called
+// in check_fast_path_restrictions_and_for_empty_tensors to check if corresponding
+// tensors in tensor lists have the same sizes and strides.
+// The difference is that this also returns ANOTHER bool representing whether the
+// tensorLists contain empty tensors (where numel() == 0). This boolean is ONLY
+// APPLICABLE if the first boolean is true. Otherwise, it is meaningless.
+std::pair<bool, bool> _check_tensors_share_sizes_and_strides_and_for_empty_tensors(ArrayRef<TensorList> tensorLists) {
+  bool has_empty_tensor = false;
+  for (const auto i : c10::irange(1, tensorLists.size())) {
+    for (const auto j : c10::irange(tensorLists[0].size())) {
+      if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
+          tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+        return std::pair(false, has_empty_tensor);
+      }
+      has_empty_tensor |= tensorLists[0][j].numel() == 0;
+    }
+  }
+
+  return std::pair(true, has_empty_tensor);;
+}
+
+// Variant of check_fast_path_restrictions. Makes the checks and also returns ANOTHER
+// bool representing whether the tensorLists contain empty tensors (where numel() == 0).
+// This boolean is ONLY APPLICABLE if the first boolean is true. Otherwise, it is meaningless.
+std::pair<bool, bool> check_fast_path_restrictions_and_for_empty_tensors(
+    ArrayRef<TensorList> tensorLists,
+    ArrayRef<Scalar> scalarList = {},
+    bool does_op_promote_integer_inputs_to_float = false) {
+
+  std::pair<bool, bool> result = _check_tensors_share_sizes_and_strides_and_for_empty_tensors(tensorLists);
+  bool tensors_share_sizes_and_strides = result.first;
+  bool has_empty_tensor = result.second;
+
+  bool okay_for_fast_path = _check_tensors_share_device_and_dtype(tensorLists) &&
+      tensors_share_sizes_and_strides &&
+      _check_tensors_do_type_promotion_with_scalars(
+             tensorLists[0],
+             scalarList,
+             does_op_promote_integer_inputs_to_float);
+
+  return std::pair(okay_for_fast_path, has_empty_tensor);
+}
+
 std::vector<c10::Scalar> convert_tensor_to_scalar_list(
     const Tensor& scalarList_,
     int64_t expect_length) {
@@ -227,20 +270,83 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
-bool can_use_fast_route(
+// returns two bools: can_use_fast_route, has_empty_tensor
+std::pair<bool, bool> can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
     bool does_op_promote_integer_inputs_to_float = false) {
-  return check_fast_path_restrictions(
+  return check_fast_path_restrictions_and_for_empty_tensors(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
-bool can_use_fast_route(
+// returns two bools: can_use_fast_route, has_empty_tensor
+std::pair<bool, bool> can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,
     bool does_op_promote_integer_inputs_to_float = false) {
   return can_use_fast_route(
       {tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
+}
+
+// This function takes in ArrayRefs and spits out std::vectors of tensors.
+std::vector<Tensor> filter_out_empty_tensors(TensorList tensorList) {
+  std::vector<Tensor> filtered_tensorList;
+  filtered_tensorList.reserve(tensorList.size());
+  for (auto i : c10::irange(tensorList.size())) {
+    if (tensorList[i].numel() != 0) {
+      filtered_tensorList.emplace_back(tensorList[i]);
+    }
+  }
+  return filtered_tensorList;
+}
+
+// This function takes in ArrayRefs and spits out std::vectors of tensors.
+std::vector<std::vector<Tensor>> filter_out_empty_tensors(ArrayRef<TensorList> tensorLists) {
+  // allocate memory ahead of time
+  std::vector<std::vector<Tensor>> filtered_tensorLists;
+  filtered_tensorLists.reserve(tensorLists.size());
+  for (const auto& tensorList : tensorLists) {
+    std::vector<Tensor> filtered_tensorList;
+    filtered_tensorList.reserve(tensorList.size());
+    filtered_tensorLists.emplace_back(filtered_tensorList);
+  }
+
+  for (auto i : c10::irange(tensorLists[0].size())) {
+    if (tensorLists[0][i].numel() != 0) {
+      for (auto j : c10::irange(tensorLists.size())) {
+        filtered_tensorLists[j].emplace_back(tensorLists[j][i]);
+      }
+    }
+  }
+
+  return filtered_tensorLists;
+}
+
+// This function takes in ArrayRefs and spits out std::vectors of tensors and scalars.
+// We assume scalarList is matching in length with the tensor lists.
+std::pair<std::vector<std::vector<Tensor>>, std::vector<Scalar>> filter_out_empty_tensors(
+    ArrayRef<TensorList> tensorLists, ArrayRef<Scalar> scalarList) {
+  std::vector<std::vector<Tensor>> filtered_tensorLists;
+  std::vector<Scalar> filtered_scalarList;
+
+  // allocate memory ahead of time
+  filtered_tensorLists.reserve(tensorLists.size());
+  for (const auto& tensorList : tensorLists) {
+    std::vector<Tensor> filtered_tensorList;
+    filtered_tensorList.reserve(tensorList.size());
+    filtered_tensorLists.emplace_back(filtered_tensorList);
+  }
+
+  for (auto i : c10::irange(tensorLists[0].size())) {
+    if (tensorLists[0][i].numel() != 0) {
+      for (auto j : c10::irange(tensorLists.size())) {
+        filtered_tensorLists[j].emplace_back(tensorLists[j][i]);
+      }
+      filtered_scalarList.emplace_back(scalarList[i]);
+    }
+  }
+
+  return std::pair(filtered_tensorLists, filtered_scalarList);
 }
 
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;

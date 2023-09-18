@@ -92,11 +92,18 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
   void foreach_tensor_##NAME##_tensor_kernel_cuda_(                      \
       TensorList tensors, const Tensor& scalar) {                        \
     check_foreach_api_restrictions(tensors);                             \
-    if (!(can_use_fast_route(                                            \
-              ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
-          tensors[0].scalar_type() == scalar.scalar_type())) {           \
+    std::pair<bool, bool> p = can_use_fast_route(                        \
+        ArrayRef<TensorList>{tensors}, {}, DIVISION_OP);                 \
+    bool can_use_fast_route = p.first;                                   \
+    bool has_empty_tensors = p.second;                                   \
+    if (!(can_use_fast_route &&                                          \
+        tensors[0].scalar_type() == scalar.scalar_type())) {             \
       return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(    \
           tensors, scalar);                                              \
+    }                                                                    \
+                                                                         \
+    if (has_empty_tensors) {                                             \
+      tensors = filter_out_empty_tensors(tensors);                       \
     }                                                                    \
                                                                          \
     FUNCTION##_<OP>(tensors, scalar);                                    \
@@ -105,11 +112,18 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
   std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(        \
       TensorList tensors, const Tensor& scalar) {                        \
     check_foreach_api_restrictions(tensors);                             \
-    if (!(can_use_fast_route(                                            \
-              ArrayRef<TensorList>{tensors}, {}, DIVISION_OP) &&         \
+    std::pair<bool, bool> p = can_use_fast_route(                        \
+        ArrayRef<TensorList>{tensors}, {}, DIVISION_OP);                 \
+    bool can_use_fast_route = p.first;                                   \
+    bool has_empty_tensors = p.second;                                   \
+    if (!(can_use_fast_route &&                                          \
           tensors[0].scalar_type() == scalar.scalar_type())) {           \
       return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(     \
           tensors, scalar);                                              \
+    }                                                                    \
+                                                                         \
+    if (has_empty_tensors) {                                             \
+      tensors = filter_out_empty_tensors(tensors);                       \
     }                                                                    \
                                                                          \
     return FUNCTION<OP>(tensors, scalar);                                \

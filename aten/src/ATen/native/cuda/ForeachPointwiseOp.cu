@@ -171,10 +171,22 @@ std::vector<Tensor> foreach_pointwise_op(
       const Scalar& scalar) {                                           \
     check_foreach_api_restrictions(input, tensors1, tensors2);          \
                                                                         \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) ||     \
+    std::pair<bool, bool> p = can_use_fast_route(                       \
+      {input, tensors1, tensors2}, scalar);                             \
+    bool can_use_fast_route_ = p.first;                                 \
+    bool has_empty_tensors = p.second;                                  \
+                                                                        \
+    if (!can_use_fast_route ||                                          \
         has_integral_tensor(input, /* includeBool */ true)) {           \
       return at::native::foreach_tensor_##NAME##_scalar_slow(           \
           input, tensors1, tensors2, scalar);                           \
+    }                                                                   \
+                                                                        \
+    if (has_empty_tensors) {                                            \
+      auto res = filter_out_empty_tensors({input, tensors1, tensors2}); \
+      input = res[0];                                                   \
+      tensors1 = res[1];                                                \
+      tensors2 = res[2];                                                \
     }                                                                   \
                                                                         \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar); \
@@ -187,10 +199,22 @@ std::vector<Tensor> foreach_pointwise_op(
       const Scalar& scalar) {                                           \
     check_foreach_api_restrictions(input, tensors1, tensors2);          \
                                                                         \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalar) ||     \
+    std::pair<bool, bool> p = can_use_fast_route(                       \
+      {input, tensors1, tensors2}, scalar);                             \
+    bool can_use_fast_route_ = p.first;                                 \
+    bool has_empty_tensors = p.second;                                  \
+                                                                        \
+    if (!can_use_fast_route ||                                          \
         has_integral_tensor(input, /* includeBool */ true)) {           \
       return at::native::foreach_tensor_##NAME##_scalar_slow_(          \
           input, tensors1, tensors2, scalar);                           \
+    }                                                                   \
+                                                                        \
+    if (has_empty_tensors) {                                            \
+      auto res = filter_out_empty_tensors({input, tensors1, tensors2}); \
+      input = res[0];                                                   \
+      tensors1 = res[1];                                                \
+      tensors2 = res[2];                                                \
     }                                                                   \
                                                                         \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);       \
@@ -204,10 +228,24 @@ std::vector<Tensor> foreach_pointwise_op(
       at::ArrayRef<Scalar> scalars) {                                    \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);  \
                                                                          \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) ||     \
+    std::pair<bool, bool> p = can_use_fast_route(                        \
+      {input, tensors1, tensors2}, scalars);                             \
+    bool can_use_fast_route_ = p.first;                                  \
+    bool has_empty_tensors = p.second;                                   \
+                                                                         \
+    if (!can_use_fast_route ||                                           \
         has_integral_tensor(input, /* includeBool */ true)) {            \
       return at::native::foreach_tensor_##NAME##_scalarlist_slow(        \
           input, tensors1, tensors2, scalars);                           \
+    }                                                                    \
+                                                                         \
+    if (has_empty_tensors) {                                             \
+      auto res = filter_out_empty_tensors(                               \
+        {input, tensors1, tensors2}, scalars);                           \
+      input = res.first[0];                                              \
+      tensors1 = res.first[1];                                           \
+      tensors2 = res.first[2];                                           \
+      scalars = res.second;                                              \
     }                                                                    \
                                                                          \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars); \
@@ -220,10 +258,24 @@ std::vector<Tensor> foreach_pointwise_op(
       at::ArrayRef<Scalar> scalars) {                                    \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);  \
                                                                          \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) ||     \
+    std::pair<bool, bool> p = can_use_fast_route(                        \
+      {input, tensors1, tensors2}, scalars);                             \
+    bool can_use_fast_route_ = p.first;                                  \
+    bool has_empty_tensors = p.second;                                   \
+                                                                         \
+    if (!can_use_fast_route ||                                           \
         has_integral_tensor(input, /* includeBool */ true)) {            \
       return at::native::foreach_tensor_##NAME##_scalarlist_slow_(       \
           input, tensors1, tensors2, scalars);                           \
+    }                                                                    \
+                                                                         \
+    if (has_empty_tensors) {                                             \
+      auto res = filter_out_empty_tensors(                               \
+        {input, tensors1, tensors2}, scalars);                           \
+      input = res.first[0];                                              \
+      tensors1 = res.first[1];                                           \
+      tensors2 = res.first[2];                                           \
+      scalars = res.second;                                              \
     }                                                                    \
                                                                          \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);       \
@@ -237,10 +289,22 @@ std::vector<Tensor> foreach_pointwise_op(
       const Tensor& scalars_) {                                           \
     auto scalars = convert_tensor_to_scalar_list(scalars_, input.size()); \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
-    if (!can_use_fast_route({input, tensors1, tensors2}) ||               \
+    std::pair<bool, bool> p = can_use_fast_route(                         \
+      {input, tensors1, tensors2});                                       \
+    bool can_use_fast_route_ = p.first;                                   \
+    bool has_empty_tensors = p.second;                                    \
+                                                                          \
+    if (!can_use_fast_route ||                                            \
         has_integral_tensor(input, /* includeBool */ true)) {             \
       return at::native::foreach_tensor_##NAME##_scalarlist_slow(         \
           input, tensors1, tensors2, scalars);                            \
+    }                                                                     \
+                                                                          \
+    if (has_empty_tensors) {                                              \
+      auto res = filter_out_empty_tensors({input, tensors1, tensors2});   \
+      input = res[0];                                                     \
+      tensors1 = res[1];                                                  \
+      tensors2 = res[2];                                                  \
     }                                                                     \
                                                                           \
     return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalars);  \
@@ -253,10 +317,22 @@ std::vector<Tensor> foreach_pointwise_op(
       const Tensor& scalars_) {                                           \
     auto scalars = convert_tensor_to_scalar_list(scalars_, input.size()); \
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);   \
-    if (!can_use_fast_route({input, tensors1, tensors2}, scalars) ||      \
+    std::pair<bool, bool> p = can_use_fast_route(                         \
+      {input, tensors1, tensors2}, scalars);                              \
+    bool can_use_fast_route_ = p.first;                                   \
+    bool has_empty_tensors = p.second;                                    \
+                                                                          \
+    if (!can_use_fast_route ||                                            \
         has_integral_tensor(input, /* includeBool */ true)) {             \
       return at::native::foreach_tensor_##NAME##_scalarlist_slow_(        \
           input, tensors1, tensors2, scalars);                            \
+    }                                                                     \
+                                                                          \
+    if (has_empty_tensors) {                                              \
+      auto res = filter_out_empty_tensors({input, tensors1, tensors2});   \
+      input = res[0];                                                     \
+      tensors1 = res[1];                                                  \
+      tensors2 = res[2];                                                  \
     }                                                                     \
                                                                           \
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);        \

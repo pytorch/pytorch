@@ -215,19 +215,31 @@ void floating_half_bfloat16_(TensorList tensors) {
 #define OP_CUSTOM_FUNCTOR(function, op_name, functor_name)                  \
   std::vector<Tensor> foreach_tensor_##op_name##_cuda(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                                \
-    if (!can_use_fast_route(tensors) ||                                     \
+    std::pair<bool, bool> p = can_use_fast_route(tensors);                  \
+    bool can_use_fast_route = p.first;                                      \
+    bool has_empty_tensors = p.second;                                      \
+    if (!can_use_fast_route ||                                              \
         has_integral_tensor(tensors, /* includeBool */ true)) {             \
       return at::native::foreach_tensor_##op_name##_slow(tensors);          \
+    }                                                                       \
+    if (has_empty_tensors) {                                                \
+      tensors = filter_out_empty_tensors(tensors);                          \
     }                                                                       \
     return function<functor_name>(tensors);                                 \
   }                                                                         \
   void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                                \
-    if (!can_use_fast_route(tensors) ||                                     \
+    std::pair<bool, bool> p = can_use_fast_route(tensors);                  \
+    bool can_use_fast_route = p.first;                                      \
+    bool has_empty_tensors = p.second;                                      \
+    if (!can_use_fast_route ||                                              \
         has_integral_tensor(tensors, /* includeBool */ true)) {             \
       return at::native::foreach_tensor_##op_name##_slow_(tensors);         \
     }                                                                       \
                                                                             \
+    if (has_empty_tensors) {                                                \
+      tensors = filter_out_empty_tensors(tensors);                          \
+    }                                                                       \
     function##_<functor_name>(tensors);                                     \
   }
 
@@ -317,8 +329,15 @@ OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sign, Sign)
 std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
 
-  if (!can_use_fast_route(tensors)) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route) {
     return at::native::foreach_tensor_neg_slow(tensors);
+  }
+
+  if (has_empty_tensors) {
+    tensors = filter_out_empty_tensors(tensors);
   }
 
   TORCH_CHECK(
@@ -331,8 +350,15 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
 void foreach_tensor_neg_cuda_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
 
-  if (!can_use_fast_route(tensors)) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route) {
     return at::native::foreach_tensor_neg_slow_(tensors);
+  }
+
+  if (has_empty_tensors) {
+    tensors = filter_out_empty_tensors(tensors);
   }
 
   TORCH_CHECK(
@@ -358,10 +384,16 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
       std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
         return at::isComplexType(t.scalar_type());
       });
-  if (!can_use_fast_route(tensors) || has_complex) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route || has_complex) {
     return at::native::foreach_tensor_abs_slow(tensors);
   }
 
+  if (has_empty_tensors) {
+    tensors = filter_out_empty_tensors(tensors);
+  }
   return all_types_complex_bfloat16_half_bool<Abs>(tensors);
 }
 
@@ -371,8 +403,15 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
       std::any_of(tensors.begin(), tensors.end(), [](const auto& t) {
         return at::isComplexType(t.scalar_type());
       });
-  if (!can_use_fast_route(tensors) || has_complex) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route || has_complex) {
     return at::native::foreach_tensor_abs_slow_(tensors);
+  }
+
+  if (has_empty_tensors) {
+    tensors = filter_out_empty_tensors(tensors);
   }
 
   all_types_complex_bfloat16_half_bool_<Abs>(tensors);
@@ -381,12 +420,19 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
 void foreach_tensor_zero_cuda_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
 
-  if (!can_use_fast_route(tensors)) {
+  std::pair<bool, bool> p = can_use_fast_route(tensors);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
+  if (!can_use_fast_route) {
     return at::native::foreach_tensor_zero_slow_(tensors);
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  tensor_lists.emplace_back(tensors.vec());
+  if (has_empty_tensors) {
+    tensor_lists = filter_out_empty_tensors({tensors});
+  } else {
+    tensor_lists.emplace_back(tensors.vec());
+  }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half,

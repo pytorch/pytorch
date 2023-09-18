@@ -104,10 +104,13 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
   check_foreach_api_restrictions(scaled_grads);
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
+  std::pair<bool, bool> p = can_use_fast_route(scaled_grads);
+  bool can_use_fast_route = p.first;
+  bool has_empty_tensors = p.second;
 
   // is_non_overlapping_and_dense() is not available in Python.
   // GradScaler can't filter for it. We need to filter here.
-  if (can_use_fast_route(scaled_grads)) {
+  if (can_use_fast_route) {
     // Hopefully common case.
     // can_use_fast_route is true, which confirms:
     //  - all scaled_grads are strided
@@ -115,8 +118,14 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     //  - all scaled_grads are on the same device
     //  - all scaled_grads are of the same dtype
     TORCH_CHECK(scaled_grads[0].is_cuda(), "scaled_grads must be CUDA tensors.");
-    // Sets up MTA launch to use scaled_grads as-is.
-    tensor_lists.emplace_back(scaled_grads.vec());
+    // Sets up MTA launch to use scaled_grads as-is, but with empty tensors filtered out.
+    std::vector<Tensor> nonempty_scaled_grads;
+    if (has_empty_tensors) {
+          nonempty_scaled_grads = filter_out_empty_tensors(scaled_grads);
+    } else {
+          nonempty_scaled_grads = scaled_grads.vec();
+    }
+    tensor_lists.emplace_back(nonempty_scaled_grads);
   } else {
     // Hopefully uncommon case.
     // can_use_fast_route is an all-or-nothing check.  In this path it was false,
@@ -138,7 +147,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
         _amp_non_finite_check_and_unscale_cuda_(const_cast<Tensor&>(t),
                                                 found_inf,
                                                 inv_scale);
-      } else {
+      } else if (t.numel() != 0) {
         tensor_lists[0].push_back(t);
       }
     }
