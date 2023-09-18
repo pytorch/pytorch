@@ -372,6 +372,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
+            aten.unsafe_split.Tensor,
             aten.upsample_bilinear2d,
             aten.upsample_nearest2d_backward,
             aten.view_as_complex,
