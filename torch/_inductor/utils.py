@@ -36,13 +36,14 @@ from unittest import mock
 import sympy
 
 import torch
+
+from torch._dynamo.runtime import get_runtime_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
-
 from . import config
-from .cuda_properties import current_device
+from .device_properties import current_device, get_device_properties
 
 log = logging.getLogger(__name__)
 
@@ -160,6 +161,24 @@ def do_bench(*args, **kwargs):
 
 
 @functools.lru_cache(None)
+def has_triton_package() -> bool:
+    try:
+        import triton
+
+        return triton is not None
+    except ImportError:
+        return False
+
+
+@functools.lru_cache(None)
+def has_triton() -> bool:
+    def is_cuda_compatible_with_triton():
+        return torch.cuda.is_available() and get_device_properties().major >= 7
+
+    return is_cuda_compatible_with_triton() and has_triton_package()
+
+
+@functools.lru_cache(None)
 def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
@@ -180,8 +199,8 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
         device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
+    if device.type != "cpu" and device.index is None:
+        return torch.device(device.type, index=current_device(device.type))
     return device
 
 
@@ -278,26 +297,29 @@ def gen_gm_and_inputs(target, args, kwargs):
     return gm, a_args
 
 
-def synchronize():
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+def synchronize(device: str = "cuda"):
+    if device == "cpu":
+        return
+    device_runtime = get_runtime_for_device(device)
+    if device_runtime.is_available():
+        device_runtime.synchronize()
 
 
-def timed(model: Callable[..., Any], example_inputs, times: int = 1) -> float:
-    synchronize()
+def timed(model: Callable[..., Any], device: str = "cuda", times: int = 1) -> float:
+    synchronize(device)
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
-        result = model(*example_inputs)
-        synchronize()
+        result = model()
+        synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
     assert result is not None
     return t1 - t0
 
 
-def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
-    timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
+def print_performance(fn, device: str = "cuda", times=10, repeat=10, baseline=1.0):
+    timings = torch.tensor([timed(fn, device, times) for _ in range(repeat)])
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took

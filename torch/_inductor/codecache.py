@@ -37,7 +37,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 
 import torch
 
-from torch._inductor import config, cuda_properties, exc
+from torch._dynamo.runtime import get_runtime_for_device
+from torch._inductor import config, device_properties, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
 
@@ -1672,8 +1673,10 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
-def _worker_compile(kernel_name: str, source_code: str, cc: int, device: int) -> None:
-    cuda_properties.set_compiler_worker_current_device(device)
+def _worker_compile(
+    kernel_name: str, source_code: str, cc: int, device: torch.device
+) -> None:
+    device_properties.set_compiler_worker_current_device(device)
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
@@ -1717,7 +1720,8 @@ _watchdog_thread: Optional[Thread] = None
 
 
 class AsyncCompile:
-    def __init__(self) -> None:
+    def __init__(self, device: str = "cuda") -> None:
+        self.device = device
         pass
 
     @staticmethod
@@ -1731,7 +1735,7 @@ class AsyncCompile:
     def process_pool() -> ProcessPoolExecutor:
         # ensure properties have been calculated before processes
         # are forked
-        cuda_properties._properties()
+        device_properties._properties()
         assert config.compile_threads > 1
         orig_ppid = os.getpid()
 
@@ -1813,9 +1817,9 @@ class AsyncCompile:
         _compile_start()
 
         if config.compile_threads > 1:
-            major, minor = torch.cuda.get_device_capability()
-            device = torch.cuda.current_device()
-            cc = major * 10 + minor
+            device_runtime = get_runtime_for_device(self.device)
+            device = torch.device(self.device, device_runtime.current_device())
+            cc = device_runtime.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device
             )
@@ -1860,4 +1864,6 @@ class AsyncCompile:
         _compile_end()
 
 
-AsyncCompile.warm_pool()
+@functools.lru_cache(None)
+def warm_pool_once():
+    AsyncCompile.warm_pool()

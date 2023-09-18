@@ -48,8 +48,8 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
+from .device_properties import get_device_properties
 from .utils import (
     argsort,
     cache_on_self,

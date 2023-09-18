@@ -947,7 +947,12 @@ class GraphLowering(torch.fx.Interpreter):
 
     @dynamo_timed
     def compile_to_module(self):
-        from .codecache import PyCodeCache
+        from .codecache import PyCodeCache, warm_pool_once
+
+        # We need to warm process pool lazily.To make sure, even out-of-tree
+        # package's device runtime have been registered before processes are
+        # forked.
+        warm_pool_once()
 
         code, linemap = self.codegen()
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
