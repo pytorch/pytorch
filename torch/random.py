@@ -23,7 +23,6 @@ def get_rng_state() -> torch.Tensor:
     return default_generator.get_state()
 
 
-@torch._disable_dynamo
 def manual_seed(seed) -> torch._C.Generator:
     r"""Sets the seed for generating random numbers. Returns a
     `torch.Generator` object.

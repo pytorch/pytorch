@@ -1,4 +1,5 @@
 #define PY_SSIZE_T_CLEAN
+#include <torch/csrc/dynamo/cpp_shim.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
@@ -179,9 +180,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 bool is_dynamo_compiling = false;
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
-static PyObject* profiler_start_hook = NULL;
-static PyObject* profiler_end_hook = NULL;
-static PyObject* guard_profiler_name_str = NULL; /* cached py str */
+const char* cache_lookup_profiler_str = "TorchDynamo Cache Lookup";
 
 // Points to the extra scratch space on the code object
 static Py_ssize_t extra_index = -1;
@@ -583,8 +582,7 @@ Debugger helper functions.
 */
 
 PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
-  // TODO(anijain2305) - CacheEntry being the first class Python object might
-  // obviate the need of this function. Revisit.
+  // get the cache entry out of a code object
   PyObject* object = NULL;
   if (!PyArg_ParseTuple(args, "O", &object)) {
     return NULL;
@@ -597,26 +595,12 @@ PyObject* _debug_get_cache_entry_list(PyObject* self, PyObject* args) {
 
   ExtraState* extra = get_extra_state(code);
   CacheEntry* current_node = extract_cache_entry(extra);
-
-  PyObject* outer_list = PyList_New(0);
-  if (!outer_list) {
-    return NULL;  // Return NULL if failed to create list
+  if (current_node == NULL)
+  {
+    Py_RETURN_NONE;
   }
-  while (current_node != NULL && current_node != (CacheEntry*)Py_None) {
-    // Creating a new Python tuple for the check_fn and code of current CacheEntry
-    PyObject* inner_list = PyTuple_Pack(2, current_node->check_fn, current_node->code);
-    int flag = PyList_Append(outer_list, inner_list);  // Add the inner list to the outer list
-    Py_DECREF(inner_list);  // Decrement our own reference
-    if (flag < 0) {
-      Py_DECREF(outer_list);  // Clean up if failed to append
-      return NULL;
-    }
-
-    // Move to the next node in the linked list
-    current_node = current_node->next;
-  }
-  // Return the outer list
-  return outer_list;
+  Py_INCREF(current_node);
+  return (PyObject*)current_node;
 }
 
 static inline PyObject* call_callback(
@@ -658,22 +642,6 @@ static PyObject* call_guard_fail_hook(
       f_locals,
       (Py_ssize_t)index,
       (e->next == (CacheEntry*)Py_None ? Py_True : Py_False));
-}
-
-static PyObject* call_profiler_start_hook(PyObject* name_str) {
-  if (profiler_start_hook == NULL) return NULL;
-  return PyObject_CallOneArg(profiler_start_hook, name_str);
-}
-
-static void call_profiler_end_hook(PyObject* record) {
-  // 'record' obj is the return value of calling _start_hook()
-  if (profiler_end_hook == NULL || record == NULL) return;
-  PyObject* res = PyObject_CallOneArg(profiler_end_hook, record);
-  if (res == NULL) {
-    PyErr_WriteUnraisable(profiler_end_hook);
-    return;
-  }
-  Py_DECREF(res);
 }
 
 // Return value: borrowed reference
@@ -723,7 +691,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
   return lookup(e->next, frame, e, index + 1);
 }
 
-inline static PyObject* eval_custom_code(
+inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -864,6 +832,23 @@ inline static PyObject* eval_custom_code(
   return result;
 }
 
+// This wrapper function adds a profiler event
+inline static PyObject* eval_custom_code(
+    PyThreadState* tstate,
+    THP_EVAL_API_FRAME_OBJECT* frame,
+    PyCodeObject* code,
+    int throw_flag) {
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
+  PyObject* result = eval_custom_code_impl(
+    tstate,
+    frame,
+    code,
+    throw_flag
+  );
+  _pytorch_record_function_exit(rf);
+  return result;
+}
+
 static PyObject* _custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -954,10 +939,9 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
-    PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
+    _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
-    call_profiler_end_hook(hook_record);
-    Py_XDECREF(hook_record);
+    _pytorch_record_function_exit(rf);
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
@@ -980,10 +964,9 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
+  _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
-  call_profiler_end_hook(hook_record);
-  Py_XDECREF(hook_record);
+  _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
@@ -1146,27 +1129,6 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
-static PyObject* clear_profiler_hooks(PyObject* module, PyObject* unused) {
-  Py_CLEAR(profiler_start_hook);
-  Py_CLEAR(profiler_end_hook);
-  Py_RETURN_NONE;
-}
-
-static PyObject* set_profiler_hooks(PyObject* module, PyObject* args) {
-  PyObject* start = NULL;
-  PyObject* end = NULL;
-  if (!PyArg_ParseTuple(args, "OO:set_profiler_hooks", &start, &end)) {
-    return NULL;
-  }
-  if (start == Py_None || end == Py_None) {
-    clear_profiler_hooks(module, NULL);
-  } else {
-    Py_XSETREF(profiler_start_hook, Py_NewRef(start));
-    Py_XSETREF(profiler_end_hook, Py_NewRef(end));
-  }
-  Py_RETURN_NONE;
-}
-
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"reset_code", reset_code, METH_O, NULL},
@@ -1174,8 +1136,6 @@ static PyMethodDef _methods[] = {
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_fail_hook", set_guard_fail_hook, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
-    {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
-    {"clear_profiler_hooks", clear_profiler_hooks, METH_NOARGS, NULL},
     {"_debug_get_cache_entry_list", _debug_get_cache_entry_list, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
@@ -1192,11 +1152,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
   if (extra_index < 0) {
     PyErr_SetString(PyExc_RuntimeError,
                     "dynamo: unable to register extra index");
-    return NULL;
-  }
-
-  guard_profiler_name_str = PyUnicode_FromString("TorchDynamo Cache Lookup");
-  if (guard_profiler_name_str == NULL) {
     return NULL;
   }
 

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import torch
 import torch._dynamo as torchdynamo
-from functorch.experimental.control_flow import map
+from functorch.experimental.control_flow import map, cond
 from torch import Tensor
 from torch.export import Constraint
 from torch._export import DEFAULT_EXPORT_DYNAMO_CONFIG, dynamic_dim, export, capture_pre_autograd_graph
@@ -964,20 +964,18 @@ class TestExport(TestCase):
 
         inp = torch.ones(5, 5)
         exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
 
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
 
         exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
         # This seems fine because the exported program is generalized to work for dynamic shapes.
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), reexported(torch.ones(7, 5))))
 
         exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0)])
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, 'Cannot provide constraints for already exported program.'):
-            _ = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         # Reexported program should still work for dynamic shapes.
-        reexported = torch._export.export(exported, (inp,))
+        reexported = torch._export.export(exported, (inp,), constraints=[dynamic_dim(inp, 0)])
         self.assertTrue(reexported(torch.ones(7, 5)), Foo()(torch.ones(7, 5)))
 
     def test_retrace_graph_level_meta_preservation(self):
@@ -996,13 +994,15 @@ class TestExport(TestCase):
         stateful_module = exported.module()
         self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
 
-        re_exported = torch._export.export(stateful_module, (inp,))
+        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 5])
         self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
         self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported(torch.ones(7, 5))))
 
         re_exported_v2 = torch._export.export(exported, (inp,))
-        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]), 1)
-        self.assertTrue(torch.allclose(exported(torch.ones(7, 5)), re_exported_v2(torch.ones(7, 5))))
+        # Because when we re-export without any constraints, we lose the shape constraints from previous round.
+        self.assertTrue(len(re_exported_v2.graph_module.meta["input_shape_constraints"]) == 0)
+        with self.assertRaisesRegex(RuntimeError, r"Input arg0_1.shape\[0\] is specialized at 7"):
+            re_exported_v2(torch.ones(6, 5))
 
     def test_constrain_as_size_error(self):
 
@@ -1040,6 +1040,131 @@ class TestExport(TestCase):
         with self.assertRaisesRegex(NotImplementedError, r"Calling eval\(\) is not supported yet."):
             graph_module.eval()
 
+    def test_export_cond_preserve_stack_trace_for_subgraphs(self):
+        class MySubModule(torch.nn.Module):
+            def foo(self, x):
+                return x.cos()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        class CondBranchClassMethod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subm = MySubModule()
+
+            def bar(self, x):
+                return x.sin()
+
+            def forward(self, x):
+                return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
+
+
+        from torch._export import capture_pre_autograd_graph
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = CondBranchClassMethod()
+        m.eval()
+        gm = capture_pre_autograd_graph(m, example_inputs)
+
+        actual_source_fns = []
+        for mod in gm.modules():
+            for node in mod.graph.nodes:
+                if node.name in {"sin", "cos"}:
+                    actual_source_fns.append(node.meta.get("source_fn", None))
+        exp_source_fns = [("cos", "cos"), ("sin", "sin")]
+        self.assertEqual(actual_source_fns, exp_source_fns)
+
+    def test_lift_constants(self) -> None:
+        from torch._export.passes.lift_constant_tensor_pass import lift_constant_tensor_pass
+
+        def f(x):
+            return x + torch.tensor(3)
+
+        ep = export(f, (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 1)
+        self.assertEqual(len(ep.state_dict), 1)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.tensor(3)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(3), torch.tensor(4)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Foo(), (torch.tensor(1),))
+        ep = lift_constant_tensor_pass(ep)
+
+        nodes = list(ep.graph.nodes)
+
+        for node in nodes:
+            self.assertTrue(node.op != "get_attr")
+        self.assertEqual(len(ep.graph_signature.buffers), 3)
+        self.assertEqual(len(ep.state_dict), 3)
+
+        # These constants should be placed after the param/buffers
+        self.assertTrue(
+            nodes[1].name in ep.graph_signature.inputs_to_buffers and
+            nodes[2].name in ep.graph_signature.inputs_to_buffers
+        )
+
+    def test_preserve_shape_dynamism_for_unused_inputs(self):
+        @dataclass
+        class Input:
+            f: torch.Tensor
+            p: torch.Tensor
+
+        torch._export.utils.register_dataclass_as_pytree_node(Input)
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Input):
+                return x.f + 1
+
+        mod = Module()
+        example_inputs = (Input(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
+        ep_static = export(mod, example_inputs)
+        for node in ep_static.graph.nodes:
+            if node.op == 'placeholder':
+                for s in node.meta['val'].shape:
+                    self.assertIsInstance(s, int)
+
+        x = example_inputs[0]
+        constraints = [dynamic_dim(x.f, 0), dynamic_dim(x.p, 0)]
+        ep_dynamic = export(mod, example_inputs, constraints=constraints)
+        for node in ep_dynamic.graph.nodes:
+            if node.op == 'placeholder':
+                for i, s in enumerate(node.meta['val'].shape):
+                    if i == 0:
+                        self.assertIsInstance(s, torch.SymInt)
+                    else:
+                        self.assertIsInstance(s, int)
+
+    def test_constraints_on_retrace(self):
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                if x.shape[0] > 4:
+                    return x.cos()
+                return x.sin()
+
+        inp = torch.ones(7, 5)
+        exported = torch._export.export(Foo(), (inp,), constraints=[dynamic_dim(inp, 0) > 5])
+        stateful_module = exported.module()
+        self.assertTrue(len(stateful_module.meta["input_shape_constraints"]), 1)
+
+        re_exported = torch._export.export(stateful_module, (inp,), constraints=[dynamic_dim(inp, 0) > 2])
+        self.assertTrue(len(re_exported.graph_module.meta["input_shape_constraints"]), 1)
+        # TODO (tmanlaibaatar) this kinda sucks because now re-exported program can diverge from eager behavior.
+        self.assertFalse(torch.allclose(Foo()(torch.ones(3, 5)), re_exported(torch.ones(3, 5))))
 
 if __name__ == '__main__':
     run_tests()

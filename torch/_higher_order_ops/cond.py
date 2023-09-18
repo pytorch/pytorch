@@ -2,11 +2,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+import torch.fx.traceback as fx_traceback
 
 import torch.utils._pytree as pytree
 
 from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
 from torch._dynamo.exc import CondOpArgsMismatchError
+from torch._dynamo.utils import disable_cache_limit
 
 from torch._functorch.eager_transforms import (
     _unwrap_all_tensors_from_functional,
@@ -126,7 +128,7 @@ def cond(pred, true_fn, false_fn, operands):
         return cond_op(pred, true_fn, false_fn, operands)
 
     def _validate_input(pred, true_fn, false_fn, operands):
-        if not isinstance(pred, (bool, torch.Tensor)):
+        if not isinstance(pred, (bool, torch.Tensor, torch.SymBool)):
             raise RuntimeError(f"Expected pred to be bool or tensor, but got {pred}.")
 
         if isinstance(pred, torch.Tensor) and pred.numel() != 1:
@@ -150,9 +152,10 @@ def cond(pred, true_fn, false_fn, operands):
         raise RuntimeError("torch.cond requires dynamo support.")
 
     with _set_compilation_env():
-        return torch.compile(cond_op, backend="eager", fullgraph=True)(
-            pred, true_fn, false_fn, operands
-        )
+        with disable_cache_limit():
+            return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                pred, true_fn, false_fn, operands
+            )
 
 
 """
@@ -160,6 +163,18 @@ We're going to define a `cond_op` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
 cond_op = HigherOrderOperator("cond")
+
+
+def _maybe_run_with_interpreter(fn):
+    maybe_interpreted_fn = fn
+    if isinstance(fn, torch.fx.GraphModule) and fx_traceback.has_preserved_node_meta():
+        # Running graph with interpreter is needed for propagating the stack_trace
+        def graph_with_interpreter(*args):
+            with fx_traceback.preserve_node_meta():
+                return torch.fx.Interpreter(fn).run(*args)
+
+        maybe_interpreted_fn = graph_with_interpreter
+    return maybe_interpreted_fn
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -171,9 +186,14 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     ), "Cond operands must be a list of tensors"
 
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
+
     with disable_proxy_modes_tracing():
-        true_graph = make_fx(true_fn, pre_dispatch=pre_dispatch)(*operands)
-        false_graph = make_fx(false_fn, pre_dispatch=pre_dispatch)(*operands)
+        true_graph = make_fx(
+            _maybe_run_with_interpreter(true_fn), pre_dispatch=pre_dispatch
+        )(*operands)
+        false_graph = make_fx(
+            _maybe_run_with_interpreter(false_fn), pre_dispatch=pre_dispatch
+        )(*operands)
 
     true_outs = []
     false_outs = []
@@ -405,12 +425,12 @@ def cond_func(pred, true_fn, false_fn, inputs):
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be modifying the input!"
+                    "One of torch.cond branch might be modifying the input!"
                 )
 
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be aliasing the input!"
+                    "One of torch.cond branch might be aliasing the input!"
                 )
 
         cond_return = cond_op(
@@ -443,12 +463,12 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
         for branch in [functional_true_fn, functional_false_fn]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be modifying the input!"
+                    "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch " "might be aliasing the input!"
+                    "One of torch.cond branch might be aliasing the input!"
                 )
 
         cond_return = cond_op(

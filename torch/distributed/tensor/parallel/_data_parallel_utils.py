@@ -151,8 +151,8 @@ def _flatten_tensor(
 def _unflatten_tensor(tensor: torch.Tensor, spec: DTensorSpec) -> torch.Tensor:
     result = DistributedTensor.from_local(
         tensor,
-        device_mesh=spec.mesh,
-        placements=spec.placements,
+        spec.mesh,
+        spec.placements,
         run_check=False,
     )
 

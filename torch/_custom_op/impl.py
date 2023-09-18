@@ -9,7 +9,6 @@ import weakref
 from torchgen.model import FunctionSchema, OperatorName, SchemaKind, BaseType, ListType, BaseTy
 
 import torch
-import torch.export
 import torch._C as _C
 import torch.library as library
 
@@ -876,8 +875,15 @@ class AbstractImplCtx:
         ):
             raise torch._subclasses.fake_tensor.DynamicOutputShapeException(self._op)
 
+        if isinstance(min, torch.SymInt) or isinstance(max, torch.SymInt):
+            raise ValueError(
+                f"ctx.create_unbacked_symint(min={min}, max={max}): expected "
+                f"min and max to be statically known ints but got SymInt. "
+                f"This is not supported."
+            )
+
         result = self._shape_env.create_unbacked_symint()
-        torch.export.constrain_as_size(result, min=min, max=max)
+        torch.sym_constrain_range_for_size(result, min=min, max=max)
         return result
 
 
