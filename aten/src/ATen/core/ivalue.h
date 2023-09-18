@@ -1142,6 +1142,10 @@ struct TORCH_API IValue final {
 #undef DEFINE_TAG
   };
 
+#define COUNT_TAG(x) 1 +
+  static constexpr auto kNumTags = TORCH_FORALL_TAGS(COUNT_TAG) 0;
+#undef COUNT_TAG
+
   template <
       class T,
       class NullType = c10::detail::intrusive_target_default_null_type<T>>
@@ -1191,7 +1195,10 @@ struct TORCH_API IValue final {
     tag = Tag::None;
   }
 
-  bool isIntrusivePtr() const {
+ private:
+  // This is the source of truth for isIntrusivePtr; edit results here
+  // as needed and isIntrusivePtr will pick them up.
+  static constexpr bool isIntrusivePtrConstexpr(Tag tag) {
     switch (tag) {
       case Tag::None:
         return false;
@@ -1248,9 +1255,36 @@ struct TORCH_API IValue final {
       case Tag::Enum:
         return true;
     }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        false, "unexpected tag ", static_cast<int>(tag));
     return false;
+  }
+
+ public:
+  // Don't edit this just to add results for new tags; edit
+  // isIntrusivePtrConstexpr above.
+  bool isIntrusivePtr() const {
+    // Implementation NOTE: the switch in isIntrusivePtrConstexpr
+    // above is the previous production implementation of this
+    // function. We observed that, at least on x86_64, the generated
+    // instruction sequence was a similar bit vector test to what we
+    // have manually implemented below, except that there was an extra
+    // "bounds check" branch confirming, essentially, that `tag <
+    // kNumTags` and providing a consistent result in that case. We
+    // don't care about the result if tag is out of bounds, so we'd
+    // like to eliminate that comparison and branch; manually
+    // implementing this function as a bit test is the simplest way I
+    // could find to accomplish that elimination.
+    static constexpr uint32_t kTruthTableBitVector =
+#define TRUTH_TABLE_ENTRY(tag) \
+  (uint32_t(isIntrusivePtrConstexpr(Tag::tag)) << uint32_t(Tag::tag)) |
+        TORCH_FORALL_TAGS(TRUTH_TABLE_ENTRY)
+#undef TRUTH_TABLE_ENTRY
+            0;
+
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        uint32_t(tag) >= 0 && uint32_t(tag) < kNumTags,
+        "unexpected tag ",
+        static_cast<int>(tag));
+    return kTruthTableBitVector & (1 << (uint32_t(tag) % 32));
   }
 
   // Storage and Generator were treated specially when
