@@ -10,7 +10,7 @@ from weakref import WeakSet
 
 log = logging.getLogger(__name__)
 
-DEFAULT_LOG_LEVEL = logging.WARN
+DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 
 

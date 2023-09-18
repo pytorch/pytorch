@@ -1879,12 +1879,16 @@ class ReinterpretView(BaseView):
     def freeze_layout(self):
         pass
 
-    def codegen_reference(self):
+    def codegen_reference(self, writer=None):
         # reinterpret_tensor is similar to as_strided except:
         # - offset is added to the existing offset (rather than replacing it)
         # - view tracking is disabled similar to unsafe_view
         return V.graph.wrapper_code.codegen_reinterpret_view(
-            self.get_name(), self.layout.size, self.layout.stride, self.layout.offset
+            self.get_name(),
+            self.layout.size,
+            self.layout.stride,
+            self.layout.offset,
+            writer,
         )
 
 
@@ -2406,8 +2410,12 @@ class Buffer(IRNode):
     def is_no_op(self):
         return False
 
-    def codegen_reference(self):
-        return self.get_name()
+    def codegen_reference(self, writer=None):
+        return (
+            self.get_name() + ".get()"
+            if V.graph.cpp_wrapper and config.aot_inductor.abi_compatible
+            else self.get_name()
+        )
 
     def decide_layout(self):
         pass
@@ -2464,7 +2472,7 @@ class ConstantBuffer(InputBuffer):
 
 
 class NoneAsConstantBuffer(IRNode):
-    def codegen_reference(self):
+    def codegen_reference(self, writer=None):
         return V.graph.wrapper_code.none_str
 
 
@@ -2473,7 +2481,7 @@ class ShapeAsConstantBuffer(IRNode):
         super().__init__()
         self.shape = shape
 
-    def codegen_reference(self):
+    def codegen_reference(self, writer=None):
         expr = V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.shape))
         if V.graph.cpp_wrapper:
             # wrap scalar to 0-d tensor for cpp wrapper
@@ -3370,9 +3378,7 @@ class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
-        V.graph.wrapper_code.generate_extern_kernel_alloc(
-            self.get_name(), self.kernel, args, self.get_origin_node()
-        )
+        V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 

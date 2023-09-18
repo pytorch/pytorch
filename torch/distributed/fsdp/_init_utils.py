@@ -506,6 +506,7 @@ def _init_prefetching_state(
     return state
 
 
+@no_type_check
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
@@ -513,6 +514,13 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
+
+    # TODO: we need to add additional check once we support FSDP + PiPPy.
+    # This check is currently sufficient, since we only support FSDP + TP.
+    if hasattr(state, "_device_mesh"):
+        state._enable_extension = (
+            mesh_resources.get_parent_mesh(state._device_mesh) is not None
+        )
     return state
 
 
