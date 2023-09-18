@@ -945,9 +945,14 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
-def trunc(a):
-    return prims.trunc(a)
+@out_wrapper()
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def trunc(a: TensorLikeType) -> TensorLikeType:
+    return handle_noncontiguous_outputs([a], prims.trunc(a))
 
 
 # TODO: register this as a real ref/decomposition once TorchInductor supports complex!
