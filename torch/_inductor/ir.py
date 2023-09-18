@@ -3749,7 +3749,7 @@ class DynamicScalar(ExternKernelAlloc):
     """
 
     # When output of .item or .tolist (i.e. DynamicScalar object) is passed as part of size arg to another operator,
-    # Inductor will need to reason about the object's symbolic value compared to other SymPy values in the program.
+    # Inductor will need to reason about the object's symbolic value together with other SymPy values in the program.
     # To make this reasoning easier, we pretend that the DynamicScalar object is a SymPy object. We achieve it with:
     # 1. Setting __sympy__ = True.
     # 2. Redirecting __hash__ and __eq__ to the underlying SymPy symbol object.

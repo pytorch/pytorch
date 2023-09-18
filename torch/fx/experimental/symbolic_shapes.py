@@ -979,24 +979,6 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
-        if isinstance(r, sympy.Integer):
-            return int(r)
-        elif isinstance(r, sympy.Symbol) and self.shape_env.is_unbacked_symint(r):
-            return r
-        elif (
-            isinstance(r, sympy.Expr) and \
-            all(isinstance(s, sympy.Integer) or self.shape_env.is_unbacked_symint(s) for s in r.atoms()) and \
-            all(
-                (
-                    s.name in {"ADD", "SUB", "MUL", "NEG"}
-                )
-                for s in r.count_ops(visual=True).atoms()
-            )
-        ):
-            # Expression will always evaluate to int if:
-            # 1. it involves only integers (including unbacked symints)
-            # 2. it only has add/sub/mul/neg operations
-            return r
         try:
             return int(r)
         except Exception:
@@ -1017,10 +999,6 @@ class SymNode:
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
         r = self.shape_env.evaluate_expr(self.expr, self.hint, fx_node=self.fx_node)
-        if isinstance(r, sympy.core.relational.Relational):
-            # NOTE: we do this unbacked symint replacement only to resolve bool guard,
-            # so any default value > 1 would work.
-            r = safe_expand(r.xreplace({s: sympy.Integer(2) for s in r.free_symbols}))
         try:
             return bool(r)
         except Exception:
@@ -3560,6 +3538,8 @@ class ShapeEnv:
             r = self._maybe_evaluate_static(result_expr, compute_hint=True)
             if r is not None:
                 return r
+            if not torch._dynamo.config.capture_scalar_outputs:
+                raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
     # NB: keep in sync with size_hint
@@ -3817,6 +3797,7 @@ class ShapeEnv:
 
             if not (expr.free_symbols <= self.var_to_val.keys()):
                 # TODO: dedupe this with _maybe_evaluate_static
+                # Attempt to eliminate the unbacked SymInt
                 new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
                 if not (new_expr.free_symbols <= self.var_to_val.keys()):
                     if torch._dynamo.config.capture_scalar_outputs:

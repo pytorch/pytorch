@@ -37,7 +37,6 @@ from ..utils import (
     sympy_symbol,
     unique,
     yellow_text,
-    compare_sympy_expr,
 )
 from ..virtualized import ops, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -123,6 +122,15 @@ def triton_constant(value):
     elif math.isnan(value):
         return 'float("nan")'
     return repr(value)
+
+
+def compare_sympy_expr(a, b):
+    if V.graph.sizevars.shape_env._maybe_evaluate_static(sympy.Lt(a, b)):
+        return -1
+    elif V.graph.sizevars.shape_env._maybe_evaluate_static(sympy.Gt(a, b)):
+        return 1
+    else:
+        return 0
 
 
 class TritonCSEVariable(CSEVariable):
