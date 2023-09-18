@@ -97,10 +97,8 @@ bool isStorage(PyObject* obj) {
 
 std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
     PyObject* obj) {
-  at::ScalarType scalar_type;
-  bool is_typed_storage;
-
-  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+  at::ScalarType scalar_type = at::ScalarType::Undefined;
+  bool is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
   PyObject* untyped_storage_obj = nullptr;
 
   if (is_typed_storage) {
