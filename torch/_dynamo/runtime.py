@@ -128,5 +128,4 @@ def get_registered_device_runtimes():
     return device_runtimes.items()
 
 
-if torch.cuda.is_available():
-    register_runtime_for_device("cuda", CudaRuntime)
+register_runtime_for_device("cuda", CudaRuntime)
