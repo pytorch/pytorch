@@ -8,10 +8,6 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils import _pytree as pytree
-from torch.utils._python_dispatch import (
-    _get_current_dispatch_mode,
-    _pop_mode_temporarily,
-)
 
 
 _export_tracepoint = HigherOrderOperator("_export_tracepoint")
@@ -26,22 +22,20 @@ _export_tracepoint.fallthrough(DispatchKey.AutogradCPU)
 
 
 @_export_tracepoint.py_impl(ProxyTorchDispatchMode)
-def export_tracepoint_dispatch_mode(*args, **kwargs):
-    mode = _get_current_dispatch_mode()
-    assert mode is not None, "Mode should always be enabled for python fallback key"
-    with _pop_mode_temporarily() as mode:
-        if not mode.enable_tracing:
-            return _export_tracepoint(*args, **kwargs)
-        p_args, p_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, (args, kwargs))
-        proxy = mode.tracer.create_proxy(
-            "call_function", _export_tracepoint, p_args, p_kwargs
-        )
-        return track_tensor_tree(args, proxy, constant=None, tracer=mode.tracer)
+def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
+    if not mode.enable_tracing:
+        return _export_tracepoint(*args, **kwargs)
+    p_args, p_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, (args, kwargs))
+    proxy = mode.tracer.create_proxy(
+        "call_function", _export_tracepoint, p_args, p_kwargs
+    )
+    return track_tensor_tree(args, proxy, constant=None, tracer=mode.tracer)
 
 
 @_export_tracepoint.py_impl(FakeTensorMode)
-def export_tracepoint_fake_tensor_mode(*args, **kwargs):
-    return args
+def export_tracepoint_fake_tensor_mode(mode, *args, **kwargs):
+    with mode:
+        return args
 
 
 @_export_tracepoint.py_impl(DispatchKey.Functionalize)
