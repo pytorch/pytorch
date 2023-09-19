@@ -10926,7 +10926,6 @@ class TestConsistency(TestCaseMPS):
 
     @ops(mps_ops_modifier(test_consistency_op_db), allowed_dtypes=MPS_DTYPES + [torch.complex64])
     def test_output_match(self, device, dtype, op):
-        print(op)
         self.assertEqual(device, "cpu")
 
         def get_samples():
