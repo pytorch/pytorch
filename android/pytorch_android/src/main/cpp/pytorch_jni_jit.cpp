@@ -167,7 +167,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
           assetName->toStdString().c_str());
     }
     JITCallGuard guard;
-    module_ = torch::jit::load(std::make_unique<MemoryReadAdapter>(
+    module_ = torch::jit::load(torch::make_unique<MemoryReadAdapter>(
         assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     module_.eval();

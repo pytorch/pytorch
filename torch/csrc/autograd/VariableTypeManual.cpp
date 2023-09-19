@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
+#include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
 #include <utility>
