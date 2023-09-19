@@ -1,5 +1,6 @@
 #include <torch/csrc/utils/invalid_arguments.h>
 
+#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <c10/util/irange.h>
@@ -135,25 +136,25 @@ std::vector<std::string> _splitString(
 std::unique_ptr<Type> _buildType(std::string type_name, bool is_nullable) {
   std::unique_ptr<Type> result;
   if (type_name == "float") {
-    result = std::make_unique<MultiType>(MultiType{"float", "int", "long"});
+    result = torch::make_unique<MultiType>(MultiType{"float", "int", "long"});
   } else if (type_name == "int") {
-    result = std::make_unique<MultiType>(MultiType{"int", "long"});
+    result = torch::make_unique<MultiType>(MultiType{"int", "long"});
   } else if (type_name.find("tuple[") == 0) {
     auto type_list = type_name.substr(6);
     type_list.pop_back();
     std::vector<std::unique_ptr<Type>> types;
     for (auto& type : _splitString(type_list, ","))
       types.emplace_back(_buildType(type, false));
-    result = std::make_unique<TupleType>(std::move(types));
+    result = torch::make_unique<TupleType>(std::move(types));
   } else if (type_name.find("sequence[") == 0) {
     auto subtype = type_name.substr(9);
     subtype.pop_back();
-    result = std::make_unique<SequenceType>(_buildType(subtype, false));
+    result = torch::make_unique<SequenceType>(_buildType(subtype, false));
   } else {
-    result = std::make_unique<SimpleType>(type_name);
+    result = torch::make_unique<SimpleType>(type_name);
   }
   if (is_nullable)
-    result = std::make_unique<NullableType>(std::move(result));
+    result = torch::make_unique<NullableType>(std::move(result));
   return result;
 }
 
