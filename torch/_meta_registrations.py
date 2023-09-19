@@ -3466,6 +3466,20 @@ def meta_zero_(self):
     return self
 
 
+@register_meta([aten.div])
+def meta_binop(self, other, **kwargs):
+    _, result_dtype = elementwise_dtypes(
+        self,
+        other,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    if isinstance(other, torch.Tensor):
+        out_shape = _broadcast_shapes(self.shape, other.shape)
+        return self.new_empty(out_shape, dtype=result_dtype)
+    else:
+        return self.new_empty(self.shape, dtype=result_dtype)
+
+
 @register_meta(
     [
         aten.mul_.Scalar,

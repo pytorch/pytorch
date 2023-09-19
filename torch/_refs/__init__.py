@@ -1152,7 +1152,6 @@ def copysign(
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 
 
-@register_decomposition(aten.div)
 @out_wrapper()
 def div(
     a: Union[TensorLikeType, NumberType],
