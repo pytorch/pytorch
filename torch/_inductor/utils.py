@@ -1182,9 +1182,9 @@ aot_inductor_launcher = """
     #include <torch/csrc/inductor/aot_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-    class AOTInductorModelContainer {
+    class RAIIModelContainer {
     public:
-        AOTInductorModelContainer() {
+        RAIIModelContainer() {
             AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
                 &container_handle,
                 1 /*num_models*/,
@@ -1192,7 +1192,7 @@ aot_inductor_launcher = """
                 nullptr /*cubin_dir*/));
         }
 
-        ~AOTInductorModelContainer() {
+        ~RAIIModelContainer() {
             AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerDelete(container_handle));
         }
 
@@ -1205,7 +1205,7 @@ aot_inductor_launcher = """
     };
 
     // Global instance
-    AOTInductorModelContainer aot_inductor_container;
+    RAIIModelContainer model_container;
 
     void run(
         std::vector<at::Tensor>& input_tensors,
@@ -1227,7 +1227,7 @@ aot_inductor_launcher = """
         AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            container_handle,
+            model_container.get(),
             input_handles.data(),
             input_tensors.size(),
             output_handles.data(),
