@@ -4025,6 +4025,18 @@ def trunc(self: Tensor, **kwargs) -> Tensor:
     return torch.where(self > 0, torch.floor(self), torch.ceil(self))
 
 
+@register_decomposition(aten.glu)
+def glu(a: Tensor, dim: int = -1) -> Tensor:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    torch._check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
+    b, c = torch.tensor_split(a, 2, dim)
+
+    return b * torch.sigmoid(c)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

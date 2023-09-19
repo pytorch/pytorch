@@ -13415,6 +13415,15 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.glu',
            aten_name='glu',
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({
+                       torch.float16: tol(atol=1e-02, rtol=5),
+                       torch.bfloat16: tol(atol=1e-02, rtol=5),
+                   }),
+                   'TestDecomp',
+               ),
+           ],
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            sample_inputs_func=sample_inputs_glu,

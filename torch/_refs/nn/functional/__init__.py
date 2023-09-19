@@ -1116,7 +1116,6 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return torch.nn.functional.hardtanh(a, 0, 6)
 
 
-@register_decomposition(aten.glu)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),

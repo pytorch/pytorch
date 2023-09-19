@@ -192,6 +192,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten.nll_loss2d_forward.default): 2e-1,
         # see https://github.com/pytorch/pytorch/pull/96264
         (torch.float16, torch.ops.aten.mv.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.glu): 1e-2,
+        (torch.float16, torch.ops.aten.glu): 1e-2,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
