@@ -7,8 +7,8 @@
  */
 #pragma once
 #include <cfloat>
-#include <cstdio>
 #include <cmath>
+#include <cstdio>
 
 ////////////////////////////////////////////////////////////////////////////////
 // Debugging functions
@@ -26,43 +26,32 @@
 #if 1
 #define PRINT_WARP_ID 0
 #define PRINT_LANE_ID 0
-#define PRINT_B0_T0(msg, ...)                                         \
-  if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 &&        \
-      threadIdx.x == PRINT_LANE_ID && threadIdx.y == PRINT_WARP_ID && \
-      threadIdx.z == 0) {                                             \
-    printf(msg "\n", ##__VA_ARGS__);                                  \
+#define PRINT_B0_T0(msg, ...)                                                                  \
+  if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.x == PRINT_LANE_ID && \
+      threadIdx.y == PRINT_WARP_ID && threadIdx.z == 0) {                                      \
+    printf(msg "\n", ##__VA_ARGS__);                                                           \
   }
-#define PRINT_T0(msg, ...)                                            \
-  if (threadIdx.x == PRINT_LANE_ID && threadIdx.y == PRINT_WARP_ID && \
-      threadIdx.z == 0) {                                             \
-    printf(msg "\n", ##__VA_ARGS__);                                  \
+#define PRINT_T0(msg, ...)                                                                \
+  if (threadIdx.x == PRINT_LANE_ID && threadIdx.y == PRINT_WARP_ID && threadIdx.z == 0) { \
+    printf(msg "\n", ##__VA_ARGS__);                                                      \
   }
-#define PRINT_TX_LX(msg, ...)                                                 \
-  for (int bx = 0; bx < gridDim.x; ++bx) {                                    \
-    for (int by = 0; by < gridDim.y; ++by) {                                  \
-      for (int bz = 0; bz < gridDim.z; ++bz) {                                \
-        for (int tx = 0; tx < blockDim.x; ++tx) {                             \
-          for (int ty = 0; ty < blockDim.y; ++ty) {                           \
-            for (int tz = 0; tz < blockDim.z; ++tz) {                         \
-              __syncthreads();                                                \
-              if (blockIdx.x == bx && blockIdx.y == by && blockIdx.z == bz && \
-                  threadIdx.x == tx && threadIdx.y == ty &&                   \
-                  threadIdx.z == tz) {                                        \
-                printf(                                                       \
-                    "[%d,%d,%d][%d,%d,%d]" msg "\n",                          \
-                    bx,                                                       \
-                    by,                                                       \
-                    bz,                                                       \
-                    tx,                                                       \
-                    ty,                                                       \
-                    tz,                                                       \
-                    ##__VA_ARGS__);                                           \
-              }                                                               \
-            }                                                                 \
-          }                                                                   \
-        }                                                                     \
-      }                                                                       \
-    }                                                                         \
+#define PRINT_TX_LX(msg, ...)                                                                      \
+  for (int bx = 0; bx < gridDim.x; ++bx) {                                                         \
+    for (int by = 0; by < gridDim.y; ++by) {                                                       \
+      for (int bz = 0; bz < gridDim.z; ++bz) {                                                     \
+        for (int tx = 0; tx < blockDim.x; ++tx) {                                                  \
+          for (int ty = 0; ty < blockDim.y; ++ty) {                                                \
+            for (int tz = 0; tz < blockDim.z; ++tz) {                                              \
+              __syncthreads();                                                                     \
+              if (blockIdx.x == bx && blockIdx.y == by && blockIdx.z == bz && threadIdx.x == tx && \
+                  threadIdx.y == ty && threadIdx.z == tz) {                                        \
+                printf("[%d,%d,%d][%d,%d,%d]" msg "\n", bx, by, bz, tx, ty, tz, ##__VA_ARGS__);    \
+              }                                                                                    \
+            }                                                                                      \
+          }                                                                                        \
+        }                                                                                          \
+      }                                                                                            \
+    }                                                                                              \
   }
 #else
 #define PRINT_B0_T0
@@ -82,7 +71,7 @@ constexpr __string_view __get_type_name() {
   for (; *p == ' '; ++p)
     ;
   char const* p2 = p;
-  int count = 1;
+  int count      = 1;
   for (;; ++p2) {
     switch (*p2) {
       case '[':
@@ -136,8 +125,7 @@ constexpr __string_view __get_type_name() {
       PRINT_ACCUM8_T0_L0_START("  ", array, _start);        \
     }                                                       \
   }
-#define PRINT_ARRAY_T0_L0(name, array, length) \
-  PRINT_ARRAY_T0_L0_INCR(name, array, length, 8)
+#define PRINT_ARRAY_T0_L0(name, array, length) PRINT_ARRAY_T0_L0_INCR(name, array, length, 8)
 
 // Print a 4x4 matrix
 #define PRINT_TENSOR4x4_T0_L0_START(name, ref, start_x, start_y)                                           \
@@ -164,25 +152,15 @@ constexpr __string_view __get_type_name() {
       float(ref.at({start_x + 3, start_y + 1})),                                                           \
       float(ref.at({start_x + 3, start_y + 2})),                                                           \
       float(ref.at({start_x + 3, start_y + 3})));
-#define PRINT_TENSOR4x4_T0_L0(name, ref) \
-  PRINT_TENSOR4x4_T0_L0_START(name, ref, 0, 0)
+#define PRINT_TENSOR4x4_T0_L0(name, ref) PRINT_TENSOR4x4_T0_L0_START(name, ref, 0, 0)
 
-#define PRINT_PROBLEM_SIZE(name, ps)            \
-  PRINT_B0_T0(                                  \
-      "%s.problem_size: {.m=%d, .n=%d, .k=%d}", \
-      name,                                     \
-      int(ps.m()),                              \
-      int(ps.n()),                              \
-      int(ps.k()))
+#define PRINT_PROBLEM_SIZE(name, ps) \
+  PRINT_B0_T0("%s.problem_size: {.m=%d, .n=%d, .k=%d}", name, int(ps.m()), int(ps.n()), int(ps.k()))
 
 template <typename LambdaIterator, typename LaneOffsetT, typename AccumT>
-CUTLASS_DEVICE void print_warp_accum(
-    AccumT accum,
-    LaneOffsetT lane_offset,
-    int32_t num_rows,
-    int32_t num_cols) {
-  bool is_main = blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 &&
-      threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0;
+CUTLASS_DEVICE void print_warp_accum(AccumT accum, LaneOffsetT lane_offset, int32_t num_rows, int32_t num_cols) {
+  bool is_main =
+      blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0;
   for (int row = 0; row < num_rows; ++row) {
     for (int col = 0; col < num_cols; ++col) {
       if (col % 32 == 0) {
@@ -195,8 +173,7 @@ CUTLASS_DEVICE void print_warp_accum(
           lane_offset,
           [&](int accum_m) {},
           [&](int accum_m, int accum_n, int idx) {
-            if (row == accum_m && col == accum_n &&
-                (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)) {
+            if (row == accum_m && col == accum_n && (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)) {
               printf(" %6.1f", float(accum[idx]));
             }
           },

@@ -29,10 +29,11 @@ namespace bwd_device_gemm {
 template <>
 void FlashBwdRunner::Run<false, 128, device_gemm_trait::BFloat16, true>() {
   BOOL_SWITCH(is_deterministic_, kIsDeterministic, [&] {
-    this->template run_<DeviceGemmKLoopHeadDim128,
-                  device_gemm_trait::BFloat16, 
-                  device_gemm_trait::kMaskingSpecCausal,
-                  kIsDeterministic>();
+    this->template run_<
+        DeviceGemmKLoopHeadDim128,
+        device_gemm_trait::BFloat16,
+        device_gemm_trait::kMaskingSpecCausal,
+        kIsDeterministic>();
   });
 } // FlashBwdRunner::Run()
 } // namespace bwd_device_gemm
