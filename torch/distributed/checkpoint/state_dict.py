@@ -3,7 +3,7 @@ import functools
 import gc
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -67,7 +67,7 @@ class DistributedStateDictOptions:
 @dataclass
 class _StateDictInfo(DistributedStateDictOptions):
     fqn_param_mapping: Dict[
-        Union[FQNS_T, torch.Tensor], Union[FQNS_T, torch.Tensor]
+        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
     all_fqns: Set[str] = field(default_factory=set)
     handle_model: bool = True
@@ -78,9 +78,10 @@ class _StateDictInfo(DistributedStateDictOptions):
 
 def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS_T:
     """
-    This API is used to convert a name of a parameter to the FQNs. The type of
-    the returned FQNs is a set of string. For FSDP case, a FlatParameter may
-    contain multiple original parameters, hence multiple FQNs.
+    This API is used to convert the name of a parameter to the FQNs. For FSDP
+    without `use_orig_params`, the name of FlatParameter can be mapped to
+    multiple original parameters. As a result, the return type of this function
+    is `Set[str]`.
 
     Args:
         module (nn.Module): the root model.
@@ -91,7 +92,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
         The canonical FQNs based on the model traversal.
     """
     if "." not in name:
-        return set([name])
+        return {name}
 
     obj_names = name.split(".")
     fqn_obj_names = []
@@ -108,7 +109,7 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
                 flat_param = getattr(curr_obj, FLAT_PARAM)
                 if prefix:
                     prefix = f"{prefix}."
-                return set(f"{prefix}{fqn}" for fqn in flat_param._fqns)
+                return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
                 fqn_obj_names.append(curr_obj_name)
@@ -117,12 +118,12 @@ def _get_fqns(model: nn.Module, name: str, skip_ddp_prefix: bool = True) -> FQNS
             fqn_obj_names.append(curr_obj_name)
             curr_obj = getattr(curr_obj, curr_obj_name)
 
-    return set([".".join(fqn_obj_names)])
+    return {".".join(fqn_obj_names)}
 
 
 def _verify_options(
     model: nn.Module,
-    optims: Tuple[torch.optim.Optimizer],
+    optims: Tuple[torch.optim.Optimizer, ...],
     model_only: bool,
     optim_only: bool,
     options: Optional[DistributedStateDictOptions] = None,
@@ -157,6 +158,8 @@ def _verify_options(
             all_fqns.add(fqn)
 
     fsdp_modules = FSDP.fsdp_modules(model)
+    state_dict_config: StateDictConfig
+    fsdp_context: Callable
     if fsdp_modules:
         # FSDP API only work if at least one FSDP instance exists.
         if options.fsdp_state_dict_type == StateDictType.FULL_STATE_DICT:
@@ -189,9 +192,9 @@ def _verify_options(
         fqn_param_mapping=fqn_param_mapping,
         all_fqns=all_fqns,
         fsdp_context=fsdp_context,
-        fsdp_modules=fsdp_modules,
+        fsdp_modules=cast(List[nn.Module], fsdp_modules),
         handle_model=model_only or not optim_only,
-        handle_optim=optim_only or (not model_only and optims),
+        handle_optim=optim_only or (not model_only and len(optims) > 0),
     )
 
 
@@ -200,11 +203,11 @@ def _verify_state_dict(
     optim_state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> None:
-
     # FSDP root must exist otherwise FSDP state_dict will be incorrect.
     has_fsdp_root = False
     for module in info.fsdp_modules:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
+        assert fsdp_state is not None, "Expected a fsdp_state with a fsdp module."
         if fsdp_state._is_root:
             has_fsdp_root = True
             break
@@ -235,7 +238,7 @@ def _verify_state_dict(
                 f"or load but optim state_dict is empty. {optim_state_dict}"
             )
 
-    for key, param in model_state_dict.items():
+    for key in model_state_dict.keys():
         if FLAT_PARAM in key:
             raise RuntimeError(
                 f"{key} contains {FLAT_PARAM}. This can happen if the model "
@@ -318,7 +321,7 @@ def _load_model_state_dict(
 
 def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     """
-    Initialize optim states by using a step with zero grads.
+    Initialize optim states by calling the step() with zero grads.
     """
     if optim.state:
         # The optimizer state is initialized.
@@ -467,13 +470,13 @@ def _unflatten_optim_state_dict(
 
 def _get_optim_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer],
+    optimizers: Tuple[torch.optim.Optimizer, ...],
     info: _StateDictInfo,
 ) -> Dict[str, ValueType]:
     if not info.handle_optim:
         return {}
 
-    optim_state_dict = {STATE: {}, PG: []}
+    optim_state_dict: Dict[str, ValueType] = {STATE: {}, PG: []}
     for optim in optimizers:
         _init_optim_state(optim)
         osd = _state_dict_fn(optim, "state_dict")()
@@ -530,7 +533,7 @@ def _split_optim_state_dict(
         The optim state_dict of ``optim``.
     """
 
-    return_osd = {STATE: {}, PG: []}
+    return_osd: Dict[str, ValueType] = {STATE: {}, PG: []}
     pg_mapping: Dict[int, int] = {}
 
     for param_group in optim.param_groups:
@@ -559,7 +562,7 @@ def _split_optim_state_dict(
 
 def _load_optim_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer],
+    optimizers: Tuple[torch.optim.Optimizer, ...],
     state_dict: Dict[str, ValueType],
     info: _StateDictInfo,
 ) -> None:
@@ -671,8 +674,8 @@ def load_state_dict(
     model: nn.Module,
     optimizers: Iterable[torch.optim.Optimizer] = tuple(),
     *,
-    model_state_dict: Dict[str, ValueType] = {},
-    optim_state_dict: Dict[str, ValueType] = {},
+    model_state_dict: Optional[Dict[str, ValueType]] = None,
+    optim_state_dict: Optional[Dict[str, ValueType]] = None,
     model_only: bool = False,
     optim_only: bool = False,
     options: Optional[DistributedStateDictOptions] = None,
@@ -704,6 +707,8 @@ def load_state_dict(
     Returns:
         None
     """
+    model_state_dict = model_state_dict if model_state_dict else {}
+    optim_state_dict = optim_state_dict if optim_state_dict else {}
     with gc_context():
         optimizers = tuple(optimizers)
         info = _verify_options(model, optimizers, model_only, optim_only, options)
@@ -745,7 +750,10 @@ def patch_model_state_dict(
         model_only=True,
         options=options,
     )
-    state_dict_call = lambda: _state_dict_call()[0]
+
+    def state_dict_call():
+        return _state_dict_call()[0]
+
     model.state_dict = state_dict_call
 
     _load_state_dict_call = functools.partial(
@@ -766,7 +774,7 @@ def patch_model_state_dict(
 
 def patch_optimizer_state_dict(
     model: nn.Module,
-    optimizers: Tuple[torch.optim.Optimizer],
+    optimizers: Tuple[torch.optim.Optimizer, ...],
     *,
     options: Optional[DistributedStateDictOptions] = None,
 ) -> None:
@@ -805,7 +813,10 @@ def patch_optimizer_state_dict(
         optim_only=True,
         options=options,
     )
-    state_dict_call = lambda: _state_dict_call()[1]
+
+    def state_dict_call():
+        return _state_dict_call()[1]
+
     _load_state_dict_call = functools.partial(
         load_state_dict,
         model=model,
@@ -813,12 +824,12 @@ def patch_optimizer_state_dict(
         optim_only=True,
         options=options,
     )
-    load_state_dict_call = lambda state_dict: _load_state_dict_call(
-        optim_state_dict=state_dict
-    )
+
+    def load_state_dict_call(state_dict: Dict[str, Any]):
+        _load_state_dict_call(optim_state_dict=state_dict)
+
     _patched_state_dict.add(state_dict_call)
     _patched_state_dict.add(load_state_dict_call)
-
     for optim in optimizers:
         optim.state_dict = state_dict_call
         optim.load_state_dict = load_state_dict_call

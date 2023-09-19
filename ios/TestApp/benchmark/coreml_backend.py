@@ -32,6 +32,7 @@ def main():
     mlmodel = torch._C._jit_to_backend("coreml", model, compile_spec)
     print(mlmodel._c._get_method("forward").graph)
     mlmodel._save_for_lite_interpreter("../models/model_coreml.ptl")
+    torch.jit.save(mlmodel, "../models/model_coreml.pt")
 
 
 if __name__ == "__main__":

@@ -290,12 +290,12 @@ class DeviceMesh:
                           mesh_dim_names=["dp", "tp"])
                           )
         ```
-        Calling mesh["dp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
-        Calling mesh["dp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
-        Calling mesh["tp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
-        Calling mesh["tp"] on rank 1, 3 would return a 1D child DeviceMesh:([1, 3]).
-        Calling mesh["tp"] on rank 2, 5 would return a 1D child DeviceMesh:([2, 5]).
-        Calling mesh["tp"] on rank 4, 7 would return a 1D child DeviceMesh:([4, 7]).
+        Calling mesh["tp"] on rank 0, 1, 2, 3 would return a 1D child DeviceMesh:([0, 1, 2, 3]).
+        Calling mesh["tp"] on rank 4, 5, 6, 7 would return a 1D child DeviceMesh:([4, 5, 6, 7]).
+        Calling mesh["dp"] on rank 0, 4 would return a 1D child DeviceMesh:([0, 4]).
+        Calling mesh["dp"] on rank 1, 5 would return a 1D child DeviceMesh:([1, 5]).
+        Calling mesh["dp"] on rank 2, 6 would return a 1D child DeviceMesh:([2, 6]).
+        Calling mesh["dp"] on rank 3, 7 would return a 1D child DeviceMesh:([3, 7]).
         """
         if self.mesh.ndim <= 1:
             raise RuntimeError(
