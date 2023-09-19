@@ -1453,6 +1453,8 @@ class SubgraphTracer(fx.Tracer):
         else:
             ctx = self.graph.inserting_before(None)
         with ctx:
+            # if "blocks_0_attn_gating_param" in name:
+            #     breakpoint()
             proxy = self.create_proxy("placeholder", name, (), {}, type_expr=type_expr)
             if self.input_name_to_proxy and before:
                 k, v = self.input_name_to_proxy.popitem()

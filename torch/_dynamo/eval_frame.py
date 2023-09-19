@@ -771,6 +771,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
+        additional_args: List[torch.Tensor],
         example_fake_inputs: List[torch.Tensor],
         flat_args_dynamic_dims: List[Set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
@@ -803,8 +804,18 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         ],
                     )
             self.new_args.append(arg)
-        self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
+
+        for i in range(0, len(additional_args)):
+            arg = super().placeholder(f"arg{i + len(flat_args)}", (), {})
+            arg.node.meta["val"] = fake_mode.from_tensor(
+                additional_args[i],
+                dynamic_dims=[DimDynamic.STATIC for _ in range(len(additional_args[i].shape))]
+            )
+            self.new_args.append(arg)
+
+        self.old_args_gen = iter([self.new_args[i] for i in matched_input_elements_positions] + self.new_args[len(flat_args):])
         self.matched_output_elements_positions = matched_output_elements_positions
+        self.count = 0
 
     def placeholder(self, target, args, kwargs):
         arg = next(self.old_args_gen)
@@ -900,6 +911,7 @@ def rewrite_signature(
         )
         source_args = [arg for args in sources.values() for arg in args]
         matched_elements_positions = []
+        additional_args = []
         dict_of_source_args = dict()
         for i, arg in enumerate(source_args):
             dict_of_source_args[id(arg)] = i
@@ -919,15 +931,21 @@ def rewrite_signature(
                             f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
                         )
                 else:
-                    if id(arg) not in dict_of_source_args:
+                    # TODO actually check this is from UnSpecNNModuleVariable
+                    if id(arg) not in dict_of_source_args and not isinstance(arg, torch.nn.Parameter):
                         raise AssertionError(
                             f"{candidate_desc} #{i} ({type(arg)}) is not among {source_types}"
                         )
-                    matched_elements_positions.append(dict_of_source_args[id(arg)])
+                    if not isinstance(arg, torch.nn.Parameter):
+                        matched_elements_positions.append(dict_of_source_args[id(arg)])
 
-        return matched_elements_positions
+                    if isinstance(arg, torch.nn.Parameter):
+                        additional_args.append(arg)
 
-    matched_input_elements_positions = produce_matching(
+
+        return matched_elements_positions, additional_args
+
+    matched_input_elements_positions, additional_args_1 = produce_matching(
         sources={"original args": flat_args},
         candidates={"graph-captured input": graph_captured_input},
     )
@@ -935,7 +953,7 @@ def rewrite_signature(
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
 
     assert graph_captured_output is not None
-    matched_output_elements_positions = produce_matching(
+    matched_output_elements_positions, additional_args_2 = produce_matching(
         sources={
             "graph-captured outputs": list(graph_captured_output),
             "original args": flat_args,
@@ -948,6 +966,7 @@ def rewrite_signature(
         flat_args,
         matched_input_elements_positions,
         matched_output_elements_positions,
+        additional_args_1,
         example_fake_inputs,
         flat_args_dynamic_dims,
         fake_mode,
@@ -1035,6 +1054,18 @@ def rewrite_signature(
             ), f"Missing keyword only argument {kwonly_arg}"
 
         return input_strs
+
+    count = 0
+    for node in new_graph.graph.nodes:
+        if node.op == "placeholder":
+            if count >= len(flat_args):
+                with new_graph.graph.inserting_after(node):
+                    new_graph.register_parameter(node.name, additional_args_1[count - len(flat_args)])
+                    getattr = new_graph.graph.get_attr(node.name)
+                    getattr.meta = node.meta
+                    node.replace_all_uses_with(getattr)
+                    new_graph.graph.erase_node(node)
+            count += 1
 
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
@@ -1154,6 +1185,8 @@ def export(
 
                 graph_captured_input = graph_inputs
                 assert graph is not None
+
+                print(graph.graph)
 
                 named_parameters = dict(graph.named_parameters(remove_duplicate=False))
                 named_buffers = dict(graph.named_buffers(remove_duplicate=False))

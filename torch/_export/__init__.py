@@ -419,6 +419,7 @@ def export(
             out_spec,
         )
     )
+    print("PRINT HERE", gm_torch_level.graph)
     gm_torch_level.recompile()
 
     param_buffer_table: Dict[str, str] = {}
