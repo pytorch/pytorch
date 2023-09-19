@@ -1814,11 +1814,11 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
             "mini_op_test::incorrect_schema": {
                 "test_aot_dispatch_static__test_delayed_error": {
                     "comment": "",
-                    "status": "XFAIL",
+                    "status": "success",
                 }
             }
         }
-        with self.assertRaisesRegex(RuntimeError, "got status=XFAIL"):
+        with self.assertRaisesRegex(RuntimeError, "got status=success"):
             validate_failures_dict_structure(
                 FailuresDict("", failures), mini_op_test_checks, MiniOpTest
             )
