@@ -252,9 +252,15 @@ def inner_trace(*args, fn, reenter):
     # We have a little shortcut here, wherein we DO NOT yet run a meta func, and so
     # we take on an assumption that input and output meta matches. As such, we must introduce
     # a runtime assert
-    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (grad, grad.size(), grad.stride()))
+    proxy_args = pytree.tree_map(
+        mode.tracer.unwrap_proxy, (grad, grad.size(), grad.stride(), grad.dtype)
+    )
     out_proxy = mode.tracer.create_proxy(
-        "call_function", torch._functional_assert_tensor_metadata, proxy_args, {}, name="assert"
+        "call_function",
+        torch._functional_assert_tensor_metadata,
+        proxy_args,
+        {},
+        name="assert",
     )
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
     return (

@@ -358,24 +358,18 @@ inline RAIIAtenTensorHandle create_raii_tensor_handle_for_temp(
 class AOTICudaStreamGuard {
  public:
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
-    // store the current stream and set the new stream as current
-    cudaStream_t current_stream;
-    AOTI_TORCH_ERROR_CHECK(aoti_torch_get_current_cuda_stream(
-        reinterpret_cast<void**>(&current_stream), device_index));
-    stream_ = current_stream;
+    CUDAStreamGuardHandle ptr;
     AOTI_TORCH_ERROR_CHECK(
-        aoti_torch_set_current_cuda_stream(stream, device_index));
-  }
-
-  ~AOTICudaStreamGuard() noexcept(false) {
-    // restore the previous stream as current
-    AOTI_TORCH_ERROR_CHECK(
-        aoti_torch_set_current_cuda_stream(stream_, device_index_));
+        aoti_torch_create_cuda_stream_guard(&ptr, stream, device_index));
+    guard_ =
+        std::unique_ptr<void, std::function<void(void*)>>(ptr, [](void* ptr) {
+          AOTI_TORCH_ERROR_CHECK(aoti_torch_delete_cuda_stream_guard(
+              reinterpret_cast<CUDAStreamGuardHandle>(ptr)));
+        });
   }
 
  private:
-  cudaStream_t stream_;
-  int32_t device_index_;
+  std::unique_ptr<void, std::function<void(void*)>> guard_;
 };
 
 } // namespace aot_inductor

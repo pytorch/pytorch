@@ -31,7 +31,7 @@ void _assert_match_sym(const O& original, const C& compared, const std::string& 
 template<typename O, typename C>
 void _assert_match(const O& original, const C& compared, const std::string& name) {
   if (compared) {
-    bool equal = (original == compared);
+    bool equal = (original == compared.value());
     if (!equal) {
       std::stringstream msg;
       msg << "Tensor " << name << " mismatch!";
