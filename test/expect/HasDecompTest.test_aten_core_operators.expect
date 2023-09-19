@@ -19,8 +19,6 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
-aten::_unsafe_view
-aten::_unsafe_view.out
 aten::abs
 aten::abs.out
 aten::abs_
