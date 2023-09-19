@@ -3181,6 +3181,11 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(torch.tensor(1, **tensor_opt), 0)
     yield SampleInput(torch.tensor(1, **tensor_opt), 0, True)
 
+    # Test cases for empty tensor
+    yield SampleInput(torch.tensor((), **tensor_opt))
+    yield SampleInput(torch.tensor((), **tensor_opt), 0)
+    yield SampleInput(torch.tensor((), **tensor_opt), 0, True)
+
     # Test cases for stable sort
     yield SampleInput(small_3d_unique(), stable=True)
     yield SampleInput(small_3d_unique(), dim=0, stable=True)
