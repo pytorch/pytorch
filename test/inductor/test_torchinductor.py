@@ -812,9 +812,12 @@ class CommonTemplate:
                     if "Vectorize" not in code:
                         for line in lines:
                             # match ternary operator
-                            if "?" in line:
-                                pos = line.find("?")
-                                found |= ":" in line[pos + 1 :]
+                            pattern = r"\?.*:"
+                            if re.findall(pattern, line):
+                                found = True
+                            # if "?" in line:
+                            #     pos = line.find("?")
+                            #     found |= ":" in line[pos + 1 :]
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:

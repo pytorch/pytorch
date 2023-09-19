@@ -186,6 +186,7 @@ constant_and_index_propagation = True
 # assert that indirect indexing does not read / write out of bounds
 assert_indirect_indexing = True
 
+
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
