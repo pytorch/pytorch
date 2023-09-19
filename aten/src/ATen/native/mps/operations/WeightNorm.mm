@@ -109,7 +109,8 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
   auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  string key = "weight_norm_backward_mps_" + std::to_string(dim) + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
+  string key =
+      "weight_norm_backward_mps_" + std::to_string(dim) + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
 
   NSMutableArray* reduction_dims = [NSMutableArray array];
   for (int i = 0; i < saved_v.dim(); ++i) {
