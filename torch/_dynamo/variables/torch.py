@@ -400,11 +400,11 @@ class TorchVariable(VariableTracker):
             # `torch.Tensor.__torch_function__`.
             if self.value in torch.overrides.get_default_nowrap_functions():
                 return unwrapped
-            return TensorWithTFOverrideVariable.create(
+            return TensorWithTFOverrideVariable.from_tensor_var(
                 tx,
                 unwrapped,
+                args[0].class_type,
                 args[0].torch_function_fn,
-                args[0].subclass_type,
             )
         elif self.value in [
             torch.amp.autocast_mode.autocast,
