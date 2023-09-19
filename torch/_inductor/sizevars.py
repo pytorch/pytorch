@@ -376,6 +376,7 @@ class SizeVarAllocator:
         try:
             return int(out)
         except Exception:
+            print(f"out: {out}")
             log.debug("failed on: %s", out)
             raise
 

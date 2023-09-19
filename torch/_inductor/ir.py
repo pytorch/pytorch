@@ -3741,17 +3741,46 @@ class DeviceCopy(ExternKernelOut):
             )
 
 
-class DynamicScalar(IRNode):
-    """
-    The result of a call to aten._local_scalar_dense.
+class DynamicScalar(ExternKernelAlloc):
+    def __init__(
+        self,
+        symbol,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+        self.symbol = symbol
 
-    This is not yet implemented.  The one model (so far) that calls this
-    (fastNLP_Bert) does not actually use the result.  So we expect this
-    node to get dead code eliminated.
-    """
+    def codegen(self, wrapper):
+        wrapper.writeline(f"{self.get_name()} = {self.inputs[0].codegen_reference()}.item()")
+        wrapper.writeline(f"{self.symbol} = {self.get_name()}")
 
-    def get_reads(self):
-        return ()
+    @classmethod
+    def create(cls, x: "TensorBox", symbol: sympy.Symbol):
+        return DynamicScalar(
+            symbol=symbol,
+            layout=FixedLayout(
+                torch.device("cpu"), x.get_dtype(), [1], [1]
+            ),
+            inputs=[x],
+        )
+
+    # TODO: add more operations (see sympy.Integer)
+    def __add__(self, other):
+        return self.symbol + other
+
+    def __mul__(self, other):
+        return self.symbol * other
+
+    def __rmul__(self, other):
+        return self.symbol * other
+
+    def __truediv__(self, other):
+        return self.symbol / other
+
+    def __sub__(self, other):
+        return self.symbol - other
 
 
 @dataclasses.dataclass

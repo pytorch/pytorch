@@ -43,6 +43,7 @@ from .ir import (
     TensorBox,
     validate_ir,
     View,
+    DynamicScalar,
 )
 from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
@@ -2268,7 +2269,10 @@ def long_tensor(data):
 
 @register_lowering(aten._local_scalar_dense)
 def _local_scalar_dense(data):
-    return ir.DynamicScalar()
+    symbol = V.graph.current_node.meta['val'].node.expr
+    ret = ir.DynamicScalar.create(data, symbol)
+    # V.graph.sizevars.shape_env.unbacked_symint_to_buf[symbol] = ret.get_name()
+    return ret
 
 
 def _full(fill_value, device, dtype, size):
@@ -2324,7 +2328,7 @@ def tensor_constructor(fill_value):
         dtype = dtype or torch.get_default_dtype()
         if len(size) == 1 and isinstance(size[0], (list, tuple, torch.Size)):
             size = tuple(size[0])
-        size = [sympy.expand(s) for s in size]
+        size = [sympy.expand(s.symbol) if isinstance(s, DynamicScalar) else sympy.expand(s) for s in size]
         return _full(fill_value, device, dtype, size)
 
     return inner
@@ -4748,8 +4752,16 @@ register_inplace(aten.__ixor__, aten.__xor__)
 def sym_constrain_range(a, min, max):
     tracing_context = torch._guards.TracingContext.get()
     assert tracing_context is not None
-    assert a in tracing_context.fake_mode.shape_env.var_to_range
+    if isinstance(a, DynamicScalar):
+        assert a.symbol in tracing_context.fake_mode.shape_env.var_to_range
+    else:
+        assert a in tracing_context.fake_mode.shape_env.var_to_range
     return a
+
+
+@register_lowering(aten.sym_constrain_range_for_size)
+def sym_constrain_range_for_size(a, min, max):
+    return sym_constrain_range(a, min, max)
 
 
 @register_lowering(aten.sym_size)
