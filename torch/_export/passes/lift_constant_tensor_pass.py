@@ -1,5 +1,3 @@
-import copy
-
 import torch
 from torch._export import ExportedProgram
 from torch._guards import detect_fake_mode
@@ -30,15 +28,17 @@ def lift_constant_tensor_pass(ep: ExportedProgram) -> ExportedProgram:
             if not isinstance(constant_tensor, torch.Tensor):
                 continue
 
-            constant_tensor_fqn = node.target
+            constant_tensor_fqn = f"_lifted_tensor_constant{len(buffers)}"
 
             with ep.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
                 const_placeholder_node = ep.graph.placeholder(constant_tensor_fqn)
-                const_placeholder_node.meta = copy.deepcopy(node.meta)
+                for k, v in node.meta.items():
+                    const_placeholder_node.meta[k] = v
                 const_placeholder_node.meta["val"] = fake_mode.from_tensor(
                     constant_tensor
                 )
+                const_placeholder_node.meta["val"].constant = constant_tensor
                 node.replace_all_uses_with(const_placeholder_node)
                 ep.graph.erase_node(node)
 
