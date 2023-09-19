@@ -91,20 +91,17 @@ class ChunkShardingSpec(ShardingSpec):
         for idx, placement in enumerate(self.placements):
             # generate ShardMetadata for each placement device
             chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
-            if chunked_dim_size > 0:
-                shard_size = list(tensor_sizes)
-                current_offsets = [0] * tensor_num_dim
-                current_offsets[self.dim] = split_size * idx  # type: ignore[index]
-                shard_size[self.dim] = chunked_dim_size  # type: ignore[index]
+            shard_size = list(tensor_sizes)
+            current_offsets = [0] * tensor_num_dim
+            current_offsets[self.dim] = split_size * idx  # type: ignore[index]
+            shard_size[self.dim] = chunked_dim_size  # type: ignore[index]
 
-                shard_metadata = ShardMetadata(
-                    shard_offsets=current_offsets,
-                    shard_sizes=shard_size,
-                    placement=placement,
-                )
-                shards_metadata.append(shard_metadata)
-
-                # current_offsets[self.dim] += chunked_dim_size  # type: ignore[index]
+            shard_metadata = ShardMetadata(
+                shard_offsets=current_offsets,
+                shard_sizes=shard_size,
+                placement=placement,
+            )
+            shards_metadata.append(shard_metadata)
 
         return sharded_tensor_meta.ShardedTensorMetadata(
             shards_metadata,
