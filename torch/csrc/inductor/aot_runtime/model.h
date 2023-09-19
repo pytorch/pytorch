@@ -41,6 +41,8 @@
 namespace torch {
 namespace aot_inductor {
 
+// UniqueAtenTensorHandle is used to manage input, output, and intermediate
+// buffers
 class UniqueAtenTensorHandle {
  public:
   UniqueAtenTensorHandle() = delete;
