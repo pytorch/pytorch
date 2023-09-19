@@ -8,6 +8,8 @@
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <ATen/ATen.h>
+#include <ATen/hip/HIPGraphsUtils.cuh> // for philox
+#include <ATen/native/transformers/hip/flash_attn_rocm/src/utils.h> // for unpack
 
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_fwd_runner_gfx90a.h>
 #include <ATen/native/transformers/hip/flash_attn_rocm/src/flash_bwd_runner_gfx90a.h>
@@ -280,7 +282,7 @@ void set_params_dgrad(FlashBwdParams &params,
     params.is_causal = is_causal;
 }
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_fwd(const at::Tensor &q,
         const at::Tensor &k,
         const at::Tensor &v,
@@ -350,13 +352,15 @@ mha_fwd(const at::Tensor &q,
 
     auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
     // auto softmax_lse = at::full({batch_size, num_heads, max_seqlen_k}, -std::numeric_limits<float>::infinity(), opts.dtype(at::kFloat));
-    at::Tensor s;
-    if (return_softmax) { s = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts.dtype(at::kInt)); }
+    at::Tensor flash_softmax;
+    if (return_softmax) {
+        flash_softmax = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts.dtype(at::kInt));
+    }
     if (zero_tensors) {
         out.zero_();
         //softmax_lse.zero_();
         softmax_lse.fill_(-std::numeric_limits<float>::infinity());
-        if (return_softmax) { s.zero_(); }
+        if (return_softmax) { flash_softmax.zero_(); }
     }
 
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(c10::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
@@ -371,7 +375,7 @@ mha_fwd(const at::Tensor &q,
                      cu_seqlens_q,
                      cu_seqlens_k,
                      nullptr,
-                     return_softmax ? s.data_ptr() : nullptr,
+                     return_softmax ? flash_softmax.data_ptr() : nullptr,
                      //return_softmax ? z_device_buf.GetDeviceBuffer() : nullptr,
                      softmax_lse.data_ptr(),
                      p_dropout,
@@ -382,21 +386,44 @@ mha_fwd(const at::Tensor &q,
     // state
     // We use a custom RNG that increases the offset by batch_size * nheads * 32.
 
-    if( is_dropout ) {
+    at::Tensor seed_t, offset_t;
+    if (is_dropout) {
         // See Note [Acquire lock when using random generators]
         int64_t counter_offset = launch_params.params.b * launch_params.params.h * 32;
+        at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
         std::lock_guard<std::mutex> lock(gen->mutex_);
-        launch_params.params.philox_args = gen->philox_cuda_state(counter_offset);
+        if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+          auto [seed, offset] = unpack(philox_state);
+          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
+          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
+        } else {
+          seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+          offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+          // launch_params.params.seed = seed_t.data_ptr<int64_t>();
+          // launch_params.params.extragraph_offset = offset_t.data_ptr<int64_t>();
+        }
+        launch_params.params.philox_args = philox_state;
+    } else {
+        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
+            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+        } else {
+            seed_t = at::empty({}, at::dtype(at::kLong));
+            offset_t = at::empty({}, at::dtype(at::kLong));
+        }
     }
 
     run_flash_fwd(launch_params);
 
+#if 0
     std::vector<at::Tensor> result = {softmax_lse};
 
     if (return_softmax) {
         result.push_back(s);
     }
     return result;
+#endif
+    return {softmax_lse, seed_t, offset_t, flash_softmax};
 }
 
 
