@@ -9,7 +9,6 @@
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
-#include <ATen/cpu/vec/vec256/vec256.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <utility>
@@ -35,6 +34,7 @@ namespace native {
 
 DEFINE_DISPATCH(_fused_sdp_choice_stub);
 
+DEFINE_DISPATCH(transform_bias_rescale_qkv_stub);
 DEFINE_DISPATCH(flash_attention_kernel);
 DEFINE_DISPATCH(flash_attention_backward_kernel);
 
@@ -45,83 +45,6 @@ Tensor gemm_nt(const Tensor& self, const Tensor& other) {
     return NestedTensor_matmul(self, other.t());
   } else {
     return at::native::matmul(self, other.t());
-  }
-}
-
-template <typename scalar_t>
-void transform_bias_rescale_qkv_inner_loop(
-    int64_t B,
-    int64_t T,
-    int64_t _3D,
-    int64_t D,
-    int64_t num_head,
-    int64_t dim_per_head,
-    scalar_t* qkv_data,
-    scalar_t* qkv_bias_data,
-    scalar_t* q_k_v_data,
-    scalar_t inv_sqrt_dim_per_head,
-    int64_t begin,
-    int64_t end) {
-  for (auto i : c10::irange(begin, end)) {
-    auto t = i % T;
-    i /= T;
-    auto nh = i % num_head;
-    i /= num_head;
-    auto b = i;
-    using Vec = vec::Vectorized<scalar_t>;
-    auto V = vec::Vectorized<scalar_t>::size();
-    auto dh = 0;
-    auto d = nh * dim_per_head;
-    for (; dh + V <= dim_per_head; dh += V, d += V) {
-      // load
-      auto q_bias_data = Vec::loadu(&qkv_bias_data[d + 0 * D]);
-      auto k_bias_data = Vec::loadu(&qkv_bias_data[d + 1 * D]);
-      auto v_bias_data = Vec::loadu(&qkv_bias_data[d + 2 * D]);
-
-      auto q_data = Vec::loadu(&qkv_data[b * _3D * T + t * _3D + d + 0 * D]) +
-          q_bias_data;
-      auto k_data = Vec::loadu(&qkv_data[b * _3D * T + t * _3D + d + 1 * D]) +
-          k_bias_data;
-      auto v_data = Vec::loadu(&qkv_data[b * _3D * T + t * _3D + d + 2 * D]) +
-          v_bias_data;
-
-      q_data = q_data * Vec(inv_sqrt_dim_per_head);
-
-      q_data.store(&q_k_v_data
-                       [0 * B * num_head * T * dim_per_head +
-                        b * num_head * T * dim_per_head +
-                        nh * T * dim_per_head + t * dim_per_head + dh]);
-      k_data.store(&q_k_v_data
-                       [1 * B * num_head * T * dim_per_head +
-                        b * num_head * T * dim_per_head +
-                        nh * T * dim_per_head + t * dim_per_head + dh]);
-      v_data.store(&q_k_v_data
-                       [2 * B * num_head * T * dim_per_head +
-                        b * num_head * T * dim_per_head +
-                        nh * T * dim_per_head + t * dim_per_head + dh]);
-    }
-    for (; dh < dim_per_head; dh++) {
-      auto d = nh * dim_per_head + dh;
-      auto q_bias = qkv_bias_data[d + 0 * D];
-      auto k_bias = qkv_bias_data[d + 1 * D];
-      auto v_bias = qkv_bias_data[d + 2 * D];
-      auto q_data = qkv_data[b * _3D * T + t * _3D + d + 0 * D] + q_bias;
-      auto k_data = qkv_data[b * _3D * T + t * _3D + d + 1 * D] + k_bias;
-      auto v_data = qkv_data[b * _3D * T + t * _3D + d + 2 * D] + v_bias;
-      q_data = q_data * inv_sqrt_dim_per_head;
-      q_k_v_data
-          [0 * B * num_head * T * dim_per_head +
-           b * num_head * T * dim_per_head + nh * T * dim_per_head +
-           t * dim_per_head + dh] = q_data;
-      q_k_v_data
-          [1 * B * num_head * T * dim_per_head +
-           b * num_head * T * dim_per_head + nh * T * dim_per_head +
-           t * dim_per_head + dh] = k_data;
-      q_k_v_data
-          [2 * B * num_head * T * dim_per_head +
-           b * num_head * T * dim_per_head + nh * T * dim_per_head +
-           t * dim_per_head + dh] = v_data;
-    }
   }
 }
 
@@ -284,37 +207,13 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
 
   const auto qkv_contig = qkv_->expect_contiguous();
   const auto qkv_bias_contig = qkv_bias.expect_contiguous();
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::Half,
-      ScalarType::BFloat16,
+  transform_bias_rescale_qkv_stub(
+      kCPU,
       qkv_->scalar_type(),
-      "transform_bias_rescale_qkv",
-      [&] {
-        scalar_t* qkv_data = qkv_contig->data_ptr<scalar_t>();
-        scalar_t* qkv_bias_data = qkv_bias_contig->data_ptr<scalar_t>();
-        scalar_t* q_k_v_data = q_k_v.data_ptr<scalar_t>();
-        const scalar_t inv_sqrt_dim_per_head =
-            1.0 / std::sqrt(static_cast<scalar_t>(dim_per_head));
-
-        int64_t grain_size =
-            std::max(internal::GRAIN_SIZE / (3 * dim_per_head), (int64_t)1);
-        parallel_for(
-            0, B * num_head * T, grain_size, [&](int64_t begin, int64_t end) {
-              transform_bias_rescale_qkv_inner_loop(
-                  B,
-                  T,
-                  _3D,
-                  D,
-                  num_head,
-                  dim_per_head,
-                  qkv_data,
-                  qkv_bias_data,
-                  q_k_v_data,
-                  inv_sqrt_dim_per_head,
-                  begin,
-                  end);
-            });
-      });
+      q_k_v.data_ptr(),
+      qkv_contig->const_data_ptr(),
+      qkv_bias_contig->const_data_ptr(),
+      B, T, D, num_head);
   auto q_k_v_s =
       at::native::split(q_k_v.view({3 * B, num_head, T, dim_per_head}), B, 0);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(q_k_v_s.size() == 3);
