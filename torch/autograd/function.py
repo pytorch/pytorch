@@ -5,7 +5,6 @@ from typing import Any, List, Optional, Tuple
 
 import torch
 import torch._C as _C
-import torch._dynamo_utils
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
@@ -551,14 +550,7 @@ class Function(_SingleLevelFunction):
 
 
 def once_differentiable(fn):
-    # In order for the function returned by once_differentiable to work with Dynamo,
-    # Dynamo needs to be able to inline through its return to prove safety.
-    # However, Dynamo thinks the function returned by once_differentiable is in a
-    # SKIPFILES, because this file is in SKIPFILES, which prevents inlining. We apply
-    # the following decorator (once per function) to force inlines.
-    @torch._dynamo_utils.force_inline
     @functools.wraps(fn)
-    @torch._dynamo_utils.force_inline
     def wrapper(ctx, *args):
         with torch.no_grad():
             outputs = fn(ctx, *args)

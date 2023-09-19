@@ -84,6 +84,7 @@ class DispatchKey(Enum):
     Sparse = auto()
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
+    NestedTensor = auto()
 
     Python = auto()
     FuncTorchDynamicLayerBackMode = auto()
@@ -209,6 +210,7 @@ class DispatchKey(Enum):
 class _TorchDispatchModeKey(Enum):
     FAKE = auto()
     PROXY = auto()
+    FUNCTIONAL = auto()
 
 
 def codegen_per_backend_entries() -> str:
