@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 
 import torch
 
-from torch._dynamo.runtime import get_runtime_for_device
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import config, device_properties, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
@@ -1720,8 +1720,7 @@ _watchdog_thread: Optional[Thread] = None
 
 
 class AsyncCompile:
-    def __init__(self, device: str = "cuda") -> None:
-        self.device = device
+    def __init__(self) -> None:
         pass
 
     @staticmethod
@@ -1812,14 +1811,14 @@ class AsyncCompile:
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
     def triton(
-        self, kernel_name: str, source_code: str
+        self, kernel_name: str, source_code: str, device: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
 
         if config.compile_threads > 1:
-            device_runtime = get_runtime_for_device(self.device)
-            device = torch.device(self.device, device_runtime.current_device())
-            cc = device_runtime.get_compute_capability(device)
+            device_interface = get_interface_for_device(device)
+            device = torch.device(device, device_interface.current_device())
+            cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
                 _worker_compile, kernel_name, source_code, cc, device
             )

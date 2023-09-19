@@ -1,7 +1,10 @@
 from typing import Any, Dict
 
 import torch
-from torch._dynamo.runtime import get_registered_device_runtimes, get_runtime_for_device
+from torch._dynamo.device_interface import (
+    get_interface_for_device,
+    get_registered_device_interfaces,
+)
 
 # API to query cuda properties that will work in a triton compile process
 # that cannot use the GPU APIs (due to processing fork() and initialization
@@ -16,14 +19,14 @@ _compile_worker_current_devices: Dict[str, int] = {}
 # we fork the workers. We can NOT call this function only once because an out-of-tree
 # package can register its runtime only when importing the package.
 def _properties():
-    for device, device_runtime in get_registered_device_runtimes():
+    for device, device_interface in get_registered_device_interfaces():
         if device in _compile_worker_device_properties:
             continue
         # Recored the newly registered device properties.
-        if device_runtime.is_available():
+        if device_interface.is_available():
             device_prop = [
-                device_runtime.get_device_properties(i)
-                for i in range(device_runtime.device_count())
+                device_interface.get_device_properties(i)
+                for i in range(device_interface.device_count())
             ]
             _compile_worker_device_properties[device] = device_prop
 
@@ -36,8 +39,8 @@ def set_compiler_worker_current_device(device: torch.device) -> None:
 def current_device(device: str) -> int:
     if device in _compile_worker_current_devices:
         return _compile_worker_current_devices[device]
-    device_runtime = get_runtime_for_device(device)
-    return device_runtime.current_device()
+    device_interface = get_interface_for_device(device)
+    return device_interface.current_device()
 
 
 def _device(device: torch.device) -> int:

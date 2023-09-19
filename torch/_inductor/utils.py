@@ -37,7 +37,7 @@ import sympy
 
 import torch
 
-from torch._dynamo.runtime import get_runtime_for_device
+from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
@@ -300,7 +300,7 @@ def gen_gm_and_inputs(target, args, kwargs):
 def synchronize(device: str = "cuda"):
     if device == "cpu":
         return
-    device_runtime = get_runtime_for_device(device)
+    device_runtime = get_interface_for_device(device)
     if device_runtime.is_available():
         device_runtime.synchronize()
 
@@ -312,7 +312,7 @@ def timed(
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
-        result = model()
+        result = model(*example_inputs)
         synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
