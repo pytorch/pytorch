@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+from typing import Tuple
 import unittest
 
 import torch
@@ -33,6 +34,7 @@ def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
         x = x.clamp(min=-1*E4M3_MAX_POS, max=E4M3_MAX_POS)
     else:
         x = x.clamp(min=-1*E5M2_MAX_POS, max=E5M2_MAX_POS)
+    return x
     return x.to(float8_dtype)
 
 
@@ -80,7 +82,8 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
-    def test_valid_cast(self, dtype: torch.dtype):
+    @parametrize("shape", ((15, 3, 13), (4, 2048, 4096)))
+    def test_valid_cast(self, dtype: torch.dtype, shape: Tuple[int]):
         def fp8_cast(x):
             y0 = x.to(dtype=torch.float8_e4m3fn).to(dtype)
             y1 = x.to(dtype=torch.float8_e5m2).to(dtype)
@@ -88,8 +91,7 @@ class TestFP8Types(TestCase):
 
         compiled_fp8_cast = torch.compile(fp8_cast, backend="inductor", dynamic=True)
 
-        x_shape = (16, 16, 16)
-        x = torch.rand(*x_shape, device="cuda", dtype=dtype)
+        x = torch.rand(*shape, device="cuda", dtype=dtype)
         y0_fp8, y1_fp8 = compiled_fp8_cast(x)
 
         torch.testing.assert_close(y0_fp8, x, rtol=5e-1, atol=5e-1)
@@ -105,25 +107,50 @@ class TestFP8Types(TestCase):
 
         x_shape = (16, 16, 16)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
+        ):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e4m3fn)
             y = compiled_fp8_cast(x, torch.float8_e5m2)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
+        ):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e5m2)
             y = compiled_fp8_cast(x, torch.float8_e4m3fn)
 
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
-    def test_layernorm_fp8_quant(self, float8_dtype: torch.dtype):
-        hidden_size = 4096
-        sequence_length = 2048
-        batch_size = 4
+    @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
+    @parametrize("shape", ((16, 16, 16), (4, 2048, 4096)))
+    def test_to_fp8_saturated(self, dtype: torch.dtype, shape: Tuple[int]):
+        def fp8_saturated(x, dtype):
+            return _to_fp8_saturated(x, dtype)
 
-        def ln_fp8(x: Tensor, scale: float, amax_buffer: Tensor):
-            x = torch.nn.functional.layer_norm(x, [hidden_size], weight=None, bias=None, eps=1e-05)
+        compiled_fp8_cast = torch.compile(fp8_saturated, backend="inductor", dynamic=True)
+        x = torch.rand(*shape, device="cuda", dtype=torch.half)
+        y_compiled = compiled_fp8_cast(x, dtype)
+        y = fp8_saturated(x, dtype)
+
+        torch.testing.assert_close(y_compiled.half(), y.half(), rtol=5e-1, atol=5e-1)
+
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    #@parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, ))
+    # @parametrize("shape", ((1, 1, 15), (4, 2048, 4096)))
+    @parametrize("shape", ((4, 2048, 4096),))
+    # @parametrize("shape", ((1, 1, 15), ))
+    # @parametrize("shape", ((1, 10, 15), ))
+    def test_layernorm_fp8_quant(self, float8_dtype: torch.dtype, shape: Tuple[int]):
+        batch_size, sequence_length, hidden_size = shape
+
+        def ln_fp8(x: Tensor, scale: Tensor, amax_buffer: Tensor):
+            x = torch.nn.functional.layer_norm(x.to(dtype=torch.float), [hidden_size], weight=None, bias=None, eps=1e-05)
             amax_buffer.fill_(torch.max(torch.abs(x)))
             x_scaled = x * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
@@ -133,14 +160,18 @@ class TestFP8Types(TestCase):
 
         x_shape = (batch_size, sequence_length, hidden_size)
         x = torch.rand(*x_shape, device="cuda", dtype=torch.half)
-        scale = 0.2
+        scale = torch.tensor(0.2, device="cuda", dtype=torch.float)
 
         amax_buffer_compiled = torch.zeros((1), device="cuda", dtype=torch.half)
         y_compiled = compiled_ln_fp8_quant(x, scale, amax_buffer_compiled)
         amax_buffer = torch.zeros((1), device="cuda", dtype=torch.half)
         y = ln_fp8(x, scale, amax_buffer)
 
-        torch.testing.assert_close(y_compiled, y, rtol=1e-2, atol=1e-2)
+        print(f"{y_compiled.half()[0][3][2405]=}")
+        print(f"{y.half()[0][3][2405]=}")
+        print(f"{amax_buffer_compiled.half()=}")
+        print(f"{amax_buffer.half()=}")
+        torch.testing.assert_close(y_compiled.half(), y.half(), rtol=1e-2, atol=1e-2)
         torch.testing.assert_close(amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2)
 
 

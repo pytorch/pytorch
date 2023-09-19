@@ -15,17 +15,19 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/openai/triton/pull/2279/
         if arg.dtype == torch.float8_e4m3fn:
-            tye = "fp8e4nv"
+            tye = "*fp8e4nv"
         elif arg.dtype == torch.float8_e5m2:
-            tye = "fp8e5"
+            tye = "*fp8e5"
         else:
             tye = JITFunction._type_of(arg.dtype)
+        print(f"{arg=}, {tye=}", flush=True)
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
             if new_tye in ["fp16", "bf16"]:
                 return "fp32"
             else:
+                print(f"{arg=}, {new_tye=}", flush=True)
                 return new_tye
         else:
             return tye

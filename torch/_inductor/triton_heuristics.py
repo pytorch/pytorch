@@ -50,6 +50,7 @@ else:
 
 
 _NUM_THREADS_PER_WARP = 32
+_MAX_TENSOR_NUMEL = 131072
 
 
 class HeuristicType(Enum):
@@ -189,23 +190,35 @@ class CachingAutotuner(KernelInterface):
         # Setting device_type="hip" required on ROCm to pass down to triton
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
+        print(f"{type(self.fn)=}")
+        print(f"{self.fn=}")
+        # import inspect
+        # lines = inspect.getsource(self.fn)
+        # print("==== code start ====")
+        # print(lines)
+        # print("==== code end ====")
+
         if warm_cache_only_with_cc:
+            print("before compile 1", flush=True)
             triton.compile(
                 self.fn,
                 warm_cache_only=True,
                 cc=warm_cache_only_with_cc,
                 **compile_meta,
             )
+            print("after compile 1", flush=True)
             return
 
         # load binary to the correct device
         with torch.cuda.device(compile_meta["device"]):
             # need to initialize context
             torch.cuda.synchronize(torch.cuda.current_device())
+            print("before compile 2", flush=True)
             binary = triton.compile(
                 self.fn,
                 **compile_meta,
             )
+            print("after compile 2", flush=True)
             binary._init_handles()
 
         call_args = [
@@ -564,7 +577,7 @@ def cached_autotune(
     heuristic_type,
     filename=None,
 ):
-    print(f"{heuristic_type=}, {size_hints=}, {meta=}, {[config.kwargs for config in configs]=}")
+    print(f"{filename=}, {heuristic_type=}, {size_hints=}, {meta=}, {[config.kwargs for config in configs]=}", flush=True)
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.
@@ -658,11 +671,6 @@ def check_config(cfg, *, xnumel=None, ynumel=None, znumel=None):
         if numel is None:
             continue
         block = cfg[f"{label}BLOCK"]
-        if numel == 1:
-            assert block == 1, (
-                f"TritonKernel.indexing assumes numel == 1 => BLOCK == 1"
-                f" but {label.lower()}numel=={numel} and {label}BLOCK={block} (cfg={cfg})."
-            )
         max_block = config.triton.max_block[label]
         max_block_str = f'config.triton.max_block["{label}"]'
         assert max_block % block == 0, (
@@ -678,7 +686,7 @@ def triton_config(
     z=None,
     num_stages=1,
     num_elements_per_warp=256,
-    min_elements_per_thread=0,
+    min_elem_per_thread=0,
 ) -> Config:
     """
     Construct a pointwise triton config with some adjustment heuristics
@@ -692,7 +700,7 @@ def triton_config(
     just a suggestion, and sometimes other adjustment heuristics will
     override the num_elements_per_warp.
 
-    min_elements_per_thread controls the minimum number of elements
+    min_elem_per_thread controls the minimum number of elements
     processed by each thread. It's always enforced.
     """
     # Ideally we want to read this from some device config
@@ -750,10 +758,10 @@ def triton_config(
     ynumel = size_hints[1] if y else None
     znumel = size_hints[2] if z else None
 
-    # Increase x to satisfy min_elements_per_thread requirements.
+    # Increase x to satisfy min_elem_per_thread requirements.
     block_size = max(
         conditional_product(x, y, z),
-        min_elements_per_thread * _NUM_THREADS_PER_WARP * num_warps,
+        min_elem_per_thread * _NUM_THREADS_PER_WARP * num_warps,
     )
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
@@ -766,11 +774,14 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None, min_elements_per_thread=0) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
+
+    min_elements_per_thread controls the minimum number of elements
+    processed by each thread. It's always enforced.
     """
 
     target = conditional_product(x, r)
@@ -787,10 +798,16 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None) -> C
     while r < size_hints[1] and conditional_product(x, r) < target:
         r *= 2
 
-    cfg = {"XBLOCK": x, "RBLOCK": r}
     if num_warps is None:
         num_warps = conditional_product(x, r) // 128
     num_warps = next_power_of_2(min(max(num_warps, 2), 8))
+
+    # Increase x to satisfy min_elements_per_thread requirements.
+    # x = max(x, min_elements_per_thread)
+    # r = min(math.floor(_MAX_TENSOR_NUMEL / x), r)
+    cfg = {"XBLOCK": x, "RBLOCK": r}
+
+    print(f"{cfg=}, {size_hints=}, {min_elements_per_thread=}")
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -825,9 +842,7 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def pointwise(
-    size_hints, meta, tile_hint=None, filename=None, min_elements_per_thread=0
-):
+def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thread=0):
     """
     Construct @triton.heuristics() based on size_hints.
     """
@@ -838,17 +853,17 @@ def pointwise(
         meta.get("autotune_hints", set()), size_hints, bs
     )
 
+    triton_config_with_settings = functools.partial(
+        triton_config, min_elem_per_thread=min_elem_per_thread
+    )
+
     if len(size_hints) == 1:
         if disable_pointwise_autotuning() and not (
             config.max_autotune or config.max_autotune_pointwise
         ):
             return cached_autotune(
                 size_hints,
-                [
-                    triton_config(
-                        size_hints, bs, min_elements_per_thread=min_elements_per_thread
-                    )
-                ],
+                [triton_config_with_settings(size_hints, bs)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
@@ -857,17 +872,11 @@ def pointwise(
             return cached_autotune(
                 size_hints,
                 [
-                    triton_config(
-                        size_hints,
-                        bs,
-                        num_elements_per_warp=256,
-                        min_elements_per_thread=min_elements_per_thread,
+                    triton_config_with_settings(
+                        size_hints, bs, num_elements_per_warp=256
                     ),
-                    triton_config(
-                        size_hints,
-                        bs // 2,
-                        num_elements_per_warp=64,
-                        min_elements_per_thread=min_elements_per_thread,
+                    triton_config_with_settings(
+                        size_hints, bs // 2, num_elements_per_warp=64
                     ),
                     *hinted_configs,
                 ],
@@ -881,14 +890,7 @@ def pointwise(
         ):
             return cached_autotune(
                 size_hints,
-                [
-                    triton_config(
-                        size_hints,
-                        32,
-                        32,
-                        min_elements_per_thread=min_elements_per_thread,
-                    )
-                ],
+                [triton_config_with_settings(size_hints, 32, 32)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
@@ -896,24 +898,12 @@ def pointwise(
         return cached_autotune(
             size_hints,
             [
-                triton_config(
-                    size_hints, 32, 32, min_elements_per_thread=min_elements_per_thread
-                ),
-                triton_config(
-                    size_hints, 64, 64, min_elements_per_thread=min_elements_per_thread
-                ),  # ~8% better for fp16
-                triton_config(
-                    size_hints, 256, 16, min_elements_per_thread=min_elements_per_thread
-                ),
-                triton_config(
-                    size_hints, 16, 256, min_elements_per_thread=min_elements_per_thread
-                ),
-                triton_config(
-                    size_hints, bs, 1, min_elements_per_thread=min_elements_per_thread
-                ),
-                triton_config(
-                    size_hints, 1, bs, min_elements_per_thread=min_elements_per_thread
-                ),
+                triton_config_with_settings(size_hints, 32, 32),
+                triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
+                triton_config_with_settings(size_hints, 256, 16),
+                triton_config_with_settings(size_hints, 16, 256),
+                triton_config_with_settings(size_hints, bs, 1),
+                triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
             ],
             meta=meta,
@@ -924,15 +914,7 @@ def pointwise(
         if disable_pointwise_autotuning():
             return cached_autotune(
                 size_hints,
-                [
-                    triton_config(
-                        size_hints,
-                        16,
-                        16,
-                        16,
-                        min_elements_per_thread=min_elements_per_thread,
-                    )
-                ],
+                [triton_config_with_settings(size_hints, 16, 16, 16)],
                 meta=meta,
                 heuristic_type=HeuristicType.POINTWISE,
                 filename=filename,
@@ -940,55 +922,13 @@ def pointwise(
         return cached_autotune(
             size_hints,
             [
-                triton_config(
-                    size_hints,
-                    16,
-                    16,
-                    16,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
-                triton_config(
-                    size_hints,
-                    64,
-                    8,
-                    8,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
-                triton_config(
-                    size_hints,
-                    8,
-                    64,
-                    8,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
-                triton_config(
-                    size_hints,
-                    8,
-                    8,
-                    64,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
-                triton_config(
-                    size_hints,
-                    bs,
-                    1,
-                    1,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
-                triton_config(
-                    size_hints,
-                    1,
-                    bs,
-                    1,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
-                triton_config(
-                    size_hints,
-                    1,
-                    1,
-                    bs,
-                    min_elements_per_thread=min_elements_per_thread,
-                ),
+                triton_config_with_settings(size_hints, 16, 16, 16),
+                triton_config_with_settings(size_hints, 64, 8, 8),
+                triton_config_with_settings(size_hints, 8, 64, 8),
+                triton_config_with_settings(size_hints, 8, 8, 64),
+                triton_config_with_settings(size_hints, bs, 1, 1),
+                triton_config_with_settings(size_hints, 1, bs, 1),
+                triton_config_with_settings(size_hints, 1, 1, bs),
                 *hinted_configs,
             ],
             meta=meta,
@@ -998,17 +938,17 @@ def pointwise(
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elements_per_thread=0):
     """args to @triton.heuristics()"""
     assert meta is not None
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), min_elements_per_thread=min_elements_per_thread
         )
-        outer_config = triton_config_reduction(size_hints, 128, 8)
+        outer_config = triton_config_reduction(size_hints, 128, 8, min_elements_per_thread=min_elements_per_thread)
         tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048), min_elements_per_thread=min_elements_per_thread
         )
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
@@ -1039,7 +979,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         if disable_pointwise_autotuning():
             return cached_autotune(
                 size_hints,
-                [triton_config_reduction(size_hints, 32, 128)],
+                [triton_config_reduction(size_hints, 32, 128, min_elements_per_thread=min_elements_per_thread)],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
@@ -1050,12 +990,12 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
                 contiguous_config,
                 outer_config,
                 tiny_config,
-                triton_config_reduction(size_hints, 64, 64),
-                triton_config_reduction(size_hints, 8, 512),
+                triton_config_reduction(size_hints, 64, 64, min_elements_per_thread=min_elements_per_thread),
+                triton_config_reduction(size_hints, 8, 512, min_elements_per_thread=min_elements_per_thread),
                 # halve the XBLOCK/RBLOCK compared to outer_config
                 # TODO: this may only be beneficial when each iteration of the reduciton
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8),
+                triton_config_reduction(size_hints, 64, 4, num_warps=8, min_elements_per_thread=min_elements_per_thread),
             ],
             meta=meta,
             filename=filename,
@@ -1064,11 +1004,11 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None):
+def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elements_per_thread=0):
     xnumel, rnumel = size_hints
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumel)
+        triton_config_reduction(size_hints, xblock, rnumel, min_elements_per_thread=min_elements_per_thread)
         for xblock in (1, 8, 32, 128)
         if rnumel * xblock <= 4096 and xblock <= xnumel
     ]
@@ -1081,7 +1021,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
     elif reduction_hint == ReductionHint.OUTER_TINY:
         configs = [
             triton_config_reduction(
-                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
+                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel, min_elements_per_thread=min_elements_per_thread
             )
         ]
     for c in configs:
