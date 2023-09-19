@@ -70,39 +70,19 @@ class TensorWithTFOverrideVariable(TensorVariable):
         super().__init__(**kwargs)
         self.torch_function_fn = torch_function_fn
 
-    def create(
-        tx,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        var = TensorWithTFOverrideVariable(
-            tensor_variable,
-            torch_function_fn,
-            subclass_type,
-            **kwargs,
-        )
+    @classmethod
+    def from_tensor_var(cls, tx, tensor_var, class_type, torch_function_fn):
+        kwargs = dict(tensor_var.__dict__)
+        kwargs.pop("class_type", None)
+        var = cls(torch_function_fn, class_type=class_type, **kwargs)
+
         # stash the subclass type to rewrap an output tensor if needed
+        # this is needed because the actual type needs to be available
+        # each time the compiled artifact is run and outputs a wrapped tensor.
         if var.global_class_name() not in tx.output.global_scope:
-            tx.output.install_global(var.global_class_name(), subclass_type)
+            tx.output.install_global(var.global_class_name(), class_type)
 
         return var
-
-    def __init__(
-        self,
-        tensor_variable,
-        torch_function_fn,
-        subclass_type,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.tensor_variable = tensor_variable
-        self.torch_function_fn = torch_function_fn
-        self.subclass_type = subclass_type
-
-    def as_proxy(self):
-        return self.tensor_variable.as_proxy()
 
     def python_type(self):
         return self.subclass_type
@@ -158,11 +138,12 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     for a in all_args
                     if isinstance(a, TensorWithTFOverrideVariable)
                 ]
+                ** options
             )
 
             return self.call_torch_function(tx, func_var, types, args, kwargs)
         else:
-            return self.tensor_variable.call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
