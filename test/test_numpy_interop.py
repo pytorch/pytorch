@@ -11,6 +11,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 
+
 # For testing handling NumPy objects and sending tensors to / accepting
 #   arrays from NumPy.
 class TestNumPyInterop(TestCase):
@@ -303,6 +304,14 @@ class TestNumPyInterop(TestCase):
         for idx in i:
             self.assertFalse(isinstance(idx, int))
             self.assertEqual(x[idx], x[int(idx)])
+
+    @onlyCPU
+    def test_numpy_index_multi(self, device):
+        for dim_sz in [2, 8, 16, 32]:
+            i = np.zeros((dim_sz, dim_sz, dim_sz), dtype=np.int32)
+            i[:dim_sz // 2, :, :] = 1
+            x = torch.randn(dim_sz, dim_sz, dim_sz)
+            self.assertTrue(x[i == 1].numel() == np.sum(i))
 
     @onlyCPU
     def test_numpy_array_interface(self, device):

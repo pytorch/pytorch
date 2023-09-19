@@ -383,7 +383,7 @@ Module import_ir_module(
   // NOTE: Zipformat can be large files. So using stream version directly
   // instead of reading the file all at once.
   if (getFileFormat(in) != FileFormat::FlatbufferFileFormat) {
-    auto reader = torch::make_unique<PyTorchStreamReader>(&in);
+    auto reader = std::make_unique<PyTorchStreamReader>(&in);
     reader->setShouldLoadDebugSymbol(load_debug_files);
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files, restore_shapes);
@@ -432,7 +432,7 @@ Module import_ir_module(
   // NOTE: Zipformat can be large files. So using stream version directly
   // instead of reading the file all at once.
   if (getFileFormat(filename) != FileFormat::FlatbufferFileFormat) {
-    auto reader = torch::make_unique<PyTorchStreamReader>(filename);
+    auto reader = std::make_unique<PyTorchStreamReader>(filename);
     reader->setShouldLoadDebugSymbol(load_debug_files);
     ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
     return deserializer.deserialize(device, extra_files, restore_shapes);
@@ -548,7 +548,7 @@ Module _load_jit_module_from_bytes(
     }
     case FileFormat::ZipFileFormat: {
       auto rai = std::make_unique<MemoryReadAdapter>(data.get(), size);
-      auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+      auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
       ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
       return deserializer.deserialize(device, extra_files, restore_shapes);
     }

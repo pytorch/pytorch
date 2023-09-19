@@ -843,10 +843,6 @@ def array_equiv(a1: ArrayLike, a2: ArrayLike):
     return _tensor_equal(a1_t, a2_t)
 
 
-def mintypecode():
-    raise NotImplementedError
-
-
 def nan_to_num(
     x: ArrayLike, copy: NotImplementedType = True, nan=0.0, posinf=None, neginf=None
 ):
@@ -857,14 +853,6 @@ def nan_to_num(
         return re + 1j * im
     else:
         return torch.nan_to_num(x, nan=nan, posinf=posinf, neginf=neginf)
-
-
-def asfarray():
-    raise NotImplementedError
-
-
-def block(*args, **kwds):
-    raise NotImplementedError
 
 
 # ### put/take_along_axis ###
@@ -887,7 +875,7 @@ def take(
 def take_along_axis(arr: ArrayLike, indices: ArrayLike, axis):
     (arr,), axis = _util.axis_none_flatten(arr, axis=axis)
     axis = _util.normalize_axis_index(axis, arr.ndim)
-    return torch.gather(arr, axis, indices)
+    return torch.take_along_dim(arr, indices, axis)
 
 
 def put(
@@ -1340,6 +1328,16 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
         # set the global state to handle the optimize=... argument, restore on exit
         if opt_einsum.is_available():
             old_strategy = torch.backends.opt_einsum.strategy
+            old_enabled = torch.backends.opt_einsum.enabled
+
+            # torch.einsum calls opt_einsum.contract_path, which runs into
+            # https://github.com/dgasmith/opt_einsum/issues/219
+            # for strategy={True, False}
+            if optimize is True:
+                optimize = "auto"
+            elif optimize is False:
+                torch.backends.opt_einsum.enabled = False
+
             torch.backends.opt_einsum.strategy = optimize
 
         if sublist_format:
@@ -1359,6 +1357,7 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
     finally:
         if opt_einsum.is_available():
             torch.backends.opt_einsum.strategy = old_strategy
+            torch.backends.opt_einsum.enabled = old_enabled
 
     result = maybe_copy_to(out, result)
     return wrap_tensors(result)
@@ -1368,6 +1367,8 @@ def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=
 
 
 def _sort_helper(tensor, axis, kind, order):
+    if tensor.dtype.is_complex:
+        raise NotImplementedError(f"sorting {tensor.dtype} is not supported")
     (tensor,), axis = _util.axis_none_flatten(tensor, axis=axis)
     axis = _util.normalize_axis_index(axis, tensor.ndim)
 
@@ -1377,8 +1378,6 @@ def _sort_helper(tensor, axis, kind, order):
 
 
 def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
-    if a.dtype.is_complex:
-        return NotImplemented
     # `order` keyword arg is only relevant for structured dtypes; so not supported here.
     a, axis, stable = _sort_helper(a, axis, kind, order)
     result = torch.sort(a, dim=axis, stable=stable)
@@ -1386,8 +1385,6 @@ def sort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
 
 
 def argsort(a: ArrayLike, axis=-1, kind=None, order: NotImplementedType = None):
-    if a.dtype.is_complex:
-        return NotImplemented
     a, axis, stable = _sort_helper(a, axis, kind, order)
     return torch.argsort(a, dim=axis, stable=stable)
 
@@ -1396,7 +1393,7 @@ def searchsorted(
     a: ArrayLike, v: ArrayLike, side="left", sorter: Optional[ArrayLike] = None
 ):
     if a.dtype.is_complex:
-        return NotImplemented
+        raise NotImplementedError(f"searchsorted with dtype={a.dtype}")
 
     return torch.searchsorted(a, v, side=side, sorter=sorter)
 
