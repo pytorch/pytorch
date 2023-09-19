@@ -144,17 +144,29 @@ def create_symbolic_tensor(name, arg, shape_env):
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
-def create_symint(shape_env, i: int):
+def create_symtype(cls, pytype, shape_env, val):
     from torch._dynamo.source import ConstantSource
-    return shape_env.create_symintnode(
-        shape_env.create_symbol(
-            i,
-            source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
-            dynamic_dim=DimDynamic.DUCK,
-            constraint_dim=None,
-        ),
-        hint=i
+    symbol = shape_env.create_symbol(
+        val,
+        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        dynamic_dim=DimDynamic.DUCK,
+        constraint_dim=None,
     )
+    return cls(SymNode(
+        symbol,
+        shape_env,
+        pytype,
+        hint=val,
+    ))
+
+def create_symint(shape_env, i: int):
+    return create_symtype(SymInt, int, shape_env, i)
+
+def create_symbool(shape_env, b: bool):
+    return create_symtype(SymBool, bool, shape_env, b)
+
+def create_symfloat(shape_env, f: float):
+    return create_symtype(SymFloat, float, shape_env, f)
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -644,6 +656,8 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
+            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -654,12 +668,16 @@ class TestSymNumberMagicMethods(TestCase):
         sym_inp2 = get_sym_inp(inp2)
         with maybe_xfail(inp1, sym_inp2):
             out = lambda_apply(inp1, sym_inp2)
+            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
         # Symified both args
         with maybe_xfail(sym_inp1, sym_inp2):
             out = lambda_apply(sym_inp1, sym_inp2)
+            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -717,6 +735,42 @@ class TestSymNumberMagicMethods(TestCase):
 
     def get_constant_bool(self, val):
         return SymBool(torch._C._get_constant_bool_symnode(val))
+
+    def test_symnode_hashing(self):
+        shape_env = ShapeEnv()
+
+        # SymInt, SymBool, SymFloat are unhashable
+        unhashable = (
+            create_symint(shape_env, 3),
+            create_symbool(shape_env, True),
+            create_symfloat(shape_env, 4.2),
+        )
+
+        for x in unhashable:
+            with self.assertRaisesRegex(TypeError, "unhashable"):
+                hash(x)
+
+        # Singleton SymInt, constant SymBool, SymNode are hashable
+        j1 = torch._C._get_singleton_int(1)
+        j1_copy = torch._C._get_singleton_int(1)
+        j2 = torch._C._get_singleton_int(2)
+        t = self.get_constant_bool(True)
+        t_copy = self.get_constant_bool(True)
+        f = self.get_constant_bool(False)
+        n = create_symint(shape_env, 3).node
+        m = self.get_constant_bool(True).node
+
+        self.assertIs(j1 == j1_copy, True)
+        self.assertEqual(hash(j1), hash(j1_copy))
+        self.assertIs(j1 == j2, False)
+        self.assertNotEqual(hash(j1), hash(j2))
+        self.assertIs(t == t_copy, True)
+        self.assertEqual(hash(t), hash(t_copy))
+        self.assertIs(t == f, False)
+        self.assertNotEqual(hash(t), hash(f))
+
+        hash(n)
+        hash(m)
 
     def test_non_symbolic_symnode(self):
         j1 = torch._C._get_singleton_int(1)
