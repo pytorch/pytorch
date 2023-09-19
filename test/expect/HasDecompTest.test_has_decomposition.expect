@@ -730,6 +730,13 @@ aten::dequantize.tensors_out
 aten::detach_
 aten::detach_copy
 aten::detach_copy.out
+aten::div.Scalar
+aten::div.Scalar_mode
+aten::div.Scalar_mode_out
+aten::div.Scalar_out
+aten::div.Tensor
+aten::div.out
+aten::div.out_mode
 aten::embedding_renorm
 aten::embedding_renorm.out
 aten::embedding_renorm_

@@ -4025,6 +4025,24 @@ def trunc(self: Tensor, **kwargs) -> Tensor:
     return torch.where(self > 0, torch.floor(self), torch.ceil(self))
 
 
+@register_decomposition([aten.div.Tensor_mode])
+def div_tensor_mode(
+    self: Tensor, other: Tensor, *, rounding_mode: Optional[str]
+) -> Tensor:
+    # aten::div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
+    quotient = torch.div(self, other)
+    if rounding_mode is None:
+        return quotient
+    elif rounding_mode == "trunc":
+        return torch.trunc(quotient)
+    elif rounding_mode == "floor":
+        return torch.floor(quotient)
+    else:
+        raise RuntimeError(
+            f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found '{rounding_mode}'"
+        )
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

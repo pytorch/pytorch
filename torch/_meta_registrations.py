@@ -3466,6 +3466,32 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(aten.div)
+@out_wrapper()
+def meta_binop(self, other, rounding_mode=None):
+    if rounding_mode is None:
+        _, result_dtype = elementwise_dtypes(
+            self,
+            other,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
+    elif rounding_mode == "trunc" or rounding_mode == "floor":
+        _, result_dtype = elementwise_dtypes(
+            self,
+            other,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )
+    else:
+        msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
+        raise ValueError(msg)
+
+    if isinstance(other, torch.Tensor):
+        out_shape = _broadcast_shapes(self.shape, other.shape)
+        return self.new_empty(out_shape, dtype=result_dtype)
+    else:
+        return self.new_empty(self.shape, dtype=result_dtype)
+
+
 @register_meta(
     [
         aten.mul_.Scalar,
