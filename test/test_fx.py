@@ -3778,8 +3778,8 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         from enum import Enum
 
         class Foo(Enum):
-          A = 1
-          B = 2
+            A = 1
+            B = 2
 
         def leaf_fn(arr, enum_val):
             # Use the raw enum.
