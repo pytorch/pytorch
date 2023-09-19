@@ -5,6 +5,7 @@ from ..source import AttrSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
+from .tensor import TensorVariable
 from .user_defined import UserDefinedClassVariable
 
 # [Note: __torch_function__] This feature is partially supported with many rough edges (contact mlazos with issues):
@@ -60,12 +61,15 @@ def build_torch_function_var(tx, fn_value, source):
         return SourcelessBuilder()(tx, fn_value)
 
 
-class TensorWithTFOverrideVariable(VariableTracker):
+class TensorWithTFOverrideVariable(TensorVariable):
     """
     Represents a tensor subclass instance with a __torch_function__ override.
     """
 
-    @staticmethod
+    def __init__(self, torch_function_fn, **kwargs):
+        super().__init__(**kwargs)
+        self.torch_function_fn = torch_function_fn
+
     def create(
         tx,
         tensor_variable,
@@ -113,10 +117,10 @@ class TensorWithTFOverrideVariable(VariableTracker):
         return VariableBuilder(tx, source)(self.torch_function_fn)
 
     def subclass_type_var(self):
-        return UserDefinedClassVariable(self.subclass_type)
+        return UserDefinedClassVariable(self.class_type)
 
     def global_class_name(self):
-        return f"__subclass_{self.subclass_type.__name__}"
+        return f"__subclass_{self.class_type.__name__}"
 
     def call_torch_function(self, tx, fn, types, args, kwargs):
         return call_torch_function(
