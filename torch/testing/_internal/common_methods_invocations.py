@@ -12231,8 +12231,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -12262,8 +12261,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('_native_batch_norm_legit',
            aten_name='_native_batch_norm_legit',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -12716,8 +12714,7 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13910,8 +13907,7 @@ op_db: List[OpInfo] = [
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13921,7 +13917,7 @@ op_db: List[OpInfo] = [
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
-                            device_type='cpu', dtypes=(torch.bfloat16,)),
+                            device_type='cpu', dtypes=(torch.bfloat16, torch.float16)),
                # Trying to use forward AD with miopen_batch_norm that does not support it
                # because it has not been implemented yet.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
