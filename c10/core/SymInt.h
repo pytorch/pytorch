@@ -205,7 +205,7 @@ class C10_API SymInt {
   // If both are symbolic, this checks if
   // they share the same node.
   // If both are not symbolic this just checks normal equality.
-  bool identity_equals(const SymInt& other) const;
+  bool is_same(const SymInt& other) const;
 
   operator SymFloat() const;
 
