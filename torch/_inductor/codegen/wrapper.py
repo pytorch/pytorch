@@ -1095,9 +1095,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                     self.prefix.splice(
                         """
-                            auto tmp_input_handles = steal_vector_of_unique_handles(input_handles);
+                            auto tmp_input_handles = steal_from_unique_handles_to_raw_handles(input_handles);
                             auto inputs = create_tensors_from_handles(tmp_input_handles);
-                            auto tmp_output_handles = steal_vector_of_unique_handles(output_handles);
+                            auto tmp_output_handles = steal_from_unique_handles_to_raw_handles(output_handles);
                             auto outputs = create_tensors_from_handles(tmp_output_handles);
                         """
                     )

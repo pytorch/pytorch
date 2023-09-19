@@ -114,7 +114,7 @@ class SharedAtenTensorHandle {
 using ConstantMap = std::unordered_map<std::string, SharedAtenTensorHandle>;
 
 // Steal the ownership from raw AtenTensorHandle to UniqueAtenTensorHandle
-std::vector<UniqueAtenTensorHandle> steal_vector_of_raw_handles(
+std::vector<UniqueAtenTensorHandle> steal_from_raw_handles_to_unique_handles(
     std::vector<AtenTensorHandle>& raw_handles) {
   std::vector<UniqueAtenTensorHandle> result;
   result.reserve(raw_handles.size());
@@ -126,7 +126,7 @@ std::vector<UniqueAtenTensorHandle> steal_vector_of_raw_handles(
 }
 
 // Steal the ownership from raw UniqueAtenTensorHandle to AtenTensorHandle
-std::vector<AtenTensorHandle> steal_vector_of_unique_handles(
+std::vector<AtenTensorHandle> steal_from_unique_handles_to_raw_handles(
     std::vector<UniqueAtenTensorHandle>& unique_handles) {
   std::vector<AtenTensorHandle> result;
   result.reserve(unique_handles.size());
