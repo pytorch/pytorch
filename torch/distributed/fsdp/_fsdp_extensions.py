@@ -125,11 +125,15 @@ def _ext_chunk_dtensor(
 
 
 def _ext_pre_load_state_dict_transform(
-    tensor: torch.Tensor,
+    tensor: torch.Tensor, param_name: Optional[str] = None
 ) -> Tuple[torch.Tensor, List[Shard]]:
     if _extensions is not None:
         return _extensions.pre_load_state_dict_transform(tensor)
 
-    assert type(tensor) is ShardedTensor
+    assert (
+        type(tensor) is ShardedTensor
+    ), "{} expected to be ShardedTensor, but got {}".format(
+        param_name if param_name is not None else "", type(tensor)
+    )
     shards = tensor.local_shards()
     return (tensor, shards)
