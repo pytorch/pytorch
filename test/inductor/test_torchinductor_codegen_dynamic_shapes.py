@@ -138,7 +138,6 @@ test_failures = {
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
     #
-
     # Failed to find for loop/cpu kernel:
     #
     "test_add_uint8_tensor_dynamic_shapes": TestFailure(("cpu", "cuda")),
