@@ -635,45 +635,27 @@ class GetAttrVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
-class GetAttrFunctionVariable(VariableTracker):
-    def __init__(self, get_fn, name, **kwargs):
-        super().__init__(**kwargs)
-        self.get_fn = get_fn
-        self.name = name
-
+class MethodWrapperVariable(variables.ConstantVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        assert len(args) == 1 and len(kwargs) == 0
-        return args[0].var_getattr(tx, self.name)
+        if self.value.__name__ == "__get__":
+            assert len(args) == 1 and len(kwargs) == 0
+            return args[0].var_getattr(tx, self.value.__self__.__name__)
 
-    def is_python_constant(self):
-        return True
-
-    def as_python_constant(self):
-        return self.get_fn
+        super().call_function(tx, args, kwargs)
 
 
-class GetSetDescriptorVariable(VariableTracker):
-    def __init__(self, desc, **kwargs):
-        super().__init__(**kwargs)
-        self.desc = desc
-
+class GetSetDescriptorVariable(variables.ConstantVariable):
     def var_getattr(self, tx, name):
         if name == "__get__":
             from .builder import VariableBuilder
 
             return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
-                self.desc.__get__
+                self.value.__get__
             )
         else:
             return super().var_getattr(tx, name)
-
-    def is_python_constant(self):
-        return True
-
-    def as_python_constant(self):
-        return self.desc
 
 
 class PythonModuleVariable(VariableTracker):
