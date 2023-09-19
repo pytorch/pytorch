@@ -1180,33 +1180,30 @@ class Placeholder(enum.Enum):
 aot_inductor_launcher = """
     #include <c10/cuda/CUDAStream.h>
     #include <torch/csrc/inductor/aot_runtime/interface.h>
-    #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
     void run(
             std::vector<at::Tensor>& input_tensors,
             std::vector<at::Tensor>& output_tensors) {
         AOTInductorModelContainerHandle container_handle;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(
+        AOT_INDUCTOR_ERROR_CHECK(
             AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-
-        std::vector<AtenTensorHandle> input_handles =
-            torch::aot_inductor::create_handles_from_tensors(input_tensors);
-        std::vector<AtenTensorHandle> output_handles =
-            torch::aot_inductor::create_handles_from_tensors(output_tensors);
-
+        AOTInductorTensorHandle inputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
+        AOTInductorTensorHandle outputs_handle =
+            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
         std::vector<const int64_t*> output_sizes(output_tensors.size());
         std::vector<int64_t> output_ndims(output_tensors.size());
         AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
 
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
             container_handle,
-            input_handles.data(),
+            inputs_handle,
             input_tensors.size(),
-            output_handles.data(),
+            outputs_handle,
             output_tensors.size(),
             stream_handle,
             proxy_executor_handle,
@@ -1214,6 +1211,6 @@ aot_inductor_launcher = """
             output_ndims.data()
         ));
 
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerDelete(container_handle));
+        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
     }
 """

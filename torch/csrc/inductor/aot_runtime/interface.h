@@ -3,12 +3,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// WARNING: Be careful when adding new includes here. This header will be used
-// in model.so, and should not refer to any aten/c10 headers except the stable
-// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
-// applies to other files under torch/csrc/inductor/aot_runtime/.
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-
 #ifdef __GNUC__
 #define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
@@ -23,7 +17,7 @@ using AOTInductorError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
 #define AOTI_RUNTIME_FAILURE 1
 
-#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
+#define AOT_INDUCTOR_ERROR_CHECK(call)                                     \
   if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
     throw std::runtime_error(                                              \
         std::string(#call " API call failed at ") + __FILE__ + ", line " + \
@@ -36,6 +30,9 @@ using AOTInductorModelContainerHandle = AOTInductorModelContainerOpaque*;
 
 struct AOTInductorStreamOpaque;
 using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
+
+struct AOTInductorTensorOpaque;
+using AOTInductorTensorHandle = AOTInductorTensorOpaque*;
 
 struct AOTInductorProxyExecutorOpaque;
 using AOTInductorProxyExecutorHandle = AOTInductorProxyExecutorOpaque*;
@@ -56,13 +53,9 @@ AOTInductorError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    // array of raw AtenTensorHandle for input tensors, and will be stolen by
-    // RAIIAtenTensorHandle
-    AtenTensorHandle* input_handles,
+    AOTInductorTensorHandle input_handles,
     size_t num_inputs,
-    // array of raw AtenTensorHandle for output tensors, and will be stolen by
-    // RAIIAtenTensorHandle
-    AtenTensorHandle* output_handles,
+    AOTInductorTensorHandle output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
     AOTInductorProxyExecutorHandle proxy_executor_handle,
