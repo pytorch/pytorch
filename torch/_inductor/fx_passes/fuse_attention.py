@@ -366,7 +366,8 @@ def partialize_and_update_signature(func, **kwargs):
     return wrapper
 
 
-def _get_sfdp_patterns():
+@functools.lru_cache(None)
+def _sfdp_init():
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -473,46 +474,31 @@ def _get_sfdp_patterns():
             _sfdp_scale_factor_check(aten.div.Tensor),
         ),
     ]:
-        # XXX: when adding a new pattern, re-run `gen_attention_patterns` so the pattern
-        # gets serialized to a python file and does not require tracing at runtime.
-        assert isinstance(workaround, dict)
-        training_args = [*args, *workaround.values()]
-        name = pattern.__name__
-
-        yield f"{name}_training", {
-            "search_fn": pattern,
-            "replace_fn": replacement,
-            "example_inputs": training_args,
-            "trace_fn": training_graph,
-            "pass_dict": patterns,
-            "extra_check": extra_check,
-            "scalar_workaround": workaround,
-        }
+        training_args = [*args, *workaround.values()]  # type: ignore[attr-defined]
+        register_replacement(
+            pattern,
+            replacement,
+            training_args,
+            training_graph,
+            patterns,
+            extra_check=extra_check,
+            scalar_workaround=workaround,
+        )
 
         if workaround:
+            assert isinstance(workaround, dict)
             assert len(workaround) == 1 and "dropout_p" in workaround
             # functools.partial insufficient because we look at signature downstream
             pattern = partialize_and_update_signature(pattern, dropout_p=0.0)
             replacement = partialize_and_update_signature(replacement, dropout_p=0.0)
             workaround = {}
 
-        yield f"{name}_inference", {
-            "search_fn": pattern,
-            "replace_fn": replacement,
-            "example_inputs": args,
-            "trace_fn": inference_graph,
-            "pass_dict": patterns,
-            "extra_check": extra_check,
-            "scalar_workaround": workaround,
-        }
-
-
-@functools.lru_cache(None)
-def _sfdp_init():
-    from .serialized_patterns.central_index import get_serialized_pattern
-
-    for key, register_replacement_kwargs in _get_sfdp_patterns():
-        search_fn_pattern = get_serialized_pattern(key)
         register_replacement(
-            **register_replacement_kwargs, search_fn_pattern=search_fn_pattern
+            pattern,
+            replacement,
+            args,
+            inference_graph,
+            patterns,
+            extra_check=extra_check,
+            scalar_workaround=workaround,
         )
