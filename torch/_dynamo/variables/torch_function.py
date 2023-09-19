@@ -56,9 +56,9 @@ def build_torch_function_var(tx, fn_value, source):
             AttrSource(source, "__torch_function__"),
             "__func__",
         )
-        return VariableBuilder(tx, source)(fn_value)
+        return VariableBuilder(tx, source)(fn_value.__func__)
     else:
-        return SourcelessBuilder()(tx, fn_value)
+        return SourcelessBuilder()(tx, fn_value.__func__)
 
 
 class TensorWithTFOverrideVariable(TensorVariable):
@@ -78,7 +78,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         assert (
             kwargs.pop("class_type") is torch.Tensor
         ), "invalid class type in TensorWithTFOverrideVariable.from_tensor_var"
-        var = cls(torch_function_fn, class_type=class_type, **kwargs)
+        var = cls(torch_function_fn=torch_function_fn, class_type=class_type, **kwargs)
 
         # stash the subclass type to rewrap an output tensor if needed
         # this is needed because the actual type needs to be available
@@ -90,15 +90,6 @@ class TensorWithTFOverrideVariable(TensorVariable):
 
     def python_type(self):
         return self.class_type
-
-    def torch_function_var(self, tx):
-        from .builder import VariableBuilder
-
-        source = AttrSource(
-            AttrSource(self.source, "__torch_function__"),
-            "__func__",
-        )
-        return VariableBuilder(tx, source)(self.torch_function_fn)
 
     def subclass_type_var(self):
         return UserDefinedClassVariable(self.class_type)
@@ -141,8 +132,8 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     a.subclass_type_var()
                     for a in all_args
                     if isinstance(a, TensorWithTFOverrideVariable)
-                ]
-                ** options
+                ],
+                **options,
             )
 
             return self.call_torch_function(tx, func_var, types, args, kwargs)
@@ -164,7 +155,7 @@ def dispatch_torch_function(tx, fn, args, kwargs):
     all_args = args + tree_flatten(kwargs)[0]
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if isinstance(arg, TensorWithTFOverrideVariable)],
-        lambda x: x.subclass_type,
+        lambda x: x.class_type,
     )
 
     for arg in overloaded_args:
