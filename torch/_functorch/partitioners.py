@@ -78,8 +78,12 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
             continue
         elif node.op == 'placeholder':
             env[node] = InvalidNode
-        elif node.op == 'call_function':
+        elif node.op == 'call_function' or node.op == 'call_method':
             all_args = pytree.tree_flatten((node.args, node.kwargs))[0]
+            # for x in all_args:
+            #     if isinstance(x, fx.Node):
+            #         if x not in env:
+
             all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
             if any(all_args):
                 env[node] = InvalidNode
