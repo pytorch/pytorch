@@ -9,18 +9,17 @@
 #include <ATen/ATen.h>
 
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#define AOT_VECTOR_SIZE_CHECK(vec, expected_size) \
-  {                                               \
-    auto actual_size = vec.size();                \
-    TORCH_CHECK(                                  \
-        actual_size == expected_size,             \
-        "expected vector size to be ",            \
-        std::to_string(expected_size),            \
-        ", but got ",                             \
-        std::to_string(actual_size));             \
+#define AOTI_VECTOR_SIZE_CHECK(vec, expected_size) \
+  {                                                \
+    auto actual_size = vec.size();                 \
+    TORCH_CHECK(                                   \
+        actual_size == expected_size,              \
+        "expected vector size to be ",             \
+        std::to_string(expected_size),             \
+        ", but got ",                              \
+        std::to_string(actual_size));              \
   }
 
 namespace torch {
@@ -65,9 +64,9 @@ class AOTInductorModelBase {
       std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor = nullptr) {
-    AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
-    AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
+      AOTIProxyExecutorHandle proxy_executor = nullptr) {
+    AOTI_VECTOR_SIZE_CHECK(inputs, num_inputs());
+    AOTI_VECTOR_SIZE_CHECK(outputs, num_outputs());
 
     auto* model = static_cast<Model*>(this);
     model->run_impl(inputs, outputs, stream, proxy_executor);
@@ -322,7 +321,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::vector<at::Tensor>& inputs,
       std::vector<at::Tensor>& outputs,
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor = nullptr);
+      AOTIProxyExecutorHandle proxy_executor = nullptr);
 
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants,
@@ -331,7 +330,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   }
 };
 
-#define AOTI_TORCH_ERROR_CHECK(call)                                      \
+#define AOTI_TORCH_ERROR_CODE_CHECK(call)                                 \
   if ((call) != AOTI_TORCH_SUCCESS) {                                     \
     throw std::runtime_error(                                             \
         std::string(#call " API call failed at ") + __FILE__ + ", line" + \
@@ -350,7 +349,7 @@ inline RAIIAtenTensorHandle create_raii_tensor_handle_for_extern(
 inline RAIIAtenTensorHandle create_raii_tensor_handle_for_temp(
     AtenTensorHandle handle) {
   return RAIIAtenTensorHandle(handle, [](AtenTensorHandle ptr) {
-    AOTI_TORCH_ERROR_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_delete_tensor_object(static_cast<AtenTensorHandle>(ptr)));
   });
 }
@@ -359,11 +358,11 @@ class AOTICudaStreamGuard {
  public:
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
     CUDAStreamGuardHandle ptr;
-    AOTI_TORCH_ERROR_CHECK(
+    AOTI_TORCH_ERROR_CODE_CHECK(
         aoti_torch_create_cuda_stream_guard(&ptr, stream, device_index));
     guard_ =
         std::unique_ptr<void, std::function<void(void*)>>(ptr, [](void* ptr) {
-          AOTI_TORCH_ERROR_CHECK(aoti_torch_delete_cuda_stream_guard(
+          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_cuda_stream_guard(
               reinterpret_cast<CUDAStreamGuardHandle>(ptr)));
         });
   }

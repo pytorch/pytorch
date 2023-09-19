@@ -1185,7 +1185,7 @@ aot_inductor_launcher = """
             std::vector<at::Tensor>& input_tensors,
             std::vector<at::Tensor>& output_tensors) {
         AOTInductorModelContainerHandle container_handle;
-        AOT_INDUCTOR_ERROR_CHECK(
+        AOTI_RUNTIME_ERROR_CODE_CHECK(
             AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
@@ -1197,9 +1197,9 @@ aot_inductor_launcher = """
             reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
         std::vector<const int64_t*> output_sizes(output_tensors.size());
         std::vector<int64_t> output_ndims(output_tensors.size());
-        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
-        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
+        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
             container_handle,
             inputs_handle,
             input_tensors.size(),
@@ -1211,6 +1211,6 @@ aot_inductor_launcher = """
             output_ndims.data()
         ));
 
-        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerDelete(container_handle));
     }
 """

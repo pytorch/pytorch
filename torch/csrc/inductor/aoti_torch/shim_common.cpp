@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <cstdint>
@@ -199,5 +200,24 @@ AOTITorchError aoti_torch_mm_out(
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     at::Tensor* mat2_tensor = tensor_handle_to_tensor_pointer(mat2);
     at::mm_out(*out_tensor, *self_tensor, *mat2_tensor);
+  });
+}
+
+// ProxyExecutor
+AOTITorchError aoti_torch_proxy_executor_call_function(
+    AOTIProxyExecutorHandle proxy_executor,
+    int extern_node_index,
+    int num_ints,
+    int64_t* flatten_int_args,
+    int num_tensors,
+    void** flatten_tensor_args) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    ProxyExecutor* executor = reinterpret_cast<ProxyExecutor*>(proxy_executor);
+    executor->call_function(
+        extern_node_index,
+        num_ints,
+        flatten_int_args,
+        num_tensors,
+        flatten_tensor_args);
   });
 }

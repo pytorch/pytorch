@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+
 #ifdef __GNUC__
 #define AOT_INDUCTOR_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
@@ -17,7 +19,7 @@ using AOTInductorError = int32_t;
 #define AOTI_RUNTIME_SUCCESS 0
 #define AOTI_RUNTIME_FAILURE 1
 
-#define AOT_INDUCTOR_ERROR_CHECK(call)                                     \
+#define AOTI_RUNTIME_ERROR_CODE_CHECK(call)                                \
   if ((call) != AOTI_RUNTIME_SUCCESS) {                                    \
     throw std::runtime_error(                                              \
         std::string(#call " API call failed at ") + __FILE__ + ", line " + \
@@ -33,9 +35,6 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 
 struct AOTInductorTensorOpaque;
 using AOTInductorTensorHandle = AOTInductorTensorOpaque*;
-
-struct AOTInductorProxyExecutorOpaque;
-using AOTInductorProxyExecutorHandle = AOTInductorProxyExecutorOpaque*;
 
 // Creates an AOTInductor model container. The parameter num_models
 // specifies the number of model instances that may be run concurrently for
@@ -58,7 +57,7 @@ AOTInductorError AOTInductorModelContainerRun(
     AOTInductorTensorHandle output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTInductorProxyExecutorHandle proxy_executor_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle,
     const int64_t** ret_output_sizes,
     int64_t* ret_output_ndims);
 

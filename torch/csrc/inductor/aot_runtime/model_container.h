@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <deque>
 #include <future>
 #include <mutex>
 #include <shared_mutex>
@@ -17,7 +19,7 @@
 extern const uint8_t _binary_constants_bin_start[];
 extern const uint8_t _binary_constants_bin_end[];
 
-#define AOT_CONST_GPU_ALIGNMENT 64
+#define AOTI_CONST_GPU_ALIGNMENT 64
 
 namespace {
 
@@ -92,9 +94,9 @@ class AOTInductorModelContainer {
       size_t max_blob = 0;
       for (size_t i = 0; i < num_constants; i++) {
         size_t data_size = model->constant_data_size(i);
-        if (data_size % AOT_CONST_GPU_ALIGNMENT) {
-          data_size = AOT_CONST_GPU_ALIGNMENT +
-              (data_size / AOT_CONST_GPU_ALIGNMENT) * AOT_CONST_GPU_ALIGNMENT;
+        if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
+          data_size = AOTI_CONST_GPU_ALIGNMENT +
+              (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
         }
         constants_internal_offset[i] = max_blob;
         max_blob += data_size;
@@ -148,11 +150,11 @@ class AOTInductorModelContainer {
       std::vector<at::Tensor>& outputs,
       std::vector<std::vector<int64_t>>** output_shapes,
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor) {
+      AOTIProxyExecutorHandle proxy_executor) {
     auto* model = get_available_model();
     try {
-      AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
-      AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
+      AOTI_VECTOR_SIZE_CHECK(inputs, num_inputs());
+      AOTI_VECTOR_SIZE_CHECK(outputs, num_outputs());
       model->run(inputs, outputs, stream, proxy_executor);
     } catch (...) {
       std::lock_guard lk(models_mutex_);
