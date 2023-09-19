@@ -1814,9 +1814,30 @@ class TritonKernel(Kernel):
 
         code = IndentedBuffer()
 
-        size_hints = [
-            next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
-        ]
+        size_hints = []
+        for numel in self.numels:
+            numel_hint = V.graph.sizevars.symbolic_hint(numel)
+            if not isinstance(numel_hint, int):
+                # This default heuristic hint was picked carefuly:
+                #
+                #  - It is NOT a multiple of 16 (which would trigger
+                #    a multiple_of_16 hint), since in general we can't
+                #    guarantee that unbacked symints are this
+                #
+                #  - It is large, to ensure that we don't shrink the
+                #    block size (since if you don't have many elements,
+                #    it'd be wasteful to pick a large block size).  Since
+                #    we don't know how many elements we might have, we
+                #    should be OK with some inefficiency to make sure we
+                #    handle the large case well.  8192 is the largest block
+                #    size we support, so we pick that.
+                #
+                # If we have a better hint for unbacked SymInts (e.g., because
+                # a user told us, or we are tracking upper bounds) we could
+                # use that here.
+                size_hint = 8193
+            else:
+                size_hint = next_power_of_2(int(numel_hint))
         if self.persistent_reduction:
             assert self.inside_reduction
             heuristics = "persistent_reduction"
