@@ -7,12 +7,12 @@ on:
         description: Run training?
         required: false
         type: boolean
-        default: true
+        default: false
       inference:
         description: Run inference?
         required: false
         type: boolean
-        default: false
+        default: true
       default:
         description: Run inductor_default?
         required: false
