@@ -9,7 +9,6 @@ import torch.cuda
 class StreamMethodContainer:
     def __init__(self) -> None:
         self.current_stream_method = {}
-        self.stream_class_method = {}
         self.create_stream_context_method = {}
         self.set_stream_method = {}
         self.set_stream_by_id_method = {}
@@ -37,7 +36,6 @@ class StreamMethodContainer:
             "set_stream",
             "set_stream_by_id",
             "current_stream",
-            "stream_class",
             "create_stream_context",
         ]:
             return self.__get_all(container + "_method")
@@ -66,10 +64,9 @@ def register_stream_method(device: str, method_args_dict: dict):
 # with the key is the associated method or class for this semantics
 #
 # * device_stream_method = {'current_stream': method_1,
-# *                         'stream_class': method_2,
+# *                         'set_stream': method_2,
 # *                         'create_stream_context': method_3,
-# *                         'set_stream': method_4,
-# *                         'set_stream_by_id': method_5}
+# *                         'set_stream_by_id': method_4}
 #
 # If the method to a specific semantics are not defined or implemented, please
 # pass 'None'. When finish creating the methods dict, register it by using following API:
@@ -80,7 +77,6 @@ def register_stream_method(device: str, method_args_dict: dict):
 if torch.cuda.is_available():
     cuda_stream_method = {
         "current_stream": torch.cuda.current_stream,
-        "stream_class": torch.cuda.streams.Stream,
         "create_stream_context": torch.cuda.stream,
         "set_stream": torch.cuda.set_stream,
         "set_stream_by_id": torch.cuda.set_stream_by_id,

@@ -1,7 +1,7 @@
 import ctypes
 
 import torch
-
+from torch.streambase import StreamBase
 from ._utils import _dummy_type
 
 
@@ -11,7 +11,7 @@ if not hasattr(torch._C, "_CudaStreamBase"):
     torch._C.__dict__["_CudaEventBase"] = _dummy_type("_CudaEventBase")
 
 
-class Stream(torch._C._CudaStreamBase):
+class Stream(StreamBase, torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
 
     A CUDA stream is a linear sequence of execution that belongs to a specific
@@ -31,10 +31,12 @@ class Stream(torch._C._CudaStreamBase):
     def __new__(cls, device=None, priority=0, **kwargs):
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
-            return super().__new__(cls, priority=priority, **kwargs)
+            return torch._C._CudaStreamBase().__new__(cls, priority=priority, **kwargs)
         else:
             with torch.cuda.device(device):
-                return super().__new__(cls, priority=priority, **kwargs)
+                return torch._C._CudaStreamBase().__new__(
+                    cls, priority=priority, **kwargs
+                )
 
     def wait_event(self, event):
         r"""Makes all future work submitted to the stream wait for an event.
@@ -87,7 +89,7 @@ class Stream(torch._C._CudaStreamBase):
 
         Returns:
             A boolean indicating if all kernels in this stream are completed."""
-        return super().query()
+        return torch._C._CudaStreamBase().query()
 
     def synchronize(self):
         r"""Wait for all the kernels in this stream to complete.
@@ -95,7 +97,7 @@ class Stream(torch._C._CudaStreamBase):
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
            `CUDA Stream documentation`_ for more info.
         """
-        super().synchronize()
+        torch._C._CudaStreamBase().synchronize()
 
     @property
     def _as_parameter_(self):
@@ -103,7 +105,7 @@ class Stream(torch._C._CudaStreamBase):
 
     def __eq__(self, o):
         if isinstance(o, Stream):
-            return super().__eq__(o)
+            return torch._C._CudaStreamBase().__eq__(o)
         return False
 
     def __hash__(self):

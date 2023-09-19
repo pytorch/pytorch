@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
+from torch.streambase import StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -614,12 +615,7 @@ class VariableBuilder:
                 value,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
-        elif any(
-            isinstance(value, stream_instance)
-            for stream_instance in StreamMethodContainer().get_all_methods(
-                "stream_class"
-            )
-        ):
+        elif isinstance(value, StreamBase):
             return StreamVariable(
                 None,
                 value,
@@ -1479,8 +1475,8 @@ def wrap_fx_proxy_cls(
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
-    elif proxy.node.target in StreamMethodContainer().get_all_methods(
-        "stream_class"
+    elif (
+        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, StreamBase)
     ) or proxy.node.target in StreamMethodContainer().get_all_methods("current_stream"):
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(

@@ -1,10 +1,13 @@
 import collections
+import inspect
 import logging
 
 import math
 import re
 import types
 from typing import Dict, List
+
+from torch.streambase import StreamBase
 
 try:
     import numpy as np
@@ -356,27 +359,18 @@ class TorchVariable(VariableTracker):
                     StreamMethodContainer().get_method_by_device(
                         "create_stream_context", args[0].device
                     )
-                )
-                + "not fully supported, streams may be ignored"
+                ),
+                "not fully supported, streams may be ignored",
             )
             assert len(args) == 1
             return StreamContextVariable.create(tx, args[0], **options)
-        elif any(
-            self.value is method
-            for method in StreamMethodContainer().get_all_methods("stream_class")
-        ):
-            match_device = None
-            for device, method in StreamMethodContainer().stream_class_method.items():
-                if self.value is method:
-                    match_device = device
+        elif inspect.isclass(self.value) and issubclass(self.value, StreamBase):
             return wrap_fx_proxy_cls(
                 StreamVariable,
                 tx,
                 tx.output.create_proxy(
                     "call_function",
-                    StreamMethodContainer().get_method_by_device(
-                        "stream_class", match_device
-                    ),
+                    self.value,
                     (),
                     {},
                 ),
