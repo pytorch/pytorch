@@ -38,29 +38,32 @@
         std::to_string(__LINE__));                                        \
   }
 
+using DeleterFnPtr = void (*)(void*);
+
 namespace torch {
 namespace aot_inductor {
 
-// UniqueAtenTensorHandle is used to manage input, output, and intermediate
-// buffers
-class UniqueAtenTensorHandle {
- public:
-  UniqueAtenTensorHandle() = delete;
-  UniqueAtenTensorHandle(const UniqueAtenTensorHandle& other) = delete;
-  UniqueAtenTensorHandle& operator=(const UniqueAtenTensorHandle& other) =
-      delete;
+inline void delete_tensor_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
+}
 
-  // Steal the ownership from another UniqueAtenTensorHandle using std::move
-  UniqueAtenTensorHandle(UniqueAtenTensorHandle&& other) = default;
-  UniqueAtenTensorHandle& operator=(UniqueAtenTensorHandle&& other) = default;
+// RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
+class RAIIAtenTensorHandle {
+ public:
+  RAIIAtenTensorHandle() = delete;
+  RAIIAtenTensorHandle(const RAIIAtenTensorHandle& other) = delete;
+  RAIIAtenTensorHandle& operator=(const RAIIAtenTensorHandle& other) = delete;
+
+  // Steal the ownership from another RAIIAtenTensorHandle using std::move
+  RAIIAtenTensorHandle(RAIIAtenTensorHandle&& other) = default;
+  RAIIAtenTensorHandle& operator=(RAIIAtenTensorHandle&& other) = default;
 
   // Steal the ownership from raw AtenTensorHandle
-  UniqueAtenTensorHandle(AtenTensorHandle handle)
-      : handle_(handle, [](AtenTensorHandle ptr) {
-          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ptr));
-        }) {}
+  RAIIAtenTensorHandle(AtenTensorHandle handle)
+      : handle_(handle, delete_tensor_object) {}
 
-  ~UniqueAtenTensorHandle() {
+  ~RAIIAtenTensorHandle() {
     handle_.reset();
   }
 
@@ -83,27 +86,28 @@ class UniqueAtenTensorHandle {
   }
 
  private:
-  std::unique_ptr<AtenTensorOpaque, std::function<void(AtenTensorOpaque*)>>
-      handle_;
+  std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
 
-using ConstantMap = std::unordered_map<std::string, UniqueAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
-// Steal the ownership from raw AtenTensorHandle to UniqueAtenTensorHandle
-std::vector<UniqueAtenTensorHandle> steal_from_raw_handles_to_unique_handles(
-    std::vector<AtenTensorHandle>& raw_handles) {
-  std::vector<UniqueAtenTensorHandle> result;
-  result.reserve(raw_handles.size());
-  for (auto& handle : raw_handles) {
-    result.push_back(UniqueAtenTensorHandle(handle));
+// Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
+std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_unique_handles(
+    AtenTensorHandle* handles,
+    size_t size) {
+  std::vector<RAIIAtenTensorHandle> result;
+  result.reserve(size);
+  for (size_t i = 0; i < size; i++) {
+    result.push_back(std::move(RAIIAtenTensorHandle(handles[i])));
+    handles[i] = nullptr;
   }
-  raw_handles.clear();
   return result;
 }
 
-// Steal the ownership from raw UniqueAtenTensorHandle to AtenTensorHandle
+// Steal the ownership from RAIIAtenTensorHandle to raw AtenTensorHandle
+// WARNING: only used in the non ABI compatible mode
 std::vector<AtenTensorHandle> steal_from_unique_handles_to_raw_handles(
-    std::vector<UniqueAtenTensorHandle>& unique_handles) {
+    std::vector<RAIIAtenTensorHandle>& unique_handles) {
   std::vector<AtenTensorHandle> result;
   result.reserve(unique_handles.size());
   for (auto& handle : unique_handles) {
@@ -147,8 +151,8 @@ class AOTInductorModelBase {
   // Passes such as constant-folding may affect how we handle constants.
   // We will revisit it once all the relevant pieces are ready.
   void run(
-      std::vector<UniqueAtenTensorHandle>& inputs,
-      std::vector<UniqueAtenTensorHandle>& outputs,
+      std::vector<RAIIAtenTensorHandle>& inputs,
+      std::vector<RAIIAtenTensorHandle>& outputs,
       cudaStream_t stream,
       AOTIProxyExecutorHandle proxy_executor = nullptr) {
     AOTI_VECTOR_SIZE_CHECK(inputs, num_inputs(), "inputs");
@@ -408,8 +412,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
   AOTInductorModel(std::shared_ptr<ConstantMap>, std::optional<std::string>);
 
   void run_impl(
-      std::vector<UniqueAtenTensorHandle>& input_handles,
-      std::vector<UniqueAtenTensorHandle>& output_handles,
+      std::vector<RAIIAtenTensorHandle>& input_handles,
+      std::vector<RAIIAtenTensorHandle>& output_handles,
       cudaStream_t stream,
       AOTIProxyExecutorHandle proxy_executor = nullptr);
 

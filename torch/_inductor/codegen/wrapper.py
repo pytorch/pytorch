@@ -1071,8 +1071,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.prefix.splice(
                 """
                 void AOTInductorModel::run_impl(
-                    std::vector<UniqueAtenTensorHandle>& input_handles,
-                    std::vector<UniqueAtenTensorHandle>& output_handles,
+                    std::vector<RAIIAtenTensorHandle>& input_handles,
+                    std::vector<RAIIAtenTensorHandle>& output_handles,
                     cudaStream_t stream,
                     AOTIProxyExecutorHandle proxy_executor) {
                 """
@@ -1095,10 +1095,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                     self.prefix.splice(
                         """
-                            auto tmp_input_handles = steal_from_unique_handles_to_raw_handles(input_handles);
-                            auto inputs = create_tensors_from_handles(tmp_input_handles);
-                            auto tmp_output_handles = steal_from_unique_handles_to_raw_handles(output_handles);
-                            auto outputs = create_tensors_from_handles(tmp_output_handles);
+                            auto raw_input_handles = steal_from_unique_handles_to_raw_handles(input_handles);
+                            auto inputs = alloc_tensors_by_stealing_from_handles(raw_input_handles);
+                            auto raw_output_handles = steal_from_unique_handles_to_raw_handles(output_handles);
+                            auto outputs = alloc_tensors_by_stealing_from_handles(raw_output_handles);
                         """
                     )
 
@@ -1132,7 +1132,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
-                    # Weights are stored in constants_ and owned by UniqueAtenTensorHandle there.
+                    # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
@@ -1558,7 +1558,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.wrapper_call.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_empty_strided({', '.join(args)}));"
             )
-            return f"UniqueAtenTensorHandle {name}({name}_handle);"
+            return f"RAIIAtenTensorHandle {name}({name}_handle);"
         else:
             return (
                 f"{self.declare}{name} = {self.namespace}empty_strided("
@@ -1589,7 +1589,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor({', '.join(args)}));"
             )
-            return f"UniqueAtenTensorHandle({tmp_name})"
+            return f"RAIIAtenTensorHandle({tmp_name})"
         else:
             args = [name, size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"

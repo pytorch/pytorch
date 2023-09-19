@@ -52,12 +52,10 @@ AOTInductorError AOTInductorModelContainerDelete(
 
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    // array of raw AtenTensorHandle for input tensors, and will be stolen by
-    // UniqueAtenTensorHandle
+    // Array of raw AtenTensorHandle for output tensors. Handles will be stolen
     AtenTensorHandle* input_handles,
     size_t num_inputs,
-    // array of raw AtenTensorHandle for output tensors, and will be stolen by
-    // UniqueAtenTensorHandle
+    // Array of raw AtenTensorHandle for output tensors. Handles will be stolen
     AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
@@ -68,15 +66,10 @@ AOTInductorError AOTInductorModelContainerRun(
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
 
-  std::vector<AtenTensorHandle> input_raw_handles(
-      input_handles, input_handles + num_inputs);
   auto input_unique_handles =
-      torch::aot_inductor::steal_from_raw_handles_to_unique_handles(input_raw_handles);
-
-  std::vector<AtenTensorHandle> output_raw_handles(
-      output_handles, output_handles + num_outputs);
+      torch::aot_inductor::steal_from_raw_handles_to_unique_handles(input_handles, num_inputs);
   auto output_unique_handles =
-      torch::aot_inductor::steal_from_raw_handles_to_unique_handles(output_raw_handles);
+      torch::aot_inductor::steal_from_raw_handles_to_unique_handles(output_handles, num_outputs);
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
 
