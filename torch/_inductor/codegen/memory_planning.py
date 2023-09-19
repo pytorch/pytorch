@@ -2,13 +2,13 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 import sympy
 
 import torch
 from .. import config, ir
-from ..utils import cache_on_self, IndentedBuffer
+from ..utils import cache_on_self, CachedFunction, IndentedBuffer
 from ..virtualized import V
 
 from .wrapper import (
@@ -61,8 +61,8 @@ class LiveRange:
     Invariant: begin <= end
     """
 
-    begin: int
-    end: int
+    begin: float  # int | ±inf
+    end: float  # int | ±inf
 
     def contains(self, other: "LiveRange"):
         """Is other entirely within self"""
@@ -84,7 +84,7 @@ class LiveRanges:
     Invariant: LiveRanges.ranges is in sorted order and non-overlapping
     """
 
-    def __init__(self, ranges: List[LiveRange]):
+    def __init__(self, ranges: Iterable[LiveRange]):
         ranges = [*sorted(ranges, key=lambda x: x.begin)]
         self.ranges = ranges[:1]
         for r in ranges[1:]:
@@ -189,6 +189,7 @@ class Allocation(AllocationTreeNode):
         return self
 
     def codegen_alloc_from_pool(self, wrapper):
+        assert self.pool
         node = self.node
         shape = tuple(node.get_size())
         stride = tuple(node.get_stride())
@@ -241,7 +242,16 @@ class Empty(AllocationTreeNode):
         return True
 
 
-class ClearCacheOnAllocateMixin:
+class MemorySplitProtocol(Protocol):
+    get_live_ranges: CachedFunction
+    get_size_hint: CachedFunction
+    get_symbolic_size: CachedFunction
+
+    def _allocate(self, block: "Allocation", is_last: bool) -> bool:
+        ...
+
+
+class ClearCacheOnAllocateMixin(MemorySplitProtocol):
     """
     Helper to assist in caching get_live_ranges, get_size_hint, and
     get_symbolic_size.
@@ -429,6 +439,8 @@ class AllocationPool:
         self.root.finalize(self, 0)
 
     def codegen_create(self, wrapper, code: IndentedBuffer):
+        assert self.creation_cache
+        assert self.name
         nbytes = self.root.get_symbolic_size()
         for block in self.root.allocations:
             if isinstance(block, Allocation) and nbytes == block.get_symbolic_size():
@@ -457,6 +469,7 @@ class AllocationPool:
             )
 
     def codegen_destroy(self, code: IndentedBuffer):
+        assert self.names_to_del
         code.writeline(f"del {', '.join(self.names_to_del)}")
 
     def __eq__(self, other):
@@ -539,7 +552,7 @@ class BufferGroup:
         self.node = node
         self.names = [node.get_name()]
         self.is_output = False
-        self.allocation = None
+        self.allocation: Optional[Allocation] = None
         self.live_range = LiveRange(float("inf"), -float("inf"))
 
     def update_usage(self, timestep: int):
@@ -590,6 +603,7 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer):
         allocation = self.group.allocation
+        assert allocation and allocation.pool
         pool = allocation.pool
         name = self.node.get_name()
         alloc_from_pool = allocation.codegen_alloc_from_pool(self.wrapper)
@@ -597,6 +611,7 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
         if self.is_first_pool_usage:
             pool.codegen_create(self.wrapper, code)
 
+        assert pool.names_to_del and pool.creation_cache
         pool.names_to_del.extend(self.group.names)
         if alloc_from_pool in pool.creation_cache:
             code.writeline(
@@ -619,13 +634,14 @@ class DeallocFromPoolLine(PoolMemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer):
         if self.is_last_pool_usage:
+            assert self.group.allocation and self.group.allocation.pool
             self.group.allocation.pool.codegen_destroy(code)
 
 
 class ReuseFromPoolLine(ReuseLine):
     """Same as ReuseLine, but doesn't delete old variable"""
 
-    def codegen(self, code: IndentedBuffer):
+    def codegen(self, code: IndentedBuffer, delete_old=False):
         super().codegen(code, delete_old=False)
 
 
@@ -730,6 +746,7 @@ class MemoryPlanner:
                 worklist.popleft()
 
         timestep += 1
+        assert self.buffer_groups
         for group in self.buffer_groups:
             if group.is_output:
                 group.update_usage(timestep)
@@ -739,13 +756,15 @@ class MemoryPlanner:
         Assign every allocation to a specific location in a specific AllocationPool.
         """
         assert config.memory_pool in ("none", "intermediates", "outputs", "combined")
+        assert self.buffer_groups
 
         for group in self.buffer_groups:
             group.make_allocation()
 
-        outputs = []
-        intermediates = []
+        outputs: List[Allocation] = []
+        intermediates: List[Allocation] = []
         for group in self.buffer_groups:
+            assert group.allocation
             if group.is_output and config.memory_pool != "combined":
                 outputs.append(group.allocation)
             else:
@@ -780,6 +799,7 @@ class MemoryPlanner:
         seen = set()
         for line in lines:
             if isinstance(line, AllocFromPoolLine):
+                assert line.group.allocation
                 pool = line.group.allocation.pool
                 assert pool is not None
                 if pool not in seen:
@@ -789,6 +809,7 @@ class MemoryPlanner:
         seen = set()
         for line in reversed(lines):
             if isinstance(line, DeallocFromPoolLine):
+                assert line.group.allocation
                 pool = line.group.allocation.pool
                 assert pool is not None
                 if pool not in seen:

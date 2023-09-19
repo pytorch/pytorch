@@ -443,7 +443,7 @@ class WrapperCodeGen(CodeGen):
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         ending = self.ending
-        if "view_as_complex" in str(kernel):
+        if "view_as_complex" in str(extern_kernel):
             # view operation fallbacks cause issues since inductor
             # doesn't know the memory is still needed and might reuse it.
             ending = f".clone(){ending}"
@@ -664,6 +664,7 @@ class WrapperCodeGen(CodeGen):
         offset = self.codegen_sizevar(offset)
 
         if config.aot_inductor.abi_compatible:
+            assert isinstance(self, CppWrapperCodeGen)
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             # Because the memory planning is done in two passes (see the implementation
             # of self.generate), the writeline behavior is different in the two passes.
@@ -1688,7 +1689,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             assert (
                 output_idx is not None and output_buffer is not None
             ), "Unknown output index"
-            
+
             output_str = (
                 f"output_tensor_handle_{output_idx}"
                 if config.aot_inductor.abi_compatible
@@ -1715,6 +1716,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else:
                 self.outputs_need_copy.add(name)
 
+        device = buffer.get_device()
+        dtype = buffer.get_dtype()
+        size = buffer.get_size()
+        stride = buffer.get_stride()
+
         if config.aot_inductor.abi_compatible:
             device_type, device_id = device.split(",")
             args = [
@@ -1732,13 +1738,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             return f"auto {name} = create_raii_tensor_handle_for_temp({name}_handle);"
 
-        return self.make_allocation(
-            name,
-            buffer.get_device(),
-            buffer.get_dtype(),
-            buffer.get_size(),
-            buffer.get_stride(),
-        )
+        return self.make_allocation(name, device, dtype, size, stride)
 
     def make_allocation(self, name, device, dtype, shape, stride):
         return (
