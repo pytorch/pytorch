@@ -6129,12 +6129,12 @@ log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
 
 
+# xref: isStorage in torch/csrc/DynamicTypes.cpp
 def _isStorage(obj):
-    # TODO: this is slightly inaccurate; we don't allow subclasses on
-    # UntypedStorage
     return isinstance(obj, (torch.TypedStorage, torch.UntypedStorage))
 
 
+# xref: compute_sizes in torch/csrc/utils/tensor_new.cpp
 def _compute_sizes(seq, scalar_type):
     MAX_DIMS = 128
     is_storage = _isStorage(seq)
@@ -6160,6 +6160,7 @@ def _compute_sizes(seq, scalar_type):
     return sizes
 
 
+# xref: infer_scalar_type in torch/csrc/utils/tensor_new.cpp
 def _infer_scalar_type(obj):
     if isinstance(obj, FloatLike):
         return torch.get_default_dtype()
@@ -6208,8 +6209,10 @@ def _infer_scalar_type(obj):
 
 
 # Analogous to recursive_store
+# xref: recursive_store in torch/csrc/utils/tensor_new.cpp
 def _recursive_build(sizes, dim, scalarType, obj):
     ndim = len(sizes)
+    assert dim <= ndim
     if dim == ndim:
         return torch.scalar_tensor(obj, dtype=scalarType)
     n = sizes[dim]
@@ -6224,6 +6227,7 @@ def _recursive_build(sizes, dim, scalarType, obj):
     )
 
 
+# xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
 def _internal_new_from_data(
     options,
     scalar_type,
@@ -6251,10 +6255,8 @@ def _internal_new_from_data(
         )
 
     # TODO
-    """
     if hasattr(data, "__cuda_array_interface__"):
         return NotImplemented
-    """
 
     # TODO: test for numpy input with PyArray_Check
 
@@ -6283,6 +6285,7 @@ def _internal_new_from_data(
     return tensor
 
 
+# xref: tensor_ctor in torch/csrc/utils/tensor_new.cpp
 def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=False):
     # TODO (or not): support names kwarg
     if isinstance(data, torch.Tensor):
@@ -6292,6 +6295,8 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
         )
     type_inference = dtype is None
     new_tensor = _internal_new_from_data(
+        # device="cpu" because that's what you get with torch.tensor(2) no
+        # device by default
         {"device": "cpu"},  # TODO: use torch.get_default_tensor_type
         dtype if dtype is not None else torch.get_default_dtype(),
         device,
