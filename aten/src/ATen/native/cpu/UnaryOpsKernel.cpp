@@ -444,15 +444,52 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   }
 }
 
-template<typename scalar_t>
-inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
-  return at::_isnan(a)
-    ? nan_replacement
-    : (a == std::numeric_limits<scalar_t>::infinity()
-      ? pos_inf_replacement
-      : (a == -std::numeric_limits<scalar_t>::infinity()
-        ? neg_inf_replacement
-        : a));
+template <typename scalar_t>
+inline scalar_t _nan_to_num_replace(
+    scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
+  if (at::_isnan(a)) {
+    return nan_replacement;
+  } else if (a == std::numeric_limits<scalar_t>::infinity()) {
+    return pos_inf_replacement;
+  } else if (a == -std::numeric_limits<scalar_t>::infinity()) {
+    return neg_inf_replacement;
+  } else {
+    return a;
+  }
+}
+
+template <typename scalar_t>
+inline c10::complex<scalar_t> _nan_to_num_replace(
+    c10::complex<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+  return c10::complex<scalar_t>(
+      _nan_to_num_replace(a.real(), nan, posinf, neginf),
+      _nan_to_num_replace(a.imag(), nan, posinf, neginf)
+  );
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _nan_to_num_replace(
+    Vectorized<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+  using vec_t = Vectorized<scalar_t>;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
+  vec_t result;
+  result = vec_t::blendv(a, vec_t(nan), a.isnan());
+  result = vec_t::blendv(result, vec_t(posinf), a == inf);
+  return vec_t::blendv(result, vec_t(neginf), a == inf.neg());
+}
+
+template <typename scalar_t>
+inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
+    Vectorized<c10::complex<scalar_t>> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+#if !defined(_MSC_VER) && (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512))
+  return {_nan_to_num_replace(Vectorized<scalar_t>(a), nan, posinf, neginf)};
+#else
+  __at_align__ c10::complex<scalar_t> buffer[a.size()];
+  a.store(buffer);
+  auto asreal = Vectorized<scalar_t>::loadu(buffer);
+  _nan_to_num_replace(asreal, nan, posinf, neginf).store(buffer);
+  return Vectorized<c10::complex<scalar_t>>::loadu(buffer);
+#endif
 }
 
 static void nan_to_num_kernel(
@@ -460,41 +497,23 @@ static void nan_to_num_kernel(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  if (isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
-      using value_t = scalar_t::value_type;
-      value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
-      value_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<value_t>(pos_inf.value())
-          : std::numeric_limits<value_t>::max();
-      value_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<value_t>(neg_inf.value())
-          : std::numeric_limits<value_t>::lowest();
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
+    using value_t = c10::scalar_value_type<scalar_t>::type;
+    value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
+    value_t pos_inf_replacement = pos_inf.has_value()
+        ? static_cast<value_t>(pos_inf.value())
+        : std::numeric_limits<value_t>::max();
+    value_t neg_inf_replacement = neg_inf.has_value()
+        ? static_cast<value_t>(neg_inf.value())
+        : std::numeric_limits<value_t>::lowest();
+    using vec_t = Vectorized<scalar_t>;
 
-      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-        value_t res_real = _nan_to_num_replace(
-          a.real(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
-        value_t res_imag = _nan_to_num_replace(
-          a.imag(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
-        return scalar_t(res_real, res_imag);
-      });
+    cpu_kernel_vec(iter, [=](scalar_t a) -> scalar_t {
+      return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
+    }, [=](vec_t a) -> vec_t {
+      return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
-      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-      scalar_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<scalar_t>(pos_inf.value())
-          : std::numeric_limits<scalar_t>::max();
-      scalar_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<scalar_t>(neg_inf.value())
-          : std::numeric_limits<scalar_t>::lowest();
-
-      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-        return _nan_to_num_replace(
-          a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
-      });
-    });
-  }
+  });
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){

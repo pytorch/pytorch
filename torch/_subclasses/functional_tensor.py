@@ -119,7 +119,9 @@ class FunctionalTensor(torch.Tensor):
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
         x_functional = torch._to_functional_tensor(x)
+        torch._mirror_autograd_meta_to(x, x_functional)
         out = FunctionalTensor(x_functional)
+        torch._mirror_autograd_meta_to(x_functional, out)
         return out
 
     def from_functional(self):
