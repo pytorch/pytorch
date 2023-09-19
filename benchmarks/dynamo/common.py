@@ -1127,10 +1127,6 @@ class AOTInductorModelCache:
             _register_dataclass_output_as_pytree(example_outputs)
 
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-            example_inputs = torch._export.combine_args_kwargs(
-                example_args, example_kwargs
-            )
-
             so_path, exported = torch._export.aot_compile(
                 model, example_args, example_kwargs
             )
@@ -1180,9 +1176,8 @@ def export_aot_inductor(forward: Callable):
         )
         param_buffer_values = list(exported.state_dict.values())
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        example_inputs = torch._export.combine_args_kwargs(example_args, example_kwargs)
         flat_example_inputs = fx_pytree.tree_flatten_spec(
-            example_inputs, exported.call_spec.in_spec
+            (example_args, example_kwargs), exported.call_spec.in_spec
         )
         all_args = (*param_buffer_values, *flat_example_inputs)
         module.run(all_args, output_tensors)
@@ -1783,6 +1778,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_multiprocess_models(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -1846,6 +1845,7 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
+            print(f"Original Error: {str(e)}")
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
@@ -2295,6 +2295,9 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
+        if not hasattr(model, name):
+            model.name = name
+
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2345,8 +2348,6 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            if not hasattr(model, name):
-                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
@@ -2968,7 +2969,7 @@ def parse_args(args=None):
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
-        args.use_distributed,
+        args.multiprocess,
         rank=rank,
         world_size=args.world_size,
         port=args.distributed_master_port,
@@ -3000,7 +3001,6 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    args.use_distributed = (args.ddp or args.fsdp) and args.only
     if args.multiprocess:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
@@ -3203,6 +3203,9 @@ def run(runner, args, original_dir=None):
     elif args.devices == ["cuda"]:
         runner.skip_models.update(runner.skip_models_for_cuda)
 
+    if not args.multiprocess:
+        runner.skip_models.update(runner.skip_multiprocess_models)
+
     if args.no_skip:
         runner.skip_models.clear()
 
@@ -3384,6 +3387,15 @@ def run(runner, args, original_dir=None):
             else:
                 try:
                     with tqdm(desc="loading model"):
+                        extra_args = []
+                        if hasattr(args, "rank") and hasattr(args, "world_size"):
+                            extra_args += [
+                                "--rank",
+                                str(args.rank),
+                                "--world_size",
+                                str(args.world_size),
+                            ]
+
                         if args.part:
                             (
                                 device,
@@ -3396,6 +3408,7 @@ def run(runner, args, original_dir=None):
                                 model_name,
                                 batch_size=batch_size,
                                 part=args.part,
+                                extra_args=extra_args,
                             )
                         else:
                             if args.fsdp:
@@ -3408,7 +3421,10 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    "cpu", model_name, batch_size=batch_size
+                                    "cpu",
+                                    model_name,
+                                    batch_size=batch_size,
+                                    extra_args=extra_args,
                                 )
                             else:
                                 (
@@ -3418,7 +3434,10 @@ def run(runner, args, original_dir=None):
                                     example_inputs,
                                     batch_size,
                                 ) = runner.load_model(
-                                    device, model_name, batch_size=batch_size
+                                    device,
+                                    model_name,
+                                    batch_size=batch_size,
+                                    extra_args=extra_args,
                                 )
                 except NotImplementedError as e:
                     print(e)

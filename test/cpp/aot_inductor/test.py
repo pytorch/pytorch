@@ -1,7 +1,7 @@
 import shutil
 
 import torch
-import torch._export
+from torch._export import aot_compile, dynamic_dim
 
 
 class Net(torch.nn.Module):
@@ -22,12 +22,14 @@ class Net(torch.nn.Module):
 x = torch.randn((32, 64), device="cuda")
 y = torch.randn((32, 64), device="cuda")
 
-# FIXME: re-enable dynamic shape after we add dynamic shape support to the
-# AOTInductor runtime
-with torch._dynamo.config.patch(dynamic_shapes=False):
-    torch._dynamo.reset()
+torch._dynamo.reset()
 
-    with torch.no_grad():
-        lib_path, module = torch._export.aot_compile(Net().cuda(), (x, y))
+with torch.no_grad():
+    constraints = [
+        dynamic_dim(x, 0) >= 1,
+        dynamic_dim(x, 0) <= 1024,
+        dynamic_dim(x, 0) == dynamic_dim(y, 0),
+    ]
+    lib_path, module = aot_compile(Net().cuda(), (x, y), constraints=constraints)
 
 shutil.copy(lib_path, "libaot_inductor_output.so")

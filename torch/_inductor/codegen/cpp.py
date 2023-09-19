@@ -9,7 +9,6 @@ import sys
 from copy import copy, deepcopy
 from typing import Dict, List
 
-import numpy
 import sympy
 
 import torch
@@ -2155,7 +2154,7 @@ class CppVecKernelChecker(CppVecKernel):
                     # VecKernel override dtype for constant
                     # Vectorization only support int32/fp32 now
                     # So if dtype = int64/fp64, we will cast it to int32/fp32 if possible
-                    i32_iinfo = numpy.iinfo(numpy.int32)
+                    i32_iinfo = torch.iinfo(torch.int32)
                     if (
                         dtype == torch.int64
                         and val <= i32_iinfo.max
@@ -2163,12 +2162,12 @@ class CppVecKernelChecker(CppVecKernel):
                     ):
                         opt_ctx.dtype = torch.int32
 
-                    f32_iinfo = numpy.finfo(numpy.float32)
+                    f32_iinfo = torch.finfo(torch.float32)
                     if dtype == torch.double:
                         if (
                             (val <= f32_iinfo.max and val >= f32_iinfo.min)
-                            or (val == numpy.inf)
-                            or (val == -numpy.inf)
+                            or (val == torch.inf)
+                            or (val == -torch.inf)
                         ):
                             opt_ctx.dtype = torch.float32
 
@@ -2213,7 +2212,7 @@ class CppVecKernelChecker(CppVecKernel):
 
                     vars_ranges = {k: ValueRanges(0, v - 1) for k, v in sizes.items()}
                     if not vars_ranges or len(vars_ranges) != len(free_symbols):
-                        i32_iinfo = numpy.iinfo(numpy.int32)
+                        i32_iinfo = torch.iinfo(torch.int32)
                         return (
                             expr.is_number
                             and expr <= i32_iinfo.max
