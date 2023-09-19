@@ -22,8 +22,8 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
-    sympy_dot,
     sympy_product,
+    sympy_str,
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
@@ -33,15 +33,13 @@ pexpr = PythonPrinter().doprint
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    size = node.get_size()
-    stride = node.get_stride()
-    last_element = sympy_dot([s - 1 for s in size], stride)
     return (
         node.get_device(),
         node.get_dtype(),
-        V.graph.sizevars.simplify(sympy_product(size)),
-        # Detect gaps in tensor storage caused by strides
-        V.graph.sizevars.size_hint(last_element),
+        # NB: this is symbolic so that we don't try to reuse a buffer
+        # for s0 for s1, just because they happen to share the same
+        # size hint
+        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),
     )
 
 
