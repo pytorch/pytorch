@@ -427,7 +427,7 @@ mha_fwd(const at::Tensor &q,
 }
 
 
-std::vector<at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
         const at::Tensor &q,   // total_q x num_heads x head_size, total_q := \sum_{i=0}^{b} s_i
         const at::Tensor &k,   // total_k x num_heads x head_size, total_k := \sum_{i=0}^{b} s_i
@@ -582,7 +582,7 @@ mha_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     if(dv.data_ptr() != dv_tmp.data_ptr()){
         dv.copy_(dv_tmp, true);
     }
-    return { dq, dk, dv, softmax_d };
+    return std::make_tuple(dq, dk, dv, softmax_d);
 }
 
 // #ifndef BUILD_PYTHON_PACKAGE
