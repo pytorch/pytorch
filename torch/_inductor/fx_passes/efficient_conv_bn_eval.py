@@ -61,7 +61,6 @@ def efficient_conv_bn_eval(
         bias_on_the_fly - bn.running_mean
     )
 
-    # calculating conv in fp32, and convert the output to the dtype of input
     input = x
     output = conv._conv_forward(input, weight_on_the_fly, bias_on_the_fly)
     return output
