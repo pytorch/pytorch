@@ -20,7 +20,7 @@ from torch.distributed.checkpoint.optimizer import (
     load_sharded_optimizer_state_dict,
 )
 
-CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
+CHECKPOINT_DIR = f"checkpoint"
 
 
 def opt_at(opt, idx):
@@ -28,9 +28,9 @@ def opt_at(opt, idx):
 
 
 def init_model():
-    model = FSDP(torch.nn.Linear(4, 4).cuda(dist.get_rank()))
+    model = FSDP(torch.nn.Linear(16, 16).cuda(dist.get_rank()))
     optim = torch.optim.Adam(model.parameters(), lr=0.1)
-    model(torch.rand(4, 4)).sum().backward()
+    model(torch.rand(16, 16)).sum().backward()
     optim.step()
 
     return model, optim
@@ -59,9 +59,10 @@ def print_params(stage, model_1, model_2, optim_1, optim_2):
 def run_fsdp_checkpoint_example(rank, world_size):
     # Set up world pg
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    os.environ["MASTER_PORT"] = "12350"
 
     # Initialize the process group
+    # TODO: Test out dist.init_process_group("cpu:gloo,cuda:nccl")
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
