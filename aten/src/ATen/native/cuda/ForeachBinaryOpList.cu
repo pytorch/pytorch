@@ -166,94 +166,88 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       });
 }
 
-#define FOREACH_BINARY_OP_LIST(FUNCTION, NAME, OP, DIVISION_OP)     \
-  void foreach_tensor_##NAME##_list_kernel_cuda_(                   \
-      TensorList tensors1, TensorList tensors2) {                   \
-    check_foreach_api_restrictions(tensors1, tensors2);             \
-    std::pair<bool, bool> p = can_use_fast_route(                   \
-      tensors1, tensors2, DIVISION_OP);                             \
-    bool can_use_fast_route = p.first;                              \
-    bool has_empty_tensors = p.second;                              \
-    if (!can_use_fast_route) {                                      \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow_( \
-          tensors1, tensors2);                                      \
-    }                                                               \
-                                                                    \
-    if (has_empty_tensors) {                                        \
-      auto tensorLists = filter_out_empty_tensors(                  \
-        {tensors1, tensors2});                                      \
-      tensors1 = tensorLists[0];                                    \
-      tensors2 = tensorLists[1];                                    \
-    }                                                               \
-                                                                    \
-    FUNCTION##_<OP>(tensors1, tensors2);                            \
-  }                                                                 \
-                                                                    \
-  std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(     \
-      TensorList tensors1, TensorList tensors2) {                   \
-    check_foreach_api_restrictions(tensors1, tensors2);             \
-    std::pair<bool, bool> p = can_use_fast_route(                   \
-      tensors1, tensors2, DIVISION_OP);                             \
-    bool can_use_fast_route = p.first;                              \
-    bool has_empty_tensors = p.second;                              \
-    if (!can_use_fast_route) {                                      \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow(  \
-          tensors1, tensors2);                                      \
-    }                                                               \
-                                                                    \
-    if (has_empty_tensors) {                                        \
-      auto tensorLists = filter_out_empty_tensors(                  \
-        {tensors1, tensors2});                                      \
-      tensors1 = tensorLists[0];                                    \
-      tensors2 = tensorLists[1];                                    \
-    }                                                               \
-                                                                    \
-    return FUNCTION<OP>(tensors1, tensors2);                        \
+#define FOREACH_BINARY_OP_LIST(FUNCTION, NAME, OP, DIVISION_OP)          \
+  void foreach_tensor_##NAME##_list_kernel_cuda_(                        \
+      TensorList tensors1, TensorList tensors2) {                        \
+    check_foreach_api_restrictions(tensors1, tensors2);                  \
+    std::pair<bool, bool> p =                                            \
+        can_use_fast_route(tensors1, tensors2, DIVISION_OP);             \
+    bool can_use_fast_route = p.first;                                   \
+    bool has_empty_tensors = p.second;                                   \
+    if (!can_use_fast_route) {                                           \
+      return at::native::foreach_tensor_##NAME##_list_kernel_slow_(      \
+          tensors1, tensors2);                                           \
+    }                                                                    \
+                                                                         \
+    if (has_empty_tensors) {                                             \
+      auto tensorLists = filter_out_empty_tensors({tensors1, tensors2}); \
+      tensors1 = tensorLists[0];                                         \
+      tensors2 = tensorLists[1];                                         \
+    }                                                                    \
+                                                                         \
+    FUNCTION##_<OP>(tensors1, tensors2);                                 \
+  }                                                                      \
+                                                                         \
+  std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(          \
+      TensorList tensors1, TensorList tensors2) {                        \
+    check_foreach_api_restrictions(tensors1, tensors2);                  \
+    std::pair<bool, bool> p =                                            \
+        can_use_fast_route(tensors1, tensors2, DIVISION_OP);             \
+    bool can_use_fast_route = p.first;                                   \
+    bool has_empty_tensors = p.second;                                   \
+    if (!can_use_fast_route) {                                           \
+      return at::native::foreach_tensor_##NAME##_list_kernel_slow(       \
+          tensors1, tensors2);                                           \
+    }                                                                    \
+                                                                         \
+    if (has_empty_tensors) {                                             \
+      auto tensorLists = filter_out_empty_tensors({tensors1, tensors2}); \
+      tensors1 = tensorLists[0];                                         \
+      tensors2 = tensorLists[1];                                         \
+    }                                                                    \
+                                                                         \
+    return FUNCTION<OP>(tensors1, tensors2);                             \
   }
 
-#define FOREACH_BINARY_OP_LIST_ALPHA(FUNCTION, NAME, OP)               \
-  void foreach_tensor_##NAME##_list_kernel_cuda_(                      \
-      TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
-    check_foreach_api_restrictions(tensors1, tensors2);                \
-    std::pair<bool, bool> p = can_use_fast_route(                      \
-      {tensors1, tensors2}, alpha);                                    \
-    bool can_use_fast_route = p.first;                                 \
-    bool has_empty_tensors = p.second;                                 \
-    if (!can_use_fast_route) {                                         \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow_(    \
-          tensors1, tensors2, alpha);                                  \
-    }                                                                  \
-                                                                       \
-    if (has_empty_tensors) {                                           \
-      auto tensorLists = filter_out_empty_tensors(                     \
-        {tensors1, tensors2});                                         \
-      tensors1 = tensorLists[0];                                       \
-      tensors2 = tensorLists[1];                                       \
-    }                                                                  \
-                                                                       \
-    FUNCTION##_<OP>(tensors1, tensors2, alpha);                        \
-  }                                                                    \
-                                                                       \
-  std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(        \
-      TensorList tensors1, TensorList tensors2, const Scalar& alpha) { \
-    check_foreach_api_restrictions(tensors1, tensors2);                \
-    std::pair<bool, bool> p = can_use_fast_route(                      \
-      {tensors1, tensors2}, alpha);                                    \
-    bool can_use_fast_route = p.first;                                 \
-    bool has_empty_tensors = p.second;                                 \
-    if (!can_use_fast_route) {                                         \
-      return at::native::foreach_tensor_##NAME##_list_kernel_slow(     \
-          tensors1, tensors2, alpha);                                  \
-    }                                                                  \
-                                                                       \
-    if (has_empty_tensors) {                                           \
-      auto tensorLists = filter_out_empty_tensors(                     \
-        {tensors1, tensors2});                                         \
-      tensors1 = tensorLists[0];                                       \
-      tensors2 = tensorLists[1];                                       \
-    }                                                                  \
-                                                                       \
-    return FUNCTION<OP>(tensors1, tensors2, alpha);                    \
+#define FOREACH_BINARY_OP_LIST_ALPHA(FUNCTION, NAME, OP)                       \
+  void foreach_tensor_##NAME##_list_kernel_cuda_(                              \
+      TensorList tensors1, TensorList tensors2, const Scalar& alpha) {         \
+    check_foreach_api_restrictions(tensors1, tensors2);                        \
+    std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2}, alpha); \
+    bool can_use_fast_route = p.first;                                         \
+    bool has_empty_tensors = p.second;                                         \
+    if (!can_use_fast_route) {                                                 \
+      return at::native::foreach_tensor_##NAME##_list_kernel_slow_(            \
+          tensors1, tensors2, alpha);                                          \
+    }                                                                          \
+                                                                               \
+    if (has_empty_tensors) {                                                   \
+      auto tensorLists = filter_out_empty_tensors({tensors1, tensors2});       \
+      tensors1 = tensorLists[0];                                               \
+      tensors2 = tensorLists[1];                                               \
+    }                                                                          \
+                                                                               \
+    FUNCTION##_<OP>(tensors1, tensors2, alpha);                                \
+  }                                                                            \
+                                                                               \
+  std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(                \
+      TensorList tensors1, TensorList tensors2, const Scalar& alpha) {         \
+    check_foreach_api_restrictions(tensors1, tensors2);                        \
+    std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2}, alpha); \
+    bool can_use_fast_route = p.first;                                         \
+    bool has_empty_tensors = p.second;                                         \
+    if (!can_use_fast_route) {                                                 \
+      return at::native::foreach_tensor_##NAME##_list_kernel_slow(             \
+          tensors1, tensors2, alpha);                                          \
+    }                                                                          \
+                                                                               \
+    if (has_empty_tensors) {                                                   \
+      auto tensorLists = filter_out_empty_tensors({tensors1, tensors2});       \
+      tensors1 = tensorLists[0];                                               \
+      tensors2 = tensorLists[1];                                               \
+    }                                                                          \
+                                                                               \
+    return FUNCTION<OP>(tensors1, tensors2, alpha);                            \
   }
 
 FOREACH_BINARY_OP_LIST_ALPHA(
@@ -306,7 +300,8 @@ void foreach_tensor_copy_list_kernel_cuda_(
     TensorList src,
     const bool non_blocking) {
   check_foreach_api_restrictions(self, src);
-  std::pair<bool, bool> p = can_use_fast_route(self, src, /* does_op_promote_integer_inputs_to_float */ false);
+  std::pair<bool, bool> p = can_use_fast_route(
+      self, src, /* does_op_promote_integer_inputs_to_float */ false);
   bool can_use_fast_route = p.first;
   bool has_empty_tensors = p.second;
   if (!can_use_fast_route) {

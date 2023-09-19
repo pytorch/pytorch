@@ -107,7 +107,8 @@ __global__ void lpnorm_cleanup(
   }
   opmath_t final = at::native::cuda_utils::BlockReduceSum<opmath_t>(val, vals);
   if (threadIdx.x == 0) {
-    ret_per_non_empty_tensor[blockIdx.x] = NormType == 1 ? final : ::sqrt(final);
+    ret_per_non_empty_tensor[blockIdx.x] =
+        NormType == 1 ? final : ::sqrt(final);
   }
 }
 
@@ -220,7 +221,8 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         p);
   }
 
-  // correctly assign values to only non-empty slots, as the empty slots should get skipped
+  // correctly assign values to only non-empty slots, as the empty slots should
+  // get skipped
   const auto ntensors = tensors.size();
   std::vector<Tensor> result;
   result.reserve(ntensors);

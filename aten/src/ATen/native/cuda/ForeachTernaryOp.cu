@@ -27,8 +27,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
     TensorList tensors2,
     TensorList tensors3) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  std::pair<bool, bool> p = can_use_fast_route(
-      {tensors1, tensors2, tensors3});
+  std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2, tensors3});
   bool can_use_fast_route = p.first;
   bool has_empty_tensors = p.second;
   if (!can_use_fast_route) {
@@ -43,7 +42,8 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
   if (has_empty_tensors) {
-    tensor_lists = filter_out_empty_tensors({tensors1, tensors2, tensors3, vec_res});
+    tensor_lists =
+        filter_out_empty_tensors({tensors1, tensors2, tensors3, vec_res});
   } else {
     tensor_lists = {tensors1.vec(), tensors2.vec(), tensors3.vec(), vec_res};
   }
