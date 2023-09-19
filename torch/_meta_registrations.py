@@ -3600,6 +3600,11 @@ def meta_masked_scatter(self, mask, source):
     return meta_masked_scatter_(output, mask, source)
 
 
+@register_meta(aten.masked_scatter_backward)
+def meta_masked_scatter_backward(self, mask, source):
+    return torch.empty_like(self)
+
+
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     return self

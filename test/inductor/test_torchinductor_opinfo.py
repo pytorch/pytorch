@@ -239,7 +239,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "fft.ihfftn": {f16, f32, f64},
     "geometric": {f16},
     "log_normal": {f16},
-    "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
