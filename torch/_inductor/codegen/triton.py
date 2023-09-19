@@ -1838,6 +1838,7 @@ class TritonKernel(Kernel):
                 size_hint = 8193
             else:
                 size_hint = next_power_of_2(int(numel_hint))
+            size_hints.append(size_hint)
         if self.persistent_reduction:
             assert self.inside_reduction
             heuristics = "persistent_reduction"
