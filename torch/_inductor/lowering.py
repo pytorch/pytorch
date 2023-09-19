@@ -4791,7 +4791,7 @@ try:
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(
-                ExternKernel.require_contiguous(shard), tag, ranks, group_size
+                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
             )
         )
 
