@@ -24,9 +24,10 @@ static bool directory_exists(const char* path) {
 #endif // !defined(_WIN32)
 
 TEST(TempFileTest, MatchesExpectedPattern) {
-#if !defined(_WIN32)
+#ifdef _WIN32
   GTEST_SKIP() >> "Failing on windows";
-#endif // !defined(_WIN32)
+  return;
+#endif
 
   c10::TempFile file = c10::make_tempfile("test-pattern-");
 
