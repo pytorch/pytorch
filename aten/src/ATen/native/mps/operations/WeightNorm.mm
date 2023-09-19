@@ -33,23 +33,22 @@ struct WeightNormBackwardCachedGraph : public MPSCachedGraph {
 };
 
 std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int64_t dim) {
+  TORCH_CHECK(dim == 0 || dim == v.dim() - 1, "fused kernels can only be applied for first or last dim")
+
   MPSStream* mpsStream = getCurrentMPSStream();
 
   auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto norms = at::empty_like(g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  const int ndims = v.dim();
+  string key = "weight_norm_mps_" + std::to_string(dim) + getTensorsStringKey({v, g});
 
-  string key;
-  int reduction_dim;
-
-  if (dim == 0) {
-    key = "weight_norm_mps_first_dim" + getTensorsStringKey({v, g});
-    reduction_dim = 1;
-  } else if (dim == ndims - 1) {
-    key = "weight_norm_mps_last_dim" + getTensorsStringKey({v, g});
-    reduction_dim = 0;
+  NSMutableArray* reduction_dims = [NSMutableArray array];
+  for (int i = 0; i < v.dim(); ++i) {
+    if (i != dim) {
+      [reduction_dims addObject:@(i)];
+    }
   }
+
   @autoreleasepool {
     auto cachedGraph = LookUpOrCreateCachedGraph<WeightNormCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // Placeholders
@@ -58,7 +57,7 @@ std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int
 
       // Compute the L2 norm for each column of v
       MPSGraphTensor* squared = [mpsGraph squareWithTensor:newCachedGraph->v_ name:nil];
-      MPSGraphTensor* sum_squared = [mpsGraph reductionSumWithTensor:squared axes:@[ @(reduction_dim) ] name:nil];
+      MPSGraphTensor* sum_squared = [mpsGraph reductionSumWithTensor:squared axes:reduction_dims name:nil];
       newCachedGraph->norms_ = [mpsGraph squareRootWithTensor:sum_squared name:nil];
 
       // Divide each column of v by its L2 norm
@@ -105,22 +104,18 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
   TORCH_CHECK(saved_norms.is_contiguous(), "saved_norms must be contiguous");
   TORCH_CHECK(dim == 0 || dim == saved_v.dim() - 1, "fused kernels can only be applied for first or last dim")
 
+  MPSStream* mpsStream = getCurrentMPSStream();
+
   auto grad_v = at::empty_like(saved_v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_g = at::empty_like(saved_g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
-  MPSStream* mpsStream = getCurrentMPSStream();
+  string key = "weight_norm_backward_mps_" + std::to_string(dim) + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
 
-  const int ndims = saved_v.dim();
-
-  string key;
-  int reduction_dim;
-
-  if (dim == 0) {
-    key = "weight_norm_backward_mps_first_dim" + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
-    reduction_dim = 1;
-  } else if (dim == ndims - 1) {
-    key = "weight_norm_backward_mps_last_dim" + getTensorsStringKey({grad_w, saved_v, saved_g, saved_norms});
-    reduction_dim = 0;
+  NSMutableArray* reduction_dims = [NSMutableArray array];
+  for (int i = 0; i < saved_v.dim(); ++i) {
+    if (i != dim) {
+      [reduction_dims addObject:@(i)];
+    }
   }
 
   @autoreleasepool {
@@ -140,7 +135,7 @@ std::tuple<Tensor, Tensor> weight_norm_backward_mps(const Tensor& grad_w,
           MPSGraphTensor* grad_w_v = [mpsGraph multiplicationWithPrimaryTensor:newCachedGraph->grad_w
                                                                secondaryTensor:newCachedGraph->saved_v
                                                                           name:nil];
-          MPSGraphTensor* result = [mpsGraph reductionSumWithTensor:grad_w_v axes:@[ @(reduction_dim) ] name:nil];
+          MPSGraphTensor* result = [mpsGraph reductionSumWithTensor:grad_w_v axes:reduction_dims name:nil];
 
           newCachedGraph->grad_g = [mpsGraph divisionWithPrimaryTensor:result
                                                        secondaryTensor:newCachedGraph->saved_norms
