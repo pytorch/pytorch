@@ -38,7 +38,7 @@ def export_tracepoint_fake_tensor_mode(mode, *args, **kwargs):
 
 
 @_export_tracepoint.py_functionalize_impl
-def export_tracepoint_functional_(ctx, *args, **kwargs):
+def export_tracepoint_functional(ctx, *args, **kwargs):
     unwrapped_args = ctx.unwrap_tensors(args)
     unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
 
