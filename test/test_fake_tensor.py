@@ -1013,31 +1013,24 @@ class FakeTensorOperatorInvariants(TestCase):
                 super().__init__()
 
             def forward(self, arg1, arg2, arg3):
-                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3, scale=0.17677669529663687)
+                torch.ops.aten._scaled_dot_product_flash_attention(arg1, arg2, arg3)
 
         args_new = [
-            [
-                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-                ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
-            ],
-            [
-                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
-                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
-                ((4, 2, 16, 32), (1024, 512, 32, 1), torch.float16, "cuda"),
-            ]
+            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
+            ((1, 48, 64, 64), (0, 4096, 64, 1), torch.float16, "cuda"),
         ]
-        for args_list in args_new:
-            args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
-                    (bsz, num_heads, seq_len, head_dim) in args_list]
-            try:
-                with torch._subclasses.CrossRefFakeMode():
-                    Repro()(*args)
-            except RuntimeError as e:
-                # We expect the cross ref to succed for the first output to fail
-                # for the rng state, see Note [Seed and Offset]
-                self.assertTrue("output[0]" not in str(e))
-                self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
+
+        args = [rand_strided(bsz, num_heads, seq_len, head_dim) for
+                (bsz, num_heads, seq_len, head_dim) in args_new]
+        try:
+            with torch._subclasses.CrossRefFakeMode():
+                Repro()(*args)
+        except RuntimeError as e:
+            # We expect the cross ref to succed for the first output to fail
+            # for the rng state, see Note [Seed and Offset]
+            self.assertTrue("output[0]" not in str(e))
+            self.assertTrue("found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!" in str(e))
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
