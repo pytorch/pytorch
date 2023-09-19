@@ -25,7 +25,7 @@ static bool directory_exists(const char* path) {
 
 TEST(TempFileTest, MatchesExpectedPattern) {
 #ifdef _WIN32
-  GTEST_SKIP() >> "Failing on windows";
+  GTEST_SKIP() << "Failing on windows";
   return;
 #endif
 
