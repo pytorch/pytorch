@@ -1066,8 +1066,12 @@ class GraphModuleDeserializer:
         serialized_graph_module: GraphModule,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Tuple[torch.fx.GraphModule, ep.ExportGraphSignature, ep.CallSpec, List[ep.ModuleCallEntry], Dict[str, sympy.Symbol]]:
-        self.shape_env = symbolic_shapes.ShapeEnv()
-        self.fake_tensor_mode = FakeTensorMode(shape_env=self.shape_env)
+        self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
+        self.fake_tensor_mode = FakeTensorMode(
+            allow_fallback_kernels=False,
+            allow_non_fake_inputs=True,
+            shape_env=self.shape_env,
+        )
         self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
         self.symbol_name_to_range = {} if symbol_name_to_range is None else symbol_name_to_range
 
