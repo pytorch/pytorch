@@ -147,20 +147,6 @@ FILENAME_ALLOWLIST = {
     comptime.__file__,
     torch.optim._functional.__file__,
     torch.utils._foreach_utils.__file__,
-    # torch.ao.quantization.pt2e.qat_utils.__file__,
-    # torch.ao.quantization.quantizer.xnnpack_quantizer.__file__,
-    # torch.ao.quantization.pt2e.representation.rewrite.__file__,
-    # torch.ao.quantization.pt2e.utils.__file__,
-    # torch.ao.quantization.pt2e.eval_utils.__file__,
-    # torch._export.constraints.__file__,
-    # torch._higher_order_ops.cond.__file__,
-    torch._functorch.apis.__file__,
-    torch._functorch.deprecated.__file__,
-    # torch.distributed.tensor.parallel._utils.__file__,
-    # torch.distributed.tensor.parallel.style.__file__,
-    # torch.distributed.tensor.parallel._data_parallel_utils.__file__,
-    # torch.distributed._tensor.api.__file__,
-    # torch.distributed._tensor.device_mesh.__file__,
     _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
     _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
     _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
@@ -168,19 +154,22 @@ FILENAME_ALLOWLIST = {
     _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
     _module_dir(torch) + "_export/constraints.py",
     _module_dir(torch) + "_higher_order_ops/cond.py",
-    # _module_dir(torch) + "_functorch/apis.py",
-    # _module_dir(torch) + "_functorch/deprecated.py",
+    _module_dir(torch) + "_functorch/apis.py",
+    _module_dir(torch) + "_functorch/deprecated.py",
     _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
     _module_dir(torch) + "distributed/tensor/parallel/style.py",
     _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
     _module_dir(torch) + "distributed/_tensor/api.py",
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
+    _module_dir(torch) + "distributed/_tensor/placement_types.py",
+    _module_dir(torch) + "distributed/c10d_logger.py",
+    _module_dir(torch) + "distributed/_functional_collectives.py",
     torch.jit._trace.__file__,
-    # torch.distributions.normal.__file__,
-    # torch.distributions.independent.__file__,
-    # torch.distributions.utils.__file__,
-    # torch.utils._contextlib.__file__,
-    # torch.fx._pytree.__file__,
+    torch.distributions.normal.__file__,
+    torch.distributions.independent.__file__,
+    torch.distributions.utils.__file__,
+    torch.utils._contextlib.__file__,
+    torch.fx._pytree.__file__,
 }
 
 if torch.distributed.is_available():
@@ -345,7 +334,7 @@ class SkipResult:
     reason: Optional[str]
 
 
-def check(filename):
+def check(filename, allow_module=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -354,7 +343,7 @@ def check(filename):
             False,
             "allowlisted in skipfiles.FILENAME_ALLOWLIST",
         )
-    if is_torch_inline_allowed(filename):
+    if allow_module and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
             "allowlisted in skipfiles.SUBMODULE_ALLOWLIST",
