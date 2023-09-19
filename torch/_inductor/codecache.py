@@ -60,8 +60,6 @@ if config.is_fbcode():
         log_global_cache_vals,
         use_global_cache,
     )
-    from triton.fb import build_paths
-    from triton.fb.build import _run_build_command
 else:
 
     def log_global_cache_errors(*args, **kwargs):
