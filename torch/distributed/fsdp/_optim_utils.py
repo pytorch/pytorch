@@ -1436,10 +1436,6 @@ def _unflatten_orig_param_states(
             value = value.cpu()
         gathered_state[state_name] = value
 
-    logger.warning(
-        "The total elements of FSDP managed optimizer state %s is %d", state_name, numel
-    )
-
 
 def _allgather_orig_param_states(
     fsdp_param_info: FSDPParamInfo,
@@ -1452,10 +1448,12 @@ def _allgather_orig_param_states(
     Given the ``gathered_state_info`` and ``input_states``, the API allgathers
     all tensor states and restore non-tensor states from ``gathered_state_info``.
     """
-    logger.warning(
-        "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
-        torch.cuda.memory_summary(),
-    )
+    fsdp_state = fsdp_param_info.state
+    if fsdp_state.rank == 0:
+        logger.warning(
+            "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
+            torch.cuda.memory_summary(),
+        )
 
     output_states: Dict[str, Dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
 
@@ -1471,7 +1469,6 @@ def _allgather_orig_param_states(
     # the order of of flat_param._fqns.
     # The final step is to split the flat_param state into original param states
     # and return the result.
-    fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.handle.flat_param
     empty_func = functools.partial(
         torch.empty, dtype=dtype, device=fsdp_state.compute_device
