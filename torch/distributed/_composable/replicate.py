@@ -3,7 +3,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
-from torch.distributed._composable_state import _get_module_state, _State
+from torch.distributed._composable_state import _State
 
 from torch.nn.parallel import DistributedDataParallel
 
