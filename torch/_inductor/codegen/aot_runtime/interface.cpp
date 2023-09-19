@@ -61,7 +61,7 @@ AOTInductorError AOTInductorModelContainerRun(
     AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTInductorProxyExecutorHandle proxy_executor_handle,
+    AOTIProxyExecutorHandle proxy_executor_handle,
     const int64_t** ret_output_sizes,
     int64_t* ret_output_ndims) {
   auto* container =
@@ -82,13 +82,9 @@ AOTInductorError AOTInductorModelContainerRun(
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
 
-  torch::aot_inductor::ProxyExecutor* proxy_executor =
-      reinterpret_cast<torch::aot_inductor::ProxyExecutor*>(
-          proxy_executor_handle);
-
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<std::vector<int64_t>>* shapes;
-    container->run(inputs, outputs, &shapes, stream, proxy_executor);
+    container->run(inputs, outputs, &shapes, stream, proxy_executor_handle);
     for (size_t i = 0; i < num_outputs; i++) {
       ret_output_sizes[i] = shapes->at(i).data();
       ret_output_ndims[i] = shapes->at(i).size();

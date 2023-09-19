@@ -75,7 +75,7 @@ TEST(AotInductorTest, BasicTest) {
   std::vector<const int64_t*> output_sizes(outputs.size());
   std::vector<int64_t> output_ndims(outputs.size());
 
-  AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+  AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,

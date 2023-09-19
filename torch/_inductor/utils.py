@@ -1200,7 +1200,7 @@ aot_inductor_launcher = """
 
         std::vector<const int64_t*> output_sizes(output_tensors.size());
         std::vector<int64_t> output_ndims(output_tensors.size());
-        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
+        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
             container_handle,

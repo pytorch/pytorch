@@ -11,7 +11,6 @@
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
 // applies to other files under torch/csrc/inductor/aot_runtime/.
 #include <torch/csrc/inductor/aot_runtime/cuda_utils.h>
-#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #define AOTI_RUNTIME_CHECK(EXPR, MSG) \
@@ -82,7 +81,7 @@ class AOTInductorModelBase {
       std::vector<RAIIAtenTensorHandle>& inputs,
       std::vector<RAIIAtenTensorHandle>& outputs,
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor = nullptr) {
+      AOTIProxyExecutorHandle proxy_executor = nullptr) {
     AOTI_VECTOR_SIZE_CHECK(inputs, num_inputs());
     AOTI_VECTOR_SIZE_CHECK(outputs, num_outputs());
 
@@ -343,7 +342,7 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::vector<RAIIAtenTensorHandle>& input_handles,
       std::vector<RAIIAtenTensorHandle>& output_handles,
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor = nullptr);
+      AOTIProxyExecutorHandle proxy_executor = nullptr);
 
   static std::unique_ptr<AOTInductorModel> Create(
       std::shared_ptr<ConstantMap> constants,
