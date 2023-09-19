@@ -99,6 +99,26 @@ def _compile_end() -> None:
 
 log = logging.getLogger(__name__)
 
+class UniversalPath:
+    def __init__(self, path: str):
+        self.path = path
+
+    def joinpath(self, *paths) -> 'UniversalPath':
+        return UniversalPath(join_paths(self.path, *paths))
+
+    def exists(self) -> bool:
+        if "://" in self.path:
+            fs, _, _ = fsspec.get_fs_token_paths(self.path)
+            return fs.exists(self.path)
+        else:
+            return os.path.exists(self.path)
+
+    def __str__(self) -> str:
+        return self.path
+
+    def __repr__(self) -> str:
+        return f"UniversalPath({self.path!r})"
+
 def join_paths(*paths):
     # Check if the path is an fsspec path by looking for "://"
     if not paths:
@@ -161,6 +181,7 @@ def cache_dir() -> str:
     return cache_dir
 
 
+
 def cpp_wrapper_cache_dir(name: str) -> str:
     cu_str = (
         "cpu"
@@ -172,8 +193,25 @@ def cpp_wrapper_cache_dir(name: str) -> str:
 
     cpp_wrapper_dir = join_paths(cache_dir(), build_folder)
     cpp_wrapper_build_directory = join_paths(cpp_wrapper_dir, name)
-    os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
+
+    def ensure_directory_exists(path):
+        if "://" in path:
+            try:
+                import fsspec
+                fs, _, _ = fsspec.get_fs_token_paths(path)
+            except ImportError as e:
+                raise ImportError(
+                    "fsspec is required to handle remote file systems but it's not installed."
+                ) from e
+            if not fs.exists(path):
+                fs.mkdir(path, exist_ok=True)
+        else:
+            os.makedirs(path, exist_ok=True)
+
+    ensure_directory_exists(cpp_wrapper_build_directory)
+
     return cpp_wrapper_build_directory
+
 
 
 class CacheBase:
@@ -210,14 +248,14 @@ class CacheBase:
 
     @staticmethod
     @functools.lru_cache(None)
-    def get_local_cache_path() -> Path:
-        return Path(join_paths(cache_dir(), "cache", CacheBase.get_system()["hash"]))
+    def get_local_cache_path() -> UniversalPath:
+        return UniversalPath(join_paths(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     @staticmethod
     @functools.lru_cache(None)
-    def get_global_cache_path() -> Optional[Path]:
+    def get_global_cache_path() -> Optional[UniversalPath]:
         return (
-            Path(join_paths(config.global_cache_dir, CacheBase.get_system()["hash"]))
+            UniversalPath(join_paths(config.global_cache_dir, CacheBase.get_system()["hash"]))
             if config.global_cache_dir is not None
             else None
         )
@@ -357,11 +395,28 @@ class PersistentCache(CacheBase):
         return timings
 
 
+
 def get_lock_dir() -> str:
     lock_dir = join_paths(cache_dir(), "locks")
-    if not os.path.exists(lock_dir):
-        os.makedirs(lock_dir, exist_ok=True)
+    
+    # Check if the path is an fsspec path
+    if "://" in lock_dir:
+        try:
+            import fsspec
+            fs, _, _ = fsspec.get_fs_token_paths(lock_dir)
+        except ImportError as e:
+            raise ImportError(
+                "fsspec is required to handle remote file systems but it's not installed."
+            ) from e
+
+        if not fs.exists(lock_dir):
+            fs.mkdir(lock_dir, exist_ok=True)
+    else:
+        if not os.path.exists(lock_dir):
+            os.makedirs(lock_dir, exist_ok=True)
+    
     return lock_dir
+
 
 
 def code_hash(code: Union[str, bytes], extra: str = ""):
@@ -512,12 +567,28 @@ def cpp_compiler_search(search: str) -> str:
     raise exc.InvalidCxxCompiler()
 
 
+import fsspec
+
 def install_gcc_via_conda() -> str:
     """On older systems, this is a quick way to get a modern compiler"""
     prefix = join_paths(cache_dir(), "gcc")
-    cxx_path = os.path.join(prefix, "bin", "g++")
-    if not os.path.exists(cxx_path):
+    cxx_path = join_paths(prefix, "bin", "g++")
+
+    def path_exists(path):
+        if "://" in path:
+            fs, _, _ = fsspec.get_fs_token_paths(path)
+            return fs.exists(path)
+        else:
+            return os.path.exists(path)
+
+    if not path_exists(cxx_path):
         log.info("Downloading GCC via conda")
+        
+        # Since this is a local process, ensure the path is local
+        if "://" in prefix:
+            log.error("Cannot install GCC to a non-local path: %s", prefix)
+            return cxx_path
+        
         conda = os.environ.get("CONDA_EXE", "conda")
         if conda is None:
             conda = shutil.which("conda")
@@ -536,6 +607,7 @@ def install_gcc_via_conda() -> str:
                 stdout=subprocess.PIPE,
             )
     return cxx_path
+
 
 
 def is_gcc() -> bool:

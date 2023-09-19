@@ -42,29 +42,46 @@ def _gen_cutlass_file(
     with open(dst_full_path, "w") as f:
         f.write(text)
 
+import fsspec
 
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
-    # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
-    # This is a temporary hack to avoid CUTLASS module naming conflicts.
-    # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
+    # ... [rest of the comments]
 
-    cutlass_py_full_path = os.path.join(
-        inductor_cuda_config.cutlass_dir, "tools/library/scripts"
-    )
-    tmp_cutlass_py_full_path = os.path.abspath(
-        join_paths(cache_dir(), "torch_cutlass_script")
-    )
+    cutlass_py_full_path = join_paths(inductor_cuda_config.cutlass_dir, "tools/library/scripts")
+    tmp_cutlass_py_full_path = join_paths(cache_dir(), "torch_cutlass_script")
 
-    if os.path.isdir(cutlass_py_full_path):
-        cutlass_file_names = [
-            file_name
-            for file_name in os.listdir(cutlass_py_full_path)
-            if file_name.endswith(".py")
-        ]
+    # Function to check if a directory exists and to list its contents
+    def dir_exists_and_list(path):
+        if "://" in path:
+            fs, _, _ = fsspec.get_fs_token_paths(path)
+            if fs.exists(path) and fs.isdir(path):
+                return True, fs.ls(path)
+            else:
+                return False, []
+        else:
+            if os.path.isdir(path):
+                return True, os.listdir(path)
+            else:
+                return False, []
+
+    exists, cutlass_files = dir_exists_and_list(cutlass_py_full_path)
+    if exists:
+        cutlass_file_names = [os.path.basename(file) for file in cutlass_files if file.endswith(".py")]
         cutlass_module_names = [file_name[:-3] for file_name in cutlass_file_names]
-        if not os.path.isdir(tmp_cutlass_py_full_path):
-            os.mkdir(tmp_cutlass_py_full_path)
+        
+        # Function to create directory
+        def ensure_dir_exists(path):
+            if "://" in path:
+                fs, _, _ = fsspec.get_fs_token_paths(path)
+                if not fs.exists(path):
+                    fs.mkdir(path)
+            else:
+                if not os.path.isdir(path):
+                    os.mkdir(path)
+
+        ensure_dir_exists(tmp_cutlass_py_full_path)
+
         for file_name in cutlass_file_names:
             _gen_cutlass_file(
                 file_name,
@@ -91,6 +108,7 @@ def try_import_cutlass() -> bool:
             cutlass_py_full_path,
         )
     return False
+
 
 
 def _normalize_cuda_arch(arch: str) -> str:
