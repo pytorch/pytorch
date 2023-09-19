@@ -617,7 +617,7 @@ def _sharded_pre_load_state_dict_hook(
 
         if not fsdp_state._state_dict_config._use_dtensor:
             # All-gather the param (ShardedTensor)
-            param, shards = _ext_pre_load_state_dict_transform(param)
+            param, shards = _ext_pre_load_state_dict_transform(param, fqn_from_global_root)
 
             assert len(shards) < 2, (
                 "Expects 0 or 1 shard per rank "
