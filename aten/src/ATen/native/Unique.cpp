@@ -76,7 +76,7 @@ struct IsUnique<scalar_t, true> {
 // This kernel also implements a `equal_nan` flag which has same
 // function as NumPy's unique. Currently this is always disabled.
 //
-// TODO: add `bool` specification, use similar approach as UniqueCub
+// TODO: add `bool` specialization, use similar approach as UniqueCub
 //
 template <typename scalar_t, typename CompareOp>
 std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
