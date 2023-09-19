@@ -37,14 +37,14 @@ def export_tracepoint_fake_tensor_mode(mode, *args, **kwargs):
         return args
 
 
-@_export_tracepoint.py_functionalize_impl()
+@_export_tracepoint.py_functionalize_impl
 def export_tracepoint_functional_(ctx, *args, **kwargs):
-    unwrapped_args = ctx.unwrap(args)
-    unwrapped_kwargs = ctx.unwrap(kwargs)
+    unwrapped_args = ctx.unwrap_tensors(args)
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
 
-    with ctx.redispatch():
+    with ctx.redispatch_to_next():
         out = _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
-        return ctx.wrap(out)
+        return ctx.wrap_tensors(out)
 
 
 @_export_tracepoint.py_impl(DispatchKey.CPU)

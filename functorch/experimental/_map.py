@@ -356,15 +356,15 @@ def map_fake_tensor_mode(mode, f, num_mapped, *args):
         return map_dense(f, num_mapped, *args)
 
 
-@map_impl.py_functionalize_impl()
+@map_impl.py_functionalize_impl
 def map_functionalize(ctx, f, num_mapped, *args):
     xs = args[:num_mapped]
     pos_args = args[num_mapped:]
-    unwrapped_xs = ctx.unwrap(xs)
-    unwrapped_args = ctx.unwrap(pos_args)
-    wrapped_fn = ctx.wrap_function(f)
+    unwrapped_xs = ctx.unwrap_tensors(xs)
+    unwrapped_args = ctx.unwrap_tensors(pos_args)
+    wrapped_fn = ctx.functionalize(f)
 
-    with ctx.redispatch():
+    with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         if _has_potential_branch_input_mutation(f, example_inputs):
@@ -374,7 +374,7 @@ def map_functionalize(ctx, f, num_mapped, *args):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
         map_return = map_impl(wrapped_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
-        return ctx.wrap(map_return)
+        return ctx.wrap_tensors(map_return)
 
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
