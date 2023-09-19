@@ -826,7 +826,7 @@ class Kernel(CodeGen):
         #   the buffer specified by key
         self.inplace_update_buffers = dict()
         # Set minimum number of elements processed per thread.
-        self.min_elements_per_thread = 1
+        self.min_elem_per_thread = 1
 
     @contextlib.contextmanager
     def set_current_node(self, node):
