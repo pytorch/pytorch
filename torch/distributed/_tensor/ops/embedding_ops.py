@@ -45,7 +45,7 @@ def embedding_rules(op_schema: OpSchema) -> OutputSharding:
         output_spec=None,
         schema_suggestions=[
             OpSchema(
-                func_schema=op_schema.func_schema,
+                op=op_schema.op,
                 args_schema=(
                     weight_spec,
                     DTensorSpec(
