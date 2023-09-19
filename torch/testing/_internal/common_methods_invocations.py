@@ -3292,7 +3292,7 @@ def error_inputs_adaptive_avg_pool2d(opinfo, device, **kwargs):
     
     # error inputs for incorrect output_size dimension
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(2, 2, 2)),
-                     error_regex="output_size must be of type int or have dimension 2")
+                     error_regex="output_size must be of type int (for square output) or have dimension 2")
 
 
 def sample_inputs_adaptive_avg_pool3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3332,7 +3332,7 @@ def error_inputs_adaptive_avg_pool3d(opinfo, device, **kwargs):
     
     # error inputs for incorrect output_size dimension
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(2, 2, 2, 2)),
-                     error_regex="output_size must be of type int or have dimension 3")
+                     error_regex="output_size must be of type int (for square output) or have dimension 3")
 
 
 def sample_inputs_adaptive_max_pool1d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3402,7 +3402,7 @@ def error_inputs_adaptive_max_pool2d(opinfo, device, **kwargs):
     
     # error inputs for incorrect output_size dimension
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(2, 2, 2)),
-                     error_regex="output_size must be of type int or have dimension 2")
+                     error_regex="output_size must be of type int (for square output) or have dimension 2")
 
 
 def sample_inputs_adaptive_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
@@ -3442,7 +3442,7 @@ def error_inputs_adaptive_max_pool3d(opinfo, device, **kwargs):
     
     # error inputs for incorrect output_size dimension
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 1)), output_size=(2, 2, 2, 2)),
-                     error_regex="output_size must be of type int or have dimension 3")
+                     error_regex="output_size must be of type int (for square output) or have dimension 3")
 
 
 class _TestParamsMaxPoolBase:
