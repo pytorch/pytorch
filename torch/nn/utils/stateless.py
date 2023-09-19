@@ -250,6 +250,10 @@ def _functional_call(
         )
     ):
         raise RuntimeError("The stateless API can't be used with Jitted modules")
+    if isinstance(module, torch.nn.DataParallel):
+        raise RuntimeError(
+            "The stateless API can't be used with nn.DataParallel module"
+        )
     if kwargs is None:
         kwargs = {}
     if not isinstance(args, tuple):

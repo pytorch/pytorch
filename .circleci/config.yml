@@ -444,35 +444,6 @@ jobs:
           script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
           cat "$script"
           source "$script"
-
-  anaconda_prune:
-    parameters:
-      packages:
-        type: string
-        description: "What packages are we pruning? (quoted, space-separated string. eg. 'pytorch', 'torchvision torchaudio', etc.)"
-        default: "pytorch"
-      channel:
-        type: string
-        description: "What channel are we pruning? (eq. pytorch-nightly)"
-        default: "pytorch-nightly"
-    docker:
-      - image: continuumio/miniconda3
-    environment:
-      - PACKAGES: "<< parameters.packages >>"
-      - CHANNEL: "<< parameters.channel >>"
-    steps:
-      - checkout
-      - run:
-          name: Install dependencies
-          no_output_timeout: "1h"
-          command: |
-            conda install -yq anaconda-client
-      - run:
-          name: Prune packages
-          no_output_timeout: "1h"
-          command: |
-              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
-              scripts/release/anaconda-prune/run.sh
   pytorch_doc_push:
     resource_class: medium
     machine:
@@ -652,7 +623,7 @@ jobs:
             - run:
                 name: Archive artifacts into zip
                 command: |
-                  zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
+                  zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json .pytorch-test-file-ratings.json
                   cp artifacts.zip /Users/distiller/workspace
 
       - persist_to_workspace:
@@ -1414,22 +1385,4 @@ workflows:
           requires:
             - pytorch_ios_full_jit_12_5_1_nightly_x86_64_build
             - pytorch_ios_full_jit_12_5_1_nightly_arm64_build
-      - anaconda_prune:
-          name: anaconda-prune-pytorch-nightly
-          context: "org-member"
-          packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
-          channel: pytorch-nightly
-          filters:
-            branches:
-              only:
-                - postnightly
-      - anaconda_prune:
-          name: anaconda-prune-pytorch-test
-          context: "org-member"
-          packages: "pytorch torchvision torchaudio torchtext ignite torchcsprng"
-          channel: pytorch-test
-          filters:
-            branches:
-              only:
-                - postnightly
     when: << pipeline.parameters.run_build >>

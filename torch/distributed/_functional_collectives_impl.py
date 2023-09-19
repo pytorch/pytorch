@@ -11,6 +11,15 @@ Moved eager kernel implementations to a separate file partly for readability and
 easier in dynamo to set tracing policy on a file-by-file level.
 
 Do not put code in this file that Dynamo is expected to trace into, as dynamo may disallow this whole file.
+
+DEBUG/TESTING HELPERS:
+
+This module includes some helpers that are quite useful when debugging or testing functional collectives:
+
+_tensor_needs_wait
+_outstanding_wait_count
+_wait_all
+
 """
 
 logger = logging.getLogger(__name__)
@@ -23,15 +32,20 @@ class _WaitRegistration:
         global work_version
         self.work = work
         self.version = work_version
-        self.ptrs = []
+        self.ptrs = set()
+        self.ptr_alias_count = {}
         self.cleanup_count = 0
         work_version += 1
 
-    def _register(self, tensor):
+    def _register_tensor_ptr(self, data_ptr):
         global data_ptr_to_work
-        ptr = tensor.data_ptr()
-        data_ptr_to_work[ptr] = self
-        self.ptrs.append(ptr)
+        data_ptr_to_work[data_ptr] = self
+        self.ptrs.add(data_ptr)
+
+    def _record_wrapper(self, ptr):
+        self._register_tensor_ptr(ptr)
+        self.ptr_alias_count.setdefault(ptr, 0)
+        self.ptr_alias_count[ptr] += 1
         self.cleanup_count += 1
 
     def wait(self):
@@ -43,9 +57,10 @@ class _WaitRegistration:
     def decrement_live_tensor(self, ptr):
         self.cleanup_count -= 1
         if self.cleanup_count == 0:
-            self.cleanup()
+            self.wait()
         else:
-            if data_ptr_to_work.get(ptr, None) == self:
+            self.ptr_alias_count[ptr] -= 1
+            if self.ptr_alias_count[ptr] < 1 and data_ptr_to_work.get(ptr, None) == self:
                 del data_ptr_to_work[ptr]
 
     def cleanup(self):
@@ -60,34 +75,36 @@ def _register_tensor_work(tensor_or_list, work_or_list):
     if not isinstance(work_or_list, list):
         reg = _WaitRegistration(work_or_list)
         for tensor in tensor_or_list:
-            reg._register(tensor)
+            reg._register_tensor_ptr(tensor.data_ptr())
     else:
         for tensor, work in zip(tensor_or_list, work_or_list):
             reg = _WaitRegistration(work)
-            reg._register(tensor)
+            reg._register_tensor_ptr(tensor.data_ptr())
+
+
 
 def _wait_reg_dec(ptr, wait_reg):
     wait_reg.decrement_live_tensor(ptr)
 
-def _register_wait_tensor(tensor):
+def _register_tensor_wrapper(tensor) -> None:
     global data_ptr_to_work
+    data_ptr = tensor.elem.data_ptr()
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
-    wait_reg = data_ptr_to_work.get(tensor.data_ptr(), None)
+    wait_reg = data_ptr_to_work.get(data_ptr, None)
     if wait_reg is None:
         warnings.warn(
-            "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
+            "Trying to register finalizer to AsyncCollectiveTensor but the inner tensor is already gone"
         )
     else:
         # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
-        # NOTE: we register the callback to the inner tensor of ACT, instead of the ACT wrapper
-        # class, for two reasons:
-        # 1. sometimes ACT need to continue propagation by unwrapping, then rewrapping with a new
-        #    ACT instance, if we register the callback to the ACT wrapper class, the callback will
-        #    be called when the ACT wrapper class is garbage collected, which is not what we want.
-        # 2. register callback to the inner tensor of ACT could achieve the same purpose as register
-        #    on the ACT wrapper, as it's the inner tensor who is going to be GCed need to wait.
-        weakref.finalize(tensor, _wait_reg_dec, tensor.data_ptr(), wait_reg)
+        # NOTE: we register the callback to the ACT wrapper class, for the following reasons:
+        # 1. The inner tensor is referenced by the associated Work object, so it's uncollective until we release the
+        #  associated work object
+        # 2. There's a n-to-1 relationship between wrappers and inner tensor due to non-waitable ops like view()
+        wait_reg._record_wrapper(data_ptr)
+        weakref.finalize(tensor, _wait_reg_dec, data_ptr, wait_reg)
+
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
@@ -98,9 +115,21 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 def _tensor_needs_wait(tensor: torch.Tensor) -> bool:
+    """Returns true if ```tensor``` needs to be waited. Works with ACS and inner tensors."""
+    if hasattr(tensor, "_get_acs_underlying_tensor"):
+        tensor = tensor._get_acs_underlying_tensor()
     data_ptr = tensor.data_ptr()
     wait_reg = data_ptr_to_work.get(data_ptr)
     return wait_reg is not None and wait_reg.work is not None
+
+def _outstanding_wait_count() -> int:
+    """ Returns the number of outstanding work objects waiting to be waited (sic). """
+    return len(data_ptr_to_work)
+
+def _wait_all() -> None:
+    """ Wait for all outstanding collectives. """
+    for work_reg in list(data_ptr_to_work.values()):
+        work_reg.wait()
 
 def _str_to_reduce_op(reduceOp: str) -> dist.ReduceOp:
     reduceOp = reduceOp.upper()

@@ -148,6 +148,7 @@ __all__ = [
     "squeeze",
     "transpose",
     "view_of",
+    "view_element_type",
     #
     # Functionalized view mutations
     #
@@ -172,7 +173,6 @@ __all__ = [
     "item",
     "maximum_value",
     "minimum_value",
-    "to_dtype",
     "copy_strided",
     #
     # Inplace prims
@@ -637,7 +637,6 @@ def _clone_meta(
             dtype=input.dtype,
             layout=input.layout,
             device=input.device,
-            requires_grad=input.requires_grad,
             memory_format=memory_format,
         )
 
@@ -649,7 +648,6 @@ def _clone_meta(
         dtype=input.dtype,
         layout=input.layout,
         device=input.device,
-        requires_grad=input.requires_grad,
     )
 
 
@@ -1483,10 +1481,8 @@ def _slice_meta(
             raise ValueError(msg)
         if x > y:
             msg = (
-                "Attempting to slice a tensor but a start index in {} is greater than"
-                " the length of its corresponding dimension in shape {}".format(
-                    start_indices, a.shape
-                )
+                f"Attempting to slice a tensor but a start index in {start_indices} is greater than"
+                f" the length of its corresponding dimension in shape {a.shape}"
             )
             raise ValueError(msg)
 
@@ -1496,16 +1492,14 @@ def _slice_meta(
             raise ValueError(msg)
         if x > y:
             msg = (
-                "Attempting to slice a tensor but a stop index in {} is greater than the length of "
-                " its corresponding dimension in shape {}".format(
-                    limit_indices, a.shape
-                )
+                f"Attempting to slice a tensor but a stop index in {limit_indices} is greater than the length of "
+                f" its corresponding dimension in shape {a.shape}"
             )
             raise ValueError(msg)
         if x < z:
             msg = (
-                "Attempting to slice a tensor but a start index in {} is greater than "
-                " its corresponding stop index {}".format(x, z)
+                f"Attempting to slice a tensor but a start index in {x} is greater than "
+                f" its corresponding stop index {z}"
             )
 
     for x in _strides:
@@ -1782,6 +1776,27 @@ view_of = _make_prim(
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
     doc=_view_of_doc,
+)
+
+
+def _view_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
+    return a.view(dtype)
+
+
+def _view_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
+    return a.view(dtype)
+
+
+_view_element_type_doc = """
+    Creates a view of the tensor with a different dtype.
+    """
+
+view_element_type = _make_prim(
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
+    meta=_view_element_type_meta,
+    impl_aten=_view_element_type_aten,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_view_element_type_doc,
 )
 
 #
