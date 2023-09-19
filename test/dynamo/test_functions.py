@@ -24,6 +24,19 @@ from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
 
+try:
+    try:
+        import triton
+        from triton import language as tl
+    except ImportError:
+        raise unittest.SkipTest("requires triton")
+
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
+
+
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
 flag = True
@@ -1434,6 +1447,58 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    def test_triton_kernel_by_hand(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def call_triton_add(x: torch.Tensor, y: torch.Tensor, grid_type: int):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+
+            def grid_fn(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            if grid_type == 0:
+                grid = (x.numel(),)
+            elif grid_type == 1:
+                grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            else:
+                grid = grid_fn
+
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=2)
+            return output
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+
+        torch_add = t1 + t2
+
+        # No Dynamo -- Make sure triton kernel works
+        self.assertEqual(call_triton_add(t1, t2, True), torch_add)
+
+        # With Dynamo
+        compiled_func = torch.compile(call_triton_add, backend="eager", fullgraph=True)
+        # With simple kernel
+        self.assertEqual(compiled_func(t1, t2, 0), torch_add)
+        # With lambda kernel
+        self.assertEqual(compiled_func(t1, t2, 1), torch_add)
+        # With user defined function kernel
+        self.assertEqual(compiled_func(t1, t2, 2), torch_add)
 
     def test_dataclass_factory(self):
         @dataclass

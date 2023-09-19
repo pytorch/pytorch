@@ -16,6 +16,8 @@ try:
 except ModuleNotFoundError:
     np = None
 
+from triton.runtime.jit import JITFunction
+
 import torch
 
 from torch import SymInt
@@ -94,6 +96,7 @@ from .distributed import (
 from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
+    TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -754,6 +757,13 @@ class VariableBuilder:
             return SymNodeVariable(
                 sym_node_proxy,
                 new_symint == 1,
+            )
+        elif isinstance(value, JITFunction):
+            return TritonKernelVariable(
+                value,
+                None,  # No grid provided
+                source=self.source,
+                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         else:
             result = UserDefinedObjectVariable(

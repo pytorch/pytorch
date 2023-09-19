@@ -16,7 +16,7 @@ from ..source import (
     GetItemSource,
     GlobalSource,
 )
-from ..utils import make_cell
+from ..utils import make_cell, proxy_args_kwargs
 from .base import typestr, VariableTracker
 
 
@@ -639,3 +639,70 @@ class FunctoolsPartialVariable(VariableTracker):
                 *[arg.as_python_constant for arg in self.args],
                 **{k: v.as_python_constant() for k, v in self.keywords.items()},
             )
+
+
+class TritonKernelVariable(VariableTracker):
+    def __init__(self, kernel, grid, **kwargs):
+        super().__init__(**kwargs)
+        self.kernel = kernel
+        self.grid = grid
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        def call_kernel(grid, *args, **kwargs):
+            self.kernel.run(*args, grid=grid, **kwargs)
+
+        from .dicts import ConstDictVariable
+        from .functions import NestedUserFunctionVariable, UserFunctionVariable
+        from .lists import BaseListVariable
+
+        grid = self.grid
+
+        # If the grid is a function, then lets execute it and convert it to
+        # a list
+        if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
+            d = dict(kwargs)
+            meta = ConstDictVariable(d, dict)
+            grid = grid.call_function(tx, [meta], {})
+
+        # Now, the grid must be a list either originally or through above
+        # modification
+        if isinstance(grid, BaseListVariable):
+            grid = grid.as_proxy()
+        else:
+            unimplemented(f"grid for the triton kernel is {type(grid)}")
+
+        proxied_args, proxied_kwargs = proxy_args_kwargs(args, kwargs)
+        tx.output.create_proxy(
+            "call_function",
+            call_kernel,
+            (grid,) + proxied_args,
+            proxied_kwargs,
+        )
+
+        return variables.ConstantVariable(
+            None,
+            **VariableTracker.propagate(self, args),
+        )
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if name == "__getitem__":
+            # __getitem__ should only be called if we don't already have a grid
+            assert self.grid is None
+
+            # Only grid needs to be passed
+            assert len(args) == 1
+            grid = args[0]
+            return TritonKernelVariable(
+                self.kernel, grid, **VariableTracker.propagate(self)
+            )
+
+        # Bail out to parents implementation
+        return super().call_method(tx, name, args, kwargs)
