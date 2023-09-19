@@ -3766,22 +3766,6 @@ class DynamicScalar(ExternKernelAlloc):
             inputs=[x],
         )
 
-    # TODO: add more operations (see sympy.Integer)
-    def __add__(self, other):
-        return self.symbol + other
-
-    def __mul__(self, other):
-        return self.symbol * other
-
-    def __rmul__(self, other):
-        return self.symbol * other
-
-    def __truediv__(self, other):
-        return self.symbol / other
-
-    def __sub__(self, other):
-        return self.symbol - other
-
 
 @dataclasses.dataclass
 class ExternKernelNode:

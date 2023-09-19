@@ -2271,7 +2271,6 @@ def long_tensor(data):
 def _local_scalar_dense(data):
     symbol = V.graph.current_node.meta['val'].node.expr
     ret = ir.DynamicScalar.create(data, symbol)
-    # V.graph.sizevars.shape_env.unbacked_symint_to_buf[symbol] = ret.get_name()
     return ret
 
 
