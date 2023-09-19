@@ -832,7 +832,6 @@ def _pre_load_state_dict_hook(
         if fsdp_state._device_handle.is_available():
             fsdp_state._device_handle.synchronize()
         # Dispatch into state_dict specific implementation of pre-hook.
-        print(f"RV: cfg {fsdp_state._state_dict_config}")
         _pre_load_state_dict_hook_fn[fsdp_state._state_dict_type](
             module, fsdp_state, state_dict, prefix
         )
