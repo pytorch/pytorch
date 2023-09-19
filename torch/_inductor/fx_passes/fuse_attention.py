@@ -362,7 +362,6 @@ def partialize_and_update_signature(func, **kwargs):
         return partial_func(*args, **kwargs)
 
     wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
-    wrapper.__name__ = func.__name__
 
     return wrapper
 

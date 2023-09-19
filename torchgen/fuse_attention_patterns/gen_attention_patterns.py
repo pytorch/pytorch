@@ -86,15 +86,19 @@ def serialize_functions() -> None:
     seen_patterns = set()
 
     file_template = get_file_template()
-    for (
+    for i, (
         key,
         kwargs,
-    ) in _get_sfdp_patterns():
+    ) in enumerate(_get_sfdp_patterns()):
         pattern_name = kwargs["search_fn"].__name__
         gen_kwargs = {
             key: kwargs[key]
             for key in ("search_fn", "example_inputs", "trace_fn", "scalar_workaround")
         }
+
+        # temporary to batch adding new patterns
+        if i >= 2:
+            continue
 
         from torch._functorch import config as functorch_config
 
