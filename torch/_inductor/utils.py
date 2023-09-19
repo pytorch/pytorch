@@ -300,9 +300,9 @@ def gen_gm_and_inputs(target, args, kwargs):
 def synchronize(device: str = "cuda"):
     if device == "cpu":
         return
-    device_runtime = get_interface_for_device(device)
-    if device_runtime.is_available():
-        device_runtime.synchronize()
+    device_interface = get_interface_for_device(device)
+    if device_interface.is_available():
+        device_interface.synchronize()
 
 
 def timed(
