@@ -1,7 +1,9 @@
 import contextlib
+from abc import ABC, abstractmethod
 
 import torch
 import torch.utils._pytree as pytree
+from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -26,6 +28,13 @@ class FunctionalTensor(torch.Tensor):
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
 
+    # Note: FunctionalTensor is not quite like the functorch wrapper subclasses,
+    # because today functionalization runs *below* the conj/neg/zero dispatch keys.
+    # We could consider changing this to make it more inline with functorch.
+    _extra_dispatch_keys = torch._C._additional_keys_to_prop_for_wrapper_tensors.add(
+        torch._C.DispatchKey.ZeroTensor
+    )
+
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
 
@@ -45,10 +54,9 @@ class FunctionalTensor(torch.Tensor):
         #     } else {
         #         return at::view_as_real(x);
         #     }
-        extra_dispatch_keys = torch._C.DispatchKeySet(
-            torch._C.DispatchKey.Conjugate
-        ).add(torch._C.DispatchKey.Negative)
-        extra_dispatch_keys = extra_dispatch_keys & torch._C._dispatch_keys(elem)
+        extra_dispatch_keys = (
+            FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
+        )
 
         out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
@@ -162,21 +170,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
 
-        self._tls_guard_keys = (
-            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
-            .add(torch._C.DispatchKey.ZeroTensor)
-            .add(torch._C.DispatchKey.Conjugate)
-            .add(torch._C.DispatchKey.Negative)
-        )
-
-        # We want several of the dispatcher functionalities (zero / neg / conj)
-        # to run **underneath** our FunctionalTensor.
-        # We do this by exluding keys when a user enters the mode,
-        # and re-including them during __torch_dispatch__
-        self._tls_exclude_guard = torch._C._ExcludeDispatchKeyGuard(
-            self._tls_guard_keys
-        )
-
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
         if (
@@ -185,7 +178,6 @@ class FunctionalTensorMode(TorchDispatchMode):
         ):
             self.enter_stack.append(True)
 
-            self._tls_exclude_guard.__enter__()
             return super().__enter__()
         else:
             self.enter_stack.append(False)
@@ -194,7 +186,6 @@ class FunctionalTensorMode(TorchDispatchMode):
     def __exit__(self, a, b, c):
         is_on_stack = self.enter_stack.pop()
         if is_on_stack:
-            self._tls_exclude_guard.__exit__(a, b, c)
             super().__exit__(a, b, c)
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -250,7 +241,10 @@ class FunctionalTensorMode(TorchDispatchMode):
             | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
         exclude_to_set = (
-            torch._C._dispatch_tls_local_exclude_set() - self._tls_guard_keys
+            torch._C._dispatch_tls_local_exclude_set().remove(
+                torch._C.DispatchKey.Functionalize
+            )
+            - FunctionalTensor._extra_dispatch_keys
         )
         # All we want to do here is re-use the existing C++ functionalization logic.
         # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
@@ -345,3 +339,91 @@ def dispatch_functionalize(func):
             return outputs
 
     return inner
+
+
+class BaseFunctionalizeAPI(ABC):
+    @abstractmethod
+    def wrap_tensors(self, args):
+        pass
+
+    @abstractmethod
+    def unwrap_tensors(self, args):
+        pass
+
+    @abstractmethod
+    def functionalize(self, inner_f):
+        pass
+
+    @abstractmethod
+    def redispatch_to_next(self):
+        pass
+
+
+class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
+    def wrap_tensors(self, args):
+        return torch.utils._pytree.tree_map_only(
+            FunctionalTensor, FunctionalTensor.to_functional, args
+        )
+
+    def unwrap_tensors(self, args):
+        return torch.utils._pytree.tree_map_only(
+            FunctionalTensor, FunctionalTensor.from_functional, args
+        )
+
+    def functionalize(self, inner_f):
+        return dispatch_functionalize(inner_f)
+
+    def redispatch_to_next(self):
+        return unset_functional_temporarily()
+
+
+class CppFunctionalizeAPI(BaseFunctionalizeAPI):
+    def wrap_tensors(self, args):
+        from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
+
+        return _wrap_all_tensors_to_functional(args, level=0)
+
+    def unwrap_tensors(self, args):
+        from torch._functorch.eager_transforms import (
+            _unwrap_all_tensors_from_functional,
+        )
+
+        return _unwrap_all_tensors_from_functional(args, reapply_views=_reapply_views())
+
+    def functionalize(self, inner_f):
+        return torch.func.functionalize(inner_f)
+
+    def redispatch_to_next(self):
+        return torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+
+
+class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
+    def __init__(self, interpreter):
+        self.interpreter = interpreter
+
+    def wrap_tensors(self, args):
+        from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
+
+        return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
+
+    def unwrap_tensors(self, args):
+        from torch._functorch.eager_transforms import (
+            _unwrap_all_tensors_from_functional,
+        )
+
+        return _unwrap_all_tensors_from_functional(
+            args, reapply_views=self.interpreter.functionalize_add_back_views()
+        )
+
+    def functionalize(self, inner_f):
+        return torch.func.functionalize(
+            inner_f,
+            remove="mutations_and_views"
+            if self.interpreter.functionalize_add_back_views()
+            else "mutations",
+        )
+
+    def redispatch_to_next(self):
+        return self.interpreter.lower()

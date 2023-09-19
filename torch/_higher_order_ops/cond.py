@@ -386,13 +386,13 @@ def _has_potential_branch_input_alias(branch, inputs):
     return _detect_input_alias(gm)
 
 
-@cond_op.py_functionalize_impl()
+@cond_op.py_functionalize_impl
 def cond_func(ctx, pred, true_fn, false_fn, inputs):
-    unwrapped_inputs = ctx.unwrap(inputs)
-    unwrapped_pred = ctx.unwrap(pred)
-    with ctx.redispatch():
-        functional_true = ctx.wrap_function(true_fn)
-        functional_false = ctx.wrap_function(false_fn)
+    unwrapped_inputs = ctx.unwrap_tensors(inputs)
+    unwrapped_pred = ctx.unwrap_tensors(pred)
+    with ctx.redispatch_to_next():
+        functional_true = ctx.functionalize(true_fn)
+        functional_false = ctx.functionalize(false_fn)
         for branch in [functional_true, functional_false]:
             if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
                 raise UnsupportedAliasMutationException(
@@ -407,7 +407,7 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
         cond_return = cond_op(
             unwrapped_pred, functional_true, functional_false, unwrapped_inputs
         )
-        return ctx.wrap(cond_return)
+        return ctx.wrap_tensors(cond_return)
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
