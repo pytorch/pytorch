@@ -16,17 +16,17 @@ TORCH_API at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle);
 // No ownership transfer, just pointer type conversion
 TORCH_API AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor);
 
-// create_handles_from_tensors is used for turning a vector of aten tensors into
-// a vector of AtenTensorHandles, and then pass that into model.so. Right now we
-// create new references and return their raw pointers as a vector, and the
-// returned raw pointers will be wrapped by RAIIAtenTensorHandle in model.so.
-TORCH_API std::vector<AtenTensorHandle> create_handles_from_tensors(
+// unsafe_alloc_new_handles_from_tensors is used for allocating new aten
+// tensor objects and return them as a vector of AtenTensorHandle (raw
+// pointers), and those pointers will be stolen by model.so.
+TORCH_API std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
     std::vector<at::Tensor>& tensors);
 
-// create_tensors_from_handles is used for turning a vector of AtenTensorHandles
-// into a vector of aten tensors. We don't free the passed in AtenTensorHandles
-// as they are owned by RAIIAtenTensorHandle in model.so.
-TORCH_API std::vector<at::Tensor> create_tensors_from_handles(
+// alloc_tensors_from_handles is used for creating a vector of aten tensors.
+// It is only used in the non ABI compatible mode as a convenient utility
+// function to convert AtenTensorHandle into aten tensors that the default
+// codegen can understand.
+TORCH_API std::vector<at::Tensor> alloc_tensors_from_handles(
     std::vector<AtenTensorHandle>& handles);
 
 } // namespace aot_inductor
