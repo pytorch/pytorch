@@ -32,7 +32,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   values.copy_(self);
   // check if self is scalar
   dim = maybe_wrap_dim(dim, self.dim(), true);
-  if (self.dim() == 0 && self.numel() == 1) {
+  if (self.dim() == 0 && self.numel() <= 1) {
     indices.zero_();
     return;
   }
