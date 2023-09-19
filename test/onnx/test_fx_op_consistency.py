@@ -203,7 +203,7 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     xfail(
         "arange",
-        dtypes=(torch.uint8, torch.int8),
+        dtypes=(torch.uint8,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
     ),
     xfail(
@@ -451,14 +451,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
-    xfail(
-        "var_mean", dtypes=(torch.float16, ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
-    ),
-    xfail(
-        "var_mean", variant_name="unbiased", dtypes=(torch.float16, ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
-    ),
 )
 # fmt: on
 
@@ -549,17 +541,13 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
     ),
-    xfail(
-        "nn.functional.embedding_bag",
-        matcher=lambda sample: sample.kwargs.get("max_norm") is not None,
-        reason="Torchlib does not support aten::embedding_renorm, emitted when 'max_norm' is not None",
-    ),
-    xfail(
+    skip(
         "nn.functional.embedding_bag",
         matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
         reason=(
             "Torchlib does not support 'padding_idx' overload for _embedding_bag and _embedding_bag_forward_only. "
-            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided."
+            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided. "
+            "See https://github.com/microsoft/onnxscript/issues/1056 for details."
         ),
     ),
     skip(
