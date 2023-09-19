@@ -183,7 +183,7 @@ class Backend:
         GLOO : ["cpu", "cuda"],
         NCCL : ["cuda"],
         UCC : ["cpu", "cuda"],
-        MPI : ["cpu"],
+        MPI : ["cpu", "cuda"],
     }
 
     backend_type_map: Dict[str, ProcessGroup.BackendType] = {
