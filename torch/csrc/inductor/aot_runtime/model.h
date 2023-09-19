@@ -121,6 +121,7 @@ std::vector<UniqueAtenTensorHandle> steal_vector_of_raw_handles(
   for (auto& handle : raw_handles) {
     result.push_back(UniqueAtenTensorHandle(handle));
   }
+  raw_handles.clear();
   return result;
 }
 
@@ -132,6 +133,7 @@ std::vector<AtenTensorHandle> steal_vector_of_unique_handles(
   for (auto& handle : unique_handles) {
     result.push_back(handle.release());
   }
+  unique_handles.clear();
   return result;
 }
 
