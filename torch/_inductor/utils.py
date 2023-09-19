@@ -305,7 +305,9 @@ def synchronize(device: str = "cuda"):
         device_runtime.synchronize()
 
 
-def timed(model: Callable[..., Any], example_inputs, device: str = "cuda", times: int = 1) -> float:
+def timed(
+    model: Callable[..., Any], example_inputs, device: str = "cuda", times: int = 1
+) -> float:
     synchronize(device)
     torch.manual_seed(1337)
     t0 = time.perf_counter()
@@ -318,7 +320,9 @@ def timed(model: Callable[..., Any], example_inputs, device: str = "cuda", times
     return t1 - t0
 
 
-def print_performance(fn, args=(), device: str="cuda", times=10, repeat=10, baseline=1.0):
+def print_performance(
+    fn, args=(), device: str = "cuda", times=10, repeat=10, baseline=1.0
+):
     timings = torch.tensor([timed(fn, args, device, times) for _ in range(repeat)])
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
