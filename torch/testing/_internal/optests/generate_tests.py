@@ -193,7 +193,7 @@ def generate_opcheck_tests(
             construct_method(attr, prefix, tester)
 
 
-TEST_OPTIONS = ("xfail", "skip", "success")
+TEST_OPTIONS = ("xfail", "skip", "xsuccess")
 
 
 def validate_failures_dict_formatting(failures_dict_path):
@@ -325,7 +325,7 @@ class OpCheckMode(TorchFunctionMode):
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if should_update_failures_dict():
                     self.failures_dict.set_status(
-                        qualname, self.test_name, "success", comment=""
+                        qualname, self.test_name, "xsuccess", comment=""
                     )
                 else:
                     if option == "xfail":
@@ -344,7 +344,7 @@ class OpCheckMode(TorchFunctionMode):
         failed_ops = []
         for qualname in self.seen_ops_to_errors.keys():
             option = self.failures_dict.get_status(qualname, self.test_name)
-            if option != "success":
+            if option != "xsuccess":
                 continue
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 continue
@@ -424,7 +424,7 @@ class OpCheckMode(TorchFunctionMode):
         result = func(*args, **kwargs)
 
         option = self.failures_dict.get_status(qualname, self.test_name)
-        if option == "success" or option == "xfail":
+        if option == "xsuccess" or option == "xfail":
             # Surpress all errors during execution. Raise them during __exit__.
             try:
                 if qualname not in self.seen_ops_to_errors:
@@ -616,10 +616,10 @@ class FailuresDict:
 
     def get_status(self, qualname, test_name):
         if qualname not in self.data:
-            return "success"
+            return "xsuccess"
         dct = self.data[qualname]
         if test_name not in dct:
-            return "success"
+            return "xsuccess"
         return dct[test_name]["status"]
 
     def set_status(self, qualname, test_name, status, *, comment=None):
@@ -629,8 +629,8 @@ class FailuresDict:
         if test_name not in dct:
             dct[test_name] = {"status": None, "comment": ""}
 
-        if status == "success":
-            # The default status is "success".
+        if status == "xsuccess":
+            # The default status is "xsuccess".
             del dct[test_name]
         else:
             dct[test_name]["status"] = status
