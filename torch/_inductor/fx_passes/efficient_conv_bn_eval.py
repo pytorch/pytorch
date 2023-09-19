@@ -64,9 +64,9 @@ def efficient_conv_bn_eval(
     )
 
     # calculating conv in fp32, and convert the output to the dtype of input
-    return conv._conv_forward(x.to(dtype=dtype), weight_on_the_fly, bias_on_the_fly).to(
-        dtype=x.dtype
-    )
+    input = x.to(dtype=dtype)
+    output = conv._conv_forward(input, weight_on_the_fly, bias_on_the_fly)
+    return output.to(dtype=x.dtype)
 
 
 @register_graph_pattern(
@@ -105,7 +105,14 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         return
     input_mod = getattr(gm, input_node.target)
     # TODO(youkaichao) support nn.Linear
-    if not isinstance(input_mod, nn.modules.conv._ConvNd):
+    # nn.ConvTranspose1d/nn.ConvTranspose2d/nn.ConvTranspose3d not supported,
+    # as they do not have `_conv_forward` method yet
+    supported_convs = [
+        nn.Conv1d,
+        nn.Conv2d,
+        nn.Conv3d,
+    ]
+    if not any(isinstance(input_mod, cls) for cls in supported_convs):
         return
     conv_node = input_node
     # Output of conv is used by other nodes, cannot optimize
