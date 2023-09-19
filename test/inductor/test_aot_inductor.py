@@ -12,6 +12,8 @@ from torch._dynamo.testing import same
 from torch._inductor import config
 from torch._inductor.utils import aot_inductor_launcher
 
+from torch._export.exported_program import combine_args_kwargs
+
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
@@ -79,6 +81,57 @@ class AOTInductorModelRunner:
         return optimized, exported, output_tensors, output_spec
 
     @classmethod
+    def export_and_compile(
+        cls, model, example_inputs, example_outputs, export_device, compile_device, options=None, constraints=None,
+    ):
+        # AOTInductorModel relies on the caller to pass in output_tensors,
+        # so we need to explicitly allocate output tensors here.
+        if constraints is None:
+            constraints = []
+        output_tensors = []
+        example_outputs, output_spec = pytree.tree_flatten(example_outputs)
+        for output in example_outputs:
+            output_tensors.append(torch.empty_like(output))
+
+        example_inputs = [x.to(export_device) for x in example_inputs]
+        # The exact API is subject to change
+        ep = torch._export.export(
+            model.to(export_device),
+            tuple(example_inputs),
+            constraints=constraints,
+        )
+
+        flat_example_inputs = fx_pytree.tree_flatten_spec(
+            combine_args_kwargs(example_inputs, {}), ep.call_spec.in_spec  # type: ignore[arg-type]
+        )
+        flat_example_inputs = [x.clone().to(compile_device) for x in flat_example_inputs]
+
+        unlifted_module = ep.module().to(compile_device)
+        unlifted_module.graph.set_codegen(torch.fx.CodeGen())  # type: ignore[attr-defined]
+        unlifted_module.recompile()
+        options = (
+            {"from_export": True}
+            if options is None
+            else {**options, "from_export": True}
+        )
+        so_path = torch._inductor.aot_compile(unlifted_module, flat_example_inputs, options)  # type: ignore[arg-type]
+
+        launcher = aot_inductor_launcher
+        if compile_device.type == "cpu":
+            launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+
+        optimized = torch.utils.cpp_extension.load_inline(
+            name="aot_inductor",
+            cpp_sources=[launcher],
+            functions=["run"],
+            extra_ldflags=[so_path],
+            with_cuda=True,
+        ).run
+
+        return optimized, ep, output_tensors, output_spec
+
+
+    @classmethod
     def run_compiled(
         cls, optimized, exported, example_inputs, output_tensors, output_spec
     ):
@@ -130,6 +183,24 @@ class AOTInductorModelRunner:
             )
         return list_output_tensors
 
+    @classmethod
+    def export_compile_run(
+        cls, model, example_inputs, example_outputs, export_device, compile_device, options=None, constraints=None
+    ):
+        if constraints is None:
+            constraints = []
+
+        def clone(t):
+            return t.clone().detach()
+        example_outputs = pytree.tree_map_only(torch.Tensor, clone, example_outputs)
+
+        optimized, exported, output_tensors, output_spec = AOTInductorModelRunner.export_and_compile(
+            model, example_inputs, example_outputs, export_device, compile_device, options, constraints=constraints,
+        )
+
+        return AOTInductorModelRunner.run_compiled(
+            optimized, exported, example_inputs, output_tensors, output_spec
+        )
 
 def check_model(
     self: TestCase,
@@ -557,6 +628,49 @@ class AOTInductorTestNonABICompatible(TestCase):
 copy_tests(
     AOTInductorTestsTemplate, AOTInductorTestNonABICompatible, "non_abi_compatible"
 )
+
+@unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
+class AOTInductorTestExportCompileOnDifferentDevice(TestCase):
+    class Repro(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.register_parameter("weight", torch.nn.Parameter(torch.rand(10, 10)))
+
+        def forward(self, x, y):
+            return x + torch.nn.functional.linear(y, self.weight)
+
+    def test_simple_export_cpu_compile_cuda(self):
+        example_inputs = (
+            torch.randn(10, 10, device='cuda'),
+            torch.randn(10, 10, device='cuda'),
+        )
+        self.check_model_on_devices(AOTInductorTestExportCompileOnDifferentDevice.Repro(), example_inputs, export_device=torch.device("cpu"), compile_device=torch.device("cuda"))
+
+    def test_simple_export_cuda_compile_cpu(self):
+        example_inputs = (
+            torch.randn(10, 10, device='cuda'),
+            torch.randn(10, 10, device='cuda'),
+        )
+        self.check_model_on_devices(AOTInductorTestExportCompileOnDifferentDevice.Repro(), example_inputs, export_device=torch.device("cuda"), compile_device=torch.device("cpu"))
+
+    def check_model_on_devices(
+        self,
+        model,
+        example_inputs,
+        export_device,
+        compile_device,
+        options=None,
+        constraints=None,
+    ):
+        example_inputs = [x.to(compile_device) for x in example_inputs]
+        model = model.to(compile_device)
+        expected = model(*example_inputs)
+
+        with config.patch("aot_inductor.abi_compatible", True):
+            actual = AOTInductorModelRunner.export_compile_run(
+                model, example_inputs, expected, export_device, compile_device, options, constraints,
+            )
+        self.assertTrue(same(actual, expected))
 
 
 if __name__ == "__main__":
