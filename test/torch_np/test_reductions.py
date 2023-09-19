@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from unittest import expectedFailure as xfail
+from unittest import expectedFailure as xfail, SkipTest
 
 import pytest
 
@@ -152,6 +152,7 @@ class TestMean(TestCase):
             assert_equal(np.mean(a, where=False), np.nan)
 
 
+@instantiate_parametrized_tests
 class TestSum(TestCase):
     def test_sum(self):
         m = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
@@ -270,7 +271,18 @@ class TestSum(TestCase):
         )
 
 
-class _GenericReductionsTestMixin:
+parametrize_axis = parametrize('axis', [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)])
+parametrize_func = parametrize('func', [np.any, np.all, np.argmin, np.argmax, np.min, np.max, np.mean, np.sum, np.prod, np.std, np.var, np.count_nonzero])
+
+fails_axes_tuples = {np.any, np.all, np.argmin, np.argmax, 
+        np.prod,
+}
+
+fails_out_arg = {np.count_nonzero,}
+
+
+@instantiate_parametrized_tests
+class TestGenericReductions(TestCase):
     """Run a set of generic tests to verify that self.func acts like a
     reduction operation.
 
@@ -280,64 +292,74 @@ class _GenericReductionsTestMixin:
     To use: subclass, define self.func and self.allowed_axes.
     """
 
-    def test_bad_axis(self):
+    @parametrize_func
+    def test_bad_axis(self, func):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
 
-        assert_raises(TypeError, self.func, m, axis="foo")
-        assert_raises(np.AxisError, self.func, m, axis=3)
-        assert_raises(TypeError, self.func, m, axis=np.array([[1], [2]]))
-        assert_raises(TypeError, self.func, m, axis=1.5)
+        assert_raises(TypeError, func, m, axis="foo")
+        assert_raises(np.AxisError, func, m, axis=3)
+        assert_raises(TypeError, func, m, axis=np.array([[1], [2]]))
+        assert_raises(TypeError, func, m, axis=1.5)
 
         # TODO: add tests with np.int32(3) etc, when implemented
 
-    def test_array_axis(self):
+    @parametrize_func
+    def test_array_axis(self, func):
         a = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
-        assert_equal(self.func(a, axis=np.array(-1)), self.func(a, axis=-1))
+        assert_equal(func(a, axis=np.array(-1)), func(a, axis=-1))
 
         with assert_raises(TypeError):
-            self.func(a, axis=np.array([1, 2]))
+            func(a, axis=np.array([1, 2]))
 
-    def test_axis_empty_generic(self):
+    @parametrize_func
+    def test_axis_empty_generic(self, func):
         a = np.array([[0, 0, 1], [1, 0, 1]])
         assert_array_equal(
-            self.func(a, axis=()), self.func(np.expand_dims(a, axis=0), axis=0)
+            func(a, axis=()), func(np.expand_dims(a, axis=0), axis=0)
         )
 
-    def test_axis_bad_tuple(self):
+    @parametrize_func
+    def test_axis_bad_tuple(self, func):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
-        with assert_raises(ValueError):
-            self.func(m, axis=(1, 1))
 
-    def _check_keepdims_generic(self, axis):
+        if func in fails_axes_tuples:
+            raise SkipTest(f"{func.__name__} does not allow tuple axis.")
+
+        with assert_raises(ValueError):
+            func(m, axis=(1, 1))
+
+    @parametrize_axis
+    @parametrize_func
+    def test_keepdims_generic(self, axis, func):
+        if func in fails_axes_tuples:
+            raise SkipTest(f"{func.__name__} does not allow tuple axis.")
+
         a = np.arange(2 * 3 * 4).reshape((2, 3, 4))
-        with_keepdims = self.func(a, axis, keepdims=True)
-        expanded = np.expand_dims(self.func(a, axis=axis), axis=axis)
+        with_keepdims = func(a, axis, keepdims=True)
+        expanded = np.expand_dims(func(a, axis=axis), axis=axis)
         assert_array_equal(with_keepdims, expanded)
 
-    def test_keepdims_generic(self):
-        for axis in self.allowed_axes:
-            self._check_keepdims_generic(axis)
-
-    def test_keepdims_generic_axis_none(self):
+    @parametrize_func
+    def test_keepdims_generic_axis_none(self, func):
         a = np.arange(2 * 3 * 4).reshape((2, 3, 4))
-        with_keepdims = self.func(a, axis=None, keepdims=True)
-        scalar = self.func(a, axis=None)
+        with_keepdims = func(a, axis=None, keepdims=True)
+        scalar = func(a, axis=None)
         expanded = np.full((1,) * a.ndim, fill_value=scalar)
         assert_array_equal(with_keepdims, expanded)
 
-
-class _GenericHasOutTestMixin:
-    """Tests for reduction functions which support out=... parameter."""
-
-    def test_out_scalar(self):
+    @parametrize_func
+    def test_out_scalar(self, func):
         # out no axis: scalar
+        if func in fails_out_arg:
+            raise SkipTest(f"{func.__name__} does not have out= arg.")
+
         a = np.arange(2 * 3 * 4).reshape((2, 3, 4))
 
-        result = self.func(a)
+        result = func(a)
         out = np.empty_like(result)
-        result_with_out = self.func(a, out=out)
+        result_with_out = func(a, out=out)
 
         assert result_with_out is out
         assert_array_equal(result, result_with_out)
@@ -365,12 +387,42 @@ class _GenericHasOutTestMixin:
 
     @parametrize("keepdims", [True, False, None])
     @parametrize("dtype", [bool, "int32", "float64"])
-    def test_out_axis(self, dtype, keepdims):
-        for axis in self.allowed_axes + [None]:
-            self._check_out_axis(axis, dtype, keepdims)
+    @parametrize_func
+    @parametrize_axis
+    def test_out_axis(self, func, axis, dtype, keepdims):
+        # out with axis
+        if func in fails_out_arg:
+            raise SkipTest(f"{func.__name__} does not have out= arg.")
+        if func in fails_axes_tuples:
+            raise SkipTest(f"{func.__name__} does not hangle tuple axis.")
 
-    def _check_keepdims_out(self, axis):
-        """Check the expicit shape of out w/keepdims=True"""
+        a = np.arange(2 * 3 * 4).reshape((2, 3, 4))
+        result = func(a, axis=axis, keepdims=keepdims).astype(dtype)
+
+        out = np.empty_like(result, dtype=dtype)
+        result_with_out = func(a, axis=axis, keepdims=keepdims, out=out)
+
+        assert result_with_out is out
+        assert result_with_out.dtype == dtype
+        assert_array_equal(result, result_with_out)
+
+        # TODO: what if result.dtype != out.dtype; does out typecast the result?
+
+        # out of wrong shape (any/out does not broadcast)
+        # np.any(m, out=np.empty_like(m)) raises a ValueError (wrong number
+        # of dimensions.)
+        # pytorch.any emits a warning and resizes the out array.
+        # Here we follow pytorch, since the result is a superset
+        # of the numpy functionality
+
+    @parametrize_func
+    @parametrize_axis
+    def test_keepdims_out(self, func, axis):
+        if func in fails_out_arg:
+            raise SkipTest(f"{func.__name__} does not have out= arg.")
+        if func in fails_axes_tuples:
+            raise SkipTest(f"{func.__name__} does not hangle tuple axis.")
+
         d = np.ones((3, 5, 7, 11))
         if axis is None:
             shape_out = (1,) * d.ndim
@@ -380,176 +432,48 @@ class _GenericHasOutTestMixin:
                 1 if i in axis_norm else d.shape[i] for i in range(d.ndim)
             )
         out = np.empty(shape_out)
-        result = self.func(d, axis=axis, keepdims=True, out=out)
+
+        result = func(d, axis=axis, keepdims=True, out=out)
         assert result is out
         assert_equal(result.shape, shape_out)
 
-    def test_keepdims_out(self):
-        allowed_axes = [ax for ax in self.allowed_axes if ax != ()]
-        for axis in allowed_axes + [
-            None,
-        ]:
-            self._check_keepdims_out(axis)
 
-
-class TestAnyGeneric(TestCase, _GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setUp(self):
-        self.func = np.any
-        self.allowed_axes = [
-            0,
-            1,
-            2,
-            -1,
-            -2,
-        ]
-
-
-class TestAllGeneric(TestCase,_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.all
-        self.allowed_axes = [
-            0,
-            1,
-            2,
-            -1,
-            -2,
-        ]
-
-
-class TestCountNonzeroGeneric(TestCase, _GenericReductionsTestMixin):
-    # count_nonzero does not have the out=... argument
-    def setup_method(self):
-        self.func = np.count_nonzero
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class TestArgminGeneric(TestCase, _GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.argmin
-        self.allowed_axes = [
-            0,
-            1,
-            2,
-            -1,
-            -2,
-        ]
-
-
-class TestArgmaxGeneric(TestCase, _GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.argmax
-        self.allowed_axes = [
-            0,
-            1,
-            2,
-            -1,
-            -2,
-        ]
-
-
-class TestAmaxGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.amax
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class TestAminGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.amin
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class TestMeanGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.mean
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class TestSumGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.sum
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class TestProdGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.prod
-        self.allowed_axes = [
-            0,
-            1,
-            2,
-            -1,
-            -2,
-        ]
-
-
-class TestStdGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.std
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class TestVarGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
-        self.func = np.var
-        self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
-
-
-class _GenericCumSumProdTestMixin:
-    """Run a set of generic tests to verify that self.func acts like a
-    reduction operation.
-
-    Specifically, this class checks axis=... and keepdims=... parameters.
-    To check the out=... parameter, see the _GenericHasOutTestMixin class below.
-
-    To use: subclass, define self.func and self.allowed_axes.
+@instantiate_parametrized_tests
+class TestGenericCumSumProd(TestCase):
+    """Run a set of generic tests to verify that cumsum/cumprod are sane.
     """
 
-    def test_bad_axis(self):
+    @parametrize('func', [np.cumsum, np.cumprod])
+    def test_bad_axis(self, func):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
 
-        assert_raises(TypeError, self.func, m, axis="foo")
-        assert_raises(np.AxisError, self.func, m, axis=3)
-        assert_raises(TypeError, self.func, m, axis=np.array([[1], [2]]))
-        assert_raises(TypeError, self.func, m, axis=1.5)
+        assert_raises(TypeError, func, m, axis="foo")
+        assert_raises(np.AxisError, func, m, axis=3)
+        assert_raises(TypeError, func, m, axis=np.array([[1], [2]]))
+        assert_raises(TypeError, func, m, axis=1.5)
 
         # TODO: add tests with np.int32(3) etc, when implemented
 
-    def test_array_axis(self):
+    @parametrize('func', [np.cumsum, np.cumprod])
+    def test_array_axis(self, func):
         a = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
-        assert_equal(self.func(a, axis=np.array(-1)), self.func(a, axis=-1))
+        assert_equal(func(a, axis=np.array(-1)), func(a, axis=-1))
 
         with assert_raises(TypeError):
-            self.func(a, axis=np.array([1, 2]))
+            func(a, axis=np.array([1, 2]))
 
-    def test_axis_empty_generic(self):
+    @parametrize('func', [np.cumsum, np.cumprod])
+    def test_axis_empty_generic(self, func):
         a = np.array([[0, 0, 1], [1, 0, 1]])
-        assert_array_equal(self.func(a, axis=None), self.func(a.ravel(), axis=0))
+        assert_array_equal(func(a, axis=None), func(a.ravel(), axis=0))
 
-    def test_axis_bad_tuple(self):
+    @parametrize('func', [np.cumsum, np.cumprod])
+    def test_axis_bad_tuple(self, func):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
         with assert_raises(TypeError):
-            self.func(m, axis=(1, 1))
-
-
-class TestCumProdGeneric(_GenericCumSumProdTestMixin):
-    def setup_method(self):
-        self.func = np.cumprod
-
-
-class TestCumSumGeneric(_GenericCumSumProdTestMixin):
-    def setup_method(self):
-        self.func = np.cumsum
-
-
-instantiate_parametrized_tests(TestSum)
-instantiate_parametrized_tests(TestAnyGeneric)
-instantiate_parametrized_tests(TestAllGeneric)
-instantiate_parametrized_tests(TestCountNonzeroGeneric)
-instantiate_parametrized_tests(TestArgminGeneric)
-instantiate_parametrized_tests(TestArgmaxGeneric)
+            func(m, axis=(1, 1))
 
 
 
