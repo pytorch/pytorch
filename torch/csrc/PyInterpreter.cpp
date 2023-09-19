@@ -657,9 +657,12 @@ static c10::ArrayRef<T> get_set_cached_attr(
 
     // Overwrite the buffer with our new values, but only if any of them changed
     // (due to a metadata mutation).
-    // This is technically not thread safe (maybe we should put the GIL here?),
-    // but *only* if we actually have to update, which only happens if there's a
-    // metadata mutation.
+    // This is technically not thread safe, because the update happens lazily.
+    // The original metadata mutation call on the tensor might have been thread safe
+    // (e.g. a .resize_() call),
+    // but we won't actually mutate the size buffer until the first call to .sizes()
+    // which the user might not access in a thread-safe way.
+    // For now we are not explicitly locking, but maybe we should.
     int64_t idx = 0;
     TORCH_INTERNAL_ASSERT(curr_size >= new_size);
     for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
