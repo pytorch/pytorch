@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/utils/memory.h>
 #include <fstream>
 
 namespace torch::jit {

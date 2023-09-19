@@ -32,11 +32,11 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   if (!tensor.defined()) {
     return tensor;
   }
-  // We don't want to re-enter the DynamicLayerFrontMode **while** we are creating a TensorWrapper.
-  // This can only really happen if we happen to call dispatcher ops while creating the TensorWrapper.
-  // Unfortunately, sym_storage_offset (and friends) are dispatcher ops,
-  // and can enter the dispatcher when our inner tensor is a tensor subclass with custom size/strides
-  // (example: FunctionalTensor)
+  // TensorWrapper creation may call dispatcher ops (e.g. aten.sym_storage_offset).
+  // We need to ensure that they pass through the functorch stack properly.
+  // In order to do that, we want to call those dispatcher ops at the next layer,
+  // hence we disable DynamicLayerFrontMode so the call to the op automatically
+  // goes to DynamicLayerBackMode which will then send it to the next layer.
   c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::FuncTorchDynamicLayerFrontMode);
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
