@@ -34,26 +34,13 @@ pexpr = PythonPrinter().doprint
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    size = node.get_size()
-    stride = node.get_stride()
-    # Detect gaps in tensor storage caused by strides
-    # The point is that the last element size hint says how big
-    # the extent of the tensor is, even if pieces inside it aren't
-    # actually used (because striding skips over it).
-    # Suppose you have a 2x2 tensor with stride 4x1, versus 1x4.
-    # In both cases, the extent of the tensor is (41 + 11 == 5),
-    # so you can represent both variants in the same amount of memory,
-    # so you can reuse the buffer in this case.
-    last_element = sympy_dot([s - 1 for s in size], stride)
-    if any(V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in last_element.free_symbols):
-        size_hint_of_last_element = sympy_str(last_element)
-    else:
-        size_hint_of_last_element = V.graph.sizevars.size_hint(last_element)
     return (
         node.get_device(),
         node.get_dtype(),
-        V.graph.sizevars.simplify(sympy_product(size)),
-        size_hint_of_last_element,
+        # NB: this is symbolic so that we don't try to reuse a buffer
+        # for s0 for s1, just because they happen to share the same
+        # size hint
+        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),
     )
 
 
