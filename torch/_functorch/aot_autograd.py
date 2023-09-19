@@ -1346,7 +1346,7 @@ def create_joint(
             warnings.filterwarnings(
                 "ignore", "Anomaly Detection has been enabled."
             )
-            with torch.autograd.detect_anomaly(check_nan=False), torch.autograd._force_original_view_tracking(True):
+            with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(*args)
 
     return inner_fn_with_anomaly

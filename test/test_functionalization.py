@@ -1570,7 +1570,7 @@ def forward(self, arg0_1):
     _to_copy_2 = torch.ops.aten._to_copy.default(expand_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  expand_1 = None
     mul = torch.ops.aten.mul.Tensor(_to_copy_2, 2);  _to_copy_2 = None
     return mul""")  # noqa: B950
-            self.assertEquals(fx_g_cpp.code.strip(), fx_g.code.strip())
+            self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
     def test_python_functionalization_conj(self):
         def f(x):
@@ -1600,7 +1600,7 @@ def forward(self, arg0_1):
     clone_2 = torch.ops.aten.clone.default(_conj_2);  _conj_2 = None
     view_as_real = torch.ops.aten.view_as_real.default(clone_2);  clone_2 = None
     return view_as_real""")
-            self.assertEquals(fx_g_cpp.code.strip(), fx_g.code.strip())
+            self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
     def test_python_functionalization_neg(self):
         def f(x):
@@ -1623,7 +1623,7 @@ def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(_neg_view);  _neg_view = None
     add = torch.ops.aten.add.Tensor(clone, 1);  clone = None
     return add""")
-            self.assertEquals(fx_g_cpp.code.strip(), fx_g.code.strip())
+            self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
 
 
