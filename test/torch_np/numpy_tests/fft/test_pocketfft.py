@@ -369,3 +369,9 @@ class TestFFTThreadSafe:
     def test_irfft(self):
         a = np.ones(self.input_shape) * 1 + 0j
         self._test_mtsame(np.fft.irfft, a)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()

@@ -36,6 +36,7 @@ from torch import _guards
 from torch._subclasses import fake_tensor
 from torch.export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
+from torch.fx.experimental.symbolic_shapes import ConstraintViolationError, DimDynamic
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from ..fx import GraphModule
@@ -60,7 +61,7 @@ else:
 
 from . import config, convert_frame, external_utils, skipfiles, utils
 from .code_context import code_context
-from .exc import CondOpArgsMismatchError, ResetRequired, UserError, UserErrorType
+from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
 from .utils import compile_times
@@ -76,8 +77,6 @@ null_context = contextlib.nullcontext
 
 import sympy
 
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
-
 
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
@@ -87,7 +86,62 @@ class Unset(Enum):
 unset = Unset.token
 
 compile_lock = threading.RLock()
-most_recent_backend: Optional[CompilerFn] = None
+guarded_backend_cache = threading.local()
+
+
+def _maybe_init_guarded_backend_cache():
+    if not hasattr(guarded_backend_cache, "skip_backend_check_for_run_only_mode"):
+        guarded_backend_cache.skip_backend_check_for_run_only_mode = False
+    if not hasattr(guarded_backend_cache, "current_backend"):
+        guarded_backend_cache.current_backend = None
+    if not hasattr(guarded_backend_cache, "cached_backends"):
+        guarded_backend_cache.cached_backends = {}
+
+
+def _reset_guarded_backend_cache():
+    _maybe_init_guarded_backend_cache()
+    guarded_backend_cache.skip_backend_check_for_run_only_mode = False
+    guarded_backend_cache.current_backend = None
+    cached_backends = guarded_backend_cache.cached_backends
+    for backend in cached_backends.values():
+        if hasattr(backend, "reset"):
+            backend.reset()
+    cached_backends.clear()
+    guarded_backend_cache.cached_backends = {}
+
+
+@contextlib.contextmanager
+def backend_cache_wrapper(callback: CompilerFn):
+    _maybe_init_guarded_backend_cache()
+
+    # callback is False for RunOnlyContext. RunOnlyContext is used
+    # as a way to re-use the previous compiled cache.
+    # We therefore skip the check and re-use whatever code that's already cached.
+    # Note: the cache that's actually used depends on the caching policy.
+    if callback is False:
+        try:
+            prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = True
+            yield None
+        finally:
+            guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
+    else:
+        backend = innermost_fn(callback)
+
+        def _set_current_backend(backend: CompilerFn):
+            prev_backend = guarded_backend_cache.current_backend
+            guarded_backend_cache.current_backend = backend
+            # Mapping id of a CompilerFn to itself
+            guarded_backend_cache.cached_backends[id(backend)] = backend
+            return prev_backend
+
+        prev_backend = _set_current_backend(backend)
+        try:
+            yield backend
+        finally:
+            _set_current_backend(prev_backend)
+
+
 DONT_WRAP_FILES = {
     # For tracing into fx modules
     inspect.getsourcefile(GraphModule),
@@ -262,6 +316,8 @@ class _TorchDynamoContext:
             )
         self.on_enter()
         self.prior = set_eval_frame(self.callback)
+        self.backend_cache_manager = backend_cache_wrapper(self.callback)
+        self.backend_cache_manager.__enter__()
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
         self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -274,6 +330,7 @@ class _TorchDynamoContext:
         # TODO: This is totally not the right way to chain contexts manually
         self.dynamic_ctx.__exit__(exc_type, exc_val, exc_tb)
         self.backend_ctx.__exit__(exc_type, exc_val, exc_tb)
+        self.backend_cache_manager.__exit__(exc_type, exc_val, exc_tb)
 
     def __call__(self, fn):
         # public api for compiler config/options
@@ -339,6 +396,8 @@ class _TorchDynamoContext:
 
             on_enter()
             prior = set_eval_frame(callback)
+            backend_cache_manager = backend_cache_wrapper(self.callback)
+            backend_cache_manager.__enter__()
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
             dynamic_ctx = enable_dynamic(self.dynamic, self.export)
@@ -349,6 +408,7 @@ class _TorchDynamoContext:
                 set_eval_frame(prior)
                 dynamic_ctx.__exit__(None, None, None)
                 backend_ctx.__exit__(None, None, None)
+                backend_cache_manager.__exit__(None, None, None)
 
         # hooks to properly handle inlining
         if isinstance(self, DisableContext):
@@ -408,10 +468,6 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    @staticmethod
-    def _different_backend(old, new):
-        return not (old == new or old is None)
-
     def __init__(
         self,
         callback,
@@ -423,19 +479,8 @@ class OptimizeContext(_TorchDynamoContext):
         compiler_config=None,
     ):
         def on_enter():
-            global most_recent_backend
-            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
-                if config.raise_on_backend_change:
-                    raise ResetRequired()
-                else:
-                    warnings.warn(
-                        "changing options to `torch.compile()` may require "
-                        "calling `torch._dynamo.reset()` to take effect"
-                    )
-            most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
-        compiler_fn = innermost_fn(callback)
         super().__init__(
             callback=callback,
             on_enter=on_enter,
@@ -667,14 +712,13 @@ def explain(f, *extra_args, **extra_kwargs):
             nonlocal out_guards
             out_guards.extend(guards)
 
-        with patch(f"{__name__}.most_recent_backend", None):
-            opt_f = optimize(
-                dynamo_graph_accumulating_compiler,
-                nopython=False,
-                guard_export_fn=guard_export_print,
-            )(f)
-            # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
-            opt_f(*args, **kwargs)
+        opt_f = optimize(
+            dynamo_graph_accumulating_compiler,
+            nopython=False,
+            guard_export_fn=guard_export_print,
+        )(f)
+        # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
+        opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
 
@@ -728,10 +772,12 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         matched_input_elements_positions: List[int],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
+        flat_args_dynamic_dims: List[Set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ):
         super().__init__(m)
 
+        assert len(flat_args_dynamic_dims) == len(flat_args)
         matched_input_elements_to_fake = {
             val: example_fake_inputs[ix]
             for ix, val in enumerate(matched_input_elements_positions)
@@ -746,7 +792,16 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                 # Fill node.mata["val"] with faketensor from the input,
                 # if it's not found in matched_input_elements_positions
                 if fake_mode is not None and isinstance(flat_args[i], torch.Tensor):
-                    arg.node.meta["val"] = fake_mode.from_tensor(flat_args[i])
+                    # TODO(zhxchen17) Also preserve all the user constraints here.
+                    arg.node.meta["val"] = fake_mode.from_tensor(
+                        flat_args[i],
+                        dynamic_dims=[
+                            DimDynamic.DYNAMIC
+                            if d in flat_args_dynamic_dims[i]
+                            else DimDynamic.STATIC
+                            for d in range(len(flat_args[i].shape))
+                        ],
+                    )
             self.new_args.append(arg)
         self.old_args_gen = (self.new_args[i] for i in matched_input_elements_positions)
         self.matched_output_elements_positions = matched_output_elements_positions
@@ -832,6 +887,7 @@ def rewrite_signature(
     graph_captured_input,
     graph_captured_output,
     dynamo_traced_result,
+    flat_args_dynamic_dims,
 ):
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
@@ -893,6 +949,7 @@ def rewrite_signature(
         matched_input_elements_positions,
         matched_output_elements_positions,
         example_fake_inputs,
+        flat_args_dynamic_dims,
         fake_mode,
     ).transform()
 
@@ -1138,7 +1195,7 @@ def export(
         constraint_violation_error = None
         if tracing_mode != "symbolic":
             assume_static_by_default = True
-        with patch(f"{__name__}.most_recent_backend", None), config.patch(
+        with config.patch(
             specialize_int=True,
             assume_static_by_default=assume_static_by_default,
             automatic_dynamic_shapes=False,
@@ -1239,6 +1296,10 @@ def export(
                     raise UserError(UserErrorType.DYNAMIC_CONTROL_FLOW, str(e))
 
         if same_signature:
+            flat_args_dynamic_dims = [
+                {c.dim for c in (constraints or ()) if c.w_tensor() is x}
+                for x in flat_args
+            ]
             graph = rewrite_signature(
                 original_signature,
                 graph,
@@ -1249,6 +1310,7 @@ def export(
                 graph_captured_input,
                 graph_captured_result,
                 result_traced,
+                flat_args_dynamic_dims,
             )
         # Store constraints and inputs as metadata for user passes, e.g. turn constraints to runtime check
         graph.meta["input_shape_constraints"] = (
