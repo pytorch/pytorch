@@ -2411,11 +2411,7 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self, writer=None):
-        return (
-            self.get_name() + ".get()"
-            if V.graph.cpp_wrapper and config.aot_inductor.abi_compatible
-            else self.get_name()
-        )
+        return self.get_name()
 
     def decide_layout(self):
         pass

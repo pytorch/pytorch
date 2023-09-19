@@ -150,14 +150,13 @@ class AOTInductorModelContainer {
           0 // device index, should read it from cudaStream_t?
           ));
       constants_->emplace(
-          std::move(name),
-          std::move(steal_tensor_handle_from_raw_to_raii(tensor_handle)));
+          std::move(name), std::move(SharedAtenTensorHandle(tensor_handle)));
     }
   }
 
   void run(
-      std::vector<RAIIAtenTensorHandle>& inputs,
-      std::vector<RAIIAtenTensorHandle>& outputs,
+      std::vector<UniqueAtenTensorHandle>& inputs,
+      std::vector<UniqueAtenTensorHandle>& outputs,
       std::vector<std::vector<int64_t>>** output_shapes,
       cudaStream_t stream,
       AOTIProxyExecutorHandle proxy_executor) {

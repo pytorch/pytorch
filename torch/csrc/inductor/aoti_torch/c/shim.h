@@ -68,9 +68,9 @@ extern "C" {
 // An AtenTensorHandle can be owning (please check the API reference for exact
 // ownership/borrow semantics).  If you have an owning AtenTensorHandle
 // in model.so, you are obligated to aoti_torch_delete_tensor_object when you
-// are done.  You can use the helper C++ class RAIIAtenTensorHandle
+// are done.  You can use the helper C++ class UniqueAtenTensorHandle
 // (see aot_runtime/model.h) to ensure the deallocator is called in RAII style
-// (note that RAIIAtenTensorHandle is private to model.so, and never crosses
+// (note that UniqueAtenTensorHandle is private to model.so, and never crosses
 // the ABI boundary.)
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
@@ -120,7 +120,7 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_strides(
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
-// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// with UniqueAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch__reinterpret_tensor(
@@ -133,7 +133,7 @@ aoti_torch__reinterpret_tensor(
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
-// with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
+// with UniqueAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
     AtenTensorHandle* ret, // returns new reference

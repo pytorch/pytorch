@@ -33,8 +33,8 @@ AOTInductorError AOTInductorModelContainerCreate(
     if (cubin_dir != nullptr) {
       cubin_dir_opt.emplace(cubin_dir);
     }
-    auto* container =
-        new torch::aot_inductor::AOTInductorModelContainer(num_models, is_cpu, cubin_dir_opt);
+    auto* container = new torch::aot_inductor::AOTInductorModelContainer(
+        num_models, is_cpu, cubin_dir_opt);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
@@ -53,11 +53,11 @@ AOTInductorError AOTInductorModelContainerDelete(
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
     // array of raw AtenTensorHandle for input tensors, and will be stolen by
-    // RAIIAtenTensorHandle
+    // UniqueAtenTensorHandle
     AtenTensorHandle* input_handles,
     size_t num_inputs,
     // array of raw AtenTensorHandle for output tensors, and will be stolen by
-    // RAIIAtenTensorHandle
+    // UniqueAtenTensorHandle
     AtenTensorHandle* output_handles,
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
@@ -68,23 +68,26 @@ AOTInductorError AOTInductorModelContainerRun(
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
 
-  std::vector<torch::aot_inductor::RAIIAtenTensorHandle> inputs;
-  inputs.reserve(num_inputs);
-  for (size_t i = 0; i < num_inputs; i++) {
-    inputs.push_back(torch::aot_inductor::steal_tensor_handle_from_raw_to_raii(input_handles[i]));
-  }
+  std::vector<AtenTensorHandle> input_raw_handles(
+      input_handles, input_handles + num_inputs);
+  auto input_raii_handles =
+      torch::aot_inductor::steal_vector_of_raw_handles(input_raw_handles);
 
-  std::vector<torch::aot_inductor::RAIIAtenTensorHandle> outputs;
-  outputs.reserve(num_outputs);
-  for (size_t i = 0; i < num_outputs; i++) {
-    outputs.push_back(torch::aot_inductor::steal_tensor_handle_from_raw_to_raii(output_handles[i]));
-  }
+  std::vector<AtenTensorHandle> output_raw_handles(
+      output_handles, output_handles + num_outputs);
+  auto output_raii_handles =
+      torch::aot_inductor::steal_vector_of_raw_handles(output_raw_handles);
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
 
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<std::vector<int64_t>>* shapes;
-    container->run(inputs, outputs, &shapes, stream, proxy_executor_handle);
+    container->run(
+        input_raii_handles,
+        output_raii_handles,
+        &shapes,
+        stream,
+        proxy_executor_handle);
     for (size_t i = 0; i < num_outputs; i++) {
       ret_output_sizes[i] = shapes->at(i).data();
       ret_output_ndims[i] = shapes->at(i).size();
