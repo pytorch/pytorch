@@ -2248,7 +2248,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*valid.*inferred to be equal to.*\n.*need to be specialized.*too complex to specify",
         ):
-            torch._export.export(foo, (t,), constraints=constraints)
+            torch._export.export(foo, (t,), options={"constraints": constraints})
 
         def bar(x):
             if x.shape[0] == 5:
@@ -2262,7 +2262,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*valid.*inferred to be a constant",
         ):
-            torch._export.export(bar, (t,), constraints=constraints)
+            torch._export.export(bar, (t,), options={"constraints": constraints})
 
         def qux(x):
             if x.shape[0] > 5 and x.shape[0] < 10:
@@ -2276,7 +2276,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Not all values.*satisfy the generated guard",
         ):
-            torch._export.export(qux, (t,), constraints=constraints)
+            torch._export.export(qux, (t,), options={"constraints": constraints})
 
     def test_untracked_inputs_in_constraints(self):
         from copy import copy
@@ -2289,7 +2289,9 @@ def forward(self, x):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
 
         example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        ep = torch.export.export(
+            foo, example_inputs, options={"constraints": constraints}
+        )
         with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
             ep(torch.randn(3), y)
 
@@ -2397,7 +2399,9 @@ def forward(self, x):
             "\\[\n.*\n.*dynamic_dim.*==.*dynamic_dim.*\n.*\\]",
         ):
             torch._export.export(
-                foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
+                foo,
+                (a, {"k": b}),
+                options={"constraints": [dynamic_dim(a, 0), dynamic_dim(b, 0)]},
             )
 
     def test_enforce_equalities(self):
@@ -2421,13 +2425,13 @@ def forward(self, x):
             torch._export.export(
                 bar,
                 (x, y),
-                constraints=specify_constraints(x, y),
+                options={"constraints": specify_constraints(x, y)},
             )
         y = torch.randn(10, 3, 3)
         ebar = torch._export.export(
             bar,
             (x, y),
-            constraints=specify_constraints(x, y),
+            options={"constraints": specify_constraints(x, y)},
         )
         self.assertEqual(
             [
@@ -2607,9 +2611,9 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Some dynamic dimensions need to be specialized.*too complex to specify",
         ):
-            torch._export.export(foo, (x,), constraints=constraints)
+            torch._export.export(foo, (x,), options={"constraints": constraints})
 
-        torch._export.export(bar, (x,), constraints=constraints)
+        torch._export.export(bar, (x,), options={"constraints": constraints})
 
     def test_list_contains(self):
         def func(x):

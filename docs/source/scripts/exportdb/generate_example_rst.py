@@ -73,7 +73,7 @@ Result:
             model,
             inputs.args,
             inputs.kwargs,
-            constraints=example_case.constraints,
+            options={"constraints": example_case.constraints},
         )
         graph_output = str(exported_program)
         graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)

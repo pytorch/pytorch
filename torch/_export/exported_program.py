@@ -27,7 +27,7 @@ from torch.export import (
     ArgumentSpec,
     ExportBackwardSignature,
     ExportGraphSignature,
-    ExportedProgram,
+    DynamoExportedProgram,
     ModuleCallEntry,
     ModuleCallSignature,
 )
@@ -38,7 +38,7 @@ __all__ = [
     "ArgumentSpec",
     "ExportBackwardSignature",
     "ExportGraphSignature",
-    "ExportedProgram",
+    "DynamoExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
 ]
@@ -195,7 +195,7 @@ def _unlift(gm, inp_pos_to_param_buffer_name, in_spec, out_spec, state_dict, buf
     return gm
 
 
-def unlift_exported_program_lifted_states(ep: torch.export.ExportedProgram) -> torch.nn.Module:
+def unlift_exported_program_lifted_states(ep: torch.export.DynamoExportedProgram) -> torch.nn.Module:
     new_gm = copy.deepcopy(ep.graph_module)
 
     # TODO Fix the period in params/buffers names later
@@ -262,7 +262,7 @@ def _create_graph_module_for_export(root, graph):
         warnings.warn(
             "Unable to execute the generated python source code from "
             "the graph. The graph module will no longer be directly callable, "
-            "but you can still run the ExportedProgram, and if needed, you can "
+            "but you can still run the DynamoExportedProgram, and if needed, you can "
             "run the graph module eagerly using torch.fx.Interpreter."
         )
         gm = torch.fx.GraphModule(root, torch.fx.Graph())

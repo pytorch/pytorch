@@ -178,7 +178,7 @@ class GraphModuleOpUpgrader:
 
         return upgrader_passes
 
-    def upgrade(self, exported_program: ep.ExportedProgram) -> ep.ExportedProgram:
+    def upgrade(self, exported_program: ep.DynamoExportedProgram) -> ep.DynamoExportedProgram:
         """Run each upgrader pass and then retrace to decompose it. Each upgrader pass replaces the old version of
         operators with a custom operator. The custom operator contains a CompositeImplicitAutograd kernel (the
         upgrading function itself). After retrace, this custom operator will be decomposed into the ops used in the

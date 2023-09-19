@@ -28,7 +28,7 @@ from .schema import (  # type: ignore[attr-defined]
     CallSpec,
     CustomObjArgument,
     Device,
-    ExportedProgram,
+    DynamoExportedProgram,
     Graph,
     GraphArgument,
     GraphModule,
@@ -58,9 +58,9 @@ from .schema import (  # type: ignore[attr-defined]
 __all__ = [
     "serialize",
     "GraphModuleSerializer",
-    "ExportedProgramSerializer",
+    "DynamoExportedProgramSerializer",
     "GraphModuleDeserializer",
-    "ExportedProgramDeserializer",
+    "DynamoExportedProgramDeserializer",
 ]
 
 from .upgrade import GraphModuleOpUpgrader
@@ -819,7 +819,7 @@ class GraphModuleSerializer:
         )
 
 
-class ExportedProgramSerializer:
+class DynamoExportedProgramSerializer:
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
         self.opset_version: Dict[str, int] = {}
         if opset_version:
@@ -827,7 +827,7 @@ class ExportedProgramSerializer:
         if "aten" not in self.opset_version:
             self.opset_version["aten"] = torch._C._get_max_operator_version()
 
-    def serialize(self, exported_program: ep.ExportedProgram) -> Tuple[ExportedProgram, bytes]:
+    def serialize(self, exported_program: ep.DynamoExportedProgram) -> Tuple[DynamoExportedProgram, bytes]:
         serialized_graph_module = (
             GraphModuleSerializer(
                 exported_program.graph_signature,
@@ -839,7 +839,7 @@ class ExportedProgramSerializer:
         serialized_equality_constraints = serialize_equality_constraints(exported_program.equality_constraints)
 
         return (
-            ExportedProgram(
+            DynamoExportedProgram(
                 graph_module=serialized_graph_module,
                 opset_version=self.opset_version,
                 range_constraints=serialized_range_constraints,
@@ -1344,7 +1344,7 @@ class GraphModuleDeserializer:
         ]
 
 
-class ExportedProgramDeserializer:
+class DynamoExportedProgramDeserializer:
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
         self.expected_opset_version: Dict[str, int] = {}
         if expected_opset_version:
@@ -1366,8 +1366,8 @@ class ExportedProgramDeserializer:
         return range_constraints
 
     def deserialize(
-        self, serialized_exported_program: ExportedProgram, serialized_state_dict: bytes
-    ) -> ep.ExportedProgram:
+        self, serialized_exported_program: DynamoExportedProgram, serialized_state_dict: bytes
+    ) -> ep.DynamoExportedProgram:
         if serialized_exported_program.schema_version != SCHEMA_VERSION:
             raise SerializeError(
                 f"Serialized schema version {serialized_exported_program.schema_version} "
@@ -1397,7 +1397,7 @@ class ExportedProgramDeserializer:
         state_dict = deserialize_torch_artifact(serialized_state_dict)
         equality_constraints = deserialize_equality_constraints(serialized_exported_program.equality_constraints)
 
-        exported_program = ep.ExportedProgram(
+        exported_program = ep.DynamoExportedProgram(
             graph_module,
             graph_module.graph,
             sig,
@@ -1461,11 +1461,11 @@ class EnumEncoder(json.JSONEncoder):
 
 
 def serialize(
-    exported_program: ep.ExportedProgram,
+    exported_program: ep.DynamoExportedProgram,
     opset_version: Optional[Dict[str, int]] = None,
 ) -> Tuple[bytes, bytes]:
     serialized_exported_program, serialized_state_dict = (
-        ExportedProgramSerializer(opset_version).serialize(exported_program)
+        DynamoExportedProgramSerializer(opset_version).serialize(exported_program)
     )
     json_program = json.dumps(
         dataclasses.asdict(serialized_exported_program), cls=EnumEncoder
@@ -1516,11 +1516,11 @@ def deserialize(
     exported_program_bytes: bytes,
     state_dict: bytes,
     expected_opset_version: Optional[Dict[str, int]] = None,
-) -> ep.ExportedProgram:
+) -> ep.DynamoExportedProgram:
     exported_program_str = exported_program_bytes.decode('utf-8')
     exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(ExportedProgram, exported_program_dict)
+    serialized_exported_program = _dict_to_dataclass(DynamoExportedProgram, exported_program_dict)
     return (
-        ExportedProgramDeserializer(expected_opset_version)
+        DynamoExportedProgramDeserializer(expected_opset_version)
         .deserialize(serialized_exported_program, state_dict)
     )

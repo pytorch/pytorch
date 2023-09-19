@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 
-from torch._export import ExportedProgram
+from torch._export import DynamoExportedProgram
 
 from torch.utils._pytree import (
     _register_pytree_node,
@@ -92,7 +92,7 @@ def register_dataclass_as_pytree_node(
     )
 
 
-def is_param(program: ExportedProgram, node: torch.fx.Node) -> bool:
+def is_param(program: DynamoExportedProgram, node: torch.fx.Node) -> bool:
     """
     Checks if the given node is a parameter within the exported program
     """
@@ -101,7 +101,7 @@ def is_param(program: ExportedProgram, node: torch.fx.Node) -> bool:
 
 
 def get_param(
-    program: ExportedProgram,
+    program: DynamoExportedProgram,
     node: torch.fx.Node,
 ) -> Optional[torch.nn.Parameter]:
     """
@@ -116,7 +116,7 @@ def get_param(
     return None
 
 
-def is_buffer(program: ExportedProgram, node: torch.fx.Node) -> bool:
+def is_buffer(program: DynamoExportedProgram, node: torch.fx.Node) -> bool:
     """
     Checks if the given node is a buffer within the exported program
     """
@@ -125,7 +125,7 @@ def is_buffer(program: ExportedProgram, node: torch.fx.Node) -> bool:
 
 
 def get_buffer(
-    program: ExportedProgram,
+    program: DynamoExportedProgram,
     node: torch.fx.Node,
 ) -> Optional[torch.Tensor]:
     """

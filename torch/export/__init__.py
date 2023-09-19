@@ -11,6 +11,13 @@ import sympy
 import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
+
+from torch.export.backends.registry import (
+    list_backends,
+    register_backend,
+    register_debug_backend,
+    register_experimental_backend,
+)
 from torch.fx._compatibility import compatibility
 
 from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
@@ -25,21 +32,26 @@ from torch.utils._pytree import (
     UnflattenFunc,
 )
 
-
 __all__ = [
     "ArgumentKind",
     "ArgumentSpec",
     "Constraint",
+    "ExportedProgram",
     "ExportBackwardSignature",
     "ExportGraphSignature",
-    "ExportedProgram",
+    "DynamoExportedProgram",
     "ModuleCallEntry",
     "ModuleCallSignature",
+    "TorchExportException",
     "constrain_as_size",
     "constrain_as_value",
     "dynamic_dim",
     "export",
+    "list_backends",
     "load",
+    "register_backend",
+    "register_debug_backend",
+    "register_experimental_backend",
     "register_dataclass",
     "save",
 ]
@@ -48,6 +60,7 @@ __all__ = [
 from .exported_program import (
     ArgumentKind,
     ArgumentSpec,
+    DynamoExportedProgram,
     ExportBackwardSignature,
     ExportedProgram,
     ExportGraphSignature,
@@ -370,7 +383,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
 
         # First dimension of t0 can be dynamic size rather than always being static size 2
         constraints = [dynamic_dim(t0, 0)]
-        ep = export(fn, (t0, t1), constraints=constraints)
+        ep = export(fn, (t0, t1), options={"constraints": constraints})
 
     - Size of a dimension is dynamic with a lower bound::
 
@@ -383,7 +396,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
             dynamic_dim(t0, 0) >= 5,
             dynamic_dim(t1, 1) > 2,
         ]
-        ep = export(fn, (t0, t1), constraints=constraints)
+        ep = export(fn, (t0, t1), options={"constraints": constraints})
 
     - Size of a dimension is dynamic with an upper bound::
 
@@ -396,7 +409,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
             dynamic_dim(t0, 0) <= 16,
             dynamic_dim(t1, 1) < 8,
         ]
-        ep = export(fn, (t0, t1), constraints=constraints)
+        ep = export(fn, (t0, t1), options={"constraints": constraints})
 
     - Size of a dimension is dynamic and it is always equal to size of another dynamic dimension::
 
@@ -407,7 +420,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
         constraints = [
             dynamic_dim(t0, 1) == dynamic_dim(t1, 0),
         ]
-        ep = export(fn, (t0, t1), constraints=constraints)
+        ep = export(fn, (t0, t1), options={"constraints": constraints})
 
     - Mix and match all types above as long as they do not express conflicting requirements
 
@@ -419,11 +432,12 @@ def dynamic_dim(t: torch.Tensor, index: int):
 
 def export(
     f: Callable,
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    f_args: Tuple[Any, ...],
+    f_kwargs: Optional[Dict[str, Any]] = None,
     *,
-    constraints: Optional[List[Constraint]] = None,
-) -> ExportedProgram:
+    backend: Union[str, Callable] = "dynamo",
+    options: Optional[Dict[str, Any]] = None,
+) -> DynamoExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
     a method) and produces a traced graph representing only the Tensor
@@ -441,7 +455,7 @@ def export(
 
     While tracing, :func:`export()` takes note of shape-related assumptions
     made by the user program and the underlying PyTorch operator kernels.
-    The output :class:`ExportedProgram` is considered valid only when these
+    The output :class:`DynamoExportedProgram` is considered valid only when these
     assumptions hold true.
 
     There are 2 types of assumptions made during tracing
@@ -478,24 +492,19 @@ def export(
     Args:
         f: The callable to trace.
 
-        args: Example positional inputs.
+        f_args: Example positional inputs.
 
-        kwargs: Optional example keyword inputs.
+        f_kwargs: Optional example keyword inputs.
 
-        constraints: An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
+        backend: The backend to use for tracing. Currently the default is "dynamo"
 
+        options: A dictionary of options to pass to the backend.
     Returns:
-        An :class:`ExportedProgram` containing the traced callable.
+        An :class:`DynamoExportedProgram` containing the traced callable.
 
     **Acceptable input/output types**
 
-    Acceptable types of inputs (for ``args`` and ``kwargs``) and outputs include:
+    Acceptable types of inputs (for ``f_args`` and ``f_kwargs``) and outputs include:
 
     - Primitive types, i.e. ``torch.Tensor``, ``int``, ``float``, ``bool`` and ``str``.
     - Dataclasses, but they must be registered by calling :func:`register_dataclass` first.
@@ -506,11 +515,11 @@ def export(
 
     from torch._export import export
 
-    return export(f, args, kwargs, constraints)
+    return export(f, f_args, f_kwargs, backend=backend, options=options)
 
 
 def save(
-    ep: ExportedProgram,
+    ep: DynamoExportedProgram,
     f: Union[str, pathlib.Path, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
@@ -522,11 +531,11 @@ def save(
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
 
-    Saves an :class:`ExportedProgram` to a file-like object. It can then be
+    Saves an :class:`DynamoExportedProgram` to a file-like object. It can then be
     loaded using the Python API :func:`torch.export.load <torch.export.load>`.
 
     Args:
-        ep (ExportedProgram): The exported program to save.
+        ep (DynamoExportedProgram): The exported program to save.
 
         f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
@@ -571,18 +580,18 @@ def load(
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     expected_opset_version: Optional[Dict[str, int]] = None,
-) -> ExportedProgram:
+) -> DynamoExportedProgram:
     """
 
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
 
-    Loads an :class:`ExportedProgram` previously saved with
+    Loads an :class:`DynamoExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
 
     Args:
-        ep (ExportedProgram): The exported program to save.
+        ep (DynamoExportedProgram): The exported program to save.
 
         f (Union[str, pathlib.Path, io.BytesIO): A file-like object (has to
          implement write and flush) or a string containing a file name.
@@ -595,17 +604,17 @@ def load(
          to expected opset versions
 
     Returns:
-        An :class:`ExportedProgram` object
+        An :class:`DynamoExportedProgram` object
 
     Example::
 
         import torch
         import io
 
-        # Load ExportedProgram from file
+        # Load DynamoExportedProgram from file
         ep = torch.export.load('exported_program.pt2')
 
-        # Load ExportedProgram from io.BytesIO object
+        # Load DynamoExportedProgram from io.BytesIO object
         with open('exported_program.pt2', 'rb') as f:
             buffer = io.BytesIO(f.read())
         buffer.seek(0)
