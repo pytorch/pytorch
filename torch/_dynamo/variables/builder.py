@@ -30,9 +30,8 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.triton import has_triton
 from torch.utils.weak import TensorWeakRef, WeakIdRef
-
-from ..._inductor.utils import has_triton
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import (
