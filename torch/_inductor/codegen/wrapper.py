@@ -1132,14 +1132,16 @@ class CppWrapperCodeGen(WrapperCodeGen):
             ), "Expect all constants to be Tensor"
             for idx, constants_key in enumerate(V.graph.constants.keys()):
                 if V.graph.aot_mode:
+                    # Weights are stored in constants_ and owned by UniqueAtenTensorHandle there.
+                    # Don't call std::move here because it will cause constants_ to lose the ownership.
                     if config.aot_inductor.abi_compatible:
                         self.prefix.writeline(
-                            f"""auto {constants_key} = constants_->at("{constants_key}");"""
+                            f"""auto {constants_key} = constants_->at("{constants_key}").get();"""
                         )
                     else:
                         self.prefix.writeline(
                             f"auto {constants_key} = *tensor_handle_to_tensor_pointer("
-                            + f"""constants_->at("{constants_key}"));"""
+                            + f"""constants_->at("{constants_key}").get());"""
                         )
                 else:
                     # Append constants as inputs to the graph

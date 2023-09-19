@@ -150,7 +150,7 @@ class AOTInductorModelContainer {
           0 // device index, should read it from cudaStream_t?
           ));
       constants_->emplace(
-          std::move(name), std::move(SharedAtenTensorHandle(tensor_handle)));
+          std::move(name), std::move(UniqueAtenTensorHandle(tensor_handle)));
     }
   }
 

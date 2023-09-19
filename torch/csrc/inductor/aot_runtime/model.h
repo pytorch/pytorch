@@ -74,6 +74,10 @@ class UniqueAtenTensorHandle {
     return handle_.release();
   }
 
+  AtenTensorHandle get() {
+    return handle_.get();
+  }
+
   void reset() {
     handle_.reset();
   }
@@ -83,35 +87,7 @@ class UniqueAtenTensorHandle {
       handle_;
 };
 
-// Constant weights are shared among model instances, and thus the ownership
-// needs to be shared
-class SharedAtenTensorHandle {
- public:
-  // Steal the ownership from raw AtenTensorHandle
-  SharedAtenTensorHandle(AtenTensorHandle handle)
-      : handle_(handle, [](AtenTensorHandle ptr) {
-          AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_tensor_object(ptr));
-        }) {}
-
-  ~SharedAtenTensorHandle() {
-    handle_.reset();
-  }
-
-  // Return a raw AtenTensorHandle to be used by aoti_torch functions
-  // Note: this function does NOT transfer the ownership of the handle
-  operator AtenTensorHandle() const {
-    return handle_.get();
-  }
-
-  void reset() {
-    handle_.reset();
-  }
-
- private:
-  std::shared_ptr<AtenTensorOpaque> handle_;
-};
-
-using ConstantMap = std::unordered_map<std::string, SharedAtenTensorHandle>;
+using ConstantMap = std::unordered_map<std::string, UniqueAtenTensorHandle>;
 
 // Steal the ownership from raw AtenTensorHandle to UniqueAtenTensorHandle
 std::vector<UniqueAtenTensorHandle> steal_from_raw_handles_to_unique_handles(
