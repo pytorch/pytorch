@@ -2217,3 +2217,9 @@ def test_blas64_geqrf_lwork_smoketest():
     # Should result to an integer of a reasonable size
     lwork = int(work.item())
     assert_(2**32 < lwork < 2**42)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
