@@ -36,6 +36,10 @@ except unittest.SkipTest:
         sys.exit(0)
     raise
 
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -1448,6 +1452,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
 
+    @requires_cuda()
     def test_triton_kernel_by_hand(self):
         @triton.jit
         def add_kernel(
@@ -1466,12 +1471,12 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        def call_triton_add(x: torch.Tensor, y: torch.Tensor, grid_type: int):
+        def call_triton_add(x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1):
             output = torch.zeros_like(x)
             n_elements = output.numel()
 
             def grid_fn(meta):
-                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+                return (triton.cdiv(num, meta["BLOCK_SIZE"]),)
 
             if grid_type == 0:
                 grid = (x.numel(),)
@@ -1498,7 +1503,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         # With lambda kernel
         self.assertEqual(compiled_func(t1, t2, 1), torch_add)
         # With user defined function kernel
-        self.assertEqual(compiled_func(t1, t2, 2), torch_add)
+        self.assertEqual(compiled_func(t1, t2, 2, 200), torch_add)
 
     def test_dataclass_factory(self):
         @dataclass

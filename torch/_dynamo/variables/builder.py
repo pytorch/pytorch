@@ -16,8 +16,6 @@ try:
 except ModuleNotFoundError:
     np = None
 
-from triton.runtime.jit import JITFunction
-
 import torch
 
 from torch import SymInt
@@ -33,6 +31,8 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
+
+from ..._inductor.utils import has_triton
 
 from .. import config, mutation_guard, replay_record, skipfiles
 from ..allowed_functions import (
@@ -142,6 +142,13 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
+
+if has_triton():
+    from triton.runtime.jit import JITFunction
+else:
+
+    class JITFunction:
+        pass
 
 
 log = logging.getLogger(__name__)
