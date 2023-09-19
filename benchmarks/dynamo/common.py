@@ -1419,27 +1419,27 @@ class OnnxModelFromDynamo(OnnxModelFromTorchScript):
         self.model_path = self._generate_onnx_model_path(
             output_directory, "bench_dynamo_onnx_model"
         )
-        self._export_output = self._export(model, example_inputs, self.model_path)
+        self._exported_program = self._export(model, example_inputs, self.model_path)
         self.onnx_session = self._init_ort_session(self.model_path)
 
     def _export(
         self, model, example_inputs, output_path: str
-    ) -> torch.onnx.ExportOutput:
+    ) -> torch.onnx.ONNXExportedProgram:
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         options = torch.onnx.ExportOptions()
-        export_output = torch.onnx.dynamo_export(
+        exported_program = torch.onnx.dynamo_export(
             model, *example_args, **example_kwargs, export_options=options
         )
 
-        export_output.save(output_path)
-        return export_output
+        exported_program.save(output_path)
+        return exported_program
 
     def format_pt_inputs(self, pt_inputs):
         pt_args, pt_kwargs = _normalize_bench_inputs(pt_inputs)
-        return self._export_output.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
+        return self._exported_program.adapt_torch_inputs_to_onnx(*pt_args, **pt_kwargs)
 
     def format_pt_outputs(self, pt_outputs):
-        return self._export_output.adapt_torch_outputs_to_onnx(pt_outputs)
+        return self._exported_program.adapt_torch_outputs_to_onnx(pt_outputs)
 
 
 def optimize_onnx_ctx(
@@ -1481,7 +1481,7 @@ def optimize_onnx_ctx(
             return onnx_model.run(inputs)
         except exporter.OnnxExporterError as e:
             # `torch.onnx.dynamo_export` raises error that encloses diagnostics.
-            diagnostic_context = e.export_output.diagnostic_context
+            diagnostic_context = e.exported_program.diagnostic_context
             for parsed_error in parser.parse_diagnostic_context(diagnostic_context):
                 output_csv(
                     output_error_filename, parsed_error.headers, parsed_error.row
