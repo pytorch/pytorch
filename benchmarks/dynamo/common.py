@@ -1845,6 +1845,7 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
+            print(f"Original Error: {str(e)}")
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
