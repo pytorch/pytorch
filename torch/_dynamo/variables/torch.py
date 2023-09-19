@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     np = None
 
 import torch._C
+import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
@@ -50,6 +51,7 @@ tensor_dunder_fns = [
     torch.Tensor.__rmod__,
     torch.Tensor.__rpow__,
     torch.Tensor.__rsub__,
+    torch.Tensor.__rdiv__,
     torch._C._TensorBase.__radd__,
     torch._C._TensorBase.__rmul__,
     torch._C._TensorBase.__ror__,
@@ -85,7 +87,13 @@ constant_fold_functions = [
 
 
 if torch.distributed.is_available():
-    constant_fold_functions.append(torch.distributed.is_initialized)
+    constant_fold_functions.extend(
+        [
+            torch.distributed.is_initialized,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -191,7 +199,7 @@ class TorchVariable(VariableTracker):
         return self.value
 
     def python_type(self):
-        if isinstance(self.value, (torch.Tensor, torch.nn.Module)):
+        if isinstance(self.value, (torch.Tensor, torch.nn.Module, torch.device)):
             return type(self.value)
         if isinstance(self.value, type):
             return type
@@ -573,9 +581,10 @@ class TorchVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args[1:]]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
-            def fn_with_prim_types(x, **kwargs):
-                return self.value(x, *args_as_value, **kwargs)
+            def fn_with_prim_types(x):
+                return self.value(x, *args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             fn_with_prim_types.__name__ = "prim " + self.value.__name__
@@ -585,7 +594,7 @@ class TorchVariable(VariableTracker):
                 proxy=tx.output.create_proxy(
                     "call_function",
                     fn_with_prim_types,
-                    *proxy_args_kwargs([args[0]], kwargs),
+                    *proxy_args_kwargs([args[0]], {}),
                 ),
                 **options,
             )
@@ -715,17 +724,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     else:
                         return False
 
-                # NB: OK to pass torch.tensor(tensor), this will trace fine
-                # TODO: But torch.tensor(unspec) would not trace fine.  Not
-                # handled right now.
                 data_arg = None
                 if args:
                     data_arg = args[0]
                 elif "data" in kwargs:
                     data_arg = kwargs["data"]
 
-                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
-                    unimplemented("torch.tensor call with list of unspec")
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                if not isinstance(data_arg, TensorVariable) and check_any_unspec(
+                    data_arg
+                ):
+                    # This is slower and less canonical, so only use it if we
+                    # have to
+                    fn_ = torch._refs.tensor
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
@@ -753,6 +765,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             tx.symbolic_locals[name] = tensor_variable.items[idx]
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
+                    if (
+                        kwargs["out"].source
+                        and kwargs["out"] in tx.output.graphargs
+                        and kwargs["out"].size != tensor_variable.size
+                    ):
+                        # It's hard to get out variants with resizing on graph inputs work
+                        # properly across dynamo/aot/inductor, just fall back.
+                        unimplemented("out variants with resizing on graph inputs")
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable

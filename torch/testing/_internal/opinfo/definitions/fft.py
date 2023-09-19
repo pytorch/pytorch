@@ -674,10 +674,24 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.fftn",
         torch_opinfo_name="fft.fftn",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifftn",
         torch_opinfo_name="fft.ifftn",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
@@ -686,14 +700,35 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
         torch_opinfo_name="fft.irfftn",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfftn",
         torch_opinfo_name="fft.hfftn",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
         torch_opinfo_name="fft.ihfftn",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 2e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft2",
@@ -702,6 +737,13 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft2",
         torch_opinfo_name="fft.ifft2",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft2",
@@ -710,14 +752,35 @@ python_ref_db: List[OpInfo] = [
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft2",
         torch_opinfo_name="fft.irfft2",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft2",
         torch_opinfo_name="fft.hfft2",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 2e-4, torch.cfloat: 2e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft2",
         torch_opinfo_name="fft.ihfft2",
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float: 2e-4}),
+                "TestFFT",
+                "test_reference_nd",
+            )
+        ],
     ),
     PythonRefInfo(
         "_refs.fft.fftshift",

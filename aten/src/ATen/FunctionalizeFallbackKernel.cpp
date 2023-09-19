@@ -181,14 +181,26 @@ static at::Tensor lift_functionalize(const at::Tensor & self) {
 }
 
 static at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  // See Note [Exporting and compiling a graph with lift_fresh_copy]
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    return self.view_as(self);
+  }
+
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh(self);
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
 static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  // Note [Exporting and compiling a graph with lift_fresh_copy]
+  // If out is already a functional tensor, don't wrap it twice.
+  // In theory this could be useful if we want to nest functionalization with itself,
+  // but that isn't really a use case today.
+  // Needed for https://github.com/pytorch/pytorch/issues/105327
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    return self.clone();
+  }
+
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift_fresh_copy(self);
   return at::functionalization::impl::to_functional_tensor(out);

@@ -30,29 +30,6 @@ std::array<THPDtype*, static_cast<int>(at::ScalarType::NumOptions)>
 std::array<THPLayout*, static_cast<int>(at::Layout::NumOptions)>
     layout_registry = {};
 
-at::DeprecatedTypeProperties* get_type_properties(
-    at::DeviceType device_type,
-    at::ScalarType scalarType) {
-  at::Backend backend = at::Backend::Undefined;
-  if (device_type == at::kCPU) {
-    backend = at::Backend::CPU;
-  } else if (device_type == at::kCUDA) {
-    backend = at::Backend::CUDA;
-  } else if (device_type == at::kXPU) {
-    backend = at::Backend::XPU;
-  } else if (device_type == at::kHPU) {
-    backend = at::Backend::HPU;
-  } else if (device_type == at::kMPS) {
-    backend = at::Backend::MPS;
-  } else if (device_type == at::DeviceType::Meta) {
-    backend = at::Backend::Undefined;
-  } else if (device_type == at::DeviceType::PrivateUse1) {
-    backend = at::Backend::PrivateUse1;
-  } else {
-    TORCH_CHECK(false, "Invalid device for storage: ", device_type);
-  }
-  return &at::getDeprecatedTypeProperties(backend, scalarType);
-}
 } // namespace
 
 void registerDtypeObject(THPDtype* dtype, at::ScalarType scalarType) {
@@ -88,13 +65,10 @@ PyObject* createPyObject(const at::Storage& storage) {
   // information about storages from python). However, any accesses to the
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()
-  PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPStorageClass);
-  auto obj = THPObjectPtr(type->tp_alloc(type, 0));
+  PyObject* obj = THPStorage_Wrap(storage);
   if (!obj)
     throw python_error();
-  ((THPStorage*)obj.get())->cdata =
-      c10::MaybeOwned<at::Storage>::owned(at::Storage(/* copy */ storage));
-  return obj.release();
+  return obj;
 }
 
 PyTypeObject* loadTypedStorageTypeObject() {
@@ -118,16 +92,13 @@ bool isStorage(PyObject* obj) {
   if (PyObject_TypeCheck(obj, getTypedStorageTypeObject())) {
     return true;
   }
-  auto obj_type = Py_TYPE(obj);
-
-  return obj_type == reinterpret_cast<PyTypeObject*>(THPStorageClass);
+  return THPStorage_Check(obj);
 }
 
-at::Storage createStorageGetType(
-    PyObject* obj,
-    at::ScalarType& scalar_type,
-    bool& is_typed_storage) {
-  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
+    PyObject* obj) {
+  at::ScalarType scalar_type = at::ScalarType::Undefined;
+  bool is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
   PyObject* untyped_storage_obj = nullptr;
 
   if (is_typed_storage) {
@@ -136,10 +107,9 @@ at::Storage createStorageGetType(
     // stay nonzero since the `TypedStorage` maintains a reference.
     PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
     TORCH_INTERNAL_ASSERT(dtype_obj);
-    Py_DECREF(dtype_obj);
-
     TORCH_INTERNAL_ASSERT(THPDtype_Check(dtype_obj));
     scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
+    Py_DECREF(dtype_obj);
 
     untyped_storage_obj = PyObject_GetAttrString(obj, "_untyped_storage");
     TORCH_INTERNAL_ASSERT(untyped_storage_obj);
@@ -150,22 +120,18 @@ at::Storage createStorageGetType(
     untyped_storage_obj = obj;
   }
 
-  if (Py_TYPE(untyped_storage_obj) !=
-      reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
-  }
+  TORCH_CHECK(
+      THPStorage_Check(untyped_storage_obj),
+      "not a storage '",
+      Py_TYPE(obj)->tp_name,
+      "'");
 
-  const auto& storage = THPStorage_Unpack(untyped_storage_obj);
-  c10::DeviceType device_type = storage.device().type();
-  auto type_properties = get_type_properties(device_type, at::kByte);
-  return type_properties->unsafeStorageFromTH(
-      storage.unsafeGetStorageImpl(), true);
+  auto storage = THPStorage_Unpack(untyped_storage_obj);
+  return std::make_tuple(storage, scalar_type, is_typed_storage);
 }
 
 at::Storage createStorage(PyObject* obj) {
-  at::ScalarType scalar_type = at::ScalarType::Undefined;
-  bool is_typed_storage = false;
-  return createStorageGetType(obj, scalar_type, is_typed_storage);
+  return std::get<0>(createStorageGetType(obj));
 }
 
 } // namespace torch

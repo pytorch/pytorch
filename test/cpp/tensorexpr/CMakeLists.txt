@@ -57,18 +57,7 @@ if(USE_PTHREADPOOL)
   target_link_libraries(test_tensorexpr PRIVATE pthreadpool_interface)
 endif()
 if(USE_CUDA)
-  target_link_libraries(test_tensorexpr PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(test_tensorexpr PRIVATE USE_CUDA)
-
-  target_link_libraries(tutorial_tensorexpr PRIVATE
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(tutorial_tensorexpr PRIVATE USE_CUDA)
 elseif(USE_ROCM)
   target_link_libraries(test_tensorexpr PRIVATE

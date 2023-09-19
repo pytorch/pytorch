@@ -17,8 +17,10 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._higher_order_ops.out_dtype import out_dtype
+from torch._prims_common import type_to_dtype
 
-from . import config
+from . import config, inductor_prims
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -54,6 +56,7 @@ inductor_decompositions = get_decompositions(
         aten.sqrt_,
         aten.std,
         aten.std_mean,
+        out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
@@ -67,6 +70,11 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
+    aten._unsafe_view,
+    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten.clamp_max,
+    aten.clamp_min,
+    aten.trunc,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -77,12 +85,6 @@ def register_decomposition(ops):
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
-
-
-@register_decomposition(aten._unsafe_view.default)
-def _unsafe_view(self, size):
-    # this makes pattern matching easier
-    return self.view(size)
 
 
 # TODO: for now, inductor doesn't handle asserts
@@ -111,6 +113,15 @@ def clamp(x, min=None, max=None):
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+@register_decomposition([aten.full])
+def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, fill_value, **kwargs)
+    return NotImplemented
 
 
 # TorchInductor-only decomposition. It should not be taken to core.
@@ -210,6 +221,11 @@ def bmm(self, batch2):
 
 @register_decomposition([aten.mm])
 def mm(self, input2):
+    # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
+    # todo: Look into why and fix it (hopefully)
+    if config.coordinate_descent_tuning:
+        if self.shape[0] == 1 or input2.shape[1] == 1:
+            return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
     if self.device == "cpu":
         if (
             self.size(-1) == 1
@@ -435,6 +451,17 @@ def dequantize_per_tensor_tensor_decomp_impl(
     return (input.to(torch.float32) - zero_point) * scale
 
 
+@register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
+def q_embedding_bag_byte_unpack_decomp(packed):
+    def bitcast_u8_to_f32(u8):
+        x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
+        return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+
+    scales = bitcast_u8_to_f32(packed[..., -8:-4])
+    offsets = bitcast_u8_to_f32(packed[..., -4:])
+    return packed[..., :-8].to(torch.float32) * scales + offsets
+
+
 @register_decomposition([aten.grid_sampler_2d])
 @pw_cast_for_opmath
 def grid_sampler_2d(
@@ -532,3 +559,14 @@ def select_decomp_table():
     if config.fallback_random:
         return decompositions
     return fast_random_decomps()
+
+
+@register_decomposition(aten.masked_scatter)
+def masked_scatter(self, mask, source):
+    if self.device.type == "cuda":
+        # This two-step algorithm is the same as eager CUDA, for eager CPU we
+        # use a 1-shot serial iteration.
+        self, mask = aten.broadcast_tensors([self, mask])
+        source_idx = mask.reshape(-1).cumsum(0) - 1
+        return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
+    return NotImplemented
