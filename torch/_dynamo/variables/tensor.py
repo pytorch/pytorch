@@ -489,7 +489,7 @@ class TensorVariable(VariableTracker):
                 unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
             # TODO: support force
-            if kwargs and "force" in kwargs:
+            if "force" in kwargs and kwargs["force"].as_python_constant():
                 unimplemented(f"Tensor.numpy(force={kwargs['force']})")
             proxy = tx.output.create_proxy(
                 "call_function",
