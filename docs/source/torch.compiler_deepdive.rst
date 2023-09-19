@@ -103,15 +103,11 @@ not in dynamic shape mode.
 What is Dynamo doing?
 ---------------------
 
-If you want to understand better what TorchDynamo is doing, you can set:
+If you want to understand better what TorchDynamo is doing, you can run your code with:
 
-.. code-block:: python
+::
 
-   import torch._dynamo.config
-   import logging
-
-   torch._dynamo.config.log_level = logging.INFO
-   torch._dynamo.config.output_code = True
+   TORCH_LOGS="+dynamo,guards,bytecode"
 
 This code triggers useful (but spammy) printouts.
 

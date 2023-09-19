@@ -11,6 +11,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>

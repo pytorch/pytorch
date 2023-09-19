@@ -134,7 +134,7 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
   // fn_name does not give you access to the same information that Function*
   // does, however in mobile/delegated backend runtime we use InlindedCallStack
   // for exception stack and for that purpose fn_name_ suffices.
-  const std::string fn_name_;
+  std::string fn_name_;
   SourceRange source_range_;
   InlinedCallStackPtr intrusive_from_this();
   c10::optional<ModuleInstanceInfo> module_instance_info_;
@@ -149,13 +149,6 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       SourceRange source_range,
       c10::optional<ModuleInstanceInfo> module_instance_info);
 
-  // Constructor for a leaf callstack node.
-  InlinedCallStack(
-      Function* fn,
-      SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info,
-      std::string& function_name);
-
   // Constructor for an inner callstack node.
   InlinedCallStack(
       InlinedCallStackPtr callee,
@@ -168,13 +161,6 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
       SourceRange source_range,
       c10::optional<ModuleInstanceInfo> module_instance_info);
 
-  InlinedCallStack(
-      InlinedCallStackPtr callee,
-      Function* fn,
-      SourceRange source_range,
-      c10::optional<ModuleInstanceInfo> module_instance_info,
-      std::string& function_name);
-
   // Return next element in the callstack list.
   c10::optional<InlinedCallStackPtr> callee() const;
 
@@ -186,7 +172,9 @@ struct TORCH_API InlinedCallStack : public c10::intrusive_ptr_target {
 
   Function* function() const;
 
-  const std::string& function_name() const;
+  void set_function_name(std::string fn_name);
+
+  std::string function_name() const;
 
   // Return callstack as a vector of [Function, SourceRange] pairs.
   std::vector<InlinedCallStackEntry> vec();
