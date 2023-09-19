@@ -334,7 +334,7 @@ class SkipResult:
     reason: Optional[str]
 
 
-def check(filename, allow_module=False):
+def check(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
@@ -343,7 +343,7 @@ def check(filename, allow_module=False):
             False,
             "allowlisted in skipfiles.FILENAME_ALLOWLIST",
         )
-    if allow_module and is_torch_inline_allowed(filename):
+    if allow_torch and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
             "allowlisted in skipfiles.SUBMODULE_ALLOWLIST",
