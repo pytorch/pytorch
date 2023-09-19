@@ -171,6 +171,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
+    'optree==0.9.1',
 ]
 
 [[linter]]
@@ -231,6 +232,7 @@ include_patterns = [
     'tools/**/*.py',
     'torchgen/**/*.py',
     'torch/utils/_pytree.py',
+    'torch/utils/pytree.py',
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
