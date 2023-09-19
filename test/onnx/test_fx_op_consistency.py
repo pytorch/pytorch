@@ -260,7 +260,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.poisson_nll_loss",
         "nn.functional.prelu",
         "nn.functional.relu6",
-        "nn.functional.scaled_dot_product_attention"
+        "nn.functional.scaled_dot_product_attention",
         "nn.functional.selu",
         "nn.functional.silu",
         "nn.functional.smooth_l1_loss",

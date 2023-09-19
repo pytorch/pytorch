@@ -449,11 +449,11 @@ FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 
 BOOL_TYPES = (torch.bool,)
 
 INT_TYPES = (
-    torch.int8,
-    torch.int16,
+    # torch.int8,  # ONNX Runtime doesn't support well
+    # torch.int16,  # ONNX Runtime doesn't support well
     torch.int32,
     torch.int64,
-    torch.uint8,
+    # torch.uint8,  # ONNX Runtime doesn't support well
 )
 
 QINT_TYPES = (
@@ -464,13 +464,13 @@ QINT_TYPES = (
 FLOAT_TYPES = (
     torch.float16,
     torch.float32,
-    # torch.float64,  ORT doesn't support
+    # torch.float64,  # ONNX Runtime doesn't support well
 )
 
 COMPLEX_TYPES = (
-    # torch.complex32,  NOTE: torch.complex32 is experimental in torch
+    # torch.complex32,  # NOTE: torch.complex32 is experimental in torch
     torch.complex64,
-    # torch.complex128,  ORT doesn't support
+    # torch.complex128,  # ONNX Runtime doesn't support well
 )
 
 TESTED_DTYPES = (
