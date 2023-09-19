@@ -3342,11 +3342,20 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
           c10::cuda::CUDACachingAllocator::recordStream(
               output.storage().data_ptr(), stream);
         }
+
+        ncclDataType_t nccl_dtype;
+        if (input.scalar_type() == at::kFloat8_e5m2 ||
+            input.scalar_type() == at::kFloat8_e4m3fn) {
+          nccl_dtype = ncclInt8;
+        } else {
+          nccl_dtype = getNcclDataType(input.scalar_type());
+        }
+
         return ncclAllGather(
             input.data_ptr(),
             output.data_ptr(),
             input.numel(),
-            getNcclDataType(input.scalar_type()),
+            nccl_dtype,
             comm,
             stream.stream());
       },
