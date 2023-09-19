@@ -681,13 +681,16 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
-    @cache_on_self
-    def has_atomic_add(self):
+    def has_atomic_add(self, check_buf):
+        # Return True if check_buf is stored by atomic_add mode
         for node in self._body.get_nodes():
             if node.op == "call_method" and node.target == "store":
-                # Check the mode parameter of store node is atomic_add
-                if ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add") or (
-                    len(node.args) == 5 and node.args[4] == "atomic_add"
+                if (
+                    ("name" in node.kwargs and node.kwargs["name"] == check_buf)
+                    or (len(node.args) >= 2 and node.args[1] == check_buf)
+                ) and (
+                    ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
+                    or (len(node.args) == 5 and node.args[4] == "atomic_add")
                 ):
                     return True
         return False
@@ -795,6 +798,17 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
+
+    def has_atomic_add(self, check_buf):
+        if any(
+            (
+                isinstance(sub_schedule_node1, SchedulerNode)
+                and sub_schedule_node1.has_atomic_add(check_buf)
+            )
+            for sub_schedule_node1 in self.get_nodes()
+        ):
+            return True
+        return False
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -1501,26 +1515,18 @@ class Scheduler:
             and isinstance(node2, SchedulerNode)
             and isinstance(node2._body, ir.LoopBody)
         ):
-            # Fix Issue: https://github.com/pytorch/pytorch/issues/108963
-            # Disable the fusion of node1 and node2, if:
-            # * Any buffer used by node2 is a mutation of node1
-            # * Store Buffer of node1 is produced by mode of atomic_add
-            _check_schedule_node_atomic_add_mutation = (
-                lambda buf, node: isinstance(node, SchedulerNode)
-                and buf in node.get_mutations()
-                and node.has_atomic_add()
-            )
-            for node2_used_buf in node2._body.reads_name2expr.keys():
-                if (
-                    isinstance(node1, FusedSchedulerNode)
-                    and any(
-                        _check_schedule_node_atomic_add_mutation(
-                            node2_used_buf, sub_schedule_node1
-                        )
-                        for sub_schedule_node1 in node1.get_nodes()
-                    )
-                ) or _check_schedule_node_atomic_add_mutation(node2_used_buf, node1):
-                    return False
+            # Fix issue: https://github.com/pytorch/pytorch/issues/108963
+            # If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
+            # we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
+            # If True, we will disable the fusion of node1 and node2.
+            if any(
+                (
+                    node2_used_buf in self.mutation_renames
+                    and node1.has_atomic_add(self.mutation_renames[node2_used_buf])
+                )
+                for node2_used_buf in node2._body.reads_name2expr.keys()
+            ):
+                return False
 
         if node2.is_template():
             return False  # only epilogues
