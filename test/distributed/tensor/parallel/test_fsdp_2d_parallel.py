@@ -9,14 +9,22 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as distributed_c10d
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
+from torch.distributed._tensor import (
+    DeviceMesh,
+    DTensor as DT,
+    init_device_mesh,
+    Replicate,
+)
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_WRAPPED_MODULE,
     checkpoint_wrapper,
     CheckpointImpl,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import FSDP_WRAPPED_MODULE
+from torch.distributed.fsdp._common_utils import (
+    _get_module_fsdp_state,
+    FSDP_WRAPPED_MODULE,
+)
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
@@ -310,6 +318,21 @@ class Test2dParallelIntegration(DTensorTestBase):
         self._test_2d_e2e_flow(
             fsdp_nested=True, use_orig_params=True, multi_param_group=True
         )
+
+
+class TestNew2dParallelIntegration(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_2d_fsdp_state_enable_extension(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        model = FSDP(
+            SimpleModel().cuda(),
+            device_mesh=mesh_2d["dp"],
+        )
+        fsdp_state = _get_module_fsdp_state(model)
+        self.assertEqual(fsdp_state._enable_extension, True)
 
 
 if __name__ == "__main__":

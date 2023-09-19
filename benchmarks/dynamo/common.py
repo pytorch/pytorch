@@ -1127,10 +1127,6 @@ class AOTInductorModelCache:
             _register_dataclass_output_as_pytree(example_outputs)
 
             example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-            example_inputs = torch._export.combine_args_kwargs(
-                example_args, example_kwargs
-            )
-
             so_path, exported = torch._export.aot_compile(
                 model, example_args, example_kwargs
             )
@@ -1180,9 +1176,8 @@ def export_aot_inductor(forward: Callable):
         )
         param_buffer_values = list(exported.state_dict.values())
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
-        example_inputs = torch._export.combine_args_kwargs(example_args, example_kwargs)
         flat_example_inputs = fx_pytree.tree_flatten_spec(
-            example_inputs, exported.call_spec.in_spec
+            (example_args, example_kwargs), exported.call_spec.in_spec
         )
         all_args = (*param_buffer_values, *flat_example_inputs)
         module.run(all_args, output_tensors)
@@ -1850,6 +1845,7 @@ class BenchmarkRunner:
         try:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
+            print(f"Original Error: {str(e)}")
             raise NotImplementedError("Eager model failed to run") from e
 
     def maybe_cast(self, model, example_inputs):
@@ -2299,6 +2295,9 @@ class BenchmarkRunner:
         # Use distributed wrapping as necessary
         model = self.deepcopy_and_maybe_ddp(model)
 
+        if not hasattr(model, name):
+            model.name = name
+
         self.init_optimizer(name, current_device, model.parameters())
         with self.pick_grad(name, self.args.training):
             ok, total = Stats.reset_counters()
@@ -2349,8 +2348,6 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            if not hasattr(model, name):
-                model.name = name
             results.append(experiment(model, example_inputs, **experiment_kwargs))
             return " ".join(map(str, results))
 
