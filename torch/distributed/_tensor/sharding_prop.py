@@ -28,7 +28,12 @@ class ShardingPropagator:
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or re-run sharding prop
         self.op_to_schema_info: Dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
+        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
+        # because SymInts are not hashable.
+        # This is generally ok because this only happens during tracing in torch.compile,
+        # and tracing does not need to be as fast as eagermode DTensor usages.
+        # TODO only remove the cache under compile, keep it under eager
+        # self.propagate_op_sharding = lru_cache(None)(self.propagate_op_sharding)  # type: ignore[method-assign]
 
     def register_sharding_prop_rule(
         self,
