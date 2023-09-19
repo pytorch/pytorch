@@ -29,10 +29,14 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(self, macOS13_3_plus, "sort_stable_out");
 
+  if (self.numel() == 0) {
+    return;
+  }
+
   values.copy_(self);
   // check if self is scalar
   dim = maybe_wrap_dim(dim, self.dim(), true);
-  if (self.dim() == 0 && self.numel() <= 1) {
+  if (self.dim() == 0 && self.numel() == 1) {
     indices.zero_();
     return;
   }
