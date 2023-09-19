@@ -320,7 +320,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
             return True
 
     @cache_on_self
-    def get_live_ranges(self):
+    def get_live_ranges(self) -> LiveRanges:
         return LiveRanges(
             itertools.chain.from_iterable(
                 x.get_live_ranges().ranges for x in self.allocations
@@ -439,7 +439,7 @@ class AllocationPool:
         self.root.finalize(self, 0)
 
     def codegen_create(self, wrapper, code: IndentedBuffer):
-        assert self.creation_cache
+        assert self.creation_cache is not None
         assert self.name
         nbytes = self.root.get_symbolic_size()
         for block in self.root.allocations:
@@ -545,7 +545,7 @@ class AllocationPools:
 class BufferGroup:
     """
     Due to inplace reuse an allocated buffer can have many names.
-    This tracks these collections of buffers sharing undlying memory.
+    This tracks these collections of buffers sharing underlying memory.
     """
 
     def __init__(self, node: ir.Buffer):
@@ -611,7 +611,7 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
         if self.is_first_pool_usage:
             pool.codegen_create(self.wrapper, code)
 
-        assert pool.names_to_del and pool.creation_cache
+        assert pool.names_to_del and (pool.creation_cache is not None)
         pool.names_to_del.extend(self.group.names)
         if alloc_from_pool in pool.creation_cache:
             code.writeline(
