@@ -7,7 +7,6 @@
 #include <shared_mutex>
 
 #include <torch/csrc/inductor/aot_runtime/model.h>
-#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
