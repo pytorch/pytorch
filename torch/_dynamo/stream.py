@@ -6,7 +6,7 @@ import torch.cuda
 
 # This class is used to contain the provided stream methods for dynamo to
 # capture the stream usage.
-class StreamMethodContainer:
+class StreamRuntimeInterfaceContainer:
     def __init__(self) -> None:
         self.current_stream_method = {}
         self.create_stream_context_method = {}
@@ -14,7 +14,7 @@ class StreamMethodContainer:
         self.set_stream_by_id_method = {}
 
     def __init_subclass__(cls):
-        raise TypeError("class StreamMethodContainer can not be inherit from")
+        raise TypeError("class StreamRuntimeInterfaceContainer can not be inherit from")
 
     def __get(self, container: str, device: str):
         assert device in getattr(self, container).keys(), "unknown device {device}"
@@ -47,14 +47,14 @@ class StreamMethodContainer:
 
 
 # the global instance to contain the stream methods
-StreamMethodObject = StreamMethodContainer()
+StreamRuntimeInterfaceObject = StreamRuntimeInterfaceContainer()
 
 
 # Here are some APIs for developers to resgiter their stream methods, which are needed to
 # align with the specific semantics.
 def register_stream_method(device: str, method_args_dict: dict):
     for key in method_args_dict.keys():
-        StreamMethodObject.register_stream_method(
+        StreamRuntimeInterfaceObject.register_stream_method(
             key + "_method", device, method_args_dict[key]
         )
 

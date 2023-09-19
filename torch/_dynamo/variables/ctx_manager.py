@@ -9,7 +9,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..source import AttrSource, DummyGlobalSource
-from ..stream import StreamMethodContainer
+from ..stream import StreamRuntimeInterfaceObject
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -373,7 +373,7 @@ class StreamContextVariable(ContextWrappingVariable):
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
-        current_stream_method = StreamMethodContainer().get_method_by_device(
+        current_stream_method = StreamRuntimeInterfaceObject.get_method_by_device(
             "current_stream", target_value.device
         )
         current_stream = wrap_fx_proxy_cls(
@@ -398,7 +398,7 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_func = StreamMethodContainer().get_method_by_device(
+        self.set_stream_func = StreamRuntimeInterfaceObject.get_method_by_device(
             "set_stream", self.device
         )
 
@@ -416,13 +416,13 @@ class StreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                StreamMethodContainer().get_method_by_device(
+                StreamRuntimeInterfaceObject.get_method_by_device(
                     "set_stream_by_id", self.device
                 ),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        StreamMethodContainer().get_method_by_device("set_stream", self.device)(
+        StreamRuntimeInterfaceObject.get_method_by_device("set_stream", self.device)(
             self.target_values[0].value
         )
 

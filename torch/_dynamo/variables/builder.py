@@ -55,7 +55,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 
-from ..stream import StreamMethodContainer
+from ..stream import StreamRuntimeInterfaceObject
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -1477,7 +1477,9 @@ def wrap_fx_proxy_cls(
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, StreamBase)
-    ) or proxy.node.target in StreamMethodContainer().get_all_methods("current_stream"):
+    ) or proxy.node.target in StreamRuntimeInterfaceObject.get_all_methods(
+        "current_stream"
+    ):
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
             proxy, example_value, example_value.device.type, **options
