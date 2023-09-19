@@ -3806,7 +3806,7 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
                 return x + self.buffer1
 
         gm, _ = torch._dynamo.export(Module(), torch.ones(5, 5), aten_graph=False)
-        buffers = [(name, buffer) for name, buffer in gm.named_buffers()]
+        buffers = list(gm.named_buffers())
         self.assertEqual(len(buffers), 1)
 
         name, buffer = buffers[0]

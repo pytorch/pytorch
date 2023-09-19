@@ -417,6 +417,42 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
+@register_meta(aten.segment_reduce.default)
+def meta_segment_reduce(
+    data: Tensor,
+    reduce: str,
+    *,
+    lengths: Optional[Tensor] = None,
+    indices: Optional[Tensor] = None,
+    offsets: Optional[Tensor] = None,
+    axis: int = 0,
+    unsafe: bool = False,
+    initial=None,
+) -> Tensor:
+    if indices is not None:
+        raise NotImplementedError(
+            "segment_reduce(): indices based reduction is not supported yet."
+        )
+
+    def segment_reduce_lengths_tensor(lengths_shape):
+        return torch.empty(
+            lengths_shape + data.shape[axis + 1 :],
+            dtype=data.dtype,
+            device="meta",
+            memory_format=torch.contiguous_format,
+        )
+
+    if lengths is not None:
+        return segment_reduce_lengths_tensor(lengths.shape)
+    # FIXME should probably check that lengths and offset aren't both set, but
+    # the ATen implementation neglects this too
+    if offsets is not None:
+        # lengths == torch.diff(offsets)
+        lengths_shape = offsets.shape[:-1] + (offsets.shape[-1] - 1,)
+        return segment_reduce_lengths_tensor(lengths_shape)
+    raise RuntimeError("segment_reduce(): Either lengths or offsets must be defined.")
+
+
 @register_meta([aten.max.default, aten.max.unary_out])
 @out_wrapper()
 def meta_max(self):
@@ -2130,6 +2166,39 @@ if torch._C._has_mkldnn:
         output_shape[-1] = w.shape[0]
         out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
         return out
+
+    _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
+        "quantized", "IMPL", "Meta"
+    )
+
+    @register_meta(torch.ops.quantized.max_pool2d)
+    def meta_quantized_max_pool2d(
+        input,
+        kernel_size,
+        stride=(),
+        padding=(0,),
+        dilation=(1,),
+        ceil_mode=False,
+    ):
+        (
+            nInputPlane,
+            outputHeight,
+            outputWidth,
+        ) = max_pool2d_checks_and_compute_shape(
+            input, kernel_size, stride, padding, dilation, ceil_mode
+        )
+        nbatch = input.size(-4) if input.dim() == 4 else 1
+        memory_format = torch.channels_last
+        if input.dim() == 3:
+            size = [nInputPlane, outputHeight, outputWidth]
+        else:
+            size = [nbatch, nInputPlane, outputHeight, outputWidth]
+        return torch.empty(
+            size,
+            dtype=input.dtype,
+            device=input.device,
+            memory_format=memory_format,
+        )
 
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
@@ -5757,6 +5826,10 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             elif "onednn::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_onednn.impl(op_overload, fn)
+            elif "quantized::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(
+                    op_overload, fn
+                )
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
