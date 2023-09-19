@@ -7,6 +7,7 @@
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <torch/library.h>
 
 #include <c10/core/SafePyObject.h>
@@ -647,6 +648,9 @@ void initDispatchBindings(PyObject* module) {
 
   m.attr("_dispatch_autogradother_backends") =
       py::cast(c10::autogradother_backends);
+
+  m.attr("_additional_keys_to_prop_for_wrapper_tensors") =
+      py::cast(at::functorch::kKeysToPropagateToWrapper);
 
   m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) {
     return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t);

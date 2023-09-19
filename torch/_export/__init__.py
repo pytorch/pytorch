@@ -549,7 +549,7 @@ def export(
         equality_constraints,
         [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
-        (args, {}),
+        (args, kwargs),
     )
 
     if len(range_constraints) > 0 or len(equality_constraints) > 0:
