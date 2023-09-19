@@ -1516,8 +1516,9 @@ class Scheduler:
             and isinstance(node2._body, ir.LoopBody)
         ):
             # Fix issue: https://github.com/pytorch/pytorch/issues/108963
-            # If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
-            # we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
+            # Check:
+            #   If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
+            #   we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
             # If True, we will disable the fusion of node1 and node2.
             if any(
                 (
