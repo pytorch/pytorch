@@ -653,13 +653,19 @@ static c10::ArrayRef<T> get_set_cached_attr(
     // Overwrite the buffer with our new values, but only if any of them changed
     // (due to a metadata mutation).
     // This is technically not thread safe, because the update happens lazily.
-    // The original metadata mutation call on the tensor might have been thread safe
-    // (e.g. a .resize_() call),
-    // but we won't actually mutate the size buffer until the first call to .sizes()
-    // which the user might not access in a thread-safe way.
-    // For now we are not explicitly locking, but maybe we should.
+    // The original metadata mutation call on the tensor might have been thread
+    // safe (e.g. a .resize_() call), but we won't actually mutate the size
+    // buffer until the first call to .sizes() which the user might not access
+    // in a thread-safe way. For now we are not explicitly locking, but maybe we
+    // should.
     int64_t idx = 0;
-    TORCH_INTERNAL_ASSERT(curr_size >= new_size);
+    // Quick sanity assert that our buffer size is large enough
+    // to compare against all the elements in the new buffer.
+    size_t curr_buffer_size = 5;
+    if (curr_buffer_size < curr_size) {
+      curr_buffer_size = curr_size;
+    }
+    TORCH_INTERNAL_ASSERT(curr_buffer_size >= new_size);
     for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
       auto actual_val = py::cast<T>(*it);
       if constexpr (std::is_same_v<T, c10::SymInt>) {
