@@ -171,6 +171,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==10.9.0',
     'pyyaml==6.0',
+    'optree==0.9.1',
 ]
 
 [[linter]]
@@ -195,13 +196,10 @@ include_patterns = [
 exclude_patterns = [
     '**/fb/**',
     'torch/_inductor/index_propagation.py',
-    'torch/_inductor/debug.py',
     'torch/_inductor/ir.py',
     'torch/_inductor/scheduler.py',
     'torch/_inductor/sizevars.py',
-    'torch/_inductor/freezing.py',
     'torch/_inductor/pattern_matcher.py',
-    'torch/_inductor/fx_utils.py',
     'torch/_inductor/codegen/triton_foreach.py',
     'torch/_inductor/codegen/cpp.py',
     'torch/_inductor/codegen/triton.py',
@@ -234,6 +232,7 @@ include_patterns = [
     'tools/**/*.py',
     'torchgen/**/*.py',
     'torch/utils/_pytree.py',
+    'torch/utils/pytree.py',
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
     'torch/utils/benchmark/utils/valgrind_wrapper/**/*.py',
