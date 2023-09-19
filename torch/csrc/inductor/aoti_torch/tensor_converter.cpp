@@ -13,7 +13,7 @@ AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
   return reinterpret_cast<AtenTensorHandle>(tensor);
 }
 
-std::vector<AtenTensorHandle> create_handles_from_tensors(
+std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
     std::vector<at::Tensor>& tensors) {
   std::vector<AtenTensorHandle> result;
   result.reserve(tensors.size());
@@ -24,7 +24,7 @@ std::vector<AtenTensorHandle> create_handles_from_tensors(
   return result;
 }
 
-std::vector<at::Tensor> create_tensors_from_handles(
+std::vector<at::Tensor> alloc_tensors_from_handles(
     std::vector<AtenTensorHandle>& handles) {
   std::vector<at::Tensor> result;
   result.reserve(handles.size());

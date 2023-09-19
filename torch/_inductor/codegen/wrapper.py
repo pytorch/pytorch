@@ -1094,9 +1094,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     self.prefix.splice(
                         """
                             auto tmp_input_handles = raii_handles_to_raw_handles(input_handles);
-                            auto inputs = create_tensors_from_handles(tmp_input_handles);
+                            auto inputs = alloc_tensors_from_handles(tmp_input_handles);
                             auto tmp_output_handles = raii_handles_to_raw_handles(output_handles);
-                            auto outputs = create_tensors_from_handles(tmp_output_handles);
+                            auto outputs = alloc_tensors_from_handles(tmp_output_handles);
                         """
                     )
 

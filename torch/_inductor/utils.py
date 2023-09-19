@@ -1194,9 +1194,9 @@ aot_inductor_launcher = """
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
 
         std::vector<AtenTensorHandle> input_handles =
-            torch::aot_inductor::create_handles_from_tensors(input_tensors);
+            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
         std::vector<AtenTensorHandle> output_handles =
-            torch::aot_inductor::create_handles_from_tensors(output_tensors);
+            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(output_tensors);
 
         std::vector<const int64_t*> output_sizes(output_tensors.size());
         std::vector<int64_t> output_ndims(output_tensors.size());
