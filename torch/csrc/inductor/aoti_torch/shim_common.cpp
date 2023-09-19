@@ -25,6 +25,8 @@
 
 #endif
 
+using namespace torch::aot_inductor;
+
 namespace {
 at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
   return reinterpret_cast<at::Tensor*>(handle);
