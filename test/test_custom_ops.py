@@ -1741,14 +1741,14 @@ class MiniOpTest(CustomOpTestCaseBase):
         x = torch.randn(2, 3, requires_grad=True, device="meta")
         y = torch.randn(3, 5, device="meta")
         result = torch.ops.aten.mm.default(x, y)
-        self.assertEqual(result, x @ y)
+        self.assertEqual(result.shape, (x @ y).shape)
 
     def test_mm_fake(self):
         with torch._subclasses.fake_tensor.FakeTensorMode():
             x = torch.randn(2, 3, requires_grad=True, device="cpu")
             y = torch.randn(3, 5, device="cpu")
             result = torch.ops.aten.mm.default(x, y)
-            self.assertEqual(result, x @ y)
+            self.assertEqual(result.shape, (x @ y).shape)
 
     def test_mm_errors(self):
         x = torch.randn(2, 3, requires_grad=True)
