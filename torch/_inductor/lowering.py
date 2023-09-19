@@ -4801,7 +4801,9 @@ try:
     @register_lowering(c10d_functional.all_gather_into_tensor)
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
-            ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
+            ir.AllGatherIntoTensor.create(
+                ir.ExternKernel.require_contiguous(shard), tag, ranks, group_size
+            )
         )
 
     @register_lowering(c10d_functional.reduce_scatter_tensor)
