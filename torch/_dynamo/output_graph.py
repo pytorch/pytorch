@@ -376,6 +376,8 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.BACKEND_MATCH))
+
     @property
     def root_tracer(self):
         return self.tracers[0]
@@ -608,7 +610,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
     def new_var(self, name="tmp"):
         existing = set(self.code_options["co_varnames"])
         for i in itertools.count():
-            var = f"___{name}_{i}"
+            var = f"{name}_{i}"
             if var not in existing:
                 self.code_options["co_varnames"] += (var,)
                 return var
@@ -684,15 +686,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(target, check_forward_hooks=True):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module forward/_pre hooks are only partially supported, and were detected in your model. "
-                    "In particular, if you do not change/remove hooks after calling .compile(), you can disregard this "
-                    "warning, and otherwise you may need to set torch._dynamo.config.skip_nnmodule_hook_guards=False "
-                    "to ensure recompiling after changing hooks."
-                    f"{nnmodule_doc_url_msg} ",
-                )
             if nnmodule_has_hooks(
                 target, check_backward_hooks=True, check_state_dict_hooks=True
             ):
@@ -877,6 +870,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
+            self.side_effects.codegen_hooks(pass1)
             self.side_effects.codegen_save_tempvars(pass1)
             pass1.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass1)
@@ -888,6 +882,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 graph_output_var,
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
+            self.side_effects.codegen_hooks(pass2)
             self.side_effects.codegen_save_tempvars(pass2)
             pass2.foreach(stack_values)
             self.side_effects.codegen_update_mutated(pass2)
@@ -997,7 +992,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
         graph_sizes_log.debug(
             "%s", LazyString(lambda: self.get_graph_sizes_log_str(name))
         )
-
         compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
@@ -1336,36 +1330,40 @@ class SubgraphTracer(fx.Tracer):
                 )
             if node_idx is not None:
                 meta = self._orig_gm_meta[node_idx]
-                for key in ("nn_module_stack", "source_fn", "stack_trace"):
-                    if key in meta:
-                        rv.node.meta[key] = meta[key]
-                return rv
+                if "stack_trace" in meta:
+                    rv.node.meta["stack_trace"] = meta["stack_trace"]
+                if "nn_module_stack" in meta and "source_fn" in meta:
+                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
+                    rv.node.meta["source_fn"] = meta["source_fn"]
 
-        nn_module_stack = tx.nn_module_stack
-        if nn_module_stack:
-            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+        if "nn_module_stack" not in rv.node.meta:
+            nn_module_stack = tx.nn_module_stack
+            if nn_module_stack:
+                rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = (rv.node.name, target)
-        elif kind == "call_module":
-            if self.parent is not None:
-                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
-            # For modules we store the class
-            rv.node.meta["source_fn"] = (
-                rv.node.name,
-                rv.node.meta["nn_module_stack"][target][1],
-            )
+        if "source_fn" not in rv.node.meta:
+            if kind in {"call_function", "call_method"}:
+                rv.node.meta["source_fn"] = (rv.node.name, target)
+            elif kind == "call_module":
+                if self.parent is not None:
+                    unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+                # For modules we store the class
+                rv.node.meta["source_fn"] = (
+                    rv.node.name,
+                    rv.node.meta["nn_module_stack"][target][1],
+                )
 
-        frame_summaries: List[traceback.FrameSummary] = []
-        while tx:
-            frame_summaries.append(tx.frame_summary())
-            tx = getattr(tx, "parent", None)
-        # Reverse the frame_summaries, such that the innermost frame is at the last
-        frame_summaries.reverse()
+        if "stack_trace" not in rv.node.meta:
+            frame_summaries: List[traceback.FrameSummary] = []
+            while tx:
+                frame_summaries.append(tx.frame_summary())
+                tx = getattr(tx, "parent", None)
+            # Reverse the frame_summaries, such that the innermost frame is at the last
+            frame_summaries.reverse()
 
-        # official from_list stub doesn't have new-style type
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = "".join(msgs)
+            # official from_list stub doesn't have new-style type
+            msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
+            rv.node.stack_trace = "".join(msgs)
 
         return rv
 

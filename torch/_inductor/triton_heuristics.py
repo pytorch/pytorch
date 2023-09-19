@@ -18,6 +18,7 @@ import torch
 
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.utils import dynamo_timed
+from torch._inductor import cuda_properties
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -157,6 +158,7 @@ class CachingAutotuner(KernelInterface):
                 str(self.meta.get("device", 0)),
             )
 
+        self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
@@ -170,10 +172,70 @@ class CachingAutotuner(KernelInterface):
         with self.lock:
             if self.launchers:
                 return
-            self.launchers = [
-                self._precompile_config(c, warm_cache_only_with_cc)
-                for c in self.configs
-            ]
+            self.launchers = []
+            compiled_binaries = []
+            for c in self.configs:
+                compiled_binary, launcher = self._precompile_config(
+                    c, warm_cache_only_with_cc
+                )
+                self.launchers.append(launcher)
+                compiled_binaries.append(compiled_binary)
+
+            seen_configs = set(self.configs)
+
+            device_prop = cuda_properties.get_device_properties(self.meta["device"])
+            if (
+                config.dynamic_scale_rblock
+                and self.heuristic_type == HeuristicType.REDUCTION
+                and self.size_hints is not None
+                # TODO not enable for H100 yet since we haven't got a chance to test this
+                # on H100. Will remove this check once we test on H100
+                and device_prop.major == 8
+            ):
+                for triton_config, compiled_binary in zip(
+                    self.configs, compiled_binaries
+                ):
+                    assert len(self.size_hints) == 2
+                    xblock = triton_config.kwargs["XBLOCK"]
+                    rblock = triton_config.kwargs["RBLOCK"]
+                    total_block = (self.size_hints[0] + xblock - 1) // xblock
+                    nreg = getattr(compiled_binary, "n_regs", None)
+                    if nreg is None:
+                        continue
+
+                    # each SM of A100 has 65536 32-bit registers. To maximize
+                    # the theoretical occupancy, we need run 2048 threads on each
+                    # SM. So each thread should use no more than 65536 / 2048
+                    # = 32 registers. In cases where occupancy matters, and each
+                    # thread uses too many registers, reduce RBLOCK to reduce
+                    # the register usage.
+                    # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
+                    # from PLBartForCausalLM, latency improve from
+                    # 7.795ms to 4.883ms.
+                    #
+                    # Note both A100 and H100 have 65536 32-bit registers per SM.
+                    if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
+                        continue
+                    max_blocks_per_sm = device_prop.max_threads_per_multi_processor // (
+                        32 * triton_config.num_warps
+                    )
+                    if (
+                        total_block
+                        <= max_blocks_per_sm * device_prop.multi_processor_count
+                    ):
+                        # <100% occupancy is fine
+                        continue
+                    # make sure rblock is not too small
+                    if rblock <= 64:
+                        continue
+                    new_config = copy.deepcopy(triton_config)
+                    new_config.kwargs["RBLOCK"] = rblock // 2
+                    if new_config in seen_configs:
+                        continue
+                    seen_configs.add(new_config)
+                    self.launchers.append(
+                        self._precompile_config(new_config, warm_cache_only_with_cc)[1]
+                    )
             self.configs = None
 
     def _precompile_config(self, cfg: Config, warm_cache_only_with_cc: Optional[int]):
@@ -200,14 +262,15 @@ class CachingAutotuner(KernelInterface):
 
         if warm_cache_only_with_cc:
             print("before compile 1", flush=True)
-            triton.compile(
-                self.fn,
-                warm_cache_only=True,
-                cc=warm_cache_only_with_cc,
-                **compile_meta,
+            return (
+                triton.compile(
+                    self.fn,
+                    warm_cache_only=True,
+                    cc=warm_cache_only_with_cc,
+                    **compile_meta,
+                ),
+                None,
             )
-            print("after compile 1", flush=True)
-            return
 
         # load binary to the correct device
         with torch.cuda.device(compile_meta["device"]):
@@ -269,7 +332,7 @@ class CachingAutotuner(KernelInterface):
             launcher.fn = self.fn
             launcher.bin = binary
 
-        return launcher
+        return binary, launcher
 
     def bench(self, launcher, *args, grid):
         """Measure the performance of a given launcher"""
@@ -357,6 +420,9 @@ class CachingAutotuner(KernelInterface):
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
+            "x_block": launcher.config.kwargs.get("XBLOCK", 1),
+            "y_block": launcher.config.kwargs.get("YBLOCK", None),
+            "z_block": launcher.config.kwargs.get("ZBLOCK", None),
             "num_warps": launcher.bin.num_warps,
             "shared_mem": launcher.bin.shared,
             "stream": stream,
@@ -383,7 +449,7 @@ class CachingAutotuner(KernelInterface):
 
         def benchmark_one_config(config):
             with self.lock:
-                launcher = self._precompile_config(config, None)
+                _, launcher = self._precompile_config(config, None)
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *cloned_args, **kwargs)
@@ -774,13 +840,13 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None, min_elements_per_thread=0) -> Config:
+def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None, min_elem_per_thread=0) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
 
-    min_elements_per_thread controls the minimum number of elements
+    min_elem_per_thread controls the minimum number of elements
     processed by each thread. It's always enforced.
     """
 
@@ -802,12 +868,13 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None, min_
         num_warps = conditional_product(x, r) // 128
     num_warps = next_power_of_2(min(max(num_warps, 2), 8))
 
-    # Increase x to satisfy min_elements_per_thread requirements.
-    # x = max(x, min_elements_per_thread)
-    # r = min(math.floor(_MAX_TENSOR_NUMEL / x), r)
+    # Increase x to satisfy min_elem_per_thread requirements.
+    # x = max(x, min_elem_per_thread)
+    x = max(x, min_elem_per_thread * _NUM_THREADS_PER_WARP * num_warps)
+    r = min(math.floor(_MAX_TENSOR_NUMEL / x), r)
     cfg = {"XBLOCK": x, "RBLOCK": r}
 
-    print(f"{cfg=}, {size_hints=}, {min_elements_per_thread=}")
+    print(f"{cfg=}, {size_hints=}, {min_elem_per_thread=}")
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -938,17 +1005,17 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elements_per_thread=0):
+def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elem_per_thread=0):
     """args to @triton.heuristics()"""
     assert meta is not None
     rnumel = size_hints[-1]
     if len(size_hints) == 2:
         contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), min_elements_per_thread=min_elements_per_thread
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), min_elem_per_thread=min_elem_per_thread
         )
-        outer_config = triton_config_reduction(size_hints, 128, 8, min_elements_per_thread=min_elements_per_thread)
+        outer_config = triton_config_reduction(size_hints, 128, 8, min_elem_per_thread=min_elem_per_thread)
         tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048), min_elements_per_thread=min_elements_per_thread
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048), min_elem_per_thread=min_elem_per_thread
         )
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
@@ -979,7 +1046,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_el
         if disable_pointwise_autotuning():
             return cached_autotune(
                 size_hints,
-                [triton_config_reduction(size_hints, 32, 128, min_elements_per_thread=min_elements_per_thread)],
+                [triton_config_reduction(size_hints, 32, 128, min_elem_per_thread=min_elem_per_thread)],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
@@ -990,12 +1057,12 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_el
                 contiguous_config,
                 outer_config,
                 tiny_config,
-                triton_config_reduction(size_hints, 64, 64, min_elements_per_thread=min_elements_per_thread),
-                triton_config_reduction(size_hints, 8, 512, min_elements_per_thread=min_elements_per_thread),
+                triton_config_reduction(size_hints, 64, 64, min_elem_per_thread=min_elem_per_thread),
+                triton_config_reduction(size_hints, 8, 512, min_elem_per_thread=min_elem_per_thread),
                 # halve the XBLOCK/RBLOCK compared to outer_config
                 # TODO: this may only be beneficial when each iteration of the reduciton
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8, min_elements_per_thread=min_elements_per_thread),
+                triton_config_reduction(size_hints, 64, 4, num_warps=8, min_elem_per_thread=min_elem_per_thread),
             ],
             meta=meta,
             filename=filename,
@@ -1004,11 +1071,11 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_el
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elements_per_thread=0):
+def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elem_per_thread=0):
     xnumel, rnumel = size_hints
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumel, min_elements_per_thread=min_elements_per_thread)
+        triton_config_reduction(size_hints, xblock, rnumel, min_elem_per_thread=min_elem_per_thread)
         for xblock in (1, 8, 32, 128)
         if rnumel * xblock <= 4096 and xblock <= xnumel
     ]
@@ -1021,7 +1088,7 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
     elif reduction_hint == ReductionHint.OUTER_TINY:
         configs = [
             triton_config_reduction(
-                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel, min_elements_per_thread=min_elements_per_thread
+                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel, min_elem_per_thread=min_elem_per_thread
             )
         ]
     for c in configs:

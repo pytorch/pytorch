@@ -11,7 +11,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, List
+from typing import Any, List, Optional
 from unittest.mock import patch
 
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 
 
 @functools.lru_cache(None)
-def has_dot():
+def has_dot() -> bool:
     try:
         subprocess.check_output(["which", "dot"], stderr=subprocess.PIPE)
         return True
@@ -48,10 +48,9 @@ def has_dot():
         return False
 
 
-def draw_buffers(nodes, print_graph=False, fname=None):
+def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
     """
     Draw a graph in fname.svg.
-    nodes is a list of SchedulerNode objects.
     """
     if not has_dot():
         log.warning("draw_buffers() requires `graphviz` package")
@@ -230,7 +229,7 @@ class DebugContext:
         return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
-    def create_debug_dir(folder_name):
+    def create_debug_dir(folder_name: str) -> Optional[str]:
         for n in DebugContext._counter:
             dirname = os.path.join(
                 get_debug_dir(),
@@ -240,6 +239,7 @@ class DebugContext:
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
                 return dirname
+        return None
 
     def __init__(self):
         self._prof = None
@@ -261,11 +261,12 @@ class DebugContext:
             )
             pass
 
-    def fopen(self, filename):
+    def fopen(self, filename: str):
         assert self._path
         return open(os.path.join(self._path, filename), "w")
 
-    def filename(self, suffix):
+    def filename(self, suffix: str):
+        assert self._path
         return os.path.join(self._path, suffix)
 
     def upload_tar(self):
@@ -306,7 +307,7 @@ class DebugContext:
             self._prof = cProfile.Profile()
             self._prof.enable()
 
-    def _setup_log_capture(self, filename, level):
+    def _setup_log_capture(self, filename: str, level: int):
         log = logging.getLogger("torch._inductor")
         fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
@@ -329,6 +330,7 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self):
+        assert self._prof
         self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
@@ -448,7 +450,7 @@ load_args_and_run_compile_fx_inner({path!r})
         print(message)
 
 
-def load_args_and_run_compile_fx_inner(path):
+def load_args_and_run_compile_fx_inner(path: str):
     from torch._inductor.compile_fx import compile_fx_inner
 
     with open(path, "rb") as f:
@@ -466,6 +468,6 @@ def load_args_and_run_compile_fx_inner(path):
             return x
 
     fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
-    with fake_mode, config.patch("save_args", False):
+    with fake_mode, config.patch("save_args", False):  # type: ignore[attr-defined]
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)

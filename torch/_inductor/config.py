@@ -73,6 +73,9 @@ batch_fusion = True
 # enable reordering pass
 reordering = True
 
+# Scale down RBLOCK for better occupancy
+dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
+
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
@@ -112,6 +115,9 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# If autotuning in subprocess, whether to use multiple devices
+autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
@@ -430,6 +436,9 @@ class aot_inductor:
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
+
+    # Wether to codegen abi compatible model.so
+    abi_compatible = is_fbcode()
 
 
 class cuda:

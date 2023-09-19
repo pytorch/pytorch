@@ -77,11 +77,16 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 
-def same_shape(a: ShapeType, b: ShapeType) -> bool:
+def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
     for x, y in zip(a, b):
+        if allow_rhs_unbacked:
+            # TODO: We should check that the symbols are consistent
+            # with each other
+            if isinstance(y, torch.SymInt):
+                continue
         if x != y:
             return False
 
@@ -90,7 +95,13 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
+def compare_tensor_meta(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    check_strides=False,
+    *,
+    allow_rhs_unbacked=False,
+):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -101,7 +112,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
+    if not same_shape(a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked):
         msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
