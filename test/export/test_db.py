@@ -33,7 +33,7 @@ class ExampleTests(TestCase):
             model,
             inputs.args,
             inputs.kwargs,
-            constraints=case.constraints,
+            options={"constraints": case.constraints},
         )
         exported_program.graph_module.print_readable()
 
@@ -63,7 +63,7 @@ class ExampleTests(TestCase):
                 model,
                 inputs.args,
                 inputs.kwargs,
-                constraints=case.constraints,
+                options={"constraints": case.constraints},
             )
 
     @parametrize(
@@ -86,7 +86,7 @@ class ExampleTests(TestCase):
             rewrite_case.model,
             inputs.args,
             inputs.kwargs,
-            constraints=rewrite_case.constraints,
+            options={"constraints": rewrite_case.constraints},
         )
 
 

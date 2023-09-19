@@ -74,7 +74,7 @@ class TestPasses(TestCase):
 
         x = torch.zeros(2, 2, 3)
 
-        ep = export(M(), (x,), constraints=[dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6])
+        ep = export(M(), (x,), options={"constraints": [dynamic_dim(x, 1) >= 2, dynamic_dim(x, 1) <= 6]})
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(2, 7, 3))
@@ -99,7 +99,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints)
+        ep = export(M(), (x, y), options={"constraints": constraints})
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
@@ -124,7 +124,7 @@ class TestPasses(TestCase):
             dynamic_dim(x, 0) >= 3
         ]
 
-        ep = export(M(), (x, y), constraints=constraints)
+        ep = export(M(), (x, y), options={"constraints": constraints})
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
@@ -155,7 +155,7 @@ class TestPasses(TestCase):
             dynamic_dim(y, 1) <= 6,
         ]
 
-        ep = export(M(), (x, y), constraints=constraints)
+        ep = export(M(), (x, y), options={"constraints": constraints})
 
         with self.assertRaisesRegex(RuntimeError, "Input arg0_1"):
             ep(torch.zeros(4, 7, 3), torch.ones(5, 5, 5))
@@ -253,7 +253,7 @@ class TestPasses(TestCase):
         x = torch.tensor([2, 1, 2, 3, 5, 0])
 
         mod = M()
-        ep = export(mod, (x,), constraints=[dynamic_dim(x, 0) >= 2])
+        ep = export(mod, (x,), options={"constraints": [dynamic_dim(x, 0) >= 2]})
 
         num_assert = count_call_function(ep.graph, torch.ops.aten._assert_async.msg)
         num_scalar_tensor = count_call_function(ep.graph, torch.ops.aten.scalar_tensor.default)
@@ -311,7 +311,7 @@ class TestPasses(TestCase):
         x = torch.rand(3, 4)
         y = torch.rand(3, 4)
         exported = torch._export.export(
-            m, (x, y), constraints=[dynamic_dim(x, 1) == dynamic_dim(y, 1)]
+            m, (x, y), options={"constraints": [dynamic_dim(x, 1) == dynamic_dim(y, 1)]}
         )
 
         x = torch.rand(3, 5)
@@ -341,9 +341,9 @@ class TestPasses(TestCase):
             exactly=True,
         ).run(gm.code)
 
-        # TODO(ycao): ExportedProgram._transform() forbids changes to number
+        # TODO(ycao): DynamoExportedProgram._transform() forbids changes to number
         # of inputs/outputs for now. When it supports that better, change this
-        # back to using ExportedProgram._transform()
+        # back to using DynamoExportedProgram._transform()
         gm = _FunctionalizeSideEffectfulOpsPass()(ep.graph_module).graph_module
 
         with self.assertRaisesRegex(

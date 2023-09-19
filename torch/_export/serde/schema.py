@@ -256,6 +256,10 @@ class GraphModule:
 
 @dataclass
 class ExportedProgram:
+    ...
+
+@dataclass
+class DynamoExportedProgram:
     graph_module: GraphModule
     opset_version: Dict[str, int]
     range_constraints: Dict[str, RangeConstraint]

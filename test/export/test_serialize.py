@@ -12,8 +12,8 @@ from torch._export.constraints import constrain_as_size
 from torch._export.db.case import ExportCase, normalize_inputs, SupportLevel
 from torch._export.db.examples import all_examples
 from torch._export.serde.serialize import (
-    ExportedProgramDeserializer,
-    ExportedProgramSerializer,
+    DynamoExportedProgramDeserializer,
+    DynamoExportedProgramSerializer,
     deserialize,
     serialize,
     SerializeError,
@@ -78,7 +78,7 @@ class TestSerialize(TestCase):
             ),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, _ = DynamoExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.native_layer_norm.default")
         # aten::native_layer_norm returns 3 tensnors
@@ -103,7 +103,7 @@ class TestSerialize(TestCase):
         input.requires_grad = True
         exported_module = export(MyModule(), (input,))
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, _ = DynamoExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.split.Tensor")
         self.assertEqual(len(node.outputs), 1)
@@ -146,7 +146,7 @@ class TestSerialize(TestCase):
             (torch.ones([512, 512], requires_grad=True),),
         )
 
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, _ = DynamoExportedProgramSerializer().serialize(exported_module)
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.var_mean.correction")
         self.assertEqual(len(node.outputs), 2)
@@ -170,7 +170,7 @@ class TestSerialize(TestCase):
 
         x, _ = torch.sort(torch.randn(3, 4))
         exported_module = export(f, (x,))
-        serialized, _ = ExportedProgramSerializer().serialize(exported_module)
+        serialized, _ = DynamoExportedProgramSerializer().serialize(exported_module)
 
         node = serialized.graph_module.graph.nodes[-1]
         self.assertEqual(node.target, "torch.ops.aten.searchsorted.Tensor")
@@ -187,7 +187,7 @@ class TestDeserialize(TestCase):
         """Export a graph, serialize it, deserialize it, and compare the results."""
         # TODO(angelayi): test better with some sort of wrapper
         constraints = [] if constraints is None else constraints
-        ep = export(fn, inputs, {}, constraints)
+        ep = export(fn, inputs, {}, options={"constraints": constraints})
         ep.graph.eliminate_dead_code()
 
         serialized_struct, state_dict = serialize(ep, opset_version={"aten": 0})
@@ -446,10 +446,10 @@ class TestSchemaVersioning(TestCase):
 
         ep = export(f, (torch.randn(1, 3),))
 
-        serialized_ep, serialized_state_dict = ExportedProgramSerializer().serialize(ep)
+        serialized_ep, serialized_state_dict = DynamoExportedProgramSerializer().serialize(ep)
         serialized_ep.schema_version = -1
         with self.assertRaisesRegex(SerializeError, r"Serialized schema version -1 does not match our current"):
-            ExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
+            DynamoExportedProgramDeserializer().deserialize(serialized_ep, serialized_state_dict)
 
 
 class TestOpVersioning(TestCase):
@@ -458,21 +458,21 @@ class TestOpVersioning(TestCase):
     def test_empty_model_opset_version_raises(self):
         compiler_opset_version = {"aten": 4}
         model_opset_version = None
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        deserializer = DynamoExportedProgramDeserializer(compiler_opset_version)
         with self.assertRaises(RuntimeError):
             deserializer._validate_model_opset_version(model_opset_version)
 
     def test_opset_mismatch_raises(self):
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        deserializer = DynamoExportedProgramDeserializer(compiler_opset_version)
         with self.assertRaises(NotImplementedError):
             deserializer._validate_model_opset_version(model_opset_version)
 
     def test_model_op_namespace_version_missing_from_deserializer_do_not_raises(self):
         compiler_opset_version = {"aten": 3}
         model_opset_version = {"aten": 3, "custom": 4}
-        deserializer = ExportedProgramDeserializer(compiler_opset_version)
+        deserializer = DynamoExportedProgramDeserializer(compiler_opset_version)
         with self.assertLogs(level='WARN') as log:
             deserializer._validate_model_opset_version(model_opset_version)
             self.assertIn("Compiler doesn't have a version table for op namespace", log.output[0])

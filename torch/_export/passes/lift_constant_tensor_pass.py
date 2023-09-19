@@ -1,9 +1,9 @@
 import torch
-from torch._export import ExportedProgram
+from torch._export import DynamoExportedProgram
 from torch._guards import detect_fake_mode
 
 
-def lift_constant_tensor_pass(ep: ExportedProgram) -> ExportedProgram:
+def lift_constant_tensor_pass(ep: DynamoExportedProgram) -> DynamoExportedProgram:
     if len([node for node in ep.graph.nodes if node.op == "placeholder"]) == 0:
         return ep
 

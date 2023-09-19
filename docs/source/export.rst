@@ -29,14 +29,14 @@ serialized.
 
     example_args = (torch.randn(10, 10), torch.randn(10, 10))
 
-    exported_program: torch.export.ExportedProgram = export(
-        f, args=example_args
+    exported_program: torch.export.DynamoExportedProgram = export(
+        f, f_args=example_args
     )
     print(exported_program)
 
 .. code-block::
 
-    ExportedProgram:
+    DynamoExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[10, 10], arg1_1: f32[10, 10]):
                 # code: a = torch.sin(x)
@@ -152,7 +152,7 @@ An Example
 
 The main entrypoint is through :func:`torch.export.export`, which takes a
 callable (:class:`torch.nn.Module`, function, or method) and sample inputs, and
-captures the computation graph into an :class:`torch.export.ExportedProgram`. An
+captures the computation graph into an :class:`torch.export.DynamoExportedProgram`. An
 example:
 
 ::
@@ -178,14 +178,14 @@ example:
     example_args = (torch.randn(1, 3, 256, 256),)
     example_kwargs = {"constant": torch.ones(1, 16, 256, 256)}
 
-    exported_program: torch.export.ExportedProgram = export(
-        M(), args=example_args, kwargs=example_kwargs
+    exported_program: torch.export.DynamoExportedProgram = export(
+        M(), f_args=example_args, f_kwargs=example_kwargs
     )
     print(exported_program)
 
 .. code-block::
 
-    ExportedProgram:
+    DynamoExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[16, 3, 3, 3], arg1_1: f32[16], arg2_1: f32[1, 3, 256, 256], arg3_1: f32[1, 16, 256, 256]):
 
@@ -222,7 +222,7 @@ example:
         Range constraints: {}
         Equality constraints: []
 
-Inspecting the ``ExportedProgram``, we can note the following:
+Inspecting the ``DynamoExportedProgram``, we can note the following:
 
 * The :class:`torch.fx.Graph` contains the computation graph of the original
   program, along with records of the original code for easy debugging.
@@ -284,14 +284,14 @@ run. Such dimensions must be marked dynamic using the
         dynamic_dim(example_args[0], 0) == dynamic_dim(example_args[1], 0),
     ]
 
-    exported_program: torch.export.ExportedProgram = export(
-      M(), args=example_args, constraints=constraints
+    exported_program: torch.export.DynamoExportedProgram = export(
+      M(), f_args=example_args, options={"constraints": constraints}
     )
     print(exported_program)
 
 .. code-block::
 
-    ExportedProgram:
+    DynamoExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[32, 64], arg1_1: f32[32], arg2_1: f32[64, 128], arg3_1: f32[64], arg4_1: f32[32], arg5_1: f32[s0, 64], arg6_1: f32[s0, 128]):
 
@@ -361,8 +361,8 @@ Some additional things to note:
 Serialization
 ^^^^^^^^^^^^^
 
-To save the ``ExportedProgram``, users can use the :func:`torch.export.save` and
-:func:`torch.export.load` APIs. A convention is to save the ``ExportedProgram``
+To save the ``DynamoExportedProgram``, users can use the :func:`torch.export.save` and
+:func:`torch.export.load` APIs. A convention is to save the ``DynamoExportedProgram``
 using a ``.pt2`` file extension.
 
 An example:
@@ -411,14 +411,14 @@ branch that is being taken with the given sample inputs. For example:
 
 .. code-block::
 
-    ExportedProgram:
+    DynamoExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[10, 2]):
                 add: f32[10, 2] = torch.ops.aten.add.Tensor(arg0_1, 1);
                 return (add,)
 
 The conditional of (``x.shape[0] > 5``) does not appear in the
-``ExportedProgram`` because the example inputs have the static
+``DynamoExportedProgram`` because the example inputs have the static
 shape of (10, 2). Since ``torch.export`` specializes on the inputs' static
 shapes, the else branch (``x - 1``) will never be reached. To preserve the dynamic
 branching behavior based on the shape of a tensor in the traced graph,
@@ -452,7 +452,7 @@ For example:
 
 .. code-block::
 
-    ExportedProgram:
+    DynamoExportedProgram:
         class GraphModule(torch.nn.Module):
             def forward(self, arg0_1: f32[2, 2], arg1_1, arg2_1):
                 add: f32[2, 2] = torch.ops.aten.add.Tensor(arg0_1, 1);
@@ -556,7 +556,7 @@ API Reference
 .. autofunction:: load
 .. autofunction:: register_dataclass
 .. autoclass:: Constraint
-.. autoclass:: ExportedProgram
+.. autoclass:: DynamoExportedProgram
 
     .. automethod:: module
     .. automethod:: buffers
