@@ -116,12 +116,12 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   }
 
   std::unique_ptr<AnyModulePlaceholder> copy() const override {
-    return std::make_unique<AnyModuleHolder>(*this);
+    return torch::make_unique<AnyModuleHolder>(*this);
   }
 
   std::unique_ptr<AnyModulePlaceholder> clone_module(
       optional<Device> device) const override {
-    return std::make_unique<AnyModuleHolder>(
+    return torch::make_unique<AnyModuleHolder>(
         std::dynamic_pointer_cast<ModuleType>(module->clone(device)));
   }
 
