@@ -284,7 +284,8 @@ TCPStore::TCPStore(
 TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},
-      numWorkers_{opts.numWorkers} {
+      numWorkers_{opts.numWorkers},
+      usingLibUv_{opts.useLibUV} {
   if (opts.useLibUV) {
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),

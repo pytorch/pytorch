@@ -3178,6 +3178,16 @@ class CommonTemplate:
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
 
+    def test_masked_scatter(self):
+        def fn(value, mask, source):
+            return torch.masked_scatter(value, mask, source)
+
+        value = make_tensor(10, 10, dtype=torch.float32, device="cpu")
+        mask = make_tensor(10, 10, dtype=torch.bool, device="cpu")
+        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device="cpu")
+
+        self.common(fn, (value, mask, source))
+
     def test_fill1(self):
         def fn(x):
             tmp = torch.ones_like(x)

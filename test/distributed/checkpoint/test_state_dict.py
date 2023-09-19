@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import copy
-import itertools
 import sys
 from itertools import chain
 from typing import Any, Callable, Dict
@@ -13,7 +12,6 @@ from torch.distributed._composable import fully_shard, replicate
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
-    _init_optim_state,
     DistributedStateDictOptions,
     load_state_dict,
     patch_model_state_dict,
@@ -33,7 +31,7 @@ from torch.testing._internal.common_dist_composable import (
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN
 
 
 if not dist.is_available():
@@ -81,7 +79,7 @@ class TestStateDict(FSDPTest):
                 self.assertIsNotNone(dist_param)
                 self._compare_tensor(param, dist_param)
             elif dist_param is None:
-                self.assertTrue(param.requires_grad == False)
+                self.assertFalse(param.requires_grad)
 
     def _verify_osd(
         self,
