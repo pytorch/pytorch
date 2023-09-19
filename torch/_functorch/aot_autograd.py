@@ -10,6 +10,7 @@ from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from functorch import make_fx
 
@@ -800,6 +801,21 @@ def from_fun(t):
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)
+
+def is_fun(t):
+    if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
+        # See Note [Functionalization always runs last]
+        # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
+        # goes at the bottom.
+        # recurse here, so we can support nested wrapper subclasses
+        t_attrs, _ = t.__tensor_flatten__()
+        t_inners = [getattr(t, attr) for attr in t_attrs]
+        any_fun = any(is_fun(x) for x in t_inners)
+        all_fun = all(is_fun(x) for x in t_inners)
+        assert any_fun == all_fun
+        return any_fun
+
+    return isinstance(t, FunctionalTensor)
 
 # t here is either
 # (1) A FunctionalTensor(_to_functional_tensor(FakeTensor))
@@ -1592,7 +1608,7 @@ def create_functionalized_fn(
             for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args)):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                assert isinstance(inpt_f, FunctionalTensor)
+                assert is_fun(inpt_f)
                 inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutates_data and not meta.input_info[i].mutates_metadata:
                     # We found an input that had a (data-only) mutation.
