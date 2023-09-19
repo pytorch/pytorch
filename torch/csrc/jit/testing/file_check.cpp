@@ -233,7 +233,7 @@ struct FileCheckImpl {
         auto count_view = source->text_str()
                               .substr(end_check_string, end - end_check_string)
                               .str();
-        count = std::stoll(std::string(count_view.begin(), count_view.end()));
+        count = c10::stoll(std::string(count_view.begin(), count_view.end()));
         end_check_string = end + 2; // add ':' and the space
       }
       auto check = Check(
