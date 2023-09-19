@@ -70,12 +70,12 @@ AOTInductorError AOTInductorModelContainerRun(
 
   std::vector<AtenTensorHandle> input_raw_handles(
       input_handles, input_handles + num_inputs);
-  auto input_raii_handles =
+  auto input_unique_handles =
       torch::aot_inductor::steal_vector_of_raw_handles(input_raw_handles);
 
   std::vector<AtenTensorHandle> output_raw_handles(
       output_handles, output_handles + num_outputs);
-  auto output_raii_handles =
+  auto output_unique_handles =
       torch::aot_inductor::steal_vector_of_raw_handles(output_raw_handles);
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
@@ -83,8 +83,8 @@ AOTInductorError AOTInductorModelContainerRun(
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     std::vector<std::vector<int64_t>>* shapes;
     container->run(
-        input_raii_handles,
-        output_raii_handles,
+        input_unique_handles,
+        output_unique_handles,
         &shapes,
         stream,
         proxy_executor_handle);

@@ -95,14 +95,14 @@ class SharedAtenTensorHandle {
     handle_.reset();
   }
 
-  void reset() {
-    handle_.reset();
-  }
-
   // Return a raw AtenTensorHandle to be used by aoti_torch functions
   // Note: this function does NOT transfer the ownership of the handle
   operator AtenTensorHandle() const {
     return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
   }
 
  private:
