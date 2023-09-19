@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     np = None
 
 import torch._C
+import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
@@ -723,17 +724,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     else:
                         return False
 
-                # NB: OK to pass torch.tensor(tensor), this will trace fine
-                # TODO: But torch.tensor(unspec) would not trace fine.  Not
-                # handled right now.
                 data_arg = None
                 if args:
                     data_arg = args[0]
                 elif "data" in kwargs:
                     data_arg = kwargs["data"]
 
-                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
-                    unimplemented("torch.tensor call with list of unspec")
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                if not isinstance(data_arg, TensorVariable) and check_any_unspec(
+                    data_arg
+                ):
+                    # This is slower and less canonical, so only use it if we
+                    # have to
+                    fn_ = torch._refs.tensor
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
