@@ -60,7 +60,6 @@ TESTED_OPS: frozenset[str] = frozenset(
         "addcmul",
         "addmm",
         "addmv",
-        "addr",
         "all",
         "allclose",
         "amax",
@@ -79,7 +78,6 @@ TESTED_OPS: frozenset[str] = frozenset(
         "atleast_2d",
         "atleast_3d",
         "baddbmm",
-        "bfloat16",
         "bitwise_and",
         "bitwise_left_shift",
         "bitwise_not",
@@ -374,17 +372,6 @@ COMPLEX_TESTED_OPS = frozenset(
 #     2b. If a test is not failing consistently, use skip.
 EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
-        "add", dtypes=onnx_test_common.BOOL_TYPES,
-        reason=onnx_test_common.reason_onnx_does_not_support("Add")
-    ),
-    xfail(
-        "add",
-        dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8 have type issue."
-        ),
-    ),
-    xfail(
         "addmm", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
@@ -400,11 +387,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     xfail(
         "amin", dtypes=(torch.int16, *onnx_test_common.BOOL_TYPES),
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
-    ),
-    xfail(
-        "arange",
-        dtypes=(torch.uint8,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
     ),
     xfail(
         "arange",
@@ -438,28 +420,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         variant_name="partial_views",
         reason="ONNX doesn't have partial view for tensor; [PostInline][ORT] segfaults",
     ),
-    xfail(
-        "baddbmm",
-        dtypes=(
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-        ),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Matmul", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
-        "bmm",
-        dtypes=(
-            torch.uint8,
-            torch.int8,
-            torch.int16,
-        ),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Matmul", "uint8, int8, int16"
-        ),
-    ),
     skip(
         "ceil", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Ceil", "bool and int")
@@ -476,29 +436,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
-        "clamp",
-        dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Max", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
         "clamp_max", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("Clamp_max", "bool")
-    ),
-    xfail(
-        "clamp_max",
-        dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Max", "uint8, int8, int16"
-        ),
-    ),
-    xfail(
-        "clamp_min",
-        dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support(
-            "Max", "uint8, int8, int16"
-        ),
     ),
     xfail(
         "clamp_min", dtypes=onnx_test_common.BOOL_TYPES,
@@ -512,21 +451,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
-        "cumsum", dtypes=onnx_test_common.BOOL_TYPES + (torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool, uint8, int8, int16")
+        "cumsum", dtypes=onnx_test_common.BOOL_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Cumsum", "bool")
     ),
     xfail(
         "cross",
         reason=onnx_test_common.reason_onnx_script_does_not_support("linalg_cross"),
-    ),
-    xfail(
-        "dot", dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_does_not_support("MatMul", "uint8, int8, int16")
-    ),
-    xfail(
-        "eq",
-        dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Equal", "uint8, int8, int16"),
     ),
     xfail(
         "equal",
@@ -541,11 +471,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "index_put",
         dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_script_does_not_support("index_put", "bool"),
-    ),
-    xfail(
-        "index_put",
-        dtypes=(torch.uint8, torch.int8, torch.int16,),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("Add", "int8, int16"),
     ),
     xfail(
         "nn.functional.adaptive_avg_pool2d",
@@ -639,11 +564,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason="ONNX doesn't support reduce='mean' option",
     ),
     xfail(
-        "square",
-        dtypes=(torch.int8, torch.uint8, torch.int16),
-        reason=onnx_test_common.reason_onnx_runtime_does_not_support("Pow", "int8, uint8, int16"),
-    ),
-    xfail(
         "stft",
         reason=onnx_test_common.reason_dynamo_does_not_support("aten._fft_r2c.default"),
     ),
@@ -655,14 +575,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
 # fmt: on
 
 SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
-    xfail(
-        "addmm",  # xfail can't only use dtypes to catch all cases
-        matcher=lambda sample: sample.input.dtype
-        in (torch.uint8, torch.int8, torch.int16),
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "Add", "int8, int16, uint8"
-        ),
-    ),
     skip(
         "amax",
         matcher=lambda sample: len(sample.input.shape) == 0,
