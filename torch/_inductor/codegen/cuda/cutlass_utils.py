@@ -46,8 +46,10 @@ import fsspec
 
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
-    # ... [rest of the comments]
-
+    # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
+    # This is a temporary hack to avoid CUTLASS module naming conflicts.
+    # TODO(ipiszy): remove this hack when CUTLASS solves Python scripts packaging structure issues.
+    
     cutlass_py_full_path = join_paths(inductor_cuda_config.cutlass_dir, "tools/library/scripts")
     tmp_cutlass_py_full_path = join_paths(cache_dir(), "torch_cutlass_script")
 
