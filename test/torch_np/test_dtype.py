@@ -5,11 +5,7 @@ import pytest
 
 import torch._numpy as tnp
 
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
-)
-
+from torch.testing._internal.common_utils import run_tests
 
 
 dtype_names = [

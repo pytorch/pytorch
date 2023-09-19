@@ -85,6 +85,7 @@ examples = {
     "True + uint8(2)": (uint8(3), unchanged),
 }
 
+
 @pytest.mark.skipif(not HAVE_NUMPY, reason="NumPy not found")
 class TestNEP50Table(TestCase):
     @parametrize("example", examples)
@@ -149,12 +150,9 @@ corners = {
 }
 
 
-
 @pytest.mark.skipif(not HAVE_NUMPY, reason="NumPy not found")
 class TestCompareToNumpy(TestCase):
-    @parametrize(
-        "scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes)
-    )
+    @parametrize("scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes))
     def test_direct_compare(self, scalar, array, dtype):
         # compare to NumPy w/ NEP 50.
         try:
@@ -177,7 +175,6 @@ class TestCompareToNumpy(TestCase):
 
         finally:
             _np._set_promotion_state(state)
-
 
     @parametrize("name", tnp._ufuncs._binary)
     @parametrize("scalar, array", itertools.product(weaks, non_weaks))

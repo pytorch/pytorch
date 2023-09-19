@@ -414,7 +414,7 @@ class TestArgmax(TestCase):
         #                      "invalid value encountered in reduce")
         if np.asarray(arr).dtype.kind in "c":
             pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
-            from unittest import 
+            from unittest import
 
         val = np.max(arr)
 

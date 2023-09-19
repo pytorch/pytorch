@@ -17,8 +17,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TestCase,
     subtest,
+    TestCase,
 )
 
 
@@ -30,7 +30,6 @@ def control_stream(use_numpy=False):
         yield
     finally:
         config.use_numpy_random_stream = oldstate
-
 
 
 class TestScalarReturn(TestCase):

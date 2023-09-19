@@ -40,7 +40,7 @@ class TestArange(TestCase):
         assert_raises(TypeError, np.arange, step=3)
         assert_raises(TypeError, np.arange, dtype="int64")
 
-    @xfail  #(reason="XXX: arange(start=0, stop, step=1)")
+    @xfail  # (reason="XXX: arange(start=0, stop, step=1)")
     def test_require_range_2(self):
         assert_raises(TypeError, np.arange, start=4)
 
@@ -54,7 +54,7 @@ class TestArange(TestCase):
         assert len(keyword_start_stop) == 6
         assert_array_equal(keyword_stop, keyword_zerotostop)
 
-    @xfail #(reason="XXX: arange(..., dtype=bool)")
+    @xfail  # (reason="XXX: arange(..., dtype=bool)")
     def test_arange_booleans(self):
         # Arange makes some sense for booleans and works up to length 2.
         # But it is weird since `arange(2, 4, dtype=bool)` works.

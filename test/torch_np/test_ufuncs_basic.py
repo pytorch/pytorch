@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
-    subtest,
 )
 
 
