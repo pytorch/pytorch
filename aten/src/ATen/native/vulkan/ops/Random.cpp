@@ -80,9 +80,7 @@ Tensor& normal_(
       self.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
 
-  TORCH_CHECK(
-      std >= 0,
-      "Vulkan: Standard deviation (std) can be negative.");
+  TORCH_CHECK(std >= 0, "Vulkan: Standard deviation (std) can be negative.");
 
   api::Context* const context = api::context();
 
