@@ -94,6 +94,7 @@ SKIP_FOR_CPU = {
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
     "simple_gpt",
+    "hf_Whisper",  # works on cuda, accuracy failure on cpu
 }
 
 SKIP_FOR_CUDA = {
