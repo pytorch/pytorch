@@ -2063,7 +2063,18 @@ def _device_put_meta(
 
 
 def _device_put_aten(a: Tensor, device: Union[str, torch.device]) -> Tensor:
-    return a.to(device)
+    # Make sure that `.to()` doesn't call back into device_put
+    # This can happen because primtorch registered a meta kernel
+    # to `aten._to_copy()`, which calls back into device_put.
+    ctx: Any = contextlib.nullcontext
+    if (
+        device == "meta"
+        or (isinstance(device, torch.device) and device.type == "meta")
+        or a.device == "meta"
+    ):
+        ctx = torch._dispatch.python.no_python_dispatcher
+    with ctx():
+        return a.to(device)
 
 
 _device_put_doc = """

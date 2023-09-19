@@ -89,11 +89,12 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
-    if torch.is_grad_enabled() or not is_cpu:
+    if torch.is_grad_enabled():
         return gm
-    if config.freezing:
-        gm = remove_identity(gm)
-        gm = fuse_conv_bn(gm)
+    if not is_cpu:
+        return gm
+    gm = remove_identity(gm)
+    gm = fuse_conv_bn(gm)
     return gm
 
 
