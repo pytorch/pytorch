@@ -488,16 +488,15 @@ class TensorVariable(VariableTracker):
             if not np:
                 unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
-            # TODO: support force
-            if "force" in kwargs and kwargs["force"].as_python_constant():
-                unimplemented(f"Tensor.numpy(force={kwargs['force']})")
             proxy = tx.output.create_proxy(
-                "call_function",
-                torch.detach,
-                *proxy_args_kwargs([self], {}),
+                "call_method", "detach", *proxy_args_kwargs([self], {})
             )
+            if "force" in kwargs and kwargs["force"].as_python_constant():
+                # TODO Add resolve_conj and resolve_neg once we support complex tensors
+                proxy = tx.output.create_proxy(
+                    "call_method", "cpu", *proxy_args_kwargs([self], {})
+                )
             return NumpyNdarrayVariable.create(tx, proxy, **options)
-
         elif name == "tolist":
             from .builder import SourcelessBuilder
 
