@@ -31,6 +31,7 @@ def setup_torchbench_cwd():
         "../torchbenchmark",
         "../torchbench",
         "../benchmark",
+        "../../torchbenchmark",
         "../../../torchbenchmark",
         "../../torchbench",
         "../../benchmark",
