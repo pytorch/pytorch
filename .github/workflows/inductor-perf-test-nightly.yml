@@ -51,16 +51,11 @@ on:
         required: false
         type: boolean
         default: false
-      nvidia_a100:
-        description: Run test on Nvidia A100 GPU?
+      devices:
+        description: Comma separated list of devices
         required: false
-        type: boolean
-        default: true
-      nvidia_t4:
-        description: Run test on Nvidia T4 GPU?
-        required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'nvidia_a100,nvidia_t4'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -70,7 +65,7 @@ jobs:
   inductor-perf-test-on-a100-nvidia-gpu:
     name: inductor-perf-test-on-a100-nvidia-gpu
     uses: ./.github/workflows/inductor-a100-perf-test.yml
-    if: ${{ inputs.nvidia_a100 == true }}
+    if: contains(inputs.devices, 'nvidia_a100')
     with:
       training: ${{ inputs.training }}
       inference: ${{ inputs.inference }}
@@ -85,7 +80,7 @@ jobs:
   inductor-perf-test-on-t4-nvidia-gpu:
     name: inductor-perf-test-on-t4-nvidia-gpu
     uses: ./.github/workflows/inductor-t4-perf-test.yml
-    if: ${{ inputs.nvidia_t4 == true }}
+    if: contains(inputs.devices, 'nvidia_t4')
     with:
       training: ${{ inputs.training }}
       inference: ${{ inputs.inference }}
@@ -96,5 +91,3 @@ jobs:
       freezing_cudagraphs: ${{ inputs.freezing_cudagraphs }}
       aotinductor: ${{ inputs.aotinductor }}
       maxautotune: ${{ inputs.maxautotune }}
-
-
