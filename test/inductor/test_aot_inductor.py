@@ -78,7 +78,7 @@ class AOTInductorModelRunner:
         cls, optimized, exported, example_inputs, output_tensors, output_spec
     ):
         flat_example_inputs = fx_pytree.tree_flatten_spec(
-            example_inputs, exported.call_spec.in_spec
+            (example_inputs, {}), exported.call_spec.in_spec
         )
         optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
@@ -260,14 +260,17 @@ class AOTInductorTestsTemplate:
             torch.randn(10285, 96, device="cuda"),
             torch.randn(96, 1, device="cuda"),
         )
-        self.check_model(
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(
             model,
             example_inputs,
+            expected,
             options={
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
+        self.assertTrue(same(actual, expected))
 
     def test_addmm(self):
         class Model(torch.nn.Module):
@@ -286,7 +289,9 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device="cuda")
         example_inputs = (a,)
-        self.check_model(model, example_inputs)
+        expected = model(*example_inputs)
+        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
+        self.assertTrue(same(actual, expected))
 
     def test_aliased_buffer_reuse(self):
         class Repro(torch.nn.Module):

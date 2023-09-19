@@ -3,7 +3,6 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/proxy_executor.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <cstdint>
@@ -26,7 +25,15 @@
 
 #endif
 
-using namespace torch::aot_inductor;
+namespace {
+at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
+  return reinterpret_cast<at::Tensor*>(handle);
+}
+
+AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
+  return reinterpret_cast<AtenTensorHandle>(tensor);
+}
+} // namespace
 
 int32_t aoti_torch_device_type_cpu() {
   return (int32_t)c10::DeviceType::CPU;
@@ -137,33 +144,6 @@ AOTITorchError aoti_torch_empty_strided(
         static_cast<c10::ScalarType>(dtype));
     at::Tensor* out_tensor =
         new at::Tensor(at::empty_strided(sizes, strides, options));
-    *ret = tensor_pointer_to_tensor_handle(out_tensor);
-  });
-}
-
-AOTITorchError aoti_torch_tensor_from_blob(
-    AtenTensorHandle* ret,
-    void* data,
-    int64_t ndim,
-    const int64_t* sizes_ptr,
-    const int64_t* strides_ptr,
-    int64_t storage_offset,
-    int32_t dtype,
-    int32_t device_type,
-    int32_t device_index) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::IntArrayRef sizes(sizes_ptr, ndim);
-    c10::IntArrayRef strides(strides_ptr, ndim);
-    c10::Device device{
-        static_cast<c10::DeviceType>(device_type),
-        static_cast<c10::DeviceIndex>(device_index)};
-    c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
-        static_cast<c10::ScalarType>(dtype));
-    at::Tensor* out_tensor = new at::Tensor(at::for_blob(data, sizes)
-                                                .strides(strides)
-                                                .storage_offset(storage_offset)
-                                                .options(options)
-                                                .make_tensor());
     *ret = tensor_pointer_to_tensor_handle(out_tensor);
   });
 }
