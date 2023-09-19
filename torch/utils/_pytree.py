@@ -263,7 +263,7 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     This is the inverse operation of `tree_flatten`.
     """
     if not isinstance(spec, TreeSpec):
-        raise ValueError(
+        raise TypeError(
             f'tree_unflatten(values, spec): Expected `spec` to be instance of '
             f'TreeSpec but got item of type {type(spec)}.')
     if len(values) != spec.num_leaves:
