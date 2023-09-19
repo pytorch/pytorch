@@ -290,8 +290,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
             #        = (W''x' + b')' = (Wx' + b')' = addmm(bias.T, weight, input).T
             if isinstance(input_B, cls) and input_B.transposed:
                 if input_B.compressed_tensor_cusparselt is None:
+                    assert input_B.sparse_tensor_cutlass is not None and input_B.meta_tensor_cutlass is not None
                     return torch._sparse_semi_structured_linear(
-                        input_A, input_B.values(), input_B.indices(), bias=bias
+                        input_A, input_B.sparse_tensor_cutlass, input_B.meta_tensor_cutlass, bias=bias
                     )
                 else:
                     return torch._cslt_sparse_mm(
@@ -304,8 +305,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
 
             if isinstance(input_A, cls) and not input_A.transposed:
                 if input_A.compressed_tensor_cusparselt is None:
+                    assert input_A.sparse_tensor_cutlass is not None and input_A.meta_tensor_cutlass is not None
                     return torch._sparse_semi_structured_linear(
-                        input_B.t(), input_A.values(), input_A.indices()
+                        input_B.t(), input_A.sparse_tensor_cutlass, input_A.meta_tensor_cutlass
                     ).t()
                 else:
                     return torch._cslt_sparse_mm(
@@ -313,8 +315,9 @@ class SparseSemiStructuredTensor(torch.Tensor):
                     )
             elif isinstance(input_B, cls) and input_B.transposed:
                 if input_B.compressed_tensor_cusparselt is None:
+                    assert input_B.sparse_tensor_cutlass is not None and input_B.meta_tensor_cutlass is not None
                     return torch._sparse_semi_structured_linear(
-                        input_A, input_B.values(), input_B.indices()
+                        input_A, input_B.sparse_tensor_cutlass, input_B.meta_tensor_cutlass
                     )
                 else:
                     return torch._cslt_sparse_mm(input_B.compressed_tensor_cusparselt, input_A.T, None).t()  # type: ignore[arg-type]
@@ -327,10 +330,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
             shape = input_tensor.shape
             if isinstance(weight, cls):
                 if weight.compressed_tensor_cusparselt is None:
+                    assert weight.sparse_tensor_cutlass is not None and weight.meta_tensor_cutlass is not None
                     return torch._sparse_semi_structured_linear(
                         input_tensor,
-                        weight.values(),
-                        weight.indices(),
+                        weight.sparse_tensor_cutlass,
+                        weight.meta_tensor_cutlass,
                         bias=bias
                     )
                 else:
@@ -343,7 +347,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         # handle values
         if func is torch.ops.aten.values.default:
             if args[0].compressed_tensor_cusparselt is None:
-                return args[0].sparse_tensor_cutlass
+                return args[0].sparse_tensor_cutlass.detach()
             else:
                 m, k = args[0].shape
                 num_kept_elements = m * k // 2
