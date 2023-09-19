@@ -101,7 +101,14 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
 // fill the tensor with NaN if it is floating point or complex type, or fill
 // with max value if it is integer type
 inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
-  if (tensor.is_floating_point() || tensor.is_complex()) {
+  constexpr auto FP8_NAN = 0b01111111;
+  if (tensor.scalar_type() == ScalarType::Float8_e5m2) {
+    at::Float8_e5m2 nan(FP8_NAN, at::Float8_e5m2::from_bits_t{});
+    tensor.fill_(nan);
+  } else if (tensor.scalar_type() == ScalarType::Float8_e4m3fn) {
+    at::Float8_e4m3fn nan(FP8_NAN, at::Float8_e4m3fn::from_bits_t{});
+    tensor.fill_(nan);
+  } else if (tensor.is_floating_point() || tensor.is_complex()) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       kBFloat16, kHalf, tensor.scalar_type(), "fill_empty_deterministic_", [&]() {
         tensor.fill_(std::numeric_limits<scalar_t>::quiet_NaN());
