@@ -21,10 +21,22 @@ from torch.testing._internal.optests import (
 )
 
 
+def is_abstract(tensor: torch.Tensor) -> bool:
+    if tensor.is_meta():
+        return True
+    if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
+        return True
+    return False
+
+
 def safe_schema_check(
     op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Any:
     args, kwargs = deepcopy_tensors((args, kwargs))
+    # SchemaCheckMode will poke around at data values to determine if tensors
+    # were mutated or not. So we avoid SchemaCheckMode if any args don't have data.
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
     with SchemaCheckMode():
         result = op(*args, **kwargs)
         return result
