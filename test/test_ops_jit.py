@@ -7,16 +7,13 @@ import torch
 
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import \
-    (run_tests, IS_SANDCASTLE, clone_input_helper, first_sample)
+    (run_tests, IS_SANDCASTLE, clone_input_helper, first_sample, TestCase)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops, OpDTypes
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining, is_lambda
 
-
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -297,4 +294,5 @@ class TestJit(JitCommonTestCase):
 instantiate_device_type_tests(TestJit, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()

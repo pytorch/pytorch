@@ -257,8 +257,6 @@ class TestInductorDynamic(TestCase):
         test(div)
 
     @onlyCPU
-    @unittest.expectedFailure
-    # Ref: https://github.com/pytorch/pytorch/issues/108159
     def test_sub_constant_folding(self, device):
         def sub(x):
             return x - torch.zeros(3)

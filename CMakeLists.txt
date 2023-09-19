@@ -58,6 +58,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_LINK_WHAT_YOU_USE TRUE)
 
 # One variable that determines whether the current cmake process is being run
 # with the main Caffe2 library. This is useful for building modules - if
@@ -822,6 +823,8 @@ if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.8.0
 endif()
 
 # ---[ Build flags
+# Re-include to override append_cxx_flag_if_supported from third_party/FBGEMM
+include(cmake/public/utils.cmake)
 if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
   # Eigen fails to build with some versions, so convert this to a warning

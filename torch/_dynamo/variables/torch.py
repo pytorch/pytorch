@@ -86,7 +86,13 @@ constant_fold_functions = [
 
 
 if torch.distributed.is_available():
-    constant_fold_functions.append(torch.distributed.is_initialized)
+    constant_fold_functions.extend(
+        [
+            torch.distributed.is_initialized,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -756,7 +762,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 elif isinstance(tensor_variable, TensorVariable):
                     assert isinstance(kwargs["out"], TensorVariable)
                     if (
-                        kwargs["out"] in tx.output.graphargs
+                        kwargs["out"].source
+                        and kwargs["out"] in tx.output.graphargs
                         and kwargs["out"].size != tensor_variable.size
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
