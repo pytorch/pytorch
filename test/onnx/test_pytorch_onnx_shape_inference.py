@@ -27,7 +27,7 @@ def as_graphcontext(graph: torch.Graph) -> jit_utils.GraphContext:
     return jit_utils.GraphContext(
         graph=graph,
         block=graph.block(),
-        opset=_constants.ONNX_MAX_OPSET,
+        opset=_constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET,
         original_node=None,  # type: ignore[arg-type]
         params_dict={},
         env={},
@@ -40,7 +40,7 @@ def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
 
 class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
     def setUp(self):
-        self.opset_version = _constants.ONNX_MAX_OPSET
+        self.opset_version = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
         symbolic_helper._set_onnx_shape_inference(True)
         symbolic_helper._set_opset_version(self.opset_version)
 
@@ -355,10 +355,10 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         utils._add_output_to_block(if_context.block, block1_output)
         utils._add_output_to_block(else_context.block, block2_output)
         if_output = torch._C._jit_pass_fixup_onnx_controlflow_node(
-            new_node, _constants.ONNX_MAX_OPSET
+            new_node, _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
         )[0]
         torch._C._jit_pass_onnx_node_shape_type_inference(
-            new_node, {}, _constants.ONNX_MAX_OPSET
+            new_node, {}, _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
         )
 
         # Exporter will add "If" instead of raw "Squeeze" if it does not know
@@ -371,7 +371,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
 class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
-        self.opset_version = _constants.ONNX_MAX_OPSET
+        self.opset_version = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 
     def test_setType_maintains_output_shape_for_single_custom_op(self):
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)

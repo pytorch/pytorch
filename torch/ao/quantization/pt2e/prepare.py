@@ -112,7 +112,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                         break
 
             assert arg_as_input_act_obs_or_fq is not None
-            obs_or_fq_map[(arg, node)] = arg_as_input_act_obs_or_fq
             if existing_obs_node is None:
                 new_obs_node = _insert_obs_or_fq(
                     arg, arg_as_input_act_obs_or_fq, model, named_modules, model.graph)
@@ -120,6 +119,17 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 new_arg = new_obs_node
             else:
                 new_arg = existing_obs_node
+            # When quantizing two layers with different configs we can have
+            # conv2d (int8) -> avgpool(uint8)
+            # In this case observer insertion for avgpool will come here but the input
+            # to avgpool will be output observer of conv2d
+            # Now the obs map that we update must correspond to the original input of
+            # avgpool and not the output obs of conv2d
+            # This is because when referring to the edge, quantizer would refer to
+            # original input and not the observed one.
+            while _is_activation_post_process_node(arg, named_modules):
+                arg = arg.args[0]  # type: ignore[assignment]
+            obs_or_fq_map[(arg, node)] = arg_as_input_act_obs_or_fq
 
     return new_arg
 
