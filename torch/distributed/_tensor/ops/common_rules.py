@@ -3,10 +3,14 @@ from typing import cast, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
+    OpSchema,
+    OutputSharding,
+)
 from torch.distributed._tensor.ops.utils import prod
-from torch.distributed._tensor.placement_types import DTensorSpec
-from torch.fx.passes.shape_prop import TensorMetadata
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
 
 def _replace_char_in_str(string: str, new_char: str, idx: int) -> str:
@@ -31,7 +35,7 @@ def _gen_reshard_suggestions(
                 tensor_meta=input_spec.tensor_meta,
             )
         )
-    suggested_schema = OpSchema(op_schema.func_schema, tuple(suggested_arg_specs), {})
+    suggested_schema = OpSchema(op_schema.op, tuple(suggested_arg_specs), {})
     suggested_schema._inplace_rewrap_schema_suggestion(op_schema)
     return OutputSharding(
         None,
@@ -208,14 +212,10 @@ def einop_rule(
     # to pass in the shape here. We should remove this once sharding decomp works
     # for ops like addmm
     assert input_specs[0].tensor_meta is not None
-    tensor_meta = TensorMetadata(
+    tensor_meta = TensorMeta(
         torch.Size(output_shape),
-        input_specs[0].tensor_meta.dtype,
-        input_specs[0].tensor_meta.requires_grad,
         input_specs[0].tensor_meta.stride,
-        input_specs[0].tensor_meta.memory_format,
-        input_specs[0].tensor_meta.is_quantized,
-        input_specs[0].tensor_meta.qparams,
+        input_specs[0].tensor_meta.dtype,
     )
     return OutputSharding(
         DTensorSpec.from_dim_map(
@@ -270,11 +270,11 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
     fmt = f"{','.join(p for p in dimchars)}->{out_dimchars}"
 
     enforce_sharding: Dict[str, int] = {}
-    if op_schema.is_inplace:
+    if _is_inplace_op(op_schema.op):
         # inplace op should keep the input sharding it writes to
         for out_dimchar, mesh_dim in zip(out_dimchars, input_specs[0].dim_map):
             enforce_sharding[out_dimchar] = mesh_dim
-    elif op_schema.is_out_variant:
+    elif _is_out_variant_op(op_schema.op):
         out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
         for out_dimchar, mesh_dim in zip(out_dimchars, out_spec.dim_map):
             enforce_sharding[out_dimchar] = mesh_dim
@@ -333,7 +333,7 @@ def reduction_rule(
             no_partial_spec = DTensorSpec.from_dim_map(
                 input_spec.mesh, reshard_dim_map, [], tensor_meta=input_spec.tensor_meta
             )
-            schema_suggestion = OpSchema(op_schema.func_schema, (no_partial_spec,), {})
+            schema_suggestion = OpSchema(op_schema.op, (no_partial_spec,), {})
             schema_suggestion._inplace_rewrap_schema_suggestion(op_schema)
             return OutputSharding(
                 output_spec=None, schema_suggestions=[schema_suggestion]
@@ -354,7 +354,7 @@ def reduction_rule(
     fmt = f"{input_chars}->{out_dimchars}"
 
     enforce_sharding: Dict[str, int] = {}
-    if op_schema.is_out_variant:
+    if _is_out_variant_op(op_schema.op):
         out_spec = cast(DTensorSpec, op_schema.kwargs_schema["out"])
         for out_dimchar, mesh_dim in zip(out_dimchars, out_spec.dim_map):
             enforce_sharding[out_dimchar] = mesh_dim
