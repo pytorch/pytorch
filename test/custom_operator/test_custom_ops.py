@@ -29,7 +29,7 @@ class TestCustomOperators(TestCase):
 
         self.assertExpectedInline("""\
 def forward(self, arg0_1):
-    nonzero = torch.ops.aten.nonzero.default(arg0_1);  arg0_1 = None
+    nonzero = torch.ops.custom.nonzero.default(arg0_1);  arg0_1 = None
     return nonzero
 """.strip(), gm.code.strip())
 
