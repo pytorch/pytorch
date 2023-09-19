@@ -28,10 +28,6 @@ def efficient_conv_bn_eval(
     """
 
     assert bn.running_var is not None
-    # To ensure the numerical stability, we use fp32 for this Conv-BN op.
-    # This optimization reduces flops and memory footprint, which can cover
-    # the overhead of using fp32.
-    dtype = torch.float32
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias
@@ -52,23 +48,23 @@ def efficient_conv_bn_eval(
         bn_bias = torch.zeros_like(bn.running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
-    weight_coeff = torch.rsqrt(bn.running_var.to(dtype=dtype) + bn.eps).reshape(
+    weight_coeff = torch.rsqrt(bn.running_var + bn.eps).reshape(
         [-1] + [1] * (conv.weight.ndim - 1)
     )
     # shape of [C_out, 1, 1, 1] in Conv2d
-    coefff_on_the_fly = bn_weight.view_as(weight_coeff).to(dtype=dtype) * weight_coeff
+    coefff_on_the_fly = bn_weight.view_as(weight_coeff) * weight_coeff
 
     # shape of [C_out, C_in, k, k] in Conv2d
-    weight_on_the_fly = weight_on_the_fly.to(dtype=dtype) * coefff_on_the_fly
+    weight_on_the_fly = weight_on_the_fly * coefff_on_the_fly
     # shape of [C_out] in Conv2d
-    bias_on_the_fly = bn_bias.to(dtype=dtype) + coefff_on_the_fly.flatten() * (
-        bias_on_the_fly.to(dtype=dtype) - bn.running_mean.to(dtype=dtype)
+    bias_on_the_fly = bn_bias + coefff_on_the_fly.flatten() * (
+        bias_on_the_fly - bn.running_mean
     )
 
     # calculating conv in fp32, and convert the output to the dtype of input
-    input = x.to(dtype=dtype)
+    input = x
     output = conv._conv_forward(input, weight_on_the_fly, bias_on_the_fly)
-    return output.to(dtype=x.dtype)
+    return output
 
 
 @register_graph_pattern(
