@@ -273,6 +273,13 @@ public:
     const auto o2 = vop(hi);
     return cvt_from_fp32<T>(o1, o2);
   }
+  Vectorized<T> isnan() const {
+    __m256 lo, hi;
+    cvt_to_fp32<T>(values, lo, hi);
+    lo = _mm256_cmp_ps(lo, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+    hi = _mm256_cmp_ps(hi, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+    return merge_compare_result(lo, hi);
+  }
   Vectorized<T> abs() const {
     return _mm256_andnot_si256(_mm256_set1_epi16(0x8000), values);
   }

@@ -3,6 +3,7 @@
 #include <ATen/core/function.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
@@ -76,7 +77,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   Function& setSchema(FunctionSchema schema) override {
-    schema_ = std::make_unique<FunctionSchema>(std::move(schema));
+    schema_ = make_unique<FunctionSchema>(std::move(schema));
     return *this;
   }
 
