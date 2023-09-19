@@ -204,7 +204,7 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
         # TODO remove Dropout special after codebase stable
         if type_before_parametrizations(child) in [nn.Dropout]:
             continue
-        elif type_before_parametrizations(child) in [nnq.FloatFunctional, nnq.QFunctional]:
+        elif issubclass(type_before_parametrizations(child), (nnq.FloatFunctional, nnq.QFunctional)):
             if needs_observation(child):
                 child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif isinstance(child, _FusedModule):
