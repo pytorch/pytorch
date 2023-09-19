@@ -37,7 +37,7 @@ class DeviceInterface:
         raise NotImplementedError()
 
     @staticmethod
-    def is_available():
+    def is_available() -> bool:
         raise NotImplementedError()
 
     @staticmethod
@@ -71,12 +71,15 @@ class CudaInterface(DeviceInterface):
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
-    is_available = staticmethod(torch.cuda.is_available)
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)
     get_raw_stream = staticmethod(get_cuda_stream)
+
+    @staticmethod
+    def is_available() -> bool:
+        return torch.cuda.is_available()
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
