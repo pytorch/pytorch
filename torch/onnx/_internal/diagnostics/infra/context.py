@@ -9,7 +9,17 @@ import gzip
 
 import logging
 
-from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar
+from typing import (
+    Callable,
+    Generator,
+    Generic,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Type,
+    TypeVar,
+)
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
@@ -260,20 +270,21 @@ class RuntimeErrorWithDiagnostic(RuntimeError):
 
 
 @dataclasses.dataclass
-class DiagnosticContext:
+class DiagnosticContext(Generic[_Diagnostic]):
     name: str
     version: str
     options: infra.DiagnosticOptions = dataclasses.field(
         default_factory=infra.DiagnosticOptions
     )
-    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    diagnostics: List[_Diagnostic] = dataclasses.field(init=False, default_factory=list)
     # TODO(bowbao): Implement this.
     # _invocation: infra.Invocation = dataclasses.field(init=False)
-    _inflight_diagnostics: List[Diagnostic] = dataclasses.field(
+    _inflight_diagnostics: List[_Diagnostic] = dataclasses.field(
         init=False, default_factory=list
     )
     _previous_log_level: int = dataclasses.field(init=False, default=logging.WARNING)
     logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+    _bound_diagnostic_type: Type = dataclasses.field(init=False, default=Diagnostic)
 
     def __enter__(self):
         self._previous_log_level = self.logger.level
@@ -318,7 +329,7 @@ class DiagnosticContext:
             with open(file_path, "w") as f:
                 f.write(self.to_json())
 
-    def log(self, diagnostic: Diagnostic) -> None:
+    def log(self, diagnostic: _Diagnostic) -> None:
         """Logs a diagnostic.
 
         This method should be used only after all the necessary information for the diagnostic
@@ -327,15 +338,15 @@ class DiagnosticContext:
         Args:
             diagnostic: The diagnostic to add.
         """
-        if not isinstance(diagnostic, Diagnostic):
+        if not isinstance(diagnostic, self._bound_diagnostic_type):
             raise TypeError(
-                f"Expected diagnostic of type {Diagnostic}, got {type(diagnostic)}"
+                f"Expected diagnostic of type {self._bound_diagnostic_type}, got {type(diagnostic)}"
             )
         if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:
             diagnostic.level = infra.Level.ERROR
         self.diagnostics.append(diagnostic)
 
-    def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
+    def log_and_raise_if_error(self, diagnostic: _Diagnostic) -> None:
         """Logs a diagnostic and raises an exception if it is an error.
 
         Use this method for logging non inflight diagnostics where diagnostic level is not known or
@@ -357,8 +368,8 @@ class DiagnosticContext:
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(
-        self, diagnostic: Diagnostic
-    ) -> Generator[Diagnostic, None, None]:
+        self, diagnostic: _Diagnostic
+    ) -> Generator[_Diagnostic, None, None]:
         """Adds a diagnostic to the context.
 
         Use this method to add diagnostics that are not created by the context.
@@ -371,7 +382,7 @@ class DiagnosticContext:
         finally:
             self._inflight_diagnostics.pop()
 
-    def push_inflight_diagnostic(self, diagnostic: Diagnostic) -> None:
+    def push_inflight_diagnostic(self, diagnostic: _Diagnostic) -> None:
         """Pushes a diagnostic to the inflight diagnostics stack.
 
         Args:
@@ -382,7 +393,7 @@ class DiagnosticContext:
         """
         self._inflight_diagnostics.append(diagnostic)
 
-    def pop_inflight_diagnostic(self) -> Diagnostic:
+    def pop_inflight_diagnostic(self) -> _Diagnostic:
         """Pops the last diagnostic from the inflight diagnostics stack.
 
         Returns:
@@ -390,7 +401,7 @@ class DiagnosticContext:
         """
         return self._inflight_diagnostics.pop()
 
-    def inflight_diagnostic(self, rule: Optional[infra.Rule] = None) -> Diagnostic:
+    def inflight_diagnostic(self, rule: Optional[infra.Rule] = None) -> _Diagnostic:
         if rule is None:
             # TODO(bowbao): Create builtin-rules and create diagnostic using that.
             if len(self._inflight_diagnostics) <= 0:

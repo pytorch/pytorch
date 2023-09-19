@@ -538,7 +538,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   for (int64_t j:unchanged_dims) {
     new_indices.select(0, sparse_extra_ndim + j).copy_(indices.select(0, j).repeat_interleave(nnz_factor));
   }
-  return at::sparse_coo_tensor(new_indices, new_values, size)._coalesced_(is_coalesced);
+  return at::sparse_coo_tensor(new_indices, new_values, size, self.options(), is_coalesced);
 }
 
 Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
@@ -1283,8 +1283,7 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
     new_values = self._values().narrow_copy(dense_dim, start, length);
   }
 
-  auto newTensor = at::sparse_coo_tensor(new_indices, new_values, new_sizes);
-  return newTensor._coalesced_(self.is_coalesced());
+  return at::sparse_coo_tensor(new_indices, new_values, new_sizes, self.options(), self.is_coalesced());
 }
 
 // Should just use narrow_copy_out, but this API is used internally at Meta:
@@ -1308,9 +1307,12 @@ Tensor& narrow_copy_dense_cpu_out(
 
   // wrap start and do bound check
   const auto cur_size = self_sizes[dim];
-  if (start != cur_size && start < 0) { // start being the end is valid, but
-                                        // not a valid dim specification.
-    start = at::maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(
       length >= 0 && start <= cur_size - length,
@@ -1374,8 +1376,12 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
   auto cur_size = self.size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    -cur_size <= start && start <= cur_size,
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
   TORCH_CHECK(start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
@@ -1384,12 +1390,16 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 
 Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  TORCH_CHECK(length >= 0, "narrow(): length must be non-negative.");
+  TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative.");
   auto cur_size = self.sym_size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
+  TORCH_CHECK_INDEX(
+    ((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size))).expect_true(__FILE__, __LINE__),
+    "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ", start, ")"
+  )
+  if (start < 0) {
+    start = start + cur_size;
   }
-  TORCH_CHECK(start <= cur_size - length,
+  TORCH_SYM_CHECK(start.sym_le(cur_size - length),
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   return at::slice_symint(self, dim, start, start + length, 1);
 }
@@ -1495,9 +1505,9 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
     }();
 
   const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
+  // TODO: apply `is_coalesced ||= new_values.size(0) < 2`.
   return _sparse_coo_tensor_with_dims_and_tensors(
-      sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options())
-    ._coalesced_(is_coalesced);
+       sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options(), is_coalesced);
 }
 
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
@@ -1586,6 +1596,29 @@ Tensor alias_with_sizes_and_strides(
     auto* self_tmp_ = self_.unsafeGetTensorImpl();
     self_tmp_->set_storage_offset(self.storage_offset());
     self_tmp_->set_sizes_and_strides(sizes, strides);
+  }
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
+// specialization for symbolic shapes and strides.
+// SymIntArrayRef/ArrayRef<c10::SymInt> and SmallVector<c10::SymInt>/SymDimVector
+template <template <typename...> typename Container>
+Tensor alias_with_sizes_and_strides(
+    const Tensor& self,
+    const Container<c10::SymInt>& sizes,
+    const Container<c10::SymInt>& strides) {
+  //caller should make sure that sizes and strides are valid for self
+  //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
+  Tensor self_;
+  if (self.is_quantized()) {
+    self_ = at::detail::make_tensor<QTensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  } else {
+    self_ = at::detail::make_tensor<TensorImpl>(
+    c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
   }
   namedinference::propagate_names(self_, self);
   return self_;
@@ -3676,7 +3709,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+  return alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
 }
 
 Tensor detach(const Tensor& self) {

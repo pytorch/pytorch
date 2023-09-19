@@ -567,10 +567,11 @@ test_libtorch() {
 
   # The slow test config corresponds to a default test config that should run
   # the libtorch tests instead.
-  if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$TEST_CONFIG" != "slow" ]]; then
+  if [[ "$TEST_CONFIG" != "slow" ]]; then
     echo "Testing libtorch"
     ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libcaffe2_nvrtc.so "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -1009,7 +1010,6 @@ elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
-  install_timm
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then

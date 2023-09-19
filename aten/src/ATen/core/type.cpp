@@ -47,7 +47,7 @@ static_assert(
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -248,6 +248,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofSymInts() {
+  static auto value = ListType::create(SymIntType::get());
+  return value;
+}
 ListTypePtr ListType::ofComplexDoubles() {
   static auto value = ListType::create(ComplexType::get());
   return value;
@@ -262,6 +266,10 @@ ListTypePtr ListType::ofBools() {
 }
 ListTypePtr ListType::ofStrings() {
   static auto value = ListType::create(StringType::get());
+  return value;
+}
+ListTypePtr ListType::ofNumbers() {
+  static auto value = ListType::create(NumberType::get());
   return value;
 }
 

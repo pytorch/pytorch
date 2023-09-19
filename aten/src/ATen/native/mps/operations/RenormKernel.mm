@@ -94,6 +94,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
 
   Tensor norm = at::linalg_vector_norm(self, p.toDouble(), reduce_dims, /*keepdim=*/true);
   auto factor = at::empty(norm.sizes(), self.options());
+  auto maxnorm_f = maxnorm.to<float>();
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> normBuffer = getMTLBufferStorage(norm);
@@ -112,7 +113,7 @@ void renorm_out_mps(const Tensor& self, const Scalar& p, int64_t dim, const Scal
       [computeEncoder setComputePipelineState:renormPSO];
       [computeEncoder setBuffer:normBuffer offset:norm.storage_offset() * norm.element_size() atIndex:0];
       [computeEncoder setBuffer:factorBuffer offset:factor.storage_offset() * factor.element_size() atIndex:1];
-      [computeEncoder setBytes:&maxnorm length:sizeof(double) atIndex:2];
+      [computeEncoder setBytes:&maxnorm_f length:sizeof(float) atIndex:2];
 
       uint32_t numThreads = norm.numel();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);

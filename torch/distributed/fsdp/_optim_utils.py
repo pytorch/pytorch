@@ -1,6 +1,7 @@
 import copy
 import functools
 import warnings
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import (
     Any,
@@ -33,6 +34,7 @@ from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
     clean_tensor_name,
 )
+from torch.distributed.fsdp._debug_utils import SimpleProfiler
 from torch.distributed.fsdp._fsdp_extensions import (
     _ext_chunk_dtensor,
     _ext_chunk_tensor,
@@ -285,7 +287,13 @@ def _unflatten_communicated_optim_state(
                 views = flat_param_views[state_name]
             optim_state: Union[torch.Tensor, ShardedTensor, DTensor] = next(views)
             if shard_state:
-                if not fsdp_state._optim_state_dict_config.use_dtensor:
+                osd_config = fsdp_state._optim_state_dict_config
+                if getattr(osd_config, "_use_dtensor", False):
+                    assert fsdp_state._device_mesh is not None
+                    optim_state = _ext_chunk_dtensor(
+                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
+                    )
+                else:
                     assert fsdp_state.process_group is not None
                     optim_state = _ext_chunk_tensor(
                         optim_state,
@@ -294,12 +302,6 @@ def _unflatten_communicated_optim_state(
                         fsdp_state._device_handle.device_count(),
                         fsdp_state.process_group,
                     )
-                else:
-                    assert fsdp_state._device_mesh is not None
-                    optim_state = _ext_chunk_dtensor(
-                        optim_state, fsdp_state.rank, fsdp_state._device_mesh
-                    )
-
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
@@ -418,6 +420,8 @@ def _flatten_optim_state_dict(
     Returns:
         Dict[str, Any]: The flattened optimizer state dict.
     """
+    SimpleProfiler.reset()
+
     unflat_osd = optim_state_dict
     if "state" not in unflat_osd and not rank0_only:
         raise ValueError(
@@ -455,11 +459,12 @@ def _flatten_optim_state_dict(
         if fqn in fqn_to_fsdp_param_info:
             fsdp_param_info = fqn_to_fsdp_param_info[fqn]
             if use_orig_params:
-                flat_state = _shard_orig_param_state(
-                    fsdp_param_info,
-                    fqn,
-                    unflat_osd_state[fqn],
-                )
+                with SimpleProfiler.profile(SimpleProfiler.Type.RESHARDING):
+                    flat_state = _shard_orig_param_state(
+                        fsdp_param_info,
+                        fqn,
+                        unflat_osd_state[fqn],
+                    )
             else:
                 flat_state = _flatten_optim_state(
                     fsdp_param_info,
@@ -517,6 +522,7 @@ def _flatten_optim_state_dict(
             user_state = _broadcast_state(fsdp_state, user_state, group=group)
         flat_osd_state[key] = copy.copy(user_state)
 
+    SimpleProfiler.dump_and_reset("FSDP _flatten_optim_state_dict() profiling: ")
     # Construct the "param_groups" part -- copy as is since it will be
     # rekeyed later according to the target rank's optimizer
     # Only copy param_groups if it exists in unflat_osd
@@ -634,11 +640,17 @@ def _flatten_optim_state(
             )
             # Shard the flattened tensor immediately to minimize max memory
             # usage
-            sharded_flat_tensor, _ = FlatParamHandle._get_shard(
-                flat_tensor,
-                fsdp_state.rank,
-                fsdp_state.world_size,
-            )
+            if (
+                fsdp_state.world_size != 1
+                and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
+            ):
+                sharded_flat_tensor, _ = FlatParamHandle._get_shard(
+                    flat_tensor,
+                    fsdp_state.rank,
+                    fsdp_state.world_size,
+                )
+            else:
+                sharded_flat_tensor = flat_tensor
             flat_state[state_name] = sharded_flat_tensor
         elif are_zero_dim_tensors:
             flat_state[state_name] = _flatten_zero_dim_tensor_optim_state(
@@ -1324,35 +1336,43 @@ def _optim_state_dict(
         :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=False``,
         then nonzero ranks return an empty :class:`dict`.
     """
+    SimpleProfiler.reset()
+    cm = ExitStack()
+    cm.enter_context(SimpleProfiler.profile(SimpleProfiler.Type.ALL))
     _reset_flat_param_grad_info_if_needed(traversal_utils._get_fsdp_handles(model))
     to_save = not rank0_only or dist.get_rank(group) == 0 or shard_state
 
-    fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
-    fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
-    param_to_fqns = _get_param_to_fqns(model)
-    flat_param_to_fqn = _get_flat_param_to_fqn(model)
-    is_named_optimizer = _is_named_optimizer(optim_state_dict)
+    with SimpleProfiler.profile("preprocessing"):
+        fsdp_osd: Dict[str, Any] = {"state": {}} if to_save else {}
+        fsdp_osd_state: Dict[str, Any] = fsdp_osd["state"] if to_save else {}
+        param_to_fqns = _get_param_to_fqns(model)
+        flat_param_to_fqn = _get_flat_param_to_fqn(model)
+        is_named_optimizer = _is_named_optimizer(optim_state_dict)
 
-    param_key_to_param = cast(
-        Dict[Union[int, str], nn.Parameter],
+        param_key_to_param = cast(
+            Dict[Union[int, str], nn.Parameter],
+            (
+                _get_param_id_to_param_from_optim_input(model, optim_input)
+                if using_optim_input
+                else _get_param_key_to_param(
+                    optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
+                )
+            ),
+        )
+        fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
+
+    with SimpleProfiler.profile("preprocessing_with_comm"):
         (
-            _get_param_id_to_param_from_optim_input(model, optim_input)
-            if using_optim_input
-            else _get_param_key_to_param(
-                optim, model, is_named_optimizer, param_to_fqns, flat_param_to_fqn
-            )
-        ),
-    )
-    fqn_to_fsdp_param_info = _get_fqn_to_fsdp_param_info(model)
-
-    all_optim_state_keys, optim_state_key_to_param_key = _map_param_key_to_optim_keys(
-        optim_state_dict,
-        group,
-        param_key_to_param,
-        param_to_fqns,
-        fqn_to_fsdp_param_info,
-        merge_keys=use_orig_params,
-    )
+            all_optim_state_keys,
+            optim_state_key_to_param_key,
+        ) = _map_param_key_to_optim_keys(
+            optim_state_dict,
+            group,
+            param_key_to_param,
+            param_to_fqns,
+            fqn_to_fsdp_param_info,
+            merge_keys=use_orig_params,
+        )
 
     # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
     # across ranks
@@ -1404,12 +1424,15 @@ def _optim_state_dict(
         elif to_save:
             assert len(optim_state_key.unflat_param_names) == 1
             unflat_param_name = optim_state_key.unflat_param_names[0]
-            fsdp_osd_state[unflat_param_name] = copy.copy(
-                optim_state_dict["state"][param_key]
-            )
-            for state_name, value in sorted_items(fsdp_osd_state[unflat_param_name]):
-                if torch.is_tensor(value):
-                    fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
+            with SimpleProfiler.profile("none_fsdp_managed_copy"):
+                fsdp_osd_state[unflat_param_name] = copy.copy(
+                    optim_state_dict["state"][param_key]
+                )
+                for state_name, value in sorted_items(
+                    fsdp_osd_state[unflat_param_name]
+                ):
+                    if torch.is_tensor(value):
+                        fsdp_osd_state[unflat_param_name][state_name] = value.cpu()
 
     # At this point, communication is complete and ranks can return early if nothing
     # will be saved on that rank.
@@ -1441,6 +1464,9 @@ def _optim_state_dict(
         fsdp_osd["param_groups"] = _unflatten_param_groups(
             optim_state_dict, param_key_to_param, param_to_fqns
         )
+
+    cm.close()
+    SimpleProfiler.dump_and_reset("FSDP _optim_state_dict() profiling: ")
 
     return fsdp_osd
 
@@ -1529,7 +1555,10 @@ def _all_gather_optim_state(
     object_list: List[StateInfo] = [
         processed_state for _ in range(fsdp_state.world_size)
     ]
-    dist.all_gather_object(object_list, processed_state, group=fsdp_state.process_group)
+    with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER_OBJ):
+        dist.all_gather_object(
+            object_list, processed_state, group=fsdp_state.process_group
+        )
 
     # Convert the gathered, pre-processed state of each rank to the original one.
     gathered_state: Dict[str, Any] = {}
@@ -1538,6 +1567,8 @@ def _all_gather_optim_state(
         {n for state in object_list for n in state.tensors.keys()}
     )
     empty_ranks: Set[int] = set()
+    cm = ExitStack()
+    cm.enter_context(SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER))
     for name in all_tensor_states:
         numels = []
         dtype = torch.float
@@ -1598,6 +1629,7 @@ def _all_gather_optim_state(
                 if rank_numel > 0
             ]
         )
+    cm.close()
 
     return gathered_state
 
@@ -1624,31 +1656,34 @@ def _gather_orig_param_state(
     ):
         return optim_state
 
-    gathered_state = _all_gather_optim_state(fsdp_state, optim_state)
+    with SimpleProfiler.profile(SimpleProfiler.Type.RESHARDING):
+        gathered_state = _all_gather_optim_state(fsdp_state, optim_state)
 
     # Unflatten state values.
-    for state_name, value in list(gathered_state.items()):
-        if not torch.is_tensor(value) or value.dim() == 0:
-            continue
+    with SimpleProfiler.profile(SimpleProfiler.Type.H2D):
+        for state_name, value in list(gathered_state.items()):
+            if not torch.is_tensor(value) or value.dim() == 0:
+                continue
 
-        value = value[: flat_param._numels[param_idx]].reshape(
-            flat_param._shapes[param_idx]
-        )
-        if shard_state:
-            if not fsdp_state._optim_state_dict_config.use_dtensor:
-                assert fsdp_state.process_group is not None
-                value = _ext_chunk_tensor(
-                    value,
-                    fsdp_state.rank,
-                    fsdp_state.world_size,
-                    fsdp_state._device_handle.device_count(),
-                    fsdp_state.process_group,
-                )
-            else:
-                assert fsdp_state._device_mesh is not None
-                value = _ext_chunk_dtensor(
-                    value, fsdp_state.rank, fsdp_state._device_mesh
-                )
-        value = value.cpu()
-        gathered_state[state_name] = value
+            value = value[: flat_param._numels[param_idx]].reshape(
+                flat_param._shapes[param_idx]
+            )
+            if shard_state:
+                osd_config = fsdp_state._optim_state_dict_config
+                if getattr(osd_config, "_use_dtensor", False):
+                    assert fsdp_state._device_mesh is not None
+                    value = _ext_chunk_dtensor(
+                        value, fsdp_state.rank, fsdp_state._device_mesh
+                    )
+                else:
+                    assert fsdp_state.process_group is not None
+                    value = _ext_chunk_tensor(
+                        value,
+                        fsdp_state.rank,
+                        fsdp_state.world_size,
+                        fsdp_state._device_handle.device_count(),
+                        fsdp_state.process_group,
+                    )
+            value = value.cpu()
+            gathered_state[state_name] = value
     return gathered_state

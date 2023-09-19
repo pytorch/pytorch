@@ -67,7 +67,7 @@ class TestAutocastCPU(TestCase):
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = compare(output, output_method)
-                self.assertTrue(comparison, "torch.{0} result did not match Tensor.{0} result".format(op))
+                self.assertTrue(comparison, f"torch.{op} result did not match Tensor.{op} result")
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
             # as the C++-side autocasting, and should be bitwise accurate.
@@ -140,6 +140,9 @@ class TestAutocastCPU(TestCase):
             with torch.cpu.amp.autocast():
                 m(x, (hx, cx))
 
+    def test_autocast_disabled_with_fp32_dtype(self):
+        with torch.autocast(device_type='cpu', dtype=torch.float32, enabled=False):
+            _ = torch.ones(10)
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod

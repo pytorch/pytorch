@@ -80,14 +80,32 @@ def python_type_for_torch(dtyp):
 
 # ### NEP 50 helpers ###
 
-SCALAR_TYPES = {int, bool, float, complex}
+_SCALAR_TYPES = (int, bool, float, complex)
+
+_SCALAR_AND_SYMBOLIC_TYPES = (
+    *_SCALAR_TYPES,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
+)
+
+
+def is_scalar(x):
+    return isinstance(x, _SCALAR_TYPES)
+
+
+def is_scalar_or_symbolic(x):
+    return isinstance(x, _SCALAR_AND_SYMBOLIC_TYPES)
 
 
 def _dtype_for_scalar(py_type):
     return {
         bool: torch.bool,
+        torch.SymBool: torch.bool,
         int: torch.int64,
+        torch.SymInt: torch.int64,
         float: torch.float64,
+        torch.SymFloat: torch.float64,
         complex: torch.complex128,
     }[py_type]
 
@@ -95,16 +113,19 @@ def _dtype_for_scalar(py_type):
 def _category(dtype):
     return {
         torch.bool: 0,
+        torch.SymBool: 0,
         # int
         torch.uint8: 1,
         torch.int8: 1,
         torch.int16: 1,
         torch.int32: 1,
         torch.int64: 1,
+        torch.SymInt: 1,
         # float
         torch.float16: 2,
         torch.float32: 2,
         torch.float64: 2,
+        torch.SymFloat: 2,
         # complex
         torch.complex64: 3,
         torch.complex128: 3,

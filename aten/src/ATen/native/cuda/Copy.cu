@@ -163,7 +163,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
-  AT_ASSERT(iter.ntensors() == 2);
+  TORCH_CHECK(iter.ntensors() == 2);
 
   Device dst_device = iter.device(0);
   Device src_device = iter.device(1);
