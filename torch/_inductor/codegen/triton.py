@@ -160,10 +160,10 @@ class TritonOverrides(OpOverrides):
             src_dtype: torch.dtype, dst_dtype: torch.dtype
         ) -> int:
             if src_dtype == dst_dtype:
-                # No data type conversion is needed. No requirements on min_elements_per_thread.
+                # No data type conversion is needed. No requirements on min_elem_per_thread.
                 return 0
 
-            # fp8 data type conversions has min_elements_per_thread requirements.
+            # fp8 data type conversions has min_elem_per_thread requirements.
             # Refer to Triton implementations here:
             # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
             fp8_dtypes = {
@@ -180,16 +180,16 @@ class TritonOverrides(OpOverrides):
                 return 4
             if src_dtype == torch.float8_e4m3fn or dst_dtype == torch.float8_e4m3fn:
                 return 2
-            # No requirements on min_elements_per_thread.
+            # No requirements on min_elem_per_thread.
             return 0
 
         if src_dtype is not None:
             # Both dtype and src_dtype are set. This is used by torch to(dtype=dtype).
-            # It takes the maximum min_elements_per_thread if there are multiple fp8 conversions
+            # It takes the maximum min_elem_per_thread if there are multiple fp8 conversions
             # in the same kernel.
-            V.kernel.min_elements_per_thread = max(
+            V.kernel.min_elem_per_thread = max(
                 _get_min_elements_per_thread(src_dtype, dtype),
-                V.kernel.min_elements_per_thread,
+                V.kernel.min_elem_per_thread,
             )
 
         if dtype == torch.bool:
@@ -800,7 +800,7 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        min_elements_per_thread=0,
+        min_elem_per_thread=0,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -818,7 +818,7 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
-        self.min_elements_per_thread = min_elements_per_thread
+        self.min_elem_per_thread = min_elem_per_thread
         # Upper bounds for indirect_indexing and their str representation
         self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
         self.last_usage = set()
@@ -2021,7 +2021,7 @@ class TritonKernel(Kernel):
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
                     meta={triton_meta!r},
-                    min_elements_per_thread={self.min_elements_per_thread}
+                    min_elem_per_thread={self.min_elem_per_thread}
                 )
                 @triton.jit
             """

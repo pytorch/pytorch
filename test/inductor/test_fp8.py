@@ -84,11 +84,17 @@ class TestFP8Types(TestCase):
 
         x_shape = (16, 16, 16)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
+        ):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e4m3fn)
             y = compiled_fp8_cast(x, torch.float8_e5m2)
 
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
+        ):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e5m2)
             y = compiled_fp8_cast(x, torch.float8_e4m3fn)
 
