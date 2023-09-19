@@ -22,7 +22,6 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
-    sympy_dot,
     sympy_product,
     sympy_str,
 )
