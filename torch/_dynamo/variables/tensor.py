@@ -916,11 +916,11 @@ class TensorSubclassVariable(VariableTracker):
         if len(args) == 1 and isinstance(args[0], TensorVariable):
             from .torch_function import TensorWithTFOverrideVariable
 
-            return TensorWithTFOverrideVariable.create(
+            return TensorWithTFOverrideVariable.from_tensor_var(
                 tx,
                 args[0],
-                self.value.__torch_function__.__func__,
                 self.value,
+                self.value.__torch_function__.__func__,
             )
 
         return super().call_function(tx, args, kwargs)
