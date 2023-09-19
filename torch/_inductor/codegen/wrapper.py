@@ -1512,6 +1512,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def generate_inf_and_nan_checker(self, nodes):
         self.write_inf_and_nan_header()
         for buf in nodes.get_names():
+            # TODO: Add buf name directly into check_inf_and_nan.
             self.writeline(f"check_inf_and_nan({buf}, true);")
 
     def codegen_device(self, device):
