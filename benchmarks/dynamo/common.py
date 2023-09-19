@@ -36,6 +36,7 @@ import torch.distributed
 import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
+from torch._dynamo import compiled_autograd
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
@@ -79,6 +80,10 @@ current_batch_size = None
 output_filename = None
 
 MAX_DOWNLOAD_ATTEMPTS = 5
+
+
+def compiler_fn(gm):
+    return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=True)
 
 
 class CI(NamedTuple):
@@ -2035,8 +2040,12 @@ class BenchmarkRunner:
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
         accuracy_status = "pass"
-
-        with self.pick_grad(name, self.args.training):
+        compiled_autograd_ctx = (
+            compiled_autograd.enable(compiler_fn)
+            if self.args.compiled_autograd
+            else contextlib.nullcontext()
+        )
+        with self.pick_grad(name, self.args.training), compiled_autograd_ctx:
             # Get results of native pytorch
             reset_rng_state()
             try:
@@ -2303,7 +2312,13 @@ class BenchmarkRunner:
             model.name = name
 
         self.init_optimizer(name, current_device, model.parameters())
-        with self.pick_grad(name, self.args.training):
+        compiled_autograd_ctx = (
+            compiled_autograd.enable(compiler_fn)
+            if self.args.compiled_autograd
+            else contextlib.nullcontext()
+        )
+
+        with self.pick_grad(name, self.args.training), compiled_autograd_ctx:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
             if tag is not None:
@@ -2619,6 +2634,11 @@ def parse_args(args=None):
                 return (torch.randn(2, 10),)
         ```
     """,
+    )
+    parser.add_argument(
+        "--compiled-autograd",
+        action="store_true",
+        help="Do we run backward under compiled autograd?",
     )
     parser.add_argument(
         "--multiprocess",
@@ -3209,6 +3229,9 @@ def run(runner, args, original_dir=None):
 
     if not args.multiprocess:
         runner.skip_models.update(runner.skip_multiprocess_models)
+
+    if args.compiled_autograd:
+        assert args.training, "compiled_autograd set without setting training."
 
     if args.no_skip:
         runner.skip_models.clear()

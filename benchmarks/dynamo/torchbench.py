@@ -31,7 +31,7 @@ def setup_torchbench_cwd():
         "../torchbenchmark",
         "../torchbench",
         "../benchmark",
-        "../../torchbenchmark",
+        "../../../torchbenchmark",
         "../../torchbench",
         "../../benchmark",
     ):
@@ -420,6 +420,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
+
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 

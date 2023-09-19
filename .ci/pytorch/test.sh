@@ -319,6 +319,10 @@ if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
 fi
 
+if [[ "${TEST_CONFIG}" == *compiled-autograd* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--compiled-autograd)
+fi
+
 if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
 else
