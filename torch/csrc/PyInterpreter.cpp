@@ -604,18 +604,13 @@ static c10::ArrayRef<T> get_set_cached_attr(
 
   size_t new_size = py::len(obj);
 
-  // It turns out that we need to maintain full-fidelity compared to
-  // TensorImpl::sizes() around when our buffer gets reallocated. In particular,
-  // SmallVector starts out by allocating a size-5 buffer. Any resizes on the
-  // tensor that are <= 5 elements will not reallocate the buffer. But once we
-  // hit a size that is > 5 elements, we will re-allocate on every future
-  // resize. NOTE: Ideally, we shouldn't need to model the SmallVector
-  // optimization! But removing this optimization fails tests: there's some code
-  // in our codebase that relies on the fact that calling `.sizes()` and then
-  // resizing the tensor doesn't reallocate the underlying SmallVector. Ideally,
-  // we should kill this optimization and fix any places in our code that rely
-  // on this. Example failing test: test/functorch/test_aotdispatch.py
-  // TestPartitioning
+  // We do the smallvector optimization here: any time the new_size is <=5,
+  // we always allocate our buffer to size 5, so that if the next resize
+  // is also to <=5 elements, we don't need to reallocate.
+  // Note: I tried removing this optimization and tripped ASAN
+  // in a batchnorm kernel here:
+  // https://pipelinesghubeus21.actions.githubusercontent.com/mBh68xKhi8LyM7tp3vECvYXNFvuV4gyVGgmYCteuEZP9JH92QN/_apis/pipelines/1/runs/3373307/signedlogcontent/790?urlExpires=2023-09-15T21%3A13%3A51.4327798Z&urlSigningMethod=HMACV1&urlSignature=tDeX7ZqaARVU5NNwyr5yYqqkWq3A2j4z8FFdqYwGr0Q%3D
+  // We should fix this instead.
   bool needs_resize = false;
   // We need to resize if:
   // (1) we haven't allocated our buffer at all yet
@@ -671,7 +666,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
         // if our SymInts are symbolic, we are *not* doing an equality check on
         // the symints. we just want to see if the nodes are the same. this is
         // because we don't want to introduce any guards here.
-        if (!curr_buffer[idx].identity_equals(actual_val)) {
+        if (!curr_buffer[idx].is_same(actual_val)) {
           curr_buffer[idx] = actual_val;
         }
       } else {

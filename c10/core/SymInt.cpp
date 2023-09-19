@@ -82,7 +82,7 @@ SymInt::operator SymFloat() const {
   }
 }
 
-bool SymInt::identity_equals(const SymInt& other) const {
+bool SymInt::is_same(const SymInt& other) const {
   if (is_heap_allocated() != other.is_heap_allocated()) {
     return false;
   }
