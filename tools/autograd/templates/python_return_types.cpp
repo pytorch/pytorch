@@ -4,34 +4,33 @@
 #include <map>
 #include <string>
 
-#include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/autograd/generated/python_return_types.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/Exceptions.h"
 
-namespace {
+namespace torch { namespace autograd { namespace generated {
+
 ${py_return_types}
-}
+
+}}}
 
 namespace torch {
 namespace autograd {
 
-std::map<std::string, PyTypeObject*>& get_namedtuple_types_map() {
-  // [NOTE] Non-global map
-  // This map calls Python functions during its initialization.
-  // If it is a global static variable and in case it is loaded
-  // before Python interpreter is ready, then the calls it makes during
-  // initialization will SEGFAULT.
-  // To avoid this we make it function static variable so that it is
-  // initialized only after the Python interpreter is ready.
-  static std::map<std::string, PyTypeObject*> namedtuple_types_map = {
-    ${py_return_types_map}
-  };
-  return namedtuple_types_map;
-}
-
-PyTypeObject* get_namedtuple(std::string name) {
-  static auto& namedtuple_types_map = get_namedtuple_types_map();
-  return namedtuple_types_map[name];
+static void addReturnType(
+    PyObject* module,
+    const char* name,
+    PyTypeObject* type) {
+  // hold onto the TypeObject for the unlikely case of user
+  // deleting or overriding it.
+  Py_INCREF(type);
+  if (PyModule_AddObject(
+          module,
+          name,
+          (PyObject*)type) != 0) {
+    Py_DECREF(type);
+    throw python_error();
+  }
 }
 
 void initReturnTypes(PyObject* module) {
@@ -42,18 +41,7 @@ void initReturnTypes(PyObject* module) {
     throw python_error();
   }
 
-  for (const auto& return_type_pair : get_namedtuple_types_map()) {
-    // hold onto the TypeObject for the unlikely case of user
-    // deleting or overriding it.
-    Py_INCREF(return_type_pair.second);
-    if (PyModule_AddObject(
-            return_types_module,
-            return_type_pair.first.c_str(),
-            (PyObject*)return_type_pair.second) != 0) {
-      Py_DECREF((PyObject*)return_type_pair.second);
-      throw python_error();
-    }
-  }
+  ${py_return_types_registrations}
 
   // steals a reference to return_types on success
   if (PyModule_AddObject(module, "_return_types", return_types_module) != 0) {

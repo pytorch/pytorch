@@ -274,7 +274,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // callbacks.
   m.def(
       "_record_function_with_args_enter",
-      [](const std::string& name, py::args args) {
+      [](const std::string& name, const py::args& args) {
         using torch::autograd::profiler::PythonRecordFunction;
         auto python_rec = c10::make_intrusive<PythonRecordFunction>(
             at::RecordScope::USER_SCOPE);
@@ -324,7 +324,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     return activities;
   });
 
-  m.def("_unsafe_set_version_counter", [](at::Tensor t, int64_t i) {
+  m.def("_unsafe_set_version_counter", [](const at::Tensor& t, int64_t i) {
     auto vc = torch::autograd::impl::version_counter(t);
     vc.set_version(i);
   });
@@ -975,7 +975,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
   c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
-  PyObject* r;
+  PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
     auto maybe_mode =
