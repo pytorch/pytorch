@@ -562,7 +562,8 @@ static void set_tensor_attr_with_capsule(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  py::handle(mb_obj.value()).attr(attr_name) = capsule;
+  auto obj = mb_obj.value();
+  py::handle(obj).attr(attr_name) = capsule;
 }
 
 // Note [Tensor Subclass custom size/stride caching strategy]
@@ -589,25 +590,16 @@ static c10::ArrayRef<T> get_set_cached_attr(
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  auto tensor_obj = mb_obj.value();
   auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
-  auto buffer_issmallvector_attr_name =
-      std::string(base_attr_name) + std::string("_issmallvector");
 
   bool is_buffer_allocated = false;
-  bool is_smallvector = false;
   size_t curr_size = 0;
-  if (PyObject_HasAttrString(mb_obj.value(), buffer_len_attr_name.c_str())) {
+  if (PyObject_HasAttrString(tensor_obj, buffer_len_attr_name.c_str())) {
     auto buffer_pyobj =
-        py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str());
+        py::handle(tensor_obj).attr(buffer_len_attr_name.c_str());
     curr_size = py::cast<size_t>(buffer_pyobj);
     is_buffer_allocated = true;
-    TORCH_INTERNAL_ASSERT(PyObject_HasAttrString(
-        mb_obj.value(), buffer_issmallvector_attr_name.c_str()));
-    (PyObject_HasAttrString(
-        mb_obj.value(), buffer_issmallvector_attr_name.c_str()));
-    auto issmallvector_pyobj =
-        py::handle(mb_obj.value()).attr(buffer_issmallvector_attr_name.c_str());
-    is_smallvector = py::cast<bool>(issmallvector_pyobj);
   }
 
   size_t new_size = py::len(obj);
@@ -627,24 +619,23 @@ static c10::ArrayRef<T> get_set_cached_attr(
   bool needs_resize = false;
   // We need to resize if:
   // (1) we haven't allocated our buffer at all yet
-  // (2) our buffer is size 5 (smallvector optimization), but our new size is >
-  // 5 (3) our buffer is no longer size 5 (because at some point previously we
-  // saw a size > 5),
-  //     and our new size is different from the current buffer size
-  needs_resize = !is_buffer_allocated ||
-      ((!is_smallvector || new_size > 5) && curr_size != new_size);
+  // (2) Our buffer size is different from the new size
+  //     (note: we use the small vector optimization, where our buffer
+  //     is always allocated to at least size 5, and any resizes
+  //     within the <= 5 regime to not require a reallocation).
+  auto is_smallvector = curr_size <= 5;
+  needs_resize = !is_buffer_allocated || (is_smallvector && new_size > 5) ||
+      (!is_smallvector && curr_size != new_size);
   if (needs_resize) {
-    auto set_to_smallvector = false;
-    // If our current buffer is not the right size (eithr because we haven't
+    // If our current buffer is not the right size (either because we haven't
     // allocated it yet, or there was a metadata mutation that changed the
     // number of dims of the tensor), allocate a fresh buffer. Note that this
     // will trash the previous buffer if there already was one, invalidating any
     // existing SymIntArrayRef's from an old .sym_size() call.
     auto new_buffer_size = new_size;
-    if (!is_buffer_allocated && new_size <= 5) {
+    if (new_size <= 5) {
       // This is the smallvector optimization
       new_buffer_size = 5;
-      set_to_smallvector = true;
     }
     T* ptr = new T[new_buffer_size];
     auto capsule =
@@ -656,13 +647,10 @@ static c10::ArrayRef<T> get_set_cached_attr(
     // Set the buffer
     set_tensor_attr_with_capsule(tensor, capsule, base_attr_name);
     // Set the len buffer
-    py::handle(mb_obj.value()).attr(buffer_len_attr_name.c_str()) = new_size;
-    // Set whether or not the buffer is now using the smallvector optimization
-    // (sized to 5)
-    py::handle(mb_obj.value()).attr(buffer_issmallvector_attr_name.c_str()) =
-        set_to_smallvector;
+    py::handle(tensor_obj).attr(buffer_len_attr_name.c_str()) = new_size;
   } else {
-    auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
+    TORCH_INTERNAL_ASSERT(PyObject_HasAttrString(tensor_obj, base_attr_name));
+    auto curr_buffer_pyobj = py::handle(tensor_obj).attr(base_attr_name);
     void* buffer_pycapsule =
         PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
     auto curr_buffer = reinterpret_cast<T*>(buffer_pycapsule);
@@ -673,23 +661,14 @@ static c10::ArrayRef<T> get_set_cached_attr(
     // but *only* if we actually have to update, which only happens if there's a
     // metadata mutation.
     int64_t idx = 0;
+    TORCH_INTERNAL_ASSERT(curr_size >= new_size);
     for (auto it = obj.begin(); it != obj.end(); ++it, ++idx) {
       auto actual_val = py::cast<T>(*it);
       if constexpr (std::is_same_v<T, c10::SymInt>) {
         // if our SymInts are symbolic, we are *not* doing an equality check on
         // the symints. we just want to see if the nodes are the same. this is
         // because we don't want to introduce any guards here.
-        if ((curr_buffer[idx].is_heap_allocated() !=
-             actual_val.is_heap_allocated()) ||
-            (!curr_buffer[idx].is_heap_allocated() &&
-             curr_buffer[idx] != actual_val) ||
-            (curr_buffer[idx].is_heap_allocated() &&
-             curr_buffer[idx].toSymNodeImplUnowned() !=
-                 actual_val.toSymNodeImplUnowned())) {
-          // This branch covers all 3 cases:
-          // - Neither is symbolic
-          // - One is symbolic and one is not
-          // - Both are symbolic but have different SymNodes
+        if (!curr_buffer[idx].identity_equals(actual_val)) {
           curr_buffer[idx] = actual_val;
         }
       } else {
@@ -701,7 +680,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
   }
 
   // The correct data is now stored at the buffer - read and return it.
-  auto curr_buffer_pyobj = py::handle(mb_obj.value()).attr(base_attr_name);
+  auto curr_buffer_pyobj = py::handle(tensor_obj).attr(base_attr_name);
   void* buffer_pycapsule =
       PyCapsule_GetPointer(curr_buffer_pyobj.ptr(), nullptr);
   auto curr_buffer = reinterpret_cast<T*>(buffer_pycapsule);
