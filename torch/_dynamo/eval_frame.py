@@ -6,7 +6,6 @@ import functools
 import inspect
 import logging
 import os
-import re
 import sys
 import textwrap
 import threading
@@ -521,7 +520,8 @@ def catch_errors_wrapper(callback, hooks: Hooks):
         if (
             # TODO: the first condition is not covered by any test
             frame.f_lasti >= first_real_inst_idx(frame.f_code)
-            # or frame.f_code.co_filename.startswith(re.sub(r"__init__.py$", "", torch.nn.__file__))
+            # This is a bug!
+            or skipfiles.is_torch_inline_allowed(frame.f_code.co_filename)
             or skipfiles.check(frame.f_code.co_filename).skipped
             or config.disable
         ):

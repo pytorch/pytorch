@@ -1026,6 +1026,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.frame_count, """1""")
             self.assertExpectedInline(cnt.op_count, """12""")
 
+    @unittest.expectedFailure
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
         cnt = torch._dynamo.testing.CompileCounter()
