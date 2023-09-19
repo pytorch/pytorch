@@ -769,6 +769,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
                         unimplemented("out variants with resizing on graph inputs")
+                    if kwargs["out"].dtype.is_complex:
+                        unimplemented("out variant has complex dtype")
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
