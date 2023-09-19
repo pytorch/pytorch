@@ -118,8 +118,8 @@ FACTORY_PARAMS = (
 # )
 
 # NOTE: ellipsis is equal to type[Ellipsis] in stub files.
-_index = "None, _bool, _int, slice, ellipsis, Tensor"  # not SupportsIndex !
-_index = f"Union[SupportsIndex, {_index}, _NestedSequence[Union[{_index}]]]"
+_leaf_types = "Union[None, _bool, _int, slice, ellipsis, Tensor]"  # not SupportsIndex!
+_index = f"Union[SupportsIndex, {_leaf_types}, _NestedSequence[{_leaf_types}]]"
 INDICES = f"indices: Union[{_index}, tuple[{_index}, ...]]"
 
 blocklist = [
