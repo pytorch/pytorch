@@ -15,6 +15,7 @@ sys.path.append(pytorch_test_dir)
 
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.utils import counters
+from torch._inductor import config as inductor_config
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
 
@@ -100,6 +101,7 @@ class MultiUserConvOp(nn.Module):
 
 
 class EfficientConvBNEvalTemplate(TestCase):
+    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_basic(self):
         def test_conv_bn_eval(test_class, use_bias, module, sync_bn):
             mod_eager = test_class(
