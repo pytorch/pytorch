@@ -144,13 +144,13 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
 }
 #undef DEF_PRELUDE
 
-Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
+Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f) & {
   c10::FunctionSchema schema = [&] {
-    if (std::holds_alternative<c10::FunctionSchema>(name_or_schema)){
-      return std::get<c10::FunctionSchema>(std::move(name_or_schema));
+    if (name_or_schema.is_right()) {
+      return std::move(name_or_schema).right();
     } else {
       // it's a name; use the inferred schema
-      c10::OperatorName name = std::get<c10::OperatorName>(std::move(name_or_schema));
+      c10::OperatorName name = std::move(name_or_schema).left();
       TORCH_CHECK(f.schema_,
         "def(\"", name, "\"): "
         "Full schema string was not specified, and we couldn't infer schema either.  ",
