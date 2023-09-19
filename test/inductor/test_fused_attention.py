@@ -42,13 +42,15 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         has_dropout=False,
         check_train=True,
         override_check_equal=False,
+        dtype=torch.float,
+        rtol=1.3e-6,
     ):
         if args1 is None:
             tensor_shape = (4, 2, 16, 32)
             args1 = [
-                torch.randn(tensor_shape, device=self.device),
-                torch.randn(tensor_shape, device=self.device),
-                torch.randn(tensor_shape, device=self.device),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
+                torch.randn(tensor_shape, device=self.device, dtype=dtype),
             ]
         else:
             args1 = list(args1)
@@ -91,7 +93,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                         and arg1.is_floating_point()
                         and (not has_dropout or override_check_equal)
                     ):
-                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=1.3e-6)
+                        self.assertEqual(arg1.grad, arg2.grad, atol=atol, rtol=rtol)
 
     @skipIfRocm
     def _test_sdpa_rewriter_1(self):
@@ -106,8 +108,17 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 .matmul(value)
             )
 
-        self._check_common(dot_prod_attention)
-        self._check_common(checkpoint_wrapper(dot_prod_attention))
+        for dtype in [torch.float, torch.half]:
+            if self.device == "cpu" and dtype == torch.half:
+                continue
+            rtol = 1.3e-6 if dtype == torch.float else 0.7
+            self._check_common(dot_prod_attention, dtype=dtype, atol=0.001, rtol=rtol)
+            self._check_common(
+                checkpoint_wrapper(dot_prod_attention),
+                dtype=dtype,
+                atol=0.001,
+                rtol=rtol,
+            )
 
     def _test_pattern_fails_with_reuse(self):
         """
