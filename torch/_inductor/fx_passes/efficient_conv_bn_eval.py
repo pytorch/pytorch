@@ -18,7 +18,7 @@ def efficient_conv_bn_eval(
     It leverages the associative law between convolution and affine transform,
     i.e., normalize (weight conv feature) = (normalize weight) conv feature.
     It works for Eval mode of ConvBN blocks during validation, and can be used
-    for **training** as well. It reduces memory and computation cost.
+    for **training** as well, but only if one sets `bn.training=False`. It reduces memory and computation cost, at the cost of reduced model accuracy.
     Args:
         bn (nn.modules.batchnorm._BatchNorm): a BatchNorm module.
         conv (nn.modules.conv._ConvNd): a conv module
