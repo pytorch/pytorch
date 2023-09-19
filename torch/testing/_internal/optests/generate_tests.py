@@ -221,7 +221,7 @@ def validate_failures_dict_formatting(failures_dict_path: str) -> None:
         return
     expected = expected.splitlines(1)
     actual = actual.splitlines(1)
-    diff = difflib.unified_diff(expected, actual)
+    diff = difflib.unified_diff(actual, expected)
     diff = "".join(diff)
     raise RuntimeError(
         f"\n{diff}\n\nExpected the failures dict to be formatted "
