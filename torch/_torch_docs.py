@@ -13720,8 +13720,7 @@ searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='lef
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
 corresponding values in :attr:`values` were inserted before the indices, when sorted, the order
 of the corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
-Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False or side is
-'left (default), then the left boundary of :attr:`sorted_sequence` is closed. More formally,
+Return a new tensor with the same size as :attr:`values`. More formally,
 the returned index satisfies the following rules:
 
 .. list-table::
