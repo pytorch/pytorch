@@ -156,15 +156,21 @@ vTensor pack_biases(
 }
 
 bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
-  return api::available() &&
-      // Weight
-      (2 == weight.ndimension()) &&
+  if (!api::available()) {
+    return false;
+  }
+
+  const bool weight_available = (2 == weight.ndimension()) &&
       (weight.size(Layout::Parameter::height) > 0) &&
       (weight.size(Layout::Parameter::width) > 0) &&
       ((weight.device().is_cpu()) ||
        (c10::DeviceType::Vulkan == weight.device().type())) &&
-      (kFloat == weight.scalar_type()) && !weight.requires_grad() &&
-      // Bias
+      (kFloat == weight.scalar_type()) && !weight.requires_grad();
+  if (!weight_available) {
+    return false;
+  }
+
+  const bool bias_available =
       ((bias && bias->defined())
            ? ((bias->ndimension() > 0) &&
               ((bias->device().is_cpu()) ||
@@ -175,8 +181,8 @@ bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
                       weight.size(Layout::Parameter::width))
                    : true) &&
               !bias->requires_grad())
-           : true) &&
-      true;
+           : true);
+  return bias_available;
 }
 
 bool usable(const Tensor& input, const IntArrayRef unpacked_weight_sizes) {
