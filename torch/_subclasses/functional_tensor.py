@@ -1,5 +1,6 @@
 import contextlib
 from abc import ABC, abstractmethod
+from typing import Any, Callable, ContextManager, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -303,57 +304,57 @@ def dispatch_functionalize(func):
 
 class BaseFunctionalizeAPI(ABC):
     @abstractmethod
-    def wrap_tensors(self, args):
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         pass
 
     @abstractmethod
-    def unwrap_tensors(self, args):
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         pass
 
     @abstractmethod
-    def functionalize(self, inner_f):
+    def functionalize(self, inner_f: Callable) -> Callable:
         pass
 
     @abstractmethod
-    def redispatch_to_next(self):
+    def redispatch_to_next(self) -> ContextManager:
         pass
 
 
 class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
-    def wrap_tensors(self, args):
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.to_functional, args
         )
 
-    def unwrap_tensors(self, args):
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
 
-    def functionalize(self, inner_f):
+    def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f)
 
-    def redispatch_to_next(self):
+    def redispatch_to_next(self) -> ContextManager:
         return unset_functional_temporarily()
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
-    def wrap_tensors(self, args):
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
 
         return _wrap_all_tensors_to_functional(args, level=0)
 
-    def unwrap_tensors(self, args):
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
 
         return _unwrap_all_tensors_from_functional(args, reapply_views=_reapply_views())
 
-    def functionalize(self, inner_f):
+    def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(inner_f)
 
-    def redispatch_to_next(self):
+    def redispatch_to_next(self) -> ContextManager:
         return torch._C._ExcludeDispatchKeyGuard(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
@@ -363,12 +364,12 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
     def __init__(self, interpreter):
         self.interpreter = interpreter
 
-    def wrap_tensors(self, args):
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
 
         return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
 
-    def unwrap_tensors(self, args):
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -377,7 +378,7 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             args, reapply_views=self.interpreter.functionalize_add_back_views()
         )
 
-    def functionalize(self, inner_f):
+    def functionalize(self, inner_f: Callable) -> Callable:
         return torch.func.functionalize(
             inner_f,
             remove="mutations_and_views"
@@ -385,5 +386,5 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
             else "mutations",
         )
 
-    def redispatch_to_next(self):
+    def redispatch_to_next(self) -> ContextManager:
         return self.interpreter.lower()
