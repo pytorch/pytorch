@@ -1962,6 +1962,10 @@ def calc_conv_nd_return_shape(
 
     kernel_size = weight.shape[2:]
     dims = input_tensor.shape[2:]
+
+    if kernel_size > dims:
+        raise RuntimeError("Kernel size can't be greater than actual input size")
+
     if is_transposed:
         out_channels = groups * weight.shape[1]
     else:
