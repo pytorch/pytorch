@@ -41,10 +41,10 @@ from . import comptime, external_utils
 """
 A note on skipfiles:
 
-Dynamo consults this file to determine whether code should be compiled or skipped.
+Dynamo consults this file to determine whether function should be inlined or skipped.
 
 A skip applies at the frame boundary, meaning dynamo either triggers a graph break
-at the beginning of the frame or attempts to trace the whole frame.  When skipping
+at the beginning of the frame or attempts to trace/inline the whole frame. When skipping
 a frame, recursively called frames are still traced by dynamo unless also skipped.
 
 Skipfiles (skipped at the file level instead of function level) still apply on a
@@ -52,7 +52,81 @@ frame-by-frame boundary as dynamo traces, but apply to all functions in that fil
 
 @skip is a helper decorator that can be applied to your function to cause it to be
 included here.
+
+Dynamo skip/inline rules are defined as follows:
+* Inline is the default behavior and will be used unless explicitly skipped.
+* Dynamo has two SKIPLIST: BUILTIN_SKIPLIST and THIRDPARTY_SKIPLIST.
+    * BUILTIN_SKIPLIST contains builtin python modules, such as abc, collections, etc.
+    * THIRDPARTY_SKIPLIST contains common third party libraries, such as numpy, pandas, etc.
+* Functions in these two SKIPLISTs are always skipped, except when they are explicitly
+    put into the two ALLOWLIST: FILENAME_ALLOWLIST and SUBMODULE_ALLOWLIST.
+* PyTorch(torch) is in the BUILTIN_SKIPLIST by default, but there are many cases
+    where we want inline the functions under torch namespace. We should add them
+    into FILENAME_ALLOWLIST or SUBMODULE_ALLOWLIST to make dynamo inline those functions.
+* If you call functions under skipped modules/files, Dynamo will wrap these functions
+    as SkipFilesVariable. There are a few functions(e.g, collections.OrderedDict) that
+    we have special handling at SkipFilesVariable.call_function.
+
 """
+
+
+BUILTIN_SKIPLIST = (
+    abc,
+    collections,
+    contextlib,
+    copy,
+    copyreg,
+    dataclasses,
+    enum,
+    functools,
+    importlib,
+    inspect,
+    linecache,
+    logging,
+    multiprocessing,
+    operator,
+    os,
+    posixpath,
+    random,
+    re,
+    selectors,
+    signal,
+    tempfile,
+    threading,
+    tokenize,
+    torch,  # torch/* is skipped by default unless specified in FILENAME_ALLOWLIST or SUBMODULE_ALLOWLIST
+    traceback,
+    types,
+    typing,
+    unittest,
+    weakref,
+    _collections_abc,
+    _weakrefset,
+)
+
+# third party libraries skiplist is defined by str, because users may not use these libraries.
+# we should use lazy import & skip in the future.
+THIRDPARTY_SKIPLIST = (
+    "functorch",
+    "fx2trt_oss",
+    "intel_extension_for_pytorch",
+    "networkx",
+    "numpy",
+    "omegaconf",
+    "onnx",
+    "onnxruntime",
+    "onnx_tf",
+    "pandas",
+    "sklearn",
+    "tabulate",
+    "tensorflow",
+    "tensorrt",
+    "torch2trt",
+    "tqdm",
+    "tree",
+    "tvm",
+    "xarray",
+)
 
 
 def _strip_init_py(s):
@@ -63,16 +137,30 @@ def _module_dir(m: types.ModuleType):
     return _strip_init_py(m.__file__)
 
 
+# Force inline functions in these files, even the files is in *_SKIPLIST.
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
     torch.utils._content_store.__file__,
-    # These are dynamo files!
     external_utils.__file__,
-    comptime.__file__,  # Want to inline these helpers
+    comptime.__file__,
     torch.optim._functional.__file__,
     torch.utils._foreach_utils.__file__,
+    # torch.ao.quantization.pt2e.qat_utils.__file__,
+    # torch.ao.quantization.quantizer.xnnpack_quantizer.__file__,
+    # torch.ao.quantization.pt2e.representation.rewrite.__file__,
+    # torch.ao.quantization.pt2e.utils.__file__,
+    # torch.ao.quantization.pt2e.eval_utils.__file__,
+    # torch._export.constraints.__file__,
+    # torch._higher_order_ops.cond.__file__,
+    torch._functorch.apis.__file__,
+    torch._functorch.deprecated.__file__,
+    # torch.distributed.tensor.parallel._utils.__file__,
+    # torch.distributed.tensor.parallel.style.__file__,
+    # torch.distributed.tensor.parallel._data_parallel_utils.__file__,
+    # torch.distributed._tensor.api.__file__,
+    # torch.distributed._tensor.device_mesh.__file__,
     _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
     _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
     _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
@@ -80,19 +168,19 @@ FILENAME_ALLOWLIST = {
     _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
     _module_dir(torch) + "_export/constraints.py",
     _module_dir(torch) + "_higher_order_ops/cond.py",
-    _module_dir(torch) + "_functorch/apis.py",
-    _module_dir(torch) + "_functorch/deprecated.py",
+    # _module_dir(torch) + "_functorch/apis.py",
+    # _module_dir(torch) + "_functorch/deprecated.py",
     _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
     _module_dir(torch) + "distributed/tensor/parallel/style.py",
     _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
     _module_dir(torch) + "distributed/_tensor/api.py",
     _module_dir(torch) + "distributed/_tensor/device_mesh.py",
     torch.jit._trace.__file__,
-    torch.distributions.normal.__file__,
-    torch.distributions.independent.__file__,
-    torch.distributions.utils.__file__,
-    torch.utils._contextlib.__file__,
-    torch.fx._pytree.__file__,
+    # torch.distributions.normal.__file__,
+    # torch.distributions.independent.__file__,
+    # torch.distributions.utils.__file__,
+    # torch.utils._contextlib.__file__,
+    # torch.fx._pytree.__file__,
 }
 
 if torch.distributed.is_available():
@@ -118,7 +206,7 @@ FILENAME_ALLOWLIST |= set(
 }
 
 
-# inline objects from it or its children
+# Force inline functions under these modules, even the modules is in *_SKIPLIST.
 SUBMODULE_ALLOWLIST = {
     torch.nn,
     torch.distributions,
@@ -139,49 +227,11 @@ if torch.distributed.is_available():
     SUBMODULE_ALLOWLIST.add(_functional_collectives)
 
 
+# skip some standard python builtin libs
 SKIP_DIRS = [
-    # torch.*
-    _module_dir(torch),
-    # torchdynamo.*
-    os.path.dirname(__file__) + "/",
     "<frozen importlib",
     "<__array_function__ internals>",
-] + [
-    # skip some standard libs
-    _module_dir(m)
-    for m in (
-        abc,
-        collections,
-        contextlib,
-        copy,
-        copyreg,
-        dataclasses,
-        enum,
-        functools,
-        importlib,
-        inspect,
-        linecache,
-        logging,
-        multiprocessing,
-        operator,
-        os,
-        posixpath,
-        random,
-        re,
-        selectors,
-        signal,
-        tempfile,
-        threading,
-        tokenize,
-        traceback,
-        types,
-        typing,
-        unittest,
-        weakref,
-        _collections_abc,
-        _weakrefset,
-    )
-]
+] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
 
 FILENAME_ALLOWLIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
@@ -321,27 +371,7 @@ def check(filename):
 
 
 # skip common third party libs
-for _name in (
-    "functorch",
-    "fx2trt_oss",
-    "intel_extension_for_pytorch",
-    "networkx",
-    "numpy",
-    "omegaconf",
-    "onnx",
-    "onnxruntime",
-    "onnx_tf",
-    "pandas",
-    "sklearn",
-    "tabulate",
-    "tensorflow",
-    "tensorrt",
-    "torch2trt",
-    "tqdm",
-    "tree",
-    "tvm",
-    "xarray",
-):
+for _name in THIRDPARTY_SKIPLIST:
     add(_name)
 
 _recompile_re()
