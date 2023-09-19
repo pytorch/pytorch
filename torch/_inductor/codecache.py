@@ -101,6 +101,24 @@ def _compile_end() -> None:
 
 log = logging.getLogger(__name__)
 
+def join_paths(*paths):
+    # Check if the path is an fsspec path by looking for "://"
+    if not paths:
+        return ""
+    
+    if "://" in paths[0]:
+        # Use the fsspec utility to join paths
+        try:
+            import fsspec
+            fs, _, _ = fsspec.get_fs_token_paths(paths[0])
+            return fs.join(*paths)
+        except ImportError as e:
+            raise ImportError(
+                "fsspec is required to handle remote file systems but it's not installed."
+            ) from e
+    else:
+        # If it's not an fsspec path, use the standard os.path.join
+        return os.path.join(paths)
 
 @functools.lru_cache(None)
 def cache_dir() -> str:
@@ -154,8 +172,8 @@ def cpp_wrapper_cache_dir(name: str) -> str:
     python_version = f"py{sys.version_info.major}{sys.version_info.minor}"
     build_folder = f"{python_version}_{cu_str}"
 
-    cpp_wrapper_dir = os.path.join(cache_dir(), build_folder)
-    cpp_wrapper_build_directory = os.path.join(cpp_wrapper_dir, name)
+    cpp_wrapper_dir = join_paths(cache_dir(), build_folder)
+    cpp_wrapper_build_directory = join_paths(cpp_wrapper_dir, name)
     os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
     return cpp_wrapper_build_directory
 
@@ -195,13 +213,13 @@ class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
     def get_local_cache_path() -> Path:
-        return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
+        return Path(join_paths(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     @staticmethod
     @functools.lru_cache(None)
     def get_global_cache_path() -> Optional[Path]:
         return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
+            Path(join_paths(config.global_cache_dir, CacheBase.get_system()["hash"]))
             if config.global_cache_dir is not None
             else None
         )
@@ -342,7 +360,7 @@ class PersistentCache(CacheBase):
 
 
 def get_lock_dir() -> str:
-    lock_dir = os.path.join(cache_dir(), "locks")
+    lock_dir = join_paths(cache_dir(), "locks")
     if not os.path.exists(lock_dir):
         os.makedirs(lock_dir, exist_ok=True)
     return lock_dir
@@ -367,10 +385,10 @@ def get_path(
         if os.path.isabs(specified_dir):
             subdir = specified_dir
         else:
-            subdir = os.path.join(cache_dir(), specified_dir)
+            subdir = join_paths(cache_dir(), specified_dir)
     else:
-        subdir = os.path.join(cache_dir(), basename[1:3])
-    path = os.path.join(subdir, f"{basename}.{extension}")
+        subdir = join_paths(cache_dir(), basename[1:3])
+    path = join_paths(subdir, f"{basename}.{extension}")
     return basename, subdir, path
 
 
@@ -498,7 +516,7 @@ def cpp_compiler_search(search: str) -> str:
 
 def install_gcc_via_conda() -> str:
     """On older systems, this is a quick way to get a modern compiler"""
-    prefix = os.path.join(cache_dir(), "gcc")
+    prefix = join_paths(cache_dir(), "gcc")
     cxx_path = os.path.join(prefix, "bin", "g++")
     if not os.path.exists(cxx_path):
         log.info("Downloading GCC via conda")

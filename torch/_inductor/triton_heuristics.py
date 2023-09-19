@@ -20,7 +20,7 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import cuda_properties
 
 from . import config
-from .codecache import cache_dir, CudaKernelParamCache
+from .codecache import cache_dir, join_paths, CudaKernelParamCache
 from .coordinate_descent_tuner import CoordescTuner
 
 from .ir import ReductionHint, TileHint
@@ -147,7 +147,7 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
-            os.environ["TRITON_CACHE_DIR"] = os.path.join(
+            os.environ["TRITON_CACHE_DIR"] = join_paths(
                 cache_dir(),
                 "triton",
                 str(self.meta.get("device", 0)),

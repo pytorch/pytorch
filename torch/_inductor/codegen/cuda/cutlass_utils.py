@@ -9,7 +9,7 @@ import sympy
 
 import torch
 
-from ...codecache import cache_dir
+from ...codecache import cache_dir, join_paths
 from ...config import cuda as inductor_cuda_config
 from ...ir import Layout
 from .cuda_env import get_cuda_arch, get_cuda_version
@@ -53,7 +53,7 @@ def try_import_cutlass() -> bool:
         inductor_cuda_config.cutlass_dir, "tools/library/scripts"
     )
     tmp_cutlass_py_full_path = os.path.abspath(
-        os.path.join(cache_dir(), "torch_cutlass_script")
+        join_paths(cache_dir(), "torch_cutlass_script")
     )
 
     if os.path.isdir(cutlass_py_full_path):
