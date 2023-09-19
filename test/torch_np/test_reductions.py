@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+from unittest import expectedFailure as xfail
+
 import pytest
 
 import torch._numpy as np
@@ -14,13 +16,22 @@ from torch._numpy.testing import (
 )
 
 
-class TestFlatnonzero:
+from torch.testing._internal.common_utils import (
+instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+    subtest,
+)
+
+
+class TestFlatnonzero(TestCase):
     def test_basic(self):
         x = np.arange(-2, 3)
         assert_equal(np.flatnonzero(x), [0, 1, 3, 4])
 
 
-class TestAny:
+class TestAny(TestCase):
     def test_basic(self):
         y1 = [0, 0, 1, 0]
         y2 = [0, 0, 0, 0]
@@ -43,7 +54,7 @@ class TestAny:
         assert_equal(np.any(y), y.any())
 
 
-class TestAll:
+class TestAll(TestCase):
     def test_basic(self):
         y1 = [0, 1, 1, 0]
         y2 = [0, 0, 0, 0]
@@ -65,7 +76,7 @@ class TestAll:
         assert_equal(np.all(y), y.all())
 
 
-class TestMean:
+class TestMean(TestCase):
     def test_mean(self):
         A = [[1, 2, 3], [4, 5, 6]]
         assert np.mean(A) == 3.5
@@ -103,7 +114,7 @@ class TestMean:
         # of float32.
         assert np.mean(np.ones(100000, dtype="float16")) == 1
 
-    @pytest.mark.xfail(reason="XXX: mean(..., where=...) not implemented")
+    @xfail #(reason="XXX: mean(..., where=...) not implemented")
     def test_mean_where(self):
         a = np.arange(16).reshape((4, 4))
         wh_full = np.array(
@@ -141,7 +152,7 @@ class TestMean:
             assert_equal(np.mean(a, where=False), np.nan)
 
 
-class TestSum:
+class TestSum(TestCase):
     def test_sum(self):
         m = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         tgt = [[6], [15], [24]]
@@ -168,7 +179,7 @@ class TestSum:
         assert_allclose(res_float, 4.0, atol=1e-15)
         assert res_float.dtype == "float64"
 
-    @pytest.mark.xfail(reason="sum: does not warn on overflow")
+    @xfail   #(reason="sum: does not warn on overflow")
     def test_sum_dtypes_warnings(self):
         for dt in (int, np.float16, np.float32, np.float64):
             for v in (0, 1, 2, 7, 8, 9, 15, 16, 19, 127, 128, 1024, 1235):
@@ -209,7 +220,7 @@ class TestSum:
             d += d
             assert_almost_equal(d, 2.0)
 
-    @pytest.mark.parametrize("dt", [np.complex64, np.complex128])
+    @parametrize("dt", [np.complex64, np.complex128])
     def test_sum_complex_1(self, dt):
         for v in (0, 1, 2, 7, 8, 9, 15, 16, 19, 127, 128, 1024, 1235):
             tgt = dt(v * (v + 1) / 2) - dt((v * (v + 1) / 2) * 1j)
@@ -219,7 +230,7 @@ class TestSum:
             assert_allclose(np.sum(d), tgt, atol=1.5e-5)
             assert_allclose(np.sum(np.flip(d)), tgt, atol=1.5e-7)
 
-    @pytest.mark.parametrize("dt", [np.complex64, np.complex128])
+    @parametrize("dt", [np.complex64, np.complex128])
     def test_sum_complex_2(self, dt):
         d = np.ones(500, dtype=dt) + 1j
         assert_allclose(np.sum(d[::2]), 250.0 + 250j, atol=1.5e-7)
@@ -235,7 +246,7 @@ class TestSum:
         d += d
         assert_allclose(d, 2.0 + 2j, atol=1.5e-7)
 
-    @pytest.mark.xfail(reason="initial=... need implementing")
+    @xfail  #(reason="initial=... need implementing")
     def test_sum_initial(self):
         # Integer, single axis
         assert_equal(np.sum([3], initial=2), 5)
@@ -249,7 +260,7 @@ class TestSum:
             [12, 12, 12],
         )
 
-    @pytest.mark.xfail(reason="where=... need implementing")
+    @xfail  #(reason="where=... need implementing")
     def test_sum_where(self):
         # More extensive tests done in test_reduction_with_where.
         assert_equal(np.sum([[1.0, 2.0], [3.0, 4.0]], where=[True, False]), 4.0)
@@ -352,8 +363,8 @@ class _GenericHasOutTestMixin:
         # Here we follow pytorch, since the result is a superset
         # of the numpy functionality
 
-    @pytest.mark.parametrize("keepdims", [True, False, None])
-    @pytest.mark.parametrize("dtype", [bool, "int32", "float64"])
+    @parametrize("keepdims", [True, False, None])
+    @parametrize("dtype", [bool, "int32", "float64"])
     def test_out_axis(self, dtype, keepdims):
         for axis in self.allowed_axes + [None]:
             self._check_out_axis(axis, dtype, keepdims)
@@ -381,8 +392,8 @@ class _GenericHasOutTestMixin:
             self._check_keepdims_out(axis)
 
 
-class TestAnyGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
-    def setup_method(self):
+class TestAnyGeneric(TestCase, _GenericReductionsTestMixin, _GenericHasOutTestMixin):
+    def setUp(self):
         self.func = np.any
         self.allowed_axes = [
             0,
@@ -393,7 +404,7 @@ class TestAnyGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
         ]
 
 
-class TestAllGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
+class TestAllGeneric(TestCase,_GenericReductionsTestMixin, _GenericHasOutTestMixin):
     def setup_method(self):
         self.func = np.all
         self.allowed_axes = [
@@ -405,14 +416,14 @@ class TestAllGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
         ]
 
 
-class TestCountNonzeroGeneric(_GenericReductionsTestMixin):
+class TestCountNonzeroGeneric(TestCase, _GenericReductionsTestMixin):
     # count_nonzero does not have the out=... argument
     def setup_method(self):
         self.func = np.count_nonzero
         self.allowed_axes = [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
 
 
-class TestArgminGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
+class TestArgminGeneric(TestCase, _GenericReductionsTestMixin, _GenericHasOutTestMixin):
     def setup_method(self):
         self.func = np.argmin
         self.allowed_axes = [
@@ -424,7 +435,7 @@ class TestArgminGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
         ]
 
 
-class TestArgmaxGeneric(_GenericReductionsTestMixin, _GenericHasOutTestMixin):
+class TestArgmaxGeneric(TestCase, _GenericReductionsTestMixin, _GenericHasOutTestMixin):
     def setup_method(self):
         self.func = np.argmax
         self.allowed_axes = [
@@ -533,7 +544,14 @@ class TestCumSumGeneric(_GenericCumSumProdTestMixin):
         self.func = np.cumsum
 
 
-if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+instantiate_parametrized_tests(TestSum)
+instantiate_parametrized_tests(TestAnyGeneric)
+instantiate_parametrized_tests(TestAllGeneric)
+instantiate_parametrized_tests(TestCountNonzeroGeneric)
+instantiate_parametrized_tests(TestArgminGeneric)
+instantiate_parametrized_tests(TestArgmaxGeneric)
 
+
+
+if __name__ == "__main__":
     run_tests()
