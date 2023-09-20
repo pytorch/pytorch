@@ -691,8 +691,6 @@ aten::convolution_backward_overrideable
 aten::convolution_backward_overrideable.out
 aten::convolution_overrideable
 aten::convolution_overrideable.out
-aten::copy
-aten::copy.out
 aten::copy_
 aten::copy_sparse_to_sparse
 aten::copy_sparse_to_sparse.out
