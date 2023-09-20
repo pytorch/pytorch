@@ -207,7 +207,7 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
         return val.node.expr.free_symbols
     elif isinstance(val, sympy.Expr):
         return val.free_symbols
-    elif isinstance(val, (int, float, bool)):
+    elif isinstance(val, (int, float, bool, str)):
         return set()
     elif isinstance(val, torch.Tensor):
         return (
@@ -215,11 +215,23 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
             free_symbols(val.stride()) |
             free_symbols(val.storage_offset())
         )
-    elif isinstance(val, (tuple, list)):
+    elif isinstance(val, (tuple, list, set)):
         r = set()
         for s in val:
             r |= free_symbols(s)
         return r
+    elif isinstance(val, dict):
+        r = set()
+        r |= free_symbols(set(val.keys()))
+        r |= free_symbols(list(val.values()))
+        return r
+    elif isinstance(val, functools.partial):
+        r = set()
+        r |= free_symbols(val.args)
+        r |= free_symbols(val.keywords)
+        return r
+    elif hasattr(val, "__dict__"):
+        return free_symbols(val.__dict__)
     else:
         raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
