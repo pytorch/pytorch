@@ -81,11 +81,21 @@ void set_params_fprop(FlashFwdParams &params,
     params.seqlen_q = seqlen_q;   // seqlen q
     params.seqlen_k = seqlen_k;   // seqlen k
     params.d = d;                 // head_dim
-    if(cu_seqlens_q.device().type() == c10::kCUDA){
+    if (cu_seqlens_q.device().type() == c10::kCUDA && at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+        hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
         params.host_seqlens_q = std::vector<int>(params.b+1);
         params.host_seqlens_k = std::vector<int>(params.b+1);
-        FMHA_CHECK_HIP(hipMemcpy(params.host_seqlens_q.data(), cu_seqlens_q.data_ptr(), (params.b+1)*sizeof(int), hipMemcpyDeviceToHost));
-        FMHA_CHECK_HIP(hipMemcpy(params.host_seqlens_k.data(), cu_seqlens_k.data_ptr(), (params.b+1)*sizeof(int), hipMemcpyDeviceToHost));
+
+        at::hip::HIPStreamCaptureModeGuard guard{hipStreamCaptureModeRelaxed};
+        AT_CUDA_CHECK(hipMemcpyAsync(params.host_seqlens_q.data(), cu_seqlens_q.data_ptr(),
+                                     (params.b+1)*sizeof(int),
+                                     hipMemcpyDeviceToHost,
+                                     stream));
+        AT_CUDA_CHECK(hipMemcpyAsync(params.host_seqlens_k.data(), cu_seqlens_k.data_ptr(),
+                                     (params.b+1)*sizeof(int),
+                                     hipMemcpyDeviceToHost,
+                                     stream));
+        AT_CUDA_CHECK(hipStreamSynchronize(stream));
     }else{
         params.host_seqlens_q = std::vector<int>(static_cast<int*>(cu_seqlens_q.data_ptr()), static_cast<int*>(cu_seqlens_q.data_ptr())+params.b+1);
         params.host_seqlens_k = std::vector<int>(static_cast<int*>(cu_seqlens_k.data_ptr()), static_cast<int*>(cu_seqlens_k.data_ptr())+params.b+1);
@@ -99,7 +109,7 @@ void set_params_fprop(FlashFwdParams &params,
     char* lse_ptr = reinterpret_cast<char*>(softmax_lse_d);
     char* s_ptr = reinterpret_cast<char*>(s_d);
 
-    for (int i = 0; i < b; i++){
+    for (int i = 0; i < b; i++) {
         int temp_seqlen_q = params.host_seqlens_q[i+1] - params.host_seqlens_q[i];
         int temp_q_stride = get_size_in_bytes(d * h * temp_seqlen_q, data_type);
         int temp_seqlen_k = params.host_seqlens_k[i+1] - params.host_seqlens_k[i];
@@ -178,6 +188,7 @@ void set_params_dgrad(FlashBwdParams &params,
                       float softmax_scale,
                       bool is_causal) {
 
+    hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
     auto acc_type = at::kFloat;
     auto data_type = q.dtype();
 
@@ -192,12 +203,20 @@ void set_params_dgrad(FlashBwdParams &params,
     params.seqlen_q = seqlen_q;
     params.seqlen_k = seqlen_k;
     params.d = d;
-    if(cu_seqlens_q.device().type()==c10::kCUDA){
+    if(cu_seqlens_q.device().type()==c10::kCUDA && at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None){
         params.host_seqlens_q = std::vector<int>(params.b+1);
         params.host_seqlens_k = std::vector<int>(params.b+1);
 
-        FMHA_CHECK_HIP(hipMemcpy(params.host_seqlens_q.data(), cu_seqlens_q.data_ptr(), (params.b+1)*sizeof(int), hipMemcpyDeviceToHost));
-        FMHA_CHECK_HIP(hipMemcpy(params.host_seqlens_k.data(), cu_seqlens_k.data_ptr(), (params.b+1)*sizeof(int), hipMemcpyDeviceToHost));
+        at::hip::HIPStreamCaptureModeGuard guard{hipStreamCaptureModeRelaxed};
+        AT_CUDA_CHECK(hipMemcpyAsync(params.host_seqlens_q.data(), cu_seqlens_q.data_ptr(),
+                                     (params.b+1)*sizeof(int),
+                                     hipMemcpyDeviceToHost,
+                                     stream));
+        AT_CUDA_CHECK(hipMemcpyAsync(params.host_seqlens_k.data(), cu_seqlens_k.data_ptr(),
+                                     (params.b+1)*sizeof(int),
+                                     hipMemcpyDeviceToHost,
+                                     stream));
+        AT_CUDA_CHECK(hipStreamSynchronize(stream));
     }else{
         params.host_seqlens_q = std::vector<int>(static_cast<int*>(cu_seqlens_q.data_ptr()), static_cast<int*>(cu_seqlens_q.data_ptr())+params.b+1);
         params.host_seqlens_k = std::vector<int>(static_cast<int*>(cu_seqlens_k.data_ptr()), static_cast<int*>(cu_seqlens_k.data_ptr())+params.b+1);
