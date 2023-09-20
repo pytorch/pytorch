@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa
 
+import functools
+
 import torch
 
 import torch._dynamo.test_case
@@ -12,24 +14,29 @@ from torch._dynamo._trace_wrapped_higher_order_op import _trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
-import functools
+
 
 def _multiply(x):
     return x * x
+
 
 def _graph_breaking_fn(x):
     print("Boo!")
     return _multiply(x)
 
+
 def _side_effect_stateful_fn2(x, obj):
     obj.counter = obj.counter + 1
     return _multiply(x)
 
+
 def _multiply_invoke(grad):
     return _trace_wrapped(grad, fn=_multiply)
 
+
 def _graph_break_invoke(grad):
     return _trace_wrapped(grad, fn=_graph_breaking_fn)
+
 
 def _side_effectful_invoke2(grad, fn):
     return _trace_wrapped(grad, fn=fn)
@@ -180,6 +187,7 @@ class GraphModule(torch.nn.Module):
             inner_fn = functools.partial(_side_effect_stateful_fn2, obj=obj)
             hook_fn = functools.partial(_side_effectful_invoke2, fn=inner_fn)
             x.register_hook(hook_fn)
+
             def fn(x, y):
                 return x + y
 
@@ -217,18 +225,14 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(obj.counter, 3)
             graph = None
 
-
     def test_invoke_in_pt2_compiled_autograd_graph_breaks(self):
         def compiler_fn(gm):
-            return torch.compile(
-                gm, backend="inductor", fullgraph=True, dynamic=True
-            )
+            return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=True)
 
         for backend in ["eager", "aot_eager", "inductor"]:
             torch._dynamo.reset()
             x = torch.tensor([0.5, 0.5], requires_grad=True)
             y = torch.tensor([0.5, 0.5], requires_grad=True)
-
 
             def fn(x, y):
                 x.register_hook(_graph_break_invoke)

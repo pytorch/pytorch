@@ -1,13 +1,15 @@
+import functools
+
 import torch.utils._pytree as pytree
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
 
 from torch._ops import HigherOrderOperator
-from torch.utils._python_dispatch import _get_current_dispatch_mode
+from torch._subclasses import FakeTensorMode
 
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-from torch._subclasses import FakeTensorMode
-import functools
+from torch.utils._python_dispatch import _get_current_dispatch_mode
+
 
 # Trace wrapped is a higher order op meant for both invoking a bound function,
 # and for registering it as a call_function in the backward graph.
@@ -17,6 +19,7 @@ import functools
 # and we would lose the python state mutation.
 def _trace_wrapped(*args, fn):
     return _trace_wrapped_op(*args, fn=fn)
+
 
 _trace_wrapped_op = HigherOrderOperator("_trace_wrapped")
 
@@ -49,10 +52,6 @@ def inner_trace(mode, *args, fn):
     fn = functools.partial(self_invoke, fn=fn)
     fn.__name__ = fn.func.__name__
 
-    is_func = torch._is_functional_tensor(grad)
-    if is_func:
-        grad = torch._functorch.aot_autograd.from_fun(grad)
-
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (grad,))
     out_proxy = mode.tracer.create_proxy(
         "call_function", fn, proxy_args, {}, name="invocation"
@@ -73,9 +72,7 @@ def inner_trace(mode, *args, fn):
         name="assert",
     )
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
-    return (
-        pytree.tree_map(torch._functorch.aot_autograd.to_fun, grad) if is_func else grad
-    )
+    return grad
 
 
 @_trace_wrapped_op.py_impl(FakeTensorMode)
@@ -95,11 +92,12 @@ _trace_wrapped_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-@_trace_wrapped_op.py_impl(DispatchKey.Functionalize)
-def _trace_wrapped_functionalized(*args, fn):
-    mode = _get_current_dispatch_mode()
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        return _trace_wrapped_op(*args, fn=fn)
+@_trace_wrapped_op.py_functionalize_impl
+def _trace_wrapped_functionalized(ctx, *args, fn):
+    unwrapped_args = ctx.unwrap_tensors(args)
+    wrapped_fn = ctx.functionalize(fn)
+    with ctx.redispatch_to_next():
+        return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, fn=wrapped_fn))
 
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
