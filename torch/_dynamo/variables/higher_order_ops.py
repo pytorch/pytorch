@@ -12,7 +12,7 @@ import torch.onnx.operators
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
 from torch._dynamo.variables.base import VariableTracker
-from torch._dynamo.variables.tensor import SymNodeVariable
+from torch._dynamo.variables.tensor import InputSymNodeVariable, SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
 
@@ -359,7 +359,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: cond(pred, true_fn, false_fn, operands)",
             )
         # predicate
-        if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
+        if type(args[0]) not in (
+            ConstantVariable,
+            TensorVariable,
+            SymNodeVariable,
+            InputSymNodeVariable,
+        ):
             unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
                 f"item but got {str(type(args[0]))} "
