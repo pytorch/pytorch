@@ -1,7 +1,7 @@
 from typing import Any
 from torch._ops import HigherOrderOperator
 from torch.utils.checkpoint import checkpoint
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import _maybe_unwrap_tree_flatten
 from itertools import count
 import inspect
 
@@ -21,8 +21,7 @@ class Wrap(HigherOrderOperator):
         @disable
         def wrapper():
             result = func(*args, **kwargs)
-            result, _ = tree_flatten(result)
-            return result[0] if len(result) == 1 else result
+            return _maybe_unwrap_tree_flatten(result)
 
         return wrapper()
 

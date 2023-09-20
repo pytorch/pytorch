@@ -448,7 +448,7 @@ def checkpoint(
                 "Passing `context_fn` or `debug` is only supported when "
                 "use_reentrant=False."
             )
-        return CheckpointFunction.apply(function, preserve, *args)
+        ret = CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
             function, preserve, context_fn, determinism_check, debug, *args, **kwargs
@@ -460,7 +460,9 @@ def checkpoint(
         try:
             next(gen)
         except StopIteration:
-            return ret
+            pass
+
+    return torch.utils._pytree._maybe_unwrap_tree_flatten(ret)
 
 
 def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
