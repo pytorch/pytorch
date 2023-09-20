@@ -70,13 +70,10 @@ void check_mkldnn_binary_fusion_inputs(
       "mkldnn pointwise binary fusion: input's device should be CPU");
   TORCH_CHECK(
       input.scalar_type() == ScalarType::Float ||
-          input.scalar_type() == ScalarType::BFloat16,
-      "mkldnn pointwise binary: input's dtype should be float or bfloat16");
-  if (input.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(
-        mkldnn_bf16_device_check(),
-        "mkldnn pointwise binary: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+          input.scalar_type() == ScalarType::BFloat16 ||
+          input.scalar_type() == ScalarType::Half,
+      "mkldnn pointwise binary: input's dtype should be float, bfloat16 or half");
+  mkldnn_check_low_precision(input.scalar_type(), "mkldnn pointwise binary");
 }
 
 #if AT_MKLDNN_ENABLED()
