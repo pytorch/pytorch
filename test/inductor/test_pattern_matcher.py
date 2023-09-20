@@ -15,14 +15,14 @@ from torch._inductor.fx_passes.serialized_patterns.central_index import (
 )
 from torch._inductor.pattern_matcher import (
     _TargetExpr,
-    gen_pattern,
-    PatternExpr,
-    PatternPrettyPrinter,
     Arg,
     CallFunction,
+    gen_pattern,
     KeywordArg,
     Match,
+    PatternExpr,
     PatternMatcherPass,
+    PatternPrettyPrinter,
     register_graph_pattern,
 )
 from torch._inductor.utils import run_and_get_code
