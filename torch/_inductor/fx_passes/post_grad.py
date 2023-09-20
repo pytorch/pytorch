@@ -827,7 +827,12 @@ def cannot_be_moved_to_cuda(node):
     ) and node.target.namespace not in ("prims", "aten"):
         return True
 
-    return False
+    # can take mixed devices - bail for now
+    incompatible_ops = (
+        aten._embedding_bag.default,
+    )
+
+    return node.target in incompatible_ops
 
 
 def get_node_device(node: fx.Node) -> Optional[torch.device]:
