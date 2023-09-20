@@ -9,10 +9,7 @@ else:
 
 _device_t = Union[torch.device, str, int, None]
 
-# API to query device properties that will work in a worker process
-# that cannot use the GPU APIs (due to processing fork() and initialization
-# time issues). Properties are recorded in the main process before
-# we fork the workers.
+# Recording the device properties in the main process but used in worker process.
 caching_worker_device_properties: Dict[str, Any] = {}
 caching_worker_current_devices: Dict[str, int] = {}
 
@@ -33,7 +30,10 @@ class DeviceInterface:
 
     class Worker:
         """
-        API to query device properties that will work in multi processing workers.
+        Worker API to query device properties that will work in multi processing
+        workers that cannot use the GPU APIs (due to processing fork() and
+        initialization time issues). Properties are recorded in the main process
+        before we fork the workers.
         """
 
         @staticmethod
