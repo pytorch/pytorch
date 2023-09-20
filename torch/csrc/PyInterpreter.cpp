@@ -596,9 +596,8 @@ static c10::ArrayRef<T> get_set_cached_attr(
   bool is_buffer_allocated = false;
   size_t curr_size = 0;
   if (PyObject_HasAttrString(tensor_obj, buffer_len_attr_name.c_str())) {
-    auto buffer_pyobj =
-        py::handle(tensor_obj).attr(buffer_len_attr_name.c_str());
-    curr_size = py::cast<size_t>(buffer_pyobj);
+    auto len_pyobj = py::handle(tensor_obj).attr(buffer_len_attr_name.c_str());
+    curr_size = py::cast<size_t>(len_pyobj);
     is_buffer_allocated = true;
   }
 
