@@ -6265,6 +6265,7 @@
   dispatch:
     CPU: weight_norm_cpu
     CUDA: weight_norm_cuda
+    MPS: weight_norm_mps
   autogen: _weight_norm_interface.out
 
 - func: _weight_norm_interface_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
@@ -6272,6 +6273,7 @@
   dispatch:
     CPU: weight_norm_backward_cpu
     CUDA: weight_norm_backward_cuda
+    MPS: weight_norm_backward_mps
   autogen: _weight_norm_interface_backward.out
 
 - func: _weight_norm_differentiable_backward(Tensor grad_w, Tensor saved_v, Tensor saved_g, Tensor saved_norms, int dim) -> (Tensor, Tensor)
