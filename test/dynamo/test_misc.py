@@ -1396,6 +1396,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_numpy_force(self):
+        def fn(x):
+            return x.numpy(force=False)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_recompilation_scalar(self):
         def fn(x, a):
             return np.where(x < 0.5, a, x)
