@@ -1008,7 +1008,9 @@ class TestExport(TestCase):
 
         def f(x):
             a = x.item()
-            return torch.full((a, 4), 0)
+            # We cannot automatically infer a is a size here because view
+            # accepts -1
+            return torch.randn(24).view(a, 4)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
