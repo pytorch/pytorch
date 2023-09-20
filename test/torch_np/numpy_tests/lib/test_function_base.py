@@ -1689,7 +1689,7 @@ class TestDigitize(TestCase):
         assert_equal(np.digitize(x, [x + 1, x - 1]), 1)
 
 
-@xfail  # (reason="TODO: implement")
+@skip  # (reason="TODO: implement; here unwrap if from numpy")
 class TestUnwrap(TestCase):
     def test_simple(self):
         # check that unwrap removes jumps greater that 2*pi
