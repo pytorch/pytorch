@@ -1019,6 +1019,15 @@ class SymNode:
         # deferred so you can't backtrace easily
         return self.shape_env.defer_runtime_assert(self.expr, f"{file}:{line}", fx_node=self.fx_node)
 
+    def expect_size(self, file, line):
+        b = self.ge(self.wrap_int(0))
+        # Generate a deferred runtime assert
+        r = b.expect_true(file, line)
+        # Refine compile time range, if possible
+        if r:
+            _advise_is_size(SymInt(self))
+        return r
+
     def bool_(self):
         return self.guard_bool("", 0)
 
