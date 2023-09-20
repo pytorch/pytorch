@@ -627,8 +627,6 @@ aten::avg_pool3d
 aten::avg_pool3d.out
 aten::avg_pool3d_backward
 aten::avg_pool3d_backward.grad_input
-aten::baddbmm
-aten::baddbmm.out
 aten::bartlett_window
 aten::bartlett_window.out
 aten::bartlett_window.periodic
