@@ -861,6 +861,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
+            breakpoint()
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(

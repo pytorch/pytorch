@@ -12,14 +12,27 @@ from torch._dynamo._trace_wrapped_higher_order_op import _trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
-
+import functools
 
 def _multiply(x):
     return x * x
 
+def _graph_breaking_fn(x):
+    print("Boo!")
+    return _multiply(x)
+
+def _side_effect_stateful_fn2(x, obj):
+    obj.counter = obj.counter + 1
+    return _multiply(x)
 
 def _multiply_invoke(grad):
     return _trace_wrapped(grad, fn=_multiply)
+
+def _graph_break_invoke(grad):
+    return _trace_wrapped(grad, fn=_graph_breaking_fn)
+
+def _side_effectful_invoke2(grad, fn):
+    return _trace_wrapped(grad, fn=fn)
 
 
 class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
@@ -137,5 +150,97 @@ class GraphModule(torch.nn.Module):
         return (copy_, copy__1)
 """
             self.assertExpectedInline(actual, expected)
+
+            graph = None
+
+    def test_invoke_in_pt2_compiled_autograd_side_effect(self):
+        graph = None
+
+        def compiler_fn(gm):
+            def inner_compiler(gm_, example_inputs_):
+                nonlocal graph
+                self.assertEqual(graph, None)
+                graph = gm_
+                return inductor.compile(gm_, example_inputs_)
+
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+            )
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            x = torch.tensor([0.5, 0.5], requires_grad=True)
+            y = torch.tensor([0.5, 0.5], requires_grad=True)
+
+            class MyObj:
+                def __init__(self):
+                    self.counter = 0
+
+            obj = MyObj()
+            inner_fn = functools.partial(_side_effect_stateful_fn2, obj=obj)
+            hook_fn = functools.partial(_side_effectful_invoke2, fn=inner_fn)
+            x.register_hook(hook_fn)
+            def fn(x, y):
+                return x + y
+
+            fn = torch._dynamo.optimize(backend, nopython=True)(fn)
+            out = fn(x, y)
+            with compiled_autograd.enable(compiler_fn):
+                out.backward(torch.tensor([2.0, 2.0]))
+            actual = normalize_gm(graph.print_readable(False))
+            self.assertEqual(obj.counter, 1)
+            self.assertEqual(x.grad, torch.tensor([4.0, 4.0]))
+            expected = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_inputs_0_ : torch.Tensor):
+        getitem = L_inputs_0_
+
+        new_empty_strided = torch.ops.aten.new_empty_strided.default(getitem, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+
+        copy_ = torch.ops.aten.copy_.default(new_empty_strided, getitem);  new_empty_strided = None
+
+        call_hook = getitem * getitem;  getitem = None
+
+        new_empty_strided_1 = torch.ops.aten.new_empty_strided.default(call_hook, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+
+        copy__1 = torch.ops.aten.copy_.default(new_empty_strided_1, call_hook);  new_empty_strided_1 = call_hook = None
+        return (copy_, copy__1)
+"""
+            self.assertExpectedInline(actual, expected)
+
+            out = fn(x, y)
+            out.backward(torch.tensor([2.0, 2.0]))
+            self.assertEqual(obj.counter, 2)
+
+            out = fn(x, y)
+            out.backward(torch.tensor([2.0, 2.0]))
+            self.assertEqual(obj.counter, 3)
+            graph = None
+
+
+    def test_invoke_in_pt2_compiled_autograd_graph_breaks(self):
+        def compiler_fn(gm):
+            return torch.compile(
+                gm, backend="inductor", fullgraph=True, dynamic=True
+            )
+
+        for backend in ["eager", "aot_eager", "inductor"]:
+            torch._dynamo.reset()
+            x = torch.tensor([0.5, 0.5], requires_grad=True)
+            y = torch.tensor([0.5, 0.5], requires_grad=True)
+
+
+            def fn(x, y):
+                x.register_hook(_graph_break_invoke)
+                return x + y
+
+            fn = torch._dynamo.optimize(backend, nopython=True)(fn)
+            out = fn(x, y)
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "print",
+            ):
+                with compiled_autograd.enable(compiler_fn):
+                    out.backward(torch.tensor([2.0, 2.0]))
 
             graph = None

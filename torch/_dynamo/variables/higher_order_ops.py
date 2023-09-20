@@ -1202,14 +1202,11 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
             example_value=None,
         )
 
-
 class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
-    def call_function(
+     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import UserFunctionVariable
-
+        from .builder import wrap_fx_proxy
         assert "fn" in kwargs
-        assert isinstance(kwargs["fn"], UserFunctionVariable)
         fn = kwargs["fn"]
         return fn.call_function(tx, args, {})
