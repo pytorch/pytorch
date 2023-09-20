@@ -320,6 +320,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return CheckpointHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "_export_tracepoint":
             return ExportTracepointHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "_trace_wrapped":
+            return TraceWrappedHigherOrderOperatorVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1199,3 +1201,15 @@ class ExportTracepointHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             example_value=None,
         )
+
+
+class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from . import UserFunctionVariable
+
+        assert "fn" in kwargs
+        assert isinstance(kwargs["fn"], UserFunctionVariable)
+        fn = kwargs["fn"]
+        return fn.call_function(tx, args, {})
