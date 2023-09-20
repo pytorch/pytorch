@@ -2232,22 +2232,25 @@ A covariance matrix is a square matrix giving the covariance of each pair of var
 the variance of each variable (covariance of a variable with itself). By definition, if :attr:`input` represents
 a single variable (Scalar or 1D) then its variance is returned.
 
-The unbiased sample covariance of the variables :math:`x` and :math:`y` is given by:
+The sample covariance of the variables :math:`x` and :math:`y` is given by:
 
 .. math::
-    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{N~-~1}
+    \text{cov}(x,y) = \frac{\sum^{N}_{i = 1}(x_{i} - \bar{x})(y_{i} - \bar{y})}{\max(0,~N~-~\delta N)}
 
-where :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the :math:`x` and :math:`y` respectively.
+where :math:`\bar{x}` and :math:`\bar{y}` are the simple means of the :math:`x` and :math:`y` respectively, and
+:math:`\delta N` is the :attr:`correction`.
 
-If :attr:`fweights` and/or :attr:`aweights` are provided, the unbiased weighted covariance
+If :attr:`fweights` and/or :attr:`aweights` are provided, the weighted covariance
 is calculated, which is given by:
 
 .. math::
-    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}{\sum^{N}_{i = 1}w_i~-~1}
+    \text{cov}_w(x,y) = \frac{\sum^{N}_{i = 1}w_i(x_{i} - \mu_x^*)(y_{i} - \mu_y^*)}
+    {\max(0,~\sum^{N}_{i = 1}w_i~-~\frac{\sum^{N}_{i = 1}w_ia_i}{\sum^{N}_{i = 1}w_i}~\delta N)}
 
-where :math:`w` denotes :attr:`fweights` or :attr:`aweights` based on whichever is provided, or
-:math:`w = fweights \times aweights` if both are provided, and
-:math:`\mu_x^* = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` is the weighted mean of the variable.
+where :math:`w` denotes :attr:`fweights` or :attr:`aweights` (``f`` and ``a`` for brevity) based on whichever is
+provided, or :math:`w = f \times a` if both are provided, and
+:math:`\mu_x^* = \frac{\sum^{N}_{i = 1}w_ix_{i} }{\sum^{N}_{i = 1}w_i}` is the weighted mean of the variable. If not
+provided, ``f`` and/or ``a`` can be seen as a :math:`\mathbb{1}` vector of appropriate size.
 
 Args:
     input (Tensor): A 2D matrix containing multiple variables and observations, or a
@@ -2260,11 +2263,11 @@ Keyword Args:
         will return the simple average. Defaults to ``1``.
     fweights (tensor, optional): A Scalar or 1D tensor of observation vector frequencies representing the number of
         times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
-        Must have integral dtype. Ignored if ``None``. `Defaults to ``None``.
+        Must have integral dtype. Ignored if ``None``. Defaults to ``None``.
     aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
         These relative weights are typically large for observations considered “important” and smaller for
         observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
-        Must have floating point dtype. Ignored if ``None``. `Defaults to ``None``.
+        Must have floating point dtype. Ignored if ``None``. Defaults to ``None``.
 
 Returns:
     (Tensor) The covariance matrix of the variables.
@@ -10730,7 +10733,7 @@ reduce over all dimensions.
 
 The standard deviation (:math:`\sigma`) is calculated as
 
-.. math:: \sigma = \sqrt{\frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2}
+.. math:: \sigma = \sqrt{\frac{1}{\max(0,~N - \delta N)}\sum_{i=0}^{N-1}(x_i-\bar{x})^2}
 
 where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
 sample mean, :math:`N` is the number of samples and :math:`\delta N` is
@@ -10786,7 +10789,7 @@ Calculates the standard deviation and mean over the dimensions specified by
 
 The standard deviation (:math:`\sigma`) is calculated as
 
-.. math:: \sigma = \sqrt{\frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2}
+.. math:: \sigma = \sqrt{\frac{1}{\max(0,~N - \delta N)}\sum_{i=0}^{N-1}(x_i-\bar{x})^2}
 
 where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
 sample mean, :math:`N` is the number of samples and :math:`\delta N` is
@@ -12115,7 +12118,7 @@ dimensions.
 
 The variance (:math:`\sigma^2`) is calculated as
 
-.. math:: \sigma^2 = \frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2
+.. math:: \sigma^2 = \frac{1}{\max(0,~N - \delta N)}\sum_{i=0}^{N-1}(x_i-\bar{x})^2
 
 where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
 sample mean, :math:`N` is the number of samples and :math:`\delta N` is
@@ -12171,7 +12174,7 @@ reduce over all dimensions.
 
 The variance (:math:`\sigma^2`) is calculated as
 
-.. math:: \sigma^2 = \frac{1}{N - \delta N}\sum_{i=0}^{N-1}(x_i-\bar{x})^2
+.. math:: \sigma^2 = \frac{1}{\max(0,~N - \delta N)}\sum_{i=0}^{N-1}(x_i-\bar{x})^2
 
 where :math:`x` is the sample set of elements, :math:`\bar{x}` is the
 sample mean, :math:`N` is the number of samples and :math:`\delta N` is
