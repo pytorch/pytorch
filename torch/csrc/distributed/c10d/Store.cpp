@@ -2,6 +2,12 @@
 
 namespace c10d {
 
+constexpr std::chrono::milliseconds Store::kDefaultTimeout;
+constexpr std::chrono::milliseconds Store::kNoTimeout;
+
+// Define destructor symbol for abstract base class.
+Store::~Store() = default;
+
 const std::chrono::milliseconds& Store::getTimeout() const noexcept {
   return timeout_;
 }
