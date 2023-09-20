@@ -21,7 +21,13 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    is_constant_source,
+    SuperSource,
+    TypeSource,
+)
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
@@ -1060,7 +1066,7 @@ class BuiltinVariable(VariableTracker):
             TorchVariable,
             UserFunctionVariable,
         )
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
@@ -1088,6 +1094,27 @@ class BuiltinVariable(VariableTracker):
             options["source"] = source
         else:
             source = None
+
+        if name == "__bases__":
+            try:
+                value = obj.as_python_constant()
+                if isinstance(value, type):
+                    bases = value.__bases__
+                    if source is not None:
+                        tuple_args = [
+                            VariableBuilder(tx, GetItemSource(source, i))(b)
+                            for i, b in enumerate(bases)
+                        ]
+                    elif len(bases) == 1 and (
+                        bases[0] is object or bases[0] is torch._C._TensorBase
+                    ):
+                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
+                    else:
+                        unimplemented(f"unexpected sourceless type bases: {bases}")
+
+                    return variables.TupleVariable(tuple_args, **options)
+            except NotImplementedError:
+                pass
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
@@ -1228,6 +1255,9 @@ class BuiltinVariable(VariableTracker):
             return VariableBuilder(tx, TypeSource(obj.source))(py_type).add_options(
                 self, obj
             )
+
+        if py_type is not None:
+            return ConstantVariable(py_type)
 
         raise UserError(
             UserErrorType.ANTI_PATTERN,
