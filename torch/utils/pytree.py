@@ -27,8 +27,13 @@ from typing import (
     Union,
 )
 
-import optree
-from optree import PyTreeSpec  # direct import for type annotations
+try:
+    import optree
+except ModuleNotFoundError:
+    optree = None
+    PyTreeSpec = None
+else:
+    from optree import PyTreeSpec  # direct import for type annotations
 
 
 __all__ = [
@@ -382,7 +387,11 @@ def tree_map(
         is the tuple of values at corresponding nodes in ``rests``.
     """
     return optree.tree_map(
-        func, tree, *rests, none_is_leaf=none_is_leaf, namespace=namespace
+        func,
+        tree,
+        *rests,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
     )
 
 
@@ -416,7 +425,11 @@ def tree_map_(
         in ``tree`` and ``xs`` is the tuple of values at values at corresponding nodes in ``rests``.
     """
     return optree.tree_map_(
-        func, tree, *rests, none_is_leaf=none_is_leaf, namespace=namespace
+        func,
+        tree,
+        *rests,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
     )
 
 
@@ -727,7 +740,10 @@ def _broadcast_to_and_flatten(
     full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
     try:
         return broadcast_prefix(
-            tree, full_tree, none_is_leaf=none_is_leaf, namespace=namespace
+            tree,
+            full_tree,
+            none_is_leaf=none_is_leaf,
+            namespace=namespace,
         )
     except ValueError:
         return None
@@ -754,14 +770,36 @@ def treespec_loads(serialized: bytes) -> PyTreeSpec:
     return treespec
 
 
-class PyTreeLeafSpecMeta(type(optree.PyTreeSpec)):  # type: ignore[misc]
-    def __instancecheck__(self, instance: object) -> bool:
-        return isinstance(instance, optree.PyTreeSpec) and instance.is_leaf()
+if optree is not None:
 
+    class PyTreeLeafSpecMeta(type(PyTreeSpec)):  # type: ignore[misc]
+        def __instancecheck__(self, instance: object) -> bool:
+            return isinstance(instance, PyTreeSpec) and instance.is_leaf()
 
-class PyTreeLeafSpec(optree.PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
-    def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
-        return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
+    class PyTreeLeafSpec(PyTreeSpec, metaclass=PyTreeLeafSpecMeta):
+        def __new__(cls, none_is_leaf: bool = True) -> "PyTreeLeafSpec":
+            return optree.treespec_leaf(none_is_leaf=none_is_leaf)  # type: ignore[return-value]
 
+    LeafSpec = PyTreeLeafSpec
 
-LeafSpec = PyTreeLeafSpec
+else:
+    from ._pytree import (
+        _broadcast_to_and_flatten,
+        _register_pytree_node as register_pytree_node,
+        LeafSpec,
+        tree_all,
+        tree_all_only,
+        tree_any,
+        tree_any_only,
+        tree_flatten,
+        tree_leaves,
+        tree_map,
+        tree_map_,
+        tree_map_only,
+        tree_map_only_,
+        tree_structure,
+        tree_unflatten,
+        TreeSpec,
+        treespec_dumps,
+        treespec_loads,
+    )

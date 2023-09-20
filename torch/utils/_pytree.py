@@ -1,8 +1,21 @@
-from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
-from collections import namedtuple, OrderedDict
 import dataclasses
 import json
 import warnings
+from collections import deque, namedtuple, OrderedDict
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    overload,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 
 T = TypeVar('T')
@@ -257,6 +270,15 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     return result, TreeSpec(node_type, context, children_specs)
 
 
+def tree_leaves(pytree: PyTree):
+    """Get a list of leaves of a pytree."""
+    return tree_flatten(pytree)[0]
+
+def tree_structure(pytree: PyTree):
+    """Get the TreeSpec for a pytree."""
+    return tree_flatten(pytree)[1]
+
+
 def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
@@ -289,6 +311,13 @@ def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
 def tree_map(fn: Any, pytree: PyTree) -> PyTree:
     flat_args, spec = tree_flatten(pytree)
     return tree_unflatten([fn(i) for i in flat_args], spec)
+
+
+def tree_map_(fn: Any, pytree: PyTree) -> PyTree:
+    flat_args, _ = tree_flatten(pytree)
+    deque(map(fn, flat_args), maxlen=0)  # consume and exhaust the iterable
+    return pytree
+
 
 Type2 = Tuple[Type[T], Type[S]]
 Type3 = Tuple[Type[T], Type[S], Type[U]]
@@ -358,6 +387,21 @@ def tree_map_only(ty: Type3[T, S, U], fn: Fn3[T, S, U, Any], pytree: PyTree) -> 
 
 def tree_map_only(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
     return tree_map(map_only(ty)(fn), pytree)
+
+@overload
+def tree_map_only_(ty: Type[T], fn: Fn[T, Any], pytree: PyTree) -> PyTree:
+    ...
+
+@overload
+def tree_map_only_(ty: Type2[T, S], fn: Fn2[T, S, Any], pytree: PyTree) -> PyTree:
+    ...
+
+@overload
+def tree_map_only_(ty: Type3[T, S, U], fn: Fn3[T, S, U, Any], pytree: PyTree) -> PyTree:
+    ...
+
+def tree_map_only_(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
+    return tree_map_(map_only(ty)(fn), pytree)
 
 def tree_all(pred: Callable[[Any], bool], pytree: PyTree) -> bool:
     flat_args, _ = tree_flatten(pytree)
