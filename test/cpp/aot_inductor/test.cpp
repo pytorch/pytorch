@@ -67,10 +67,9 @@ TEST(AotInductorTest, BasicTest) {
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  std::vector<AtenTensorHandle> input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  std::vector<AtenTensorHandle> output_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(outputs);
+  auto input_handles = torch::aot_inductor::RAIITensorToHandleAllocator(inputs);
+  auto output_handles =
+      torch::aot_inductor::RAIITensorToHandleAllocator(outputs);
 
   std::vector<const int64_t*> output_sizes(outputs.size());
   std::vector<int64_t> output_ndims(outputs.size());
@@ -79,9 +78,9 @@ TEST(AotInductorTest, BasicTest) {
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,
-      input_handles.data(),
+      input_handles.release(),
       inputs.size(),
-      output_handles.data(),
+      output_handles.release(),
       outputs.size(),
       stream_handle,
       proxy_executor_handle,

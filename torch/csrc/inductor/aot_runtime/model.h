@@ -91,7 +91,8 @@ class RAIIAtenTensorHandle {
 
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
-// Steal the ownership from raw AtenTensorHandle to RAIIAtenTensorHandle
+// Steal the passed-in array and steal the its elements from raw
+// AtenTensorHandle to RAIIAtenTensorHandle
 std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_unique_handles(
     AtenTensorHandle* handles,
     size_t size) {
@@ -101,6 +102,7 @@ std::vector<RAIIAtenTensorHandle> steal_from_raw_handles_to_unique_handles(
     result.push_back(std::move(RAIIAtenTensorHandle(handles[i])));
     handles[i] = nullptr;
   }
+  delete[] handles;
   return result;
 }
 

@@ -13,17 +13,6 @@ AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
   return reinterpret_cast<AtenTensorHandle>(tensor);
 }
 
-std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
-    std::vector<at::Tensor>& tensors) {
-  std::vector<AtenTensorHandle> result;
-  result.reserve(tensors.size());
-  for (auto tensor : tensors) {
-    auto allocated = new at::Tensor(std::move(tensor));
-    result.push_back(tensor_pointer_to_tensor_handle(allocated));
-  }
-  return result;
-}
-
 std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
     std::vector<AtenTensorHandle>& handles) {
   std::vector<at::Tensor> result;
@@ -33,6 +22,16 @@ std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
   }
   handles.clear();
   return result;
+}
+
+RAIITensorToHandleAllocator::RAIITensorToHandleAllocator(
+    std::vector<at::Tensor>& tensors) {
+  size_t size = tensors.size();
+  handles_ = new AtenTensorHandle[size];
+  for (size_t i = 0; i < size; i++) {
+    at::Tensor* allocated = new at::Tensor(tensors[i]);
+    handles_[i] = tensor_pointer_to_tensor_handle(allocated);
+  }
 }
 
 } // namespace aot_inductor
