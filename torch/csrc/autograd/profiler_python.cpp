@@ -301,7 +301,7 @@ class ValueCache {
 
   c10::optional<TensorMetadata> recordIfTensor(py::handle p);
   std::vector<std::pair<std::string, TensorMetadata>> unpackTensorMap(
-      py::dict tensor_map);
+      const py::dict& tensor_map);
   void trimPrefixes();
 
  private:
@@ -354,7 +354,7 @@ c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
 }
 
 std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
-    py::dict tensor_map) {
+    const py::dict& tensor_map) {
   std::vector<std::pair<std::string, TensorMetadata>> out;
   for (auto& it : tensor_map) {
     auto* value = it.second.ptr();
@@ -676,6 +676,7 @@ struct ThreadLocalResults {
 class PythonTracer final : public python_tracer::PythonTracerBase {
  public:
   PythonTracer(torch::profiler::impl::RecordQueue* queue);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PythonTracer() override;
 
   static int pyProfileFn(
@@ -816,6 +817,7 @@ void PythonTracer::stop() {
   }
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PythonTracer::~PythonTracer() {
   if (active_) {
     TORCH_WARN("`PythonTracer::stop()` was not called.");

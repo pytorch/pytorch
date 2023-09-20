@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
+#include <torch/csrc/utils/memory.h>
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -222,8 +223,8 @@ int NodeTask::getReentrantDepth() const {
 }
 
 CheckpointValidGuard::CheckpointValidGuard(
-    const std::shared_ptr<const GraphTask>& graph_task) {
-  prev_checkpoint_valid_state = checkpoint_valid;
+    const std::shared_ptr<const GraphTask>& graph_task)
+    : prev_checkpoint_valid_state(checkpoint_valid) {
   checkpoint_valid =
       graph_task->can_checkpoint() && prev_checkpoint_valid_state;
 }
@@ -383,8 +384,8 @@ void Engine::thread_init(
   }
 }
 
-GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task) {
-  last_graph_task_ = std::move(current_graph_task);
+GraphTaskGuard::GraphTaskGuard(std::shared_ptr<GraphTask> graph_task)
+    : last_graph_task_(std::move(current_graph_task)) {
   current_graph_task = std::move(graph_task);
 }
 GraphTaskGuard::~GraphTaskGuard() {
@@ -639,6 +640,7 @@ void Engine::reentrant_thread_init() {
 }
 
 void Engine::thread_on_exception(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
@@ -671,7 +673,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
-    future_result_->markCompleted(std::move(vars));
+    future_result_->markCompleted(vars);
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
   }
@@ -953,6 +955,7 @@ static variable_list call_function(
   });
 
   if (has_post_hooks) {
+    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
@@ -1588,7 +1591,7 @@ void GraphTask::init_to_execute(
       // In terms of populating the rest of exec_info though, you can basically
       // think of this as the same as setting `needed_` is true directly.
       if (!info.captures_) {
-        info.captures_ = std::make_unique<std::vector<ExecInfo::Capture>>();
+        info.captures_ = make_unique<std::vector<ExecInfo::Capture>>();
       }
       info.captures_->emplace_back(output_edge.input_nr, output_idx++);
     }

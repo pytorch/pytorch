@@ -1499,5 +1499,46 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(counters["stats"]["calls_captured"], iter_n)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
+    def test_cond_with_consecutive_make_fx_symbolic(self):
+        def true_fn(x):
+            return x - x.cos()
+
+        def false_fn(x):
+            return x + x.sin()
+
+        def foo(x):
+            return cond(x.shape[0] == 4, true_fn, false_fn, [x])
+
+        exp_graph = """\
+class foo(torch.nn.Module):
+    def forward(self, x_1: f32[s0, s1]):
+        # No stacktrace found for following nodes
+        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
+        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
+        true_graph_0 = self.true_graph_0
+        false_graph_0 = self.false_graph_0
+        conditional: f32[s0, s1] = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  \
+eq = true_graph_0 = false_graph_0 = x_1 = None
+        return conditional
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: f32[s0, s1]):
+            # No stacktrace found for following nodes
+            cos: f32[s0, s1] = torch.ops.aten.cos.default(arg0_1)
+            sub: f32[s0, s1] = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
+            return sub
+
+    class <lambda>(torch.nn.Module):
+        def forward(self, arg0_1: f32[s0, s1]):
+            # No stacktrace found for following nodes
+            sin: f32[s0, s1] = torch.ops.aten.sin.default(arg0_1)
+            add: f32[s0, s1] = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
+            return add
+"""
+        inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
+        for inp in inps:
+            gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
+            self._expected_inline_normalized(gm.print_readable(print_output=False), exp_graph)
+
 if __name__ == '__main__':
     run_tests()
