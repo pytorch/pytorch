@@ -681,19 +681,27 @@ class SchedulerNode(BaseSchedulerNode):
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
 
-    def has_atomic_add(self, check_buf):
-        # Return True if check_buf is stored by atomic_add mode
+    @cache_on_self
+    def _get_atomic_add_buffers(self) -> Set[str]:
+        buffers_store_as_atomic_add = set()
         for node in self._body.get_nodes():
-            if node.op == "call_method" and node.target == "store":
-                if (
-                    ("name" in node.kwargs and node.kwargs["name"] == check_buf)
-                    or (len(node.args) >= 2 and node.args[1] == check_buf)
-                ) and (
+            if (
+                node.op == "call_method"
+                and node.target == "store"
+                and (
                     ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
                     or (len(node.args) == 5 and node.args[4] == "atomic_add")
-                ):
-                    return True
-        return False
+                )
+            ):
+                buffers_store_as_atomic_add.add(
+                    node.kwargs["name"]
+                    if "name" in node.kwargs
+                    else (node.args[1] if len(node.args) >= 2 else "")
+                )
+        return buffers_store_as_atomic_add
+
+    def has_atomic_add(self, check_buf):
+        return check_buf in self._get_atomic_add_buffers()
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
@@ -800,15 +808,13 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return op_counts
 
     def has_atomic_add(self, check_buf):
-        if any(
+        return any(
             (
                 isinstance(sub_schedule_node1, SchedulerNode)
                 and sub_schedule_node1.has_atomic_add(check_buf)
             )
             for sub_schedule_node1 in self.get_nodes()
-        ):
-            return True
-        return False
+        )
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
