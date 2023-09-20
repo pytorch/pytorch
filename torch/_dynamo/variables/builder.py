@@ -391,6 +391,19 @@ class VariableBuilder:
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
 
+        elif value is torch.utils._pytree.SUPPORTED_NODES:
+            result = {
+                k: UserDefinedObjectVariable(
+                    value[k],
+                    source=GetItemSource(self.get_source(), k),
+                    # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
+                    # under the assumption that the values themselves don't change.
+                    guards=self.make_guards(GuardBuilder.DICT_VERSION),
+                )
+                for k in value.keys()
+            }
+            return ConstDictVariable(result, type(value))
+
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
