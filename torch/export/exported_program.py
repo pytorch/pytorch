@@ -17,8 +17,9 @@ from torch.fx.passes.infra.pass_manager import PassManager
 __all__ = [
     "ArgumentKind",
     "ArgumentSpec",
-    "ExportBackwardSignature",
     "DynamoExportedProgram",
+    "ExportBackwardSignature",
+    "ExportedProgram",
     "ExportGraphSignature",
     "ModuleCallEntry",
     "ModuleCallSignature",

@@ -7,6 +7,8 @@ import sys
 import types
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
+__all__ = []  # type: ignore[var-annotated]
+
 ExportFn = Callable[
     [Callable, List[Any], Optional[Dict[str, Any]], Optional[Any]], "ExportedProgram"  # type: ignore[name-defined]
 ]
@@ -20,7 +22,7 @@ class InvalidTorchExportBackend(RuntimeError):
         )
 
 
-def lookup_backend(export_fn):
+def _lookup_backend(export_fn):
     """Expand backend strings to functions"""
     if isinstance(export_fn, str):
         if export_fn not in _BACKENDS:
@@ -103,7 +105,7 @@ def _lazy_import_entry_point(backend_name: str):
         register_backend(export_fn=export_fn, name=backend_name)
 
 
-def import_submodule(mod: types.ModuleType):
+def _import_submodule(mod: types.ModuleType):
     """
     Ensure all the files in a given submodule are imported
     """
@@ -116,4 +118,4 @@ def import_submodule(mod: types.ModuleType):
 def _lazy_import():
     from .. import backends
 
-    import_submodule(backends)
+    _import_submodule(backends)

@@ -208,7 +208,7 @@ def export(
 
     if not options:
         options = {}
-    export_fn = torch.export.backends.registry.lookup_backend(backend)
+    export_fn = torch.export.backends.registry._lookup_backend(backend)
     return export_fn(f, f_args, f_kwargs, **options)
 
 
