@@ -593,8 +593,8 @@ PickleOpCode Unpickler::readInstruction() {
           size_t bytes_read;
           std::tie(storage_ptr, bytes_read) = read_record_(key);
           TORCH_CHECK(
-              bytes_read >= numel * dtype.itemsize(),
-              "Tensor unpicklig: read storage with ",
+              bytes_read >= numel * dtype.itemsize() || device.is_meta(),
+              "Unpickle non-meta tensor: read storage with ",
               bytes_read,
               " bytes of data, but tensor expects at least ",
               numel,
