@@ -1814,18 +1814,6 @@ if(NOT INTERN_BUILD_MOBILE)
   add_definitions(-DUSE_EXTERNAL_MZCRC)
   add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
 
-  # Is __thread supported?
-  if(NOT MSVC)
-    CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
-  else(NOT MSVC)
-    CHECK_C_SOURCE_COMPILES("static __declspec( thread ) int x = 1; int main() { return x; }" C_HAS_THREAD)
-  endif(NOT MSVC)
-  if(NOT C_HAS_THREAD)
-    message(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
-  else(NOT C_HAS_THREAD)
-    add_compile_options(-DTH_HAVE_THREAD)
-  endif(NOT C_HAS_THREAD)
-
   find_package(ZVECTOR) # s390x simd support
 endif()
 
