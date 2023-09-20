@@ -100,54 +100,6 @@ class _(int):
     pass
 
 
-"""
-Generic type over any number of dimension types (Dim types or _).
-
-NOTE: Because of Python 3.8's lack of support for user-defined
-variadic generic types, we are forced to implement TensorType as
-an alias for Tuple. Python 3.9+ provides better ways of doing this,
-but such ways are not backward-compatibile with Python 3.8 and
-cause CI failures.
-"""
-TensorType = Tuple
-
-
-class _DynamicTensorType(type):
-    """
-    Metaclass for tensor types with only dynamic dimensions.
-    """
-    pass
-
-
-def dynamic_shapes_type(spec):
-    """
-    Given a dynamic shapes specification that can be passed to an export call
-    (see below), returns a corresponding type that can be used to annotate
-    the exported callable.
-    """
-    if isinstance(spec, type):
-        # don't do anything if it's already a type
-        return spec
-    if isinstance(spec, Sequence):
-        # any sequence gets mapped to a Tuple type
-        args = tuple(dynamic_shapes_type(v) for v in spec)
-        return Tuple[args]
-    if isinstance(spec, Mapping):
-        if all(type(k) is int and type(v) is _Dim for k, v in spec.items()):
-            # {i: dim_i, j: dim_j} gets mapped to a _TensorType, which is
-            # equivalent to a TensorType with *all* dimensions specified:
-            # dim_i at i, dim_j at j, and _ everywhere else
-            return _DynamicTensorType(
-                f"DynamicTensorType({spec})",
-                (),
-                {"dynamic_shape": spec},
-            )
-        # any mapping gets mapped to a TypedDict type
-        annotations = {k: dynamic_shapes_type(v) for k, v in spec.items()}
-        name = ", ".join(f"{k}={v}" for k, v in annotations.items())
-        return TypedDict(f"TypedDict({name})", annotations)  # type: ignore[operator]
-
-
 def export__RC__(
     f: Callable,
     args: Tuple[Any, ...],
@@ -159,15 +111,6 @@ def export__RC__(
     API for exporting with dynamic shape specifications instead of constraints.
     It should be considered "release candidate" (RC), meant to replace `export`.
 
-    See documentation of `export` for `f`, `args`, `kwargs`, and return.
-    Here we focus on documenting mechanisms for specifying dynamic shapes.
-
-    There are two ways of specifying dynamic shapes, described below:
-    1. Either pass `dynamic_shapes` of inputs along with inputs.
-    2. Or type arguments of the callable `f` with expected dynamic shapes.
-
-    Mechanism #1: `dynamic_shapes`
-    ======================================
     Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
     argument names of `f` to dynamic shape specifications, as follows:
     - The dynamic shape of a tensor argument can be specified as a dict from
@@ -177,15 +120,7 @@ def export__RC__(
     - Arguments that are dicts or tuples of tensors are recursively specified
       by using mappings or sequences of contained specifications.
 
-    Mechanism #2: types
-    ===================
-    Here, arguments of `f` are expected to be (optionally) typed with their
-    dynamic shape specifications, as follows:
-    - The shape of a tensor argument can be specified as a TensorType of
-      dimension types (Dim types and _). Note that all dimensions, dynamic
-      and static, must be included.
-    - Arguments that are dicts or tuples of tensors are recursively typed
-      by using Dict[str, ...] or List[...] of contained specifications.
+    See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
     kwargs = kwargs if kwargs is not None else {}
 
@@ -194,30 +129,17 @@ def export__RC__(
 
     def assoc_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, (tuple, list)):
-            if isinstance(dynamic_shapes, Sequence):
-                for arg, shape in zip(combined_args, dynamic_shapes):
-                    yield from assoc_zip(arg, shape)
-            elif get_origin(dynamic_shapes) is tuple:
-                for arg, shape in zip(combined_args, get_args(dynamic_shapes)):
-                    yield from assoc_zip(arg, shape)
-            else:
-                assert get_origin(dynamic_shapes) is list, f"Unexpected {dynamic_shapes} matching tuple"
-                shape = get_args(dynamic_shapes)[0]
-                for arg in combined_args:
-                    yield from assoc_zip(arg, shape)
+            assert isinstance(dynamic_shapes, Sequence)
+            for arg, shape in zip(combined_args, dynamic_shapes):
+                yield from assoc_zip(arg, shape)
         elif isinstance(combined_args, dict):
-            if isinstance(dynamic_shapes, Mapping):
-                for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
-                    yield from assoc_zip(arg, shape)
-            elif isinstance(dynamic_shapes, _TypedDictMeta):
-                for arg, shape in zip(combined_args.values(), dynamic_shapes.__annotations__.values()):
-                    yield from assoc_zip(arg, shape)
-            else:
-                assert get_origin(dynamic_shapes) is dict, f"Unexpected {dynamic_shapes} matching dict"
-                shape = get_args(dynamic_shapes)[1]
-                for arg in combined_args.values():
-                    yield from assoc_zip(arg, shape)
-        # TODO: dataclasses
+            assert isinstance(dynamic_shapes, Mapping)
+            for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
+                yield from assoc_zip(arg, shape)
+        elif dataclasses.is_dataclass(combined_args):
+            assert type(dynamic_shapes) == type(combined_args)
+            for f in dataclasses.fields(combined_args):
+                yield from assoc_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
 
@@ -226,16 +148,12 @@ def export__RC__(
     symbols = defaultdict(list)
 
     def update_symbols(tensor, shape):
-        if get_origin(shape) is tuple:  # TensorType
-            for i, dim in enumerate(get_args(shape)):
-                if isinstance(dim, _Dim):
-                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
-        elif isinstance(shape, dict):  # dynamic shape specification for tensor
+        if isinstance(shape, dict):
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
-        elif isinstance(shape, _DynamicTensorType):
-            for i, dim in shape.dynamic_shape.items():  # type: ignore[attr-defined]
+        elif isinstance(shape, (tuple, list)):
+            for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
 
