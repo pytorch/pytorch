@@ -1,13 +1,10 @@
+from contextlib import nullcontext
+
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
+from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.aot_autograd import AOTConfig, create_joint
-from torch._functorch.eager_transforms import (
-    _unwrap_all_tensors_from_functional,
-    _wrap_all_tensors_to_functional,
-    functionalize,
-)
 
 from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
@@ -16,6 +13,11 @@ from torch._higher_order_ops.cond import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import (
+    FunctionalTensor,
+    FunctionalTensorMode,
+    unset_functional_temporarily,
+)
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     make_fx,
@@ -23,6 +25,23 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
+
+
+# TODO: pull these helpers from AOTAutograd later
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
@@ -65,10 +84,10 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
     # when creating the output node, it fails to associate the wrapped tensor with its proxy.
     # Instead, it will create _tensor_constant as output.
 
-    with suspend_functionalization():
+    with suspend_functionalization(), unset_functional_temporarily():
         with disable_proxy_modes_tracing():
 
-            def from_fun(t):
+            def _from_fun(t):
                 if isinstance(t, torch.Tensor):
                     if t.dtype != torch.bool:
                         return torch.empty_strided(
@@ -80,17 +99,27 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     else:
                         # clone of a functional tensor produces a functional tensor
                         # but we want to avoid it so we clone a non-functional version
-                        maybe_unfunc_t = torch._functorch.aot_autograd.from_fun(t)
+                        maybe_unfunc_t = t
+                        if isinstance(t, FunctionalTensor):
+                            torch._sync(t)
+                            maybe_unfunc_t = from_fun(t)
+                        elif torch._is_functional_tensor(t):
+                            # need to handle both types of functionalization here:
+                            # these are the tensors that came from the user,
+                            # which could be either FunctionalTensorWrapper or FunctionalTensor
+                            torch._sync(t)
+                            maybe_unfunc_t = torch._from_functional_tensor(t)
                         return maybe_unfunc_t.clone()
                 return t
 
-            example_xs = [from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
+            example_xs = [_from_fun(xs) for xs in _unstack_pytree(mapped_xs)[0]]
+
             example_pos_args = [
-                from_fun(arg) if isinstance(arg, torch.Tensor) else arg
+                _from_fun(arg) if isinstance(arg, torch.Tensor) else arg
                 for arg in pos_args
             ]
             example_flat_out = pytree.tree_map(
-                from_fun, f(*example_xs, *example_pos_args)
+                _from_fun, f(*example_xs, *example_pos_args)
             )
             if any(
                 not isinstance(out, torch.Tensor)
@@ -101,7 +130,7 @@ def create_fw_bw_graph(f, num_mapped_args, *args):
                     "Expect outputs of map only contains tensors or None. "
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
-            example_grad = [from_fun(out) for out in example_flat_out]
+            example_grad = [_from_fun(out) for out in example_flat_out]
 
             fw_graph = make_fx(f)(*example_xs, *example_pos_args)
 
@@ -261,7 +290,14 @@ def _unstack_pytree(xs):
             f"Leaves of xs must have same leading dimension size {[xs.shape for xs in flat_xs]}"
         )
 
-    a = zip(*flat_xs)
+    ctx = (
+        FunctionalTensorMode
+        if any(isinstance(x, FunctionalTensor) for x in flat_xs)
+        else nullcontext
+    )
+    with ctx():
+        a = zip(*flat_xs)
+
     pytrees = []
     for tuple in a:
         pytrees.append(pytree.tree_unflatten(tuple, inspec))
@@ -320,54 +356,15 @@ def map_fake_tensor_mode(mode, f, num_mapped, *args):
         return map_dense(f, num_mapped, *args)
 
 
-@map_impl.py_impl(DispatchKey.Functionalize)
-def map_func(f, num_mapped, *args):
-    reapply_views = torch._C._functionalization_reapply_views_tls()
+@map_impl.py_functionalize_impl
+def map_functionalize(ctx, f, num_mapped, *args):
     xs = args[:num_mapped]
     pos_args = args[num_mapped:]
-    unwrapped_xs = _unwrap_all_tensors_from_functional(xs, reapply_views=reapply_views)
-    unwrapped_args = _unwrap_all_tensors_from_functional(
-        pos_args, reapply_views=reapply_views
-    )
-    mode = "mutations_and_views" if reapply_views else "mutations"
+    unwrapped_xs = ctx.unwrap_tensors(xs)
+    unwrapped_args = ctx.unwrap_tensors(pos_args)
+    wrapped_fn = ctx.functionalize(f)
 
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        functional_map_fn = functionalize(f, remove=mode)
-        with disable_proxy_modes_tracing():
-            example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
-
-        if _has_potential_branch_input_mutation(f, example_inputs):
-            raise UnsupportedAliasMutationException("torch.map is mutating the input!")
-
-        if _has_potential_branch_input_alias(f, example_inputs):
-            raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
-
-        map_return = map_impl(
-            functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args
-        )
-        return _wrap_all_tensors_to_functional(map_return, level=0)
-
-
-@map_impl.py_impl(torch._C._functorch.TransformType.Functionalize)
-def map_functionalize(interpreter, f, num_mapped, *args):
-    """
-    Functionalization implementation for torch.map. Currently:
-      1. We don't allow any input mutation inside the map function
-      2. Our check for above condition is not exhaustive
-    """
-    xs = args[:num_mapped]
-    pos_args = args[num_mapped:]
-    reapply_views = interpreter.functionalize_add_back_views()
-    mode = "mutations_and_views" if reapply_views else "mutations"
-    # At this point, we will see functionalized tensors, so need to unwrap them first
-    unwrapped_xs = _unwrap_all_tensors_from_functional(xs, reapply_views=reapply_views)
-    unwrapped_args = _unwrap_all_tensors_from_functional(
-        pos_args, reapply_views=reapply_views
-    )
-
-    functional_map_fn = functionalize(f, remove=mode)
-
-    with interpreter.lower():
+    with ctx.redispatch_to_next():
         with disable_proxy_modes_tracing():
             example_inputs = (*_unstack_pytree(unwrapped_xs)[0], *unwrapped_args)
         if _has_potential_branch_input_mutation(f, example_inputs):
@@ -376,10 +373,8 @@ def map_functionalize(interpreter, f, num_mapped, *args):
         if _has_potential_branch_input_alias(f, example_inputs):
             raise UnsupportedAliasMutationException("torch.map is aliasing the input!")
 
-        map_return = map_impl(
-            functional_map_fn, num_mapped, *unwrapped_xs, *unwrapped_args
-        )
-        return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
+        map_return = map_impl(wrapped_fn, num_mapped, *unwrapped_xs, *unwrapped_args)
+        return ctx.wrap_tensors(map_return)
 
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
