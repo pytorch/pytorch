@@ -43,7 +43,6 @@ from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from . import config
-from .device_properties import current_device, get_device_properties
 
 log = logging.getLogger(__name__)
 
@@ -173,7 +172,11 @@ def has_triton_package() -> bool:
 @functools.lru_cache(None)
 def has_triton() -> bool:
     def is_cuda_compatible_with_triton():
-        return torch.cuda.is_available() and get_device_properties().major >= 7
+        device_interface = get_interface_for_device("cuda")
+        return (
+            device_interface.is_available()
+            and device_interface.Worker.get_device_properties().major >= 7
+        )
 
     return is_cuda_compatible_with_triton() and has_triton_package()
 
@@ -200,7 +203,8 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
     if isinstance(device, str):
         device = torch.device(device)
     if device.type != "cpu" and device.index is None:
-        return torch.device(device.type, index=current_device(device.type))
+        device_interface = get_interface_for_device(device.type)
+        return torch.device(device.type, index=device_interface.Worker.current_device())
     return device
 
 

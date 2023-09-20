@@ -1,4 +1,4 @@
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 import torch
 
@@ -8,6 +8,13 @@ else:
     get_cuda_stream = None
 
 _device_t = Union[torch.device, str, int, None]
+
+# API to query device properties that will work in a worker process
+# that cannot use the GPU APIs (due to processing fork() and initialization
+# time issues). Properties are recorded in the main process before
+# we fork the workers.
+caching_worker_device_properties: Dict[str, Any] = {}
+caching_worker_current_devices: Dict[str, int] = {}
 
 
 class DeviceInterface:
@@ -22,6 +29,23 @@ class DeviceInterface:
 
     class device:
         def __new__(cls, device: _device_t):
+            raise NotImplementedError()
+
+    class Worker:
+        """
+        API to query device properties that will work in multi processing workers.
+        """
+
+        @staticmethod
+        def set_device(device: int):
+            raise NotImplementedError()
+
+        @staticmethod
+        def current_device() -> int:
+            raise NotImplementedError()
+
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
             raise NotImplementedError()
 
     @staticmethod
@@ -68,6 +92,41 @@ class DeviceInterface:
 class CudaInterface(DeviceInterface):
     Event = torch.cuda.Event
     device = torch.cuda.device
+
+    class Worker:
+        @staticmethod
+        def set_device(device: int):
+            caching_worker_current_devices["cuda"] = device
+
+        @staticmethod
+        def current_device() -> int:
+            if "cuda" in caching_worker_current_devices:
+                return caching_worker_current_devices["cuda"]
+            return torch.cuda.current_device()
+
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            if device is not None:
+                if isinstance(device, str):
+                    device = torch.device(device)
+                    assert device.type == "cuda"
+                if isinstance(device, torch.device):
+                    device = device.index
+            if device is None:
+                device = CudaInterface.Worker.current_device()
+
+            if not torch.cuda.is_available():
+                return {}
+
+            if "cuda" not in caching_worker_device_properties:
+                device_prop = [
+                    torch.cuda.get_device_properties(i)
+                    for i in range(torch.cuda.device_count())
+                ]
+                caching_worker_device_properties["cuda"] = device_prop
+
+            return caching_worker_device_properties["cuda"][device]
+
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
@@ -77,6 +136,7 @@ class CudaInterface(DeviceInterface):
     get_device_properties = staticmethod(torch.cuda.get_device_properties)
     get_raw_stream = staticmethod(get_cuda_stream)
 
+    # Can be mock patched by @patch decorator.
     @staticmethod
     def is_available() -> bool:
         return torch.cuda.is_available()

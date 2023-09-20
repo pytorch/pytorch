@@ -37,8 +37,11 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKIN
 
 import torch
 
-from torch._dynamo.device_interface import get_interface_for_device
-from torch._inductor import config, device_properties, exc
+from torch._dynamo.device_interface import (
+    get_interface_for_device,
+    get_registered_device_interfaces,
+)
+from torch._inductor import config, exc
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.utils import developer_warning, is_linux
 
@@ -1673,10 +1676,16 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
+def caching_device_properties():
+    for _, device_interface in get_registered_device_interfaces():
+        device_interface.Worker.get_device_properties()
+
+
 def _worker_compile(
     kernel_name: str, source_code: str, cc: int, device: torch.device
 ) -> None:
-    device_properties.set_compiler_worker_current_device(device)
+    device_interface = get_interface_for_device(device.type)
+    device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
@@ -1734,7 +1743,7 @@ class AsyncCompile:
     def process_pool() -> ProcessPoolExecutor:
         # ensure properties have been calculated before processes
         # are forked
-        device_properties._properties()
+        caching_device_properties()
         assert config.compile_threads > 1
         orig_ppid = os.getpid()
 
