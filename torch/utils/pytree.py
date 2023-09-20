@@ -187,8 +187,19 @@ def register_pytree_node(
             )
         )
     """
+    from ._pytree import _register_pytree_node
+
+    _register_pytree_node(
+        cls,
+        flatten_func,
+        unflatten_func,
+    )
+
     optree.register_pytree_node(
-        cls, flatten_func, _reverse_args(unflatten_func), namespace=namespace
+        cls,
+        flatten_func,
+        _reverse_args(unflatten_func),
+        namespace=namespace,
     )
 
 
