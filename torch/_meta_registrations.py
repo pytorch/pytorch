@@ -3505,7 +3505,6 @@ def meta_div(self, other, rounding_mode=None):
             self.stride(),
             dtype=result_dtype,
             device="meta",
-            requires_grad=self.requires_grad,
         )
     elif isinstance(other, torch.Tensor):
         return torch.empty_strided(
@@ -3513,7 +3512,6 @@ def meta_div(self, other, rounding_mode=None):
             other.stride(),
             dtype=result_dtype,
             device="meta",
-            requires_grad=other.requires_grad,
         )
     else:
         return torch.empty(
