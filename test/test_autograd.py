@@ -8460,6 +8460,56 @@ get_out().sum().backward()
         _test_op(torch.view_as_complex, torch.rand(2, 2), ())
         _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
 
+    def test_setup_context_when_forward_has_default_args(self):
+        class PowFunction(Function):
+            @staticmethod
+            def forward(x, y=3):
+                return torch.pow(x, y)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, y = inputs
+                ctx.save_for_backward(x)
+                ctx.y = y
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        class PowFunctionWithClassmethod(Function):
+            @classmethod
+            def forward(cls, x, y=3):
+                return torch.pow(x, y)
+
+            @classmethod
+            def setup_context(cls, ctx, inputs, output):
+                x, y = inputs
+                ctx.save_for_backward(x)
+                ctx.y = y
+
+            @classmethod
+            def backward(cls, ctx, gO):
+                x, = ctx.saved_tensors
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        x = torch.tensor(2.0, requires_grad=True)
+
+        y = torch.tensor(8.0)
+        y_expected = torch.tensor(12.0)
+
+        y1 = PowFunction.apply(x)
+        y1_expected, = torch.autograd.grad(y1, x)
+
+        y2 = PowFunctionWithClassmethod.apply(x)
+        y2_expected, = torch.autograd.grad(y2, x)
+
+        self.assertEqual(y, y1)
+        self.assertEqual(y_expected, y1_expected)
+        self.assertEqual(y, y2)
+        self.assertEqual(y_expected, y2_expected)
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):

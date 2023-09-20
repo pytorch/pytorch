@@ -6,7 +6,6 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 import torch
 import torch.nn.functional as F
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.pt2e.utils import _is_sym_size_node
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -17,7 +16,6 @@ from torch.ao.quantization.quantizer import (
 from torch.ao.quantization.quantizer.utils import (
     _annotate_input_qspec_map,
     _annotate_output_qspec,
-    _node_only_used_for_sym_size,
 )
 from torch.fx import Node
 from torch.fx.passes.utils.source_matcher_utils import get_source_partitions

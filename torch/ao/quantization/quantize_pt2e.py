@@ -72,6 +72,7 @@ def prepare_qat_pt2e(
 _QUANT_OPS = [
     torch.ops.quantized_decomposed.quantize_per_tensor.default,
     torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+    torch.ops.quantized_decomposed.quantize_per_channel.default,
 ]
 def _quant_node_filter(n: Node) -> bool:
     """If there is any pure ops between get_attr and quantize op they will be const propagated

@@ -98,7 +98,8 @@ def _port_metadata_for_input_quant_nodes(
         q_node, dq_node = _find_q_dq_node_for_user(input_node, node)
         if q_node is None or dq_node is None:
             return
-        # add metadata if the q_node can be traced back to get_attr node
+        # add metadata for all the node between q_node and get_attr node
+        # if the q_node can be traced back to get_attr node
         q_to_get_attr_nodes = [q_node]
         q_node_input = q_node.args[0]
         while isinstance(q_node_input, torch.fx.Node) and q_node_input.op not in ["placeholder", "get_attr"]:
