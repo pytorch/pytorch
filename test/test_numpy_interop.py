@@ -157,6 +157,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    @skipIfTorchDynamo("conj bit not implemented in TensorVariable yet")
     def test_to_numpy_force_argument(self, device) -> None:
         for force in [False, True]:
             for requires_grad in [False, True]:
