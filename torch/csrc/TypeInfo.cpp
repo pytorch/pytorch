@@ -113,32 +113,39 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
+  HANDLE_TH_ERRORS
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::kHalf, at::ScalarType::BFloat16, self->type, "epsilon", [] {
         return PyFloat_FromDouble(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::epsilon());
       });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPFInfo_max(THPFInfo* self, void*) {
+  HANDLE_TH_ERRORS
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::kHalf, at::ScalarType::BFloat16, self->type, "max", [] {
         return PyFloat_FromDouble(
             std::numeric_limits<at::scalar_value_type<scalar_t>::type>::max());
       });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPFInfo_min(THPFInfo* self, void*) {
+  HANDLE_TH_ERRORS
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::kHalf, at::ScalarType::BFloat16, self->type, "lowest", [] {
         return PyFloat_FromDouble(
             std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::lowest());
       });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPIInfo_max(THPIInfo* self, void*) {
+  HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_INTEGRAL_TYPES(self->type, "max", [] {
       return THPUtils_packInt64(std::numeric_limits<scalar_t>::max());
@@ -148,9 +155,11 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
   return AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self->type, "max", [] {
     return THPUtils_packInt64(std::numeric_limits<underlying_t>::max());
   });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPIInfo_min(THPIInfo* self, void*) {
+  HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_INTEGRAL_TYPES(self->type, "min", [] {
       return THPUtils_packInt64(std::numeric_limits<scalar_t>::lowest());
@@ -160,21 +169,26 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
   return AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(self->type, "min", [] {
     return THPUtils_packInt64(std::numeric_limits<underlying_t>::lowest());
   });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
+  HANDLE_TH_ERRORS
   auto primary_name = torch::utils::getDtypeNames(self->type).first;
   return AT_DISPATCH_INTEGRAL_TYPES(self->type, "dtype", [&primary_name] {
     return PyUnicode_FromString(primary_name.data());
   });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
+  HANDLE_TH_ERRORS
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::kHalf, at::ScalarType::BFloat16, self->type, "min", [] {
         return PyFloat_FromDouble(
             std::numeric_limits<at::scalar_value_type<scalar_t>::type>::min());
       });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
@@ -183,6 +197,7 @@ static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
 }
 
 static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
+  HANDLE_TH_ERRORS
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::kHalf, at::ScalarType::BFloat16, self->type, "digits10", [] {
         return PyFloat_FromDouble(std::pow(
@@ -190,9 +205,11 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
             -std::numeric_limits<
                 at::scalar_value_type<scalar_t>::type>::digits10));
       });
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
+  HANDLE_TH_ERRORS
   auto primary_name = torch::utils::getDtypeNames(self->type).first;
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::kHalf,
@@ -200,10 +217,12 @@ static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
       self->type,
       "dtype",
       [&primary_name] { return PyUnicode_FromString(primary_name.data()); });
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPFInfo_str(THPFInfo* self) {
   std::ostringstream oss;
+  const auto dtypeStr = THPFInfo_dtype(self, nullptr);
   oss << "finfo(resolution="
       << PyFloat_AsDouble(THPFInfo_resolution(self, nullptr));
   oss << ", min=" << PyFloat_AsDouble(THPFInfo_min(self, nullptr));
@@ -212,19 +231,23 @@ PyObject* THPFInfo_str(THPFInfo* self) {
   oss << ", smallest_normal="
       << PyFloat_AsDouble(THPFInfo_smallest_normal(self, nullptr));
   oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
-  oss << ", dtype=" << PyUnicode_AsUTF8(THPFInfo_dtype(self, nullptr)) << ")";
-
-  return THPUtils_packString(oss.str().c_str());
+  if (dtypeStr != nullptr) {
+    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ")";
+  }
+  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
 }
 
 PyObject* THPIInfo_str(THPIInfo* self) {
   std::ostringstream oss;
 
+  const auto dtypeStr = THPIInfo_dtype(self, nullptr);
   oss << "iinfo(min=" << PyLong_AsDouble(THPIInfo_min(self, nullptr));
   oss << ", max=" << PyLong_AsDouble(THPIInfo_max(self, nullptr));
-  oss << ", dtype=" << PyUnicode_AsUTF8(THPIInfo_dtype(self, nullptr)) << ")";
+  if (dtypeStr) {
+      oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ")";
+  }
 
-  return THPUtils_packString(oss.str().c_str());
+  return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
 }
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
