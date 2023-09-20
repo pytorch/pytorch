@@ -1,4 +1,5 @@
 import functools
+import numbers
 import operator
 import sys
 from enum import Enum
@@ -4032,6 +4033,23 @@ def register_inplace(aten_op, outplace_op):
         return args[0].copy_(out)
 
     return inplace_op
+
+
+@out_wrapper()
+@pw_cast_for_opmath
+@register_decomposition([aten.baddbmm])
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    result = torch.bmm(batch1, batch2)
+    if not isinstance(alpha, numbers.Number) or alpha != 1:
+        result = result * alpha
+    if beta == 0:
+        return result
+    if not isinstance(beta, numbers.Number) or beta != 1:
+        self = self * beta
+    return self + result
 
 
 register_inplace(aten.addbmm_, aten.addbmm)
