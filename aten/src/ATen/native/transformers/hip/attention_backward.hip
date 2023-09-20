@@ -9,13 +9,13 @@
 #include <c10/util/Exception.h>
 #include <c10/util/bit_cast.h>
 
-#include <c10/core/TensorImpl.h>
+#include <ATen/hip/HIPGeneratorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/hip/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
-#include <ATen/hip/HIPGeneratorImpl.h>
+#include <c10/core/TensorImpl.h>
 
 #include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 
@@ -23,9 +23,9 @@
 // FlashAttention Specific Imports
 #include <ATen/native/transformers/hip/flash_attn_rocm/fmha_api.h>
 // MemoryEfficient Attention Specific Imports
-//#include <ATen/native/transformers/hip/mem_eff_attention/kernel_backward.h>
-//#include <ATen/native/transformers/hip/mem_eff_attention/kernels/cutlassB.h>
-//#include <ATen/native/transformers/hip/mem_eff_attention/gemm_kernel_utils.h>
+// #include <ATen/native/transformers/hip/mem_eff_attention/kernel_backward.h>
+// #include <ATen/native/transformers/hip/mem_eff_attention/kernels/cutlassB.h>
+// #include <ATen/native/transformers/hip/mem_eff_attention/gemm_kernel_utils.h>
 #include <ATen/native/transformers/hip/mem_eff_attention/pytorch_utils.h>
 #endif
 namespace at {
@@ -59,44 +59,41 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
-  auto contiguous_out = out.contiguous();
-  Tensor dq = at::empty_like(query);
-  Tensor dk = at::empty_like(key);
-  Tensor dv = at::empty_like(value);
+  auto contiguous_out      = out.contiguous();
+  Tensor dq                = at::empty_like(query);
+  Tensor dk                = at::empty_like(key);
+  Tensor dv                = at::empty_like(value);
   //  The kernel computes irregadless we will drop for this functions return
   Tensor grad_softmax;
 
   std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
-          contiguous_grad_out,
-          query,
-          key,
-          value,
-          contiguous_out,
-          logsumexp,
-          dq,
-          dk,
-          dv,
-          cumulative_sequence_length_q,
-          cumulative_sequence_length_k,
-          max_seqlen_batch_q,
-          max_seqlen_batch_k,
-          dropout_p,
-          softmax_scale,
-          false, /*zero_tensors = false for all calls here*/
-          is_causal,
-          num_splits,
-          philox_seed,
-          philox_offset
-  );
+      contiguous_grad_out,
+      query,
+      key,
+      value,
+      contiguous_out,
+      logsumexp,
+      dq,
+      dk,
+      dv,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      softmax_scale,
+      false, /*zero_tensors = false for all calls here*/
+      is_causal,
+      num_splits,
+      philox_seed,
+      philox_offset);
   return std::make_tuple(dq, dk, dv);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.");
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
-
-std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
-_efficient_attention_backward(
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
     const at::Tensor& key,
@@ -114,13 +111,13 @@ _efficient_attention_backward(
     // (Mode 1MHK only) Maximum sequence length across batches
     int64_t max_seqlen_k,
     const at::Tensor& logsumexp,
-    double dropout_p, // dropout probability
-    const at::Tensor& rng_seed_tensor, // seed using for generating random numbers for dropout
+    double dropout_p,                    // dropout probability
+    const at::Tensor& rng_seed_tensor,   // seed using for generating random numbers for dropout
     const at::Tensor& rng_offset_tensor, // offset into random number sequence
     int64_t custom_mask_type,
     const c10::optional<double> scale,
-    c10::optional <int64_t> num_splits_key) {
-  #if 0
+    c10::optional<int64_t> num_splits_key) {
+#if 0
   // defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -455,7 +452,7 @@ _efficient_attention_backward(
   TORCH_CHECK(kernel_launched, "cutlassB: no kernel found to launch!");
   AT_CUDA_CHECK(hipGetLastError());
   return std::make_tuple(grad_q, grad_k, grad_v, grad_bias);
-  #endif
+#endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }
@@ -475,52 +472,51 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    c10::optional<double> scale) {
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
 
   const int64_t batch_size = query.size(0);
-  const int64_t num_heads = query.size(1);
-  const int64_t head_dim = query.size(3);
+  const int64_t num_heads  = query.size(1);
+  const int64_t head_dim   = query.size(3);
 
   Tensor q_t = query.transpose(1, 2);
   Tensor k_t = key.transpose(1, 2);
   Tensor v_t = value.transpose(1, 2);
-
 
   int64_t Nnz_q{batch_size * max_seqlen_batch_q};
   int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
 
   // For the standard MHA these will actually be views
   Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
-  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
+  Tensor key_reshaped   = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  auto grad_out_reshaped = grad_out_.transpose(1,2).reshape({{Nnz_q, num_heads, head_dim}});
-  auto out_reshaped = out.transpose(1,2).reshape({Nnz_q, num_heads, head_dim});
+  auto grad_out_reshaped = grad_out_.transpose(1, 2).reshape({{Nnz_q, num_heads, head_dim}});
+  auto out_reshaped      = out.transpose(1, 2).reshape({Nnz_q, num_heads, head_dim});
 
   Tensor grad_q, grad_k, grad_v;
   std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
-    grad_out_reshaped,
-    query_reshaped,
-    key_reshaped,
-    value_reshaped,
-    out_reshaped,
-    logsumexp,
-    cumulative_sequence_length_q,
-    cumulative_sequence_length_k,
-    max_seqlen_batch_q,
-    max_seqlen_batch_k,
-    dropout_p,
-    is_causal,
-    philox_seed,
-    philox_offset,
-    scale);
+      grad_out_reshaped,
+      query_reshaped,
+      key_reshaped,
+      value_reshaped,
+      out_reshaped,
+      logsumexp,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      is_causal,
+      philox_seed,
+      philox_offset,
+      scale);
 
-  grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
-  grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
-  grad_v = grad_v.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
+  grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1, 2);
+  grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1, 2);
+  grad_v = grad_v.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1, 2);
 
   return std::make_tuple(grad_q, grad_k, grad_v);
 }
@@ -534,22 +530,22 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
     const at::Tensor& logsumexp,
     bool causal,
     bool chunk_grad_outputs,
-    c10::optional<double> scale){
+    c10::optional<double> scale) {
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
   auto grad_out = grad_out_.transpose(1, 2);
-  auto out_t = out.transpose(1, 2);
-  auto q_t = query.transpose(1, 2);
-  auto k_t = key.transpose(1, 2);
-  auto v_t = value.transpose(1, 2);
+  auto out_t    = out.transpose(1, 2);
+  auto q_t      = query.transpose(1, 2);
+  auto k_t      = key.transpose(1, 2);
+  auto v_t      = value.transpose(1, 2);
 
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
   // TODO_DRISS
   // These are place holders unitl we add support for dropout and bias
-  auto bias = c10::nullopt;
-  Tensor seed_t = at::empty({}, at::dtype(at::kLong));
+  auto bias       = c10::nullopt;
+  Tensor seed_t   = at::empty({}, at::dtype(at::kLong));
   Tensor offset_t = at::empty({}, at::dtype(at::kLong));
 
   // Will add with signauter changes for dropout and bias
@@ -557,33 +553,30 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   // from forward to backward
   int64_t max_seqlen_q = q_t.size(1);
   int64_t max_seqlen_k = k_t.size(1);
-  double dropout_p = 0.0;
+  double dropout_p     = 0.0;
 
-  sdp::CustomMaskType custom_mask_type = causal
-    ? sdp::CustomMaskType::CausalFromTopLeft
-    : sdp::CustomMaskType::NoCustomMask;
+  sdp::CustomMaskType custom_mask_type =
+      causal ? sdp::CustomMaskType::CausalFromTopLeft : sdp::CustomMaskType::NoCustomMask;
 
-  std::tie(grad_q, grad_k, grad_v, grad_bias) =
-      at::_efficient_attention_backward(
-          grad_out,
-          q_t,
-          k_t,
-          v_t,
-          bias,
-          out_t,
-          c10::nullopt,
-          c10::nullopt,
-          max_seqlen_q,
-          max_seqlen_k,
-          logsumexp,
-          dropout_p,
-          seed_t,
-          offset_t,
-          static_cast<int64_t>(custom_mask_type),
-          scale,
-          c10::nullopt);  // num_split_keys
-  return std::make_tuple(
-      grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
+  std::tie(grad_q, grad_k, grad_v, grad_bias) = at::_efficient_attention_backward(
+      grad_out,
+      q_t,
+      k_t,
+      v_t,
+      bias,
+      out_t,
+      c10::nullopt,
+      c10::nullopt,
+      max_seqlen_q,
+      max_seqlen_k,
+      logsumexp,
+      dropout_p,
+      seed_t,
+      offset_t,
+      static_cast<int64_t>(custom_mask_type),
+      scale,
+      c10::nullopt); // num_split_keys
+  return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }
 
 } // namespace native
