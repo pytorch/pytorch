@@ -4,6 +4,7 @@ import contextlib
 import dis
 import functools
 import inspect
+import itertools
 import logging
 import os
 import sys
@@ -382,9 +383,14 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            any_arg_is_proxy = any(
+                isinstance(arg, torch.fx.Proxy)
+                for arg in itertools.chain(args, kwargs.values())
+            )
             if (
                 not isinstance(self, DisableContext)
                 and torch.fx._symbolic_trace.is_fx_tracing()
+                and any_arg_is_proxy
             ):
                 if config.error_on_nested_fx_trace:
                     raise RuntimeError(

@@ -49,6 +49,7 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
@@ -4319,6 +4320,50 @@ def fn():
         # should not error
         gm = torch.fx.symbolic_trace(optimized)
         self.assertTrue(same(gm(input), real))
+
+    def test_make_fx_compiled_fn_symbolic_mode(self):
+        def fn(pred, x):
+            if pred:
+                return x.sin()
+            else:
+                return x.cos()
+
+        def symbool_fn_compiled(x):
+            sym_bool = x.shape[0] == 3
+            return torch.compile(backend="eager", fullgraph=True)(fn)(sym_bool, x)
+
+        def symbool_fn_not_compiled(x):
+            pred = x.shape[0] == 3
+            return fn(pred, x)
+
+        x = torch.ones(3, 4)
+        x2 = torch.ones(4, 3)
+
+        compiled_gm = make_fx(
+            lambda x: symbool_fn_compiled(x), tracing_mode="symbolic"
+        )(x)
+        compiled_gm_str = compiled_gm.print_readable(print_output=False)
+        self.assertEqual(len(compiled_gm.shape_env.guards), 1)
+
+        not_compiled_gm = make_fx(
+            lambda x: symbool_fn_not_compiled(x), tracing_mode="symbolic"
+        )(x)
+        not_compiled_gm_str = not_compiled_gm.print_readable(print_output=False)
+        self.assertEqual(len(not_compiled_gm.shape_env.guards), 1)
+
+        self.assertEqual(compiled_gm(x), not_compiled_gm(x))
+        self.assertEqual(compiled_gm(x2), not_compiled_gm(x2))
+        self.assertEqual(compiled_gm_str, not_compiled_gm_str)
+        self.assertExpectedInline(
+            not_compiled_gm_str,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, x_1: f32[3, s1]):
+        # No stacktrace found for following nodes
+        sin: f32[3, s1] = torch.ops.aten.sin.default(x_1);  x_1 = None
+        return sin
+        """,
+        )
 
     def test_not_dynamic_scope(self):
         def f(y):

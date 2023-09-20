@@ -760,7 +760,7 @@ class InputSymNodeVariable(SymNodeVariable):
     """
     InputSymNodeVariable represents a symbolic input. Compared with SymNodeVariable, it tracks
     both the original symbolic input and the symbol that dynamo generated in its own shape_env for tracing.
-    Whenver dynamo tries to evaluate_expr on dynamo generated symbol, the same should be applied to the original
+    Whenever dynamo cals evaluate_expr on dynamo generated symbol, the same should be applied to the original
     symbol. This is to propagate the guards to outter shape env.
     """
 

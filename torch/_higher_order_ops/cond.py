@@ -1,4 +1,3 @@
-from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
@@ -27,18 +26,6 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import _get_current_dispatch_mode
-
-
-@contextmanager
-def _set_compilation_env():
-    _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
-    try:
-        # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
-        # once we are confident fx tracing works with dynamo.
-        torch.fx._symbolic_trace._is_fx_tracing_flag = False
-        yield
-    finally:
-        torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
 
 
 @dataclass
@@ -148,11 +135,10 @@ def cond(pred, true_fn, false_fn, operands):
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("torch.cond requires dynamo support.")
 
-    with _set_compilation_env():
-        with disable_cache_limit():
-            return torch.compile(cond_op, backend="eager", fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+    with disable_cache_limit():
+        return torch.compile(cond_op, backend="eager", fullgraph=True)(
+            pred, true_fn, false_fn, operands
+        )
 
 
 """
