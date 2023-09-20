@@ -565,15 +565,13 @@ fallback to NumPy for their execution:
 
 - Non-numeric dtypes like datetimes, strings, chars, void, structured dtypes and recarrays.
 
-- Long dtypes ``np.float128/np.complex256`` and some unsigned dtypes ``np.uint16/np.uint32/np.uint64`.
+- Long dtypes ``np.float128/np.complex256`` and some unsigned dtypes ``np.uint16/np.uint32/np.uint64``.
 
 - ``ndarray`` subclasses.
 
 - Masked arrays.
 
 - Esoteric ufunc machinery like ``axes=[(n,k),(k,m)->(n,m)]`` and ufunc methods (e.g., ``np.add.reduce``).
-
-- Fortran ordered arrays and, in general, any ``order=`` different to ``C``.
 
 - Sorting / ordering ``complex64/complex128`` arrays.
 
@@ -669,7 +667,7 @@ If the program does work when importing ``torch._numpy as np``, chances are
 that the bug is in TorchDynamo. If this is the case, please feel open an issue
 with a minimal reproducer.
 
-I ``torch.compile`d a NumPy function and I did not see any speed-up.
+I ``torch.compile``d a NumPy function and I did not see any speed-up.
 --------------------------------------------------------------------
 
 The best place to start is the
@@ -683,7 +681,7 @@ removes them in a pass called "functionalization". As such, it is best to avoid
 in-place ops, or the use of the ``out=`` parameter, and instead simply use
 out-of-place ops and let ``torch.compile`` optimize the memory use. Same goes
 for data-dependent ops like masked indexing through boolean masks, or
-data-dependent control flow like `if` or `while` constructions.
+data-dependent control flow like ``if`` or ``while`` constructions.
 
 
 Which API to use for fine grain tracing?
