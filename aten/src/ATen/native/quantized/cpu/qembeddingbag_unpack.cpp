@@ -168,14 +168,14 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
 }
 
 Tensor qembeddingbag_byte_unpack_meta(const Tensor& packed_weight) {
-  const auto packed_weight_sizes = packed_weight.sym_sizes();
+  const auto packed_weight_sizes = packed_weight.sizes();
   const auto col_dim = packed_weight_sizes.size() - 1;
-  const auto input_columns = packed_weight_sizes[col_dim];
+  const int32_t input_columns = packed_weight_sizes[col_dim];
   // The last 2 values are used to store the FP32 scale and zero_point values
   // per row.
-  const auto output_columns = input_columns - 2 * sizeof(float);
+  const int32_t output_columns = input_columns - 2 * sizeof(float);
 
-  auto output_shape = packed_weight_sizes.vec();
+  std::vector<int64_t> output_shape = packed_weight_sizes.vec();
   output_shape[col_dim] = output_columns;
 
   at::SymDimVector output_shape_vec(output_shape);

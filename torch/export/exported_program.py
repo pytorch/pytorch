@@ -228,7 +228,6 @@ class ExportedProgram:
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
-        dialect: Optional[str] = None,
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,
@@ -254,7 +253,6 @@ class ExportedProgram:
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
-        self._dialect = dialect or "ATEN"
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -334,10 +332,6 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def example_inputs(self):
         return self._example_inputs
-
-    @property
-    def dialect(self):
-        return self._dialect
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
@@ -524,7 +518,6 @@ class ExportedProgram:
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
-            self.dialect,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
