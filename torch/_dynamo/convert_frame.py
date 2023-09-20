@@ -2,6 +2,7 @@ import collections
 import functools
 import itertools
 import logging
+import numpy
 import os
 import random
 import types
@@ -177,7 +178,7 @@ def has_tensor_in_frame(frame):
             return seen_ids[obj_id]
         seen_ids[obj_id] = False
 
-        if isinstance(obj, (torch.Tensor, torch.nn.Module)) or (
+        if isinstance(obj, (torch.Tensor, torch.nn.Module, numpy.ndarray)) or (
             istype(obj, type) and issubclass(obj, torch.nn.Module)
         ):
             seen_ids[obj_id] = True
