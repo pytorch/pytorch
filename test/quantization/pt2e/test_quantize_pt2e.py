@@ -1247,7 +1247,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         """
         m = self._get_pt2e_quantized_linear()
         for n in m.graph.nodes:
-            print(f"{n.format_node()}, {n.meta}")
+            if n.op == "get_attr" and "frozen_param" in n.target:
+                self.assertIn("stack_trace", n.meta)
 
     def test_add_and_inplace_add(self):
         quantizer = XNNPACKQuantizer()
