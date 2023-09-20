@@ -531,7 +531,7 @@ parameters of the ``nn.Module``. To get this to work, use
 Does NumPy work with ``torch.compile``?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Starting in 2.1., ``torch.compile`` understands native NumPy programs that
+Starting in 2.1, ``torch.compile`` understands native NumPy programs that
 work on NumPy arrays, and mixed PyTorch-NumPy programs that convert from PyTorch
 to NumPy and back via ``x.numpy()``, ``torch.from_numpy``, and related functions.
 
@@ -543,33 +543,46 @@ Which NumPy features does ``torch.compile`` support?
 NumPy within ``torch.compile`` follows the latest NumPy release.
 
 Generally, ``torch.compile`` is able to trace through most NumPy constructions,
-and when it cannot, it fallbacks to eager and lets NumPy execute that piece of
+and when it cannot, it falls back to eager and lets NumPy execute that piece of
 code. Even then, there are a few features where ``torch.compile`` semantics
 slightly deviate from those of NumPy:
 
 - NumPy scalars: We model them as 0-D arrays. That is, ``np.float32(3)`` returns
-  a 0-D array under ``torch.compile``. For performance, it is best to use this 0-D
+  a 0-D array under ``torch.compile``. To avoid a graph break, it is best to use this 0-D
   array. If this is not possible, one may often recover the original behavior
-  by cast the NumPy scalar to the relevant Python scalar (e.g., ``float``).
+  by casting the NumPy scalar to the relevant Python scalar type ``bool/int/float``.
+
 - Negative strides: ``np.flip`` and slicing with a negative step return a copy.
+
 - Type promotion: NumPy's type promotion will change in NumPy 2.0. The new rules
   are described in `NEP 50 <https://numpy.org/neps/nep-0050-scalar-promotion.html)>`__.
   ``torch.compile`` implements NEP 50 rather than the current soon-to-be deprecated rules.
+
 - ``{tril,triu}_indices_from`` return arrays rather than lists of tuples.
 
-There are other feature for which we do not support tracing and we gracefully
+There are other features for which we do not support tracing and we gracefully
 fallback to NumPy for their execution:
 
 - Non-numeric dtypes like datetimes, strings, chars, void, structured dtypes and recarrays.
-- Long dtypes like ``np.float128`` and ``np.complex256``.
+
+- Long dtypes ``np.float128/np.complex256`` and some unsigned dtypes ``np.uint16/np.uint32/np.uint64`.
+
 - ``ndarray`` subclasses.
+
 - Masked arrays.
-- Ufunc machinery like ``axes=[(n,k),(k,m)->(n,m)]``, ``np.add.reduce``, etc.
-- Fortran orders and, in general, any ``order=`` different to ``C``.
+
+- Esoteric ufunc machinery like ``axes=[(n,k),(k,m)->(n,m)]`` and ufunc methods (e.g., ``np.add.reduce``).
+
+- Fortran ordered arrays and, in general, any ``order=`` different to ``C``.
+
 - Sorting / ordering ``complex64/complex128`` arrays.
+
 - NumPy ``np.poly1d`` and ``np.polynomial``.
+
 - Positional ``out1, out2`` args in functions with 2 or more returns (``out=tuple`` does work).
+
 - ``__array_function__``, ``__array_interface__`` and ``__array_wrap__``.
+
 - ``ndarray.ctypes`` attribute not supported.
 
 Can I execute NumPy code on CUDA via ``torch.compile``?
@@ -602,7 +615,7 @@ to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
    @torch.compile
    def numpy_fn(X: Tensor, Y: Tensor): -> Tensor
        X = X.numpy()
-       Y = X.numpy()
+       Y = Y.numpy()
        # Compute Z here
        Z = torch.from_numpy(Z)
        return Z
@@ -613,10 +626,12 @@ to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
        Z = numpy_fn(X, Y)
 
 By doing this, we explicitly create the tensors in CUDA memory, and we keep
-them there. Note that the original program would not run on eager mode now.
-If you want to run it in eager mode, you would need to call ``.numpy(force=True)``
-and perhaps doing ``Z = Z.cuda()`` before returning ``Z``. Of course, doing
-this would execute the program on eager mode NumPy, and on CPU.
+them there. In this case ``X.numpy()`` and ``from_numpy()`` are hints to the compiler
+but no real data movement happens. Note that the original program would not run
+on eager mode now. If you want to run it in eager mode, you would need to call
+``.numpy(force=True)`` doing ``Z = Z.cuda()`` before returning
+``Z``. Of course, doing this would execute the program on eager mode NumPy, and
+on CPU.
 
 
 How do I debug my ``torch.compile``d NumPy code?
@@ -642,12 +657,12 @@ function.
 
 Of course, this is not a satisfactory answer if our program is mostly composed
 of NumPy code. In these cases, we can try to execute eagerly (without
-``torch.compile``) the NumPy code on PyTorch by importing ``import torch._numpy
-as np``. This should just be used for **debugging purposes** and is in no way a
+``torch.compile``) the NumPy code on PyTorch by importing ``import torch._numpy as np``.
+This should just be used for **debugging purposes** and is in no way a
 replacement for the PyTorch API, as it is **much less performant** and, as a
 private API, **may change without notice**. At any rate, ``torch._numpy`` is a
-Python implementation of NumPy in terms of PyTorchand it is used internally to
-transform NumPy code into Pytorch code.. It is rather easy to read and modify,
+Python implementation of NumPy in terms of PyTorch and it is used internally to
+transform NumPy code into Pytorch code. It is rather easy to read and modify,
 so if you find any bug in it feel free to submit a PR fixing it!
 
 If the program does work when importing ``torch._numpy as np``, chances are
