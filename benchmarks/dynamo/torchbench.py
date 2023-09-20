@@ -83,6 +83,7 @@ SKIP = {
     "maml",
     # Failing in eager mode
     "clip",
+    "simple_gpt" # DTensor not yet supported by torch.compile()
 }
 
 SKIP_FOR_CPU = {
