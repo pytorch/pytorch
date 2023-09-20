@@ -893,6 +893,8 @@ def get_include_and_linking_paths(
             # and raise error together with instructions at compilation error later
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
+            if config.assert_indirect_indexing:
+                libs += ["c10", "torch_cpu"]
 
     # third party libs
     if config.is_fbcode():
@@ -1241,6 +1243,9 @@ class CppCodeCache:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         print(cpp_command)
+'g++ i -shared -fPIC -Wall -std=c++17 -Wno-unused-variable -D_GLIBCXX_USE_CXX11_ABI=1 -I/opt/conda/envs/py_3.8/lib/python3.8/site-packages/torch/include -I/opt/conda/envs/py_3.8/lib/python3.8/site-packages/torch/include/torch/csrc/api/include -I/opt/conda/envs/py_3.8/lib/python3.8/site-packages/torch/include/TH -I/opt/conda/envs/py_3.8/lib/python3.8/site-packages/torch/include/THC -I/opt/conda/envs/py_3.8/include/python3.8 -lgomp -O3 -ffast-math -fno-finite-math-only -march=native -fopenmp -D C10_USING_CUSTOM_GENERATED_MACROS -o o'
+
+        breakpoint()
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
