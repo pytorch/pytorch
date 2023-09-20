@@ -961,6 +961,20 @@ class CommonTemplate:
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
+    def test_embedding_bag_byte_unpack(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("No CUDA implementation (it returns empty)")
+
+        def fn(a):
+            return torch.ops.quantized.embedding_bag_byte_unpack(a)
+
+        M, N = 32, 64
+        scales = torch.randn(M, 1).view(torch.uint8)
+        offsets = torch.randn(M, 1).view(torch.uint8)
+        data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
+        packed = torch.cat([data, scales, offsets], dim=-1)
+        self.common(fn, [packed])
+
     def test_expanded_reduction(self):
         if self.device == "cpu":
             raise unittest.SkipTest(
