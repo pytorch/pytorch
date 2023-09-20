@@ -874,8 +874,9 @@ def register_replacement(
         else:
             pattern = search_fn_pattern
 
-        assert repr(pattern) not in _seen_patterns
-        _seen_patterns.add(repr(pattern))
+        pattern_repr = PatternPrettyPrinter.run(pattern)
+        assert pattern_repr not in _seen_patterns
+        _seen_patterns.add(pattern_repr)
         pattern = ReplacementPatternEntry(
             pattern=pattern,
             extra_check=check_fn,
