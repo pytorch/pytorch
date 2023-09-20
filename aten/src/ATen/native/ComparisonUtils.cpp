@@ -6,7 +6,6 @@
 
 #ifdef AT_PER_OPERATOR_HEADERS
 #include <ATen/ops/_assert_tensor_metadata_native.h>
-#include <ATen/ops/_functional_assert_tensor_metadata_native.h>
 #endif
 
 namespace at {
@@ -48,12 +47,6 @@ void _assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef s
   _assert_match(tensor.sym_strides(), strides, "strides");
   _assert_match(tensor.dtype(), dtype, "dtype");
 }
-
-Tensor _functional_assert_tensor_metadata(at::Tensor const& tensor, at::OptionalIntArrayRef sizes, at::OptionalIntArrayRef strides, c10::optional<c10::ScalarType> dtype) {
-  _assert_tensor_metadata(tensor, sizes, strides, dtype);
-  return tensor.clone();
-}
-
 
 }
 }  // namespace at::native
