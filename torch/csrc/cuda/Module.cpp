@@ -105,9 +105,8 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
-  int current_device = 0;
   torch::utils::cuda_lazy_init();
-  current_device = c10::cuda::ExchangeDevice(device);
+  auto current_device = c10::cuda::ExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
@@ -121,9 +120,8 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
     return THPUtils_packInt32(-1);
   }
 
-  int current_device = 0;
   torch::utils::cuda_lazy_init();
-  current_device = c10::cuda::MaybeExchangeDevice(device);
+  auto current_device = c10::cuda::MaybeExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
@@ -131,10 +129,9 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
 
 PyObject* THCPModule_getDevice_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  int32_t device = 0;
   torch::utils::cuda_lazy_init();
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  device = static_cast<int32_t>(c10::cuda::current_device());
+  auto device = static_cast<int32_t>(c10::cuda::current_device());
   return THPUtils_packInt32(device);
   END_HANDLE_TH_ERRORS
 }
@@ -159,9 +156,8 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
   int64_t device = THPUtils_unpackLong(arg1);
   int64_t peer_device = THPUtils_unpackLong(arg2);
 
-  bool can_access = false;
   torch::utils::cuda_lazy_init();
-  can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
+  auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
   return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS
 }
@@ -169,9 +165,7 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
 PyObject* THCPModule_getDeviceCount_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   poison_fork();
-  uint64_t device_count = 0;
-  device_count = at::cuda::device_count();
-  return THPUtils_packUInt64(device_count);
+  return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -223,9 +217,7 @@ PyObject* THCPModule_getCurrentStream_raw(
   THPUtils_assert(
       THPUtils_checkLong(device_index), "invalid argument to getCurrentStream");
   int64_t device = THPUtils_unpackLong(device_index);
-  void* stream = nullptr;
-  stream = at::cuda::getCurrentCUDAStream(device).stream();
-  return PyLong_FromVoidPtr(stream);
+  return PyLong_FromVoidPtr(at::cuda::getCurrentCUDAStream(device).stream());
   END_HANDLE_TH_ERRORS
 }
 
