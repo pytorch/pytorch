@@ -1211,7 +1211,9 @@ def unsafe_split(input: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, 
 
 
 @register_decomposition(aten.unsafe_split_with_sizes.default)
-def unsafe_split_with_sizes(input: Tensor, split_sizes: List[int], dim: int = 0) -> Tuple[Tensor, ...]:
+def unsafe_split_with_sizes(
+    input: Tensor, split_sizes: List[int], dim: int = 0
+) -> Tuple[Tensor, ...]:
     return aten.split_with_sizes.default(input, split_sizes, dim)
 
 
