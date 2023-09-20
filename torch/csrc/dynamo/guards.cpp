@@ -520,6 +520,18 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   }
 }
 
+static PyObject* dict_version(PyObject* dummy, PyObject* args) {
+  // Retrieves the version of a dictionary.
+  PyObject* obj = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return nullptr;
+  }
+  if (!PyDict_Check(obj)) {
+    return nullptr;
+  }
+  return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
+}
+
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   /*
    Assert that a given tensor has a given size/stride, but ignore strides
@@ -718,6 +730,7 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
     {"nn_module_guard", nn_module_guard, METH_O, NULL},
+    {"dict_version", dict_version, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
