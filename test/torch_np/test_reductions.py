@@ -15,13 +15,11 @@ from torch._numpy.testing import (
     assert_equal,
 )
 
-
 from torch.testing._internal.common_utils import (
-instantiate_parametrized_tests,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
-    subtest,
 )
 
 
@@ -114,7 +112,7 @@ class TestMean(TestCase):
         # of float32.
         assert np.mean(np.ones(100000, dtype="float16")) == 1
 
-    @xfail #(reason="XXX: mean(..., where=...) not implemented")
+    @xfail  # (reason="XXX: mean(..., where=...) not implemented")
     def test_mean_where(self):
         a = np.arange(16).reshape((4, 4))
         wh_full = np.array(
@@ -180,7 +178,7 @@ class TestSum(TestCase):
         assert_allclose(res_float, 4.0, atol=1e-15)
         assert res_float.dtype == "float64"
 
-    @xfail   #(reason="sum: does not warn on overflow")
+    @xfail  # (reason="sum: does not warn on overflow")
     def test_sum_dtypes_warnings(self):
         for dt in (int, np.float16, np.float32, np.float64):
             for v in (0, 1, 2, 7, 8, 9, 15, 16, 19, 127, 128, 1024, 1235):
@@ -247,7 +245,7 @@ class TestSum(TestCase):
         d += d
         assert_allclose(d, 2.0 + 2j, atol=1.5e-7)
 
-    @xfail  #(reason="initial=... need implementing")
+    @xfail  # (reason="initial=... need implementing")
     def test_sum_initial(self):
         # Integer, single axis
         assert_equal(np.sum([3], initial=2), 5)
@@ -261,7 +259,7 @@ class TestSum(TestCase):
             [12, 12, 12],
         )
 
-    @xfail  #(reason="where=... need implementing")
+    @xfail  # (reason="where=... need implementing")
     def test_sum_where(self):
         # More extensive tests done in test_reduction_with_where.
         assert_equal(np.sum([[1.0, 2.0], [3.0, 4.0]], where=[True, False]), 4.0)
@@ -271,14 +269,38 @@ class TestSum(TestCase):
         )
 
 
-parametrize_axis = parametrize('axis', [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)])
-parametrize_func = parametrize('func', [np.any, np.all, np.argmin, np.argmax, np.min, np.max, np.mean, np.sum, np.prod, np.std, np.var, np.count_nonzero])
-
-fails_axes_tuples = {np.any, np.all, np.argmin, np.argmax, 
+parametrize_axis = parametrize(
+    "axis", [0, 1, 2, -1, -2, (0, 1), (1, 0), (0, 1, 2), (1, -1, 0)]
+)
+parametrize_func = parametrize(
+    "func",
+    [
+        np.any,
+        np.all,
+        np.argmin,
+        np.argmax,
+        np.min,
+        np.max,
+        np.mean,
+        np.sum,
         np.prod,
+        np.std,
+        np.var,
+        np.count_nonzero,
+    ],
+)
+
+fails_axes_tuples = {
+    np.any,
+    np.all,
+    np.argmin,
+    np.argmax,
+    np.prod,
 }
 
-fails_out_arg = {np.count_nonzero,}
+fails_out_arg = {
+    np.count_nonzero,
+}
 
 
 @instantiate_parametrized_tests
@@ -315,9 +337,7 @@ class TestGenericReductions(TestCase):
     @parametrize_func
     def test_axis_empty_generic(self, func):
         a = np.array([[0, 0, 1], [1, 0, 1]])
-        assert_array_equal(
-            func(a, axis=()), func(np.expand_dims(a, axis=0), axis=0)
-        )
+        assert_array_equal(func(a, axis=()), func(np.expand_dims(a, axis=0), axis=0))
 
     @parametrize_func
     def test_axis_bad_tuple(self, func):
@@ -440,10 +460,9 @@ class TestGenericReductions(TestCase):
 
 @instantiate_parametrized_tests
 class TestGenericCumSumProd(TestCase):
-    """Run a set of generic tests to verify that cumsum/cumprod are sane.
-    """
+    """Run a set of generic tests to verify that cumsum/cumprod are sane."""
 
-    @parametrize('func', [np.cumsum, np.cumprod])
+    @parametrize("func", [np.cumsum, np.cumprod])
     def test_bad_axis(self, func):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
@@ -455,7 +474,7 @@ class TestGenericCumSumProd(TestCase):
 
         # TODO: add tests with np.int32(3) etc, when implemented
 
-    @parametrize('func', [np.cumsum, np.cumprod])
+    @parametrize("func", [np.cumsum, np.cumprod])
     def test_array_axis(self, func):
         a = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
         assert_equal(func(a, axis=np.array(-1)), func(a, axis=-1))
@@ -463,18 +482,17 @@ class TestGenericCumSumProd(TestCase):
         with assert_raises(TypeError):
             func(a, axis=np.array([1, 2]))
 
-    @parametrize('func', [np.cumsum, np.cumprod])
+    @parametrize("func", [np.cumsum, np.cumprod])
     def test_axis_empty_generic(self, func):
         a = np.array([[0, 0, 1], [1, 0, 1]])
         assert_array_equal(func(a, axis=None), func(a.ravel(), axis=0))
 
-    @parametrize('func', [np.cumsum, np.cumprod])
+    @parametrize("func", [np.cumsum, np.cumprod])
     def test_axis_bad_tuple(self, func):
         # Basic check of functionality
         m = np.array([[0, 1, 7, 0, 0], [3, 0, 0, 2, 19]])
         with assert_raises(TypeError):
             func(m, axis=(1, 1))
-
 
 
 if __name__ == "__main__":

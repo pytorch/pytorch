@@ -1,7 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import itertools
-from unittest import expectedFailure as xfail
+from unittest import expectedFailure as xfail, skipIf as skip
 
 import pytest
 
@@ -15,8 +15,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TestCase,
     subtest,
+    TestCase,
 )
 
 
@@ -170,7 +170,7 @@ class TestNonzero(TestCase):
         assert_equal(m.nonzero(), tgt)
 
 
-class TestArgmaxArgminCommon: #(TestCase): FIXME
+class TestArgmaxArgminCommon:  # (TestCase): FIXME
     sizes = [
         (),
         (3,),
@@ -266,7 +266,7 @@ class TestArgmaxArgminCommon: #(TestCase): FIXME
             with pytest.raises(ValueError):
                 method(arr.T, axis=axis, out=wrong_outarray, keepdims=True)
 
-    @pytest.mark.skipif(reason="XXX: need ndarray.chooses")
+    @skip(True, reason="XXX: need ndarray.chooses")
     @parametrize("method", ["max", "min"])
     def test_all(self, method):
         # a = np.random.normal(0, 1, (4, 5, 6, 7, 8))
@@ -395,9 +395,18 @@ class TestArgmax(TestCase):
         subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
         subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
         subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0), decorators=[xfail]),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
+            decorators=[xfail],
+        ),
         subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xfail]),
         subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
         subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xfail]),
@@ -498,9 +507,18 @@ class TestArgmin(TestCase):
         subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
         subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
         subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
-        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0), decorators=[xfail]),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
+            decorators=[xfail],
+        ),
+        subtest(
+            ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
+            decorators=[xfail],
+        ),
         subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
         subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 2), decorators=[xfail]),
         subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 1), decorators=[xfail]),
@@ -591,7 +609,7 @@ class TestNoExtraMethods(TestCase):
             getattr(a, name)
 
 
-#instantiate_parametrized_tests(TestArgmaxArgminCommon)
+# instantiate_parametrized_tests(TestArgmaxArgminCommon)
 instantiate_parametrized_tests(TestArgmax)
 instantiate_parametrized_tests(TestArgmin)
 instantiate_parametrized_tests(TestNoExtraMethods)

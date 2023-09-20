@@ -2,10 +2,9 @@
 
 import functools
 import inspect
-from unittest import expectedFailure as xfail
+from unittest import expectedFailure as xfail, skipIf as skip
 
 import numpy as _np
-import pytest
 import torch
 
 import torch._numpy as w
@@ -65,6 +64,7 @@ ufunc_names.remove("bitwise_not")
 one_arg_funcs += [getattr(_ufuncs, name) for name in ufunc_names]
 
 
+@instantiate_parametrized_tests
 class TestOneArr(TestCase):
     """Base for smoke tests of one-arg functions: (array_like) -> (array_like)
 
@@ -108,6 +108,7 @@ one_arg_axis_funcs = [
 ]
 
 
+@instantiate_parametrized_tests
 class TestOneArrAndAxis(TestCase):
     @parametrize("func", one_arg_axis_funcs)
     @parametrize("axis", [0, 1, -1, None])
@@ -131,6 +132,7 @@ class TestOneArrAndAxis(TestCase):
         assert isinstance(ta, w.ndarray)
 
 
+@instantiate_parametrized_tests
 class TestOneArrAndAxesTuple(TestCase):
     @parametrize("func", [w.transpose])
     @parametrize("axes", [(0, 2, 1), (1, 2, 0), None])
@@ -176,7 +178,7 @@ arr_shape_funcs = [
 ]
 
 
-# XXX: errs with redefinition, why?
+@instantiate_parametrized_tests
 class TestOneArrAndShape(TestCase):
     """Smoke test of functions (array_like, shape_like) -> array_like"""
 
@@ -217,6 +219,7 @@ class TestOneArrAndShape(TestCase):
 one_arg_scalar_funcs = [(w.size, _np.size), (w.shape, _np.shape), (w.ndim, _np.ndim)]
 
 
+@instantiate_parametrized_tests
 class TestOneArrToScalar(TestCase):
     """Smoke test of functions (array_like) -> scalar or python object."""
 
@@ -251,6 +254,7 @@ class TestOneArrToScalar(TestCase):
 shape_funcs = [w.zeros, w.empty, w.ones, functools.partial(w.full, fill_value=42)]
 
 
+@instantiate_parametrized_tests
 class TestShapeLikeToArray(TestCase):
     """Smoke test (shape_like) -> array."""
 
@@ -267,6 +271,7 @@ class TestShapeLikeToArray(TestCase):
 seq_funcs = [w.atleast_1d, w.atleast_2d, w.atleast_3d, w.broadcast_arrays]
 
 
+@instantiate_parametrized_tests
 class TestSequenceOfArrays(TestCase):
     """Smoke test (sequence of arrays) -> (sequence of arrays)."""
 
@@ -327,6 +332,7 @@ seq_to_single_funcs = [
 ]
 
 
+@instantiate_parametrized_tests
 class TestSequenceOfArraysToSingle(TestCase):
     """Smoke test (sequence of arrays) -> (array)."""
 
@@ -351,6 +357,7 @@ single_to_seq_funcs = (
 )
 
 
+@instantiate_parametrized_tests
 class TestArrayToSequence(TestCase):
     """Smoke test array -> (tuple of arrays)."""
 
@@ -393,6 +400,7 @@ funcs_and_args = [
 ]
 
 
+@instantiate_parametrized_tests
 class TestPythonArgsToArray(TestCase):
     """Smoke_test (sequence of scalars) -> (array)"""
 
@@ -523,6 +531,7 @@ class TestSmokeNotImpl(TestCase):
             w.empty(3, like="ooops")
 
 
+@instantiate_parametrized_tests
 class TestDefaultDtype(TestCase):
     def test_defaultdtype_defaults(self):
         # by default, both floats and ints 64 bit
@@ -550,9 +559,7 @@ class TestDefaultDtype(TestCase):
             w.set_default_dtype(fp_dtype="numpy")
 
 
-@pytest.mark.skipif(
-    _np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23"
-)
+@skip(_np.__version__ <= "1.23", reason="from_dlpack is new in NumPy 1.23")
 class TestExport(TestCase):
     def test_exported_objects(self):
         exported_fns = (
@@ -579,7 +586,7 @@ class TestMisc(TestCase):
         assert isinstance(out[0], tuple) and len(out[0]) == 2
         assert isinstance(out[0][0], torch.Tensor)
 
-    @pytest.mark.skipif(not TEST_CUDA, reason="requires cuda")
+    @skip(not TEST_CUDA, reason="requires cuda")
     def test_f16_on_cuda(self):
         # make sure operations with float16 tensors give same results on CUDA and on CPU
         t = torch.arange(5, dtype=torch.float16)
@@ -592,19 +599,6 @@ class TestMisc(TestCase):
 
         assert_allclose(w.cov(t.cuda(), t.cuda()), w.cov(t, t).tensor.cuda())
         assert_allclose(w.corrcoef(t.cuda()), w.corrcoef(t).tensor.cuda())
-
-
-instantiate_parametrized_tests(TestOneArr)
-instantiate_parametrized_tests(TestOneArrAndAxis)
-instantiate_parametrized_tests(TestOneArrAndAxesTuple)
-instantiate_parametrized_tests(TestOneArrAndShape)
-instantiate_parametrized_tests(TestShapeLikeToArray)
-instantiate_parametrized_tests(TestOneArrToScalar)
-instantiate_parametrized_tests(TestSequenceOfArrays)
-instantiate_parametrized_tests(TestSequenceOfArraysToSingle)
-instantiate_parametrized_tests(TestArrayToSequence)
-instantiate_parametrized_tests(TestPythonArgsToArray)
-instantiate_parametrized_tests(TestDefaultDtype)
 
 
 if __name__ == "__main__":

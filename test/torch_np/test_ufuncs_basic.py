@@ -11,13 +11,11 @@ by
 """
 import operator
 
-import pytest
+from unittest import skipIf as skip, SkipTest
 
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
-
-from unittest import SkipTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -42,14 +40,14 @@ class TestUnaryUfuncs(TestCase):
         x = self.get_x(ufunc)[0]
         float(ufunc(x))
 
-    @pytest.mark.skip(reason="XXX: unary ufuncs ignore the dtype=... parameter")
+    @skip(True, reason="XXX: unary ufuncs ignore the dtype=... parameter")
     @parametrize_unary_ufuncs
     def test_x_and_dtype(self, ufunc):
         x = self.get_x(ufunc)
         res = ufunc(x, dtype="float")
         assert res.dtype == np.dtype("float")
 
-    @pytest.mark.skip(reason="XXX: unary ufuncs ignore the dtype=... parameter")
+    @skip(True, reason="XXX: unary ufuncs ignore the dtype=... parameter")
     @parametrize_casting
     @parametrize_unary_ufuncs
     @parametrize("dtype", ["float64", "complex128", "float32"])
@@ -245,7 +243,7 @@ class TestNdarrayDunderVsUfunc(TestCase):
         b = other_dtype(3)
 
         if ufunc in no_complex and issubclass(other_dtype, np.complexfloating):
-            pytest.skip(f"{ufunc} does not accept complex.")
+            raise SkipTest(f"{ufunc} does not accept complex.")
 
         # __op__
         result = op(a, b)
@@ -283,7 +281,7 @@ class TestNdarrayDunderVsUfunc(TestCase):
         b = np.array([5, 6, 7], dtype=other_dtype)
 
         if ufunc in no_complex and issubclass(other_dtype, np.complexfloating):
-            pytest.skip(f"{ufunc} does not accept complex.")
+            raise SkipTest(f"{ufunc} does not accept complex.")
 
         # __op__
         result = op(a, b)
