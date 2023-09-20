@@ -1216,7 +1216,7 @@ class CppKernel(Kernel):
 
     def index_to_str(self, index: sympy.Expr) -> str:
         """
-        Convert an index expr to a string that can be used in triton code.
+        Convert an index expr to a string that can be used in cpp code.
         e.g. a sympy expression "s2" may actually appear as "ks1" in the cpp kernel.
         """
         return cexpr(self.rename_indexing(index))

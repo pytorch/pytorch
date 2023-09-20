@@ -807,17 +807,12 @@ class CommonTemplate:
                 fn_opt = torch.compile(dynamic=dynamic)(fn)
                 if self.device == "cpu":
                     code = run_and_get_cpp_code(fn_opt, *inps)
-                    lines = code.split("\n")
                     found = False
                     if "Vectorize" not in code:
-                        for line in lines:
-                            # match ternary operator
-                            pattern = r"\?.*:"
-                            if re.findall(pattern, line):
-                                found = True
-                            # if "?" in line:
-                            #     pos = line.find("?")
-                            #     found |= ":" in line[pos + 1 :]
+                        # match ternary operator
+                        pattern = r"\?.*:"
+                        if re.findall(pattern, code):
+                            found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
                 else:
