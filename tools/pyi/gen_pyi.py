@@ -79,7 +79,7 @@ FACTORY_PARAMS = (
     f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
 )
 
-# this could be more precise w.r.t list contents etc. How to do Ellipsis?
+# NOTE: specifying indices for Tensor.__getitem__
 # We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
 #
 # key: (

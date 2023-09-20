@@ -17,20 +17,16 @@ from typing import (
     Literal,
     NamedTuple,
     Optional,
-    overload,
+    Protocol,
     Sequence,
-    SupportsIndex,
     Set,
+    SupportsIndex,
     Tuple,
     Type,
     TypeVar,
-    Any,
-    Iterator,
-    overload,
-    TypeVar,
-    Protocol,
-    runtime_checkable,
     Union,
+    overload,
+    runtime_checkable,
 )
 from typing_extensions import ParamSpec
 
@@ -55,7 +51,6 @@ from torch.types import (
     Storage,
     SymInt,
 )
-
 
 # This module is defined in torch/csrc/Module.cpp
 
