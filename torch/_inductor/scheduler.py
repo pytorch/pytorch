@@ -13,8 +13,8 @@ import sympy
 import torch
 from torch._dynamo.utils import dynamo_timed
 
-from .codegen.common import get_scheduling_for_device, Kernel
 from . import comms, config, dependencies, ir, metrics
+from .codegen.common import get_scheduling_for_device, Kernel
 from .dependencies import StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
