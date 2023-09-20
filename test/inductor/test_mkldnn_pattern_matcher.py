@@ -19,7 +19,8 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
+
 
 # The dict value is match_nodes(computation_op+unary_op)
 
@@ -78,6 +79,19 @@ class TestPatternMatcherBase(TestCase):
 
         return tuple(clone(x) for x in inputs)
 
+    def _generate_reference_quantized_model(self, mod, inputs):
+        export_model = capture_pre_autograd_graph(
+            mod,
+            inputs,
+        )
+        quantizer = X86InductorQuantizer()
+        quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+        prepare_model = prepare_pt2e(export_model, quantizer)
+        prepare_model(*inputs)
+        convert_model = convert_pt2e(prepare_model)
+        torch.ao.quantization.move_exported_model_to_eval(convert_model)
+        return convert_model
+
     def _test_common(
         self,
         mod,
@@ -97,16 +111,7 @@ class TestPatternMatcherBase(TestCase):
             atol, rtol = 1e-2, 1e-2
         if check_quantization:
             with torch.no_grad():
-                export_model = capture_pre_autograd_graph(
-                    mod,
-                    inputs,
-                )
-                quantizer = X86InductorQuantizer()
-                quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
-                prepare_model = prepare_pt2e(export_model, quantizer)
-                prepare_model(*inputs)
-                convert_model = convert_pt2e(prepare_model)
-                torch.ao.quantization.move_exported_model_to_eval(convert_model)
+                convert_model = self._generate_reference_quantized_model(mod, inputs)
                 _ = torch.compile(convert_model)(*inputs)
                 self.assertEqual(
                     counters["inductor"]["pattern_matcher_count"], matcher_count
@@ -130,19 +135,34 @@ class TestPatternMatcherBase(TestCase):
                 )
 
     def _test_code_common(
-        self, mod, inputs, include_ops, exclude_ops, atol=1e-5, rtol=1.3e-6
+        self,
+        mod,
+        inputs,
+        include_ops,
+        exclude_ops,
+        atol=1e-5,
+        rtol=1.3e-6,
+        check_quantization=False,
+        check_dynamic=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
+            if check_quantization:
+                mod = self._generate_reference_quantized_model(mod, inputs)
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
-                torch.compile(mod, fullgraph=True), *clone_inputs
+                torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
+                *clone_inputs,
             )
-            torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
             for op in include_ops:
                 self.assertIn(op, source_code)
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
+            if check_dynamic is not None:
+                _check_has_dynamic_shape(self, source_code)
+            if not check_quantization:
+                # Skip due to reduce range setting for Quantization on preCI system.
+                torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
@@ -1170,6 +1190,50 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             match_count = 8
             match_nodes = 12
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
+
+    def test_qconv2d_maxpool2d_linear_dynamic(self):
+        r"""
+        This testcase will quantize a single Conv2d->Maxpool2d->Linear module
+        with dynamic batch size input.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(
+                    3, 16, (2, 2), stride=(1, 1), padding=(1, 1)
+                )
+                self.relu = torch.nn.ReLU()
+                self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+                self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.linear = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                temp = self.relu(self.conv(x))
+                temp = self.maxpool2d(temp)
+                temp = self.avgpool(temp)
+                temp = torch.flatten(temp, 1)
+                return self.linear(temp)
+
+        mod = M().eval()
+        v = torch.randn((2, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+        include_ops = [
+            "torch.ops.onednn.qconv2d_pointwise",
+            "torch.ops.quantized.max_pool2d",
+            "torch.ops.onednn.qlinear_pointwise",
+        ]
+        exclude_ops = []
+        self._test_code_common(
+            mod,
+            (v,),
+            include_ops,
+            exclude_ops,
+            check_quantization=True,
+            check_dynamic=True,
+        )
 
 
 if __name__ == "__main__":
