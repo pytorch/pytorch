@@ -28,16 +28,15 @@ namespace at {
 namespace native {
 
 #ifndef USE_ROCM
-template<typename ElementInputA, typename EpilogueTag>
+template<typename ElementInputA, typename ElementInputB, typename EpilogueTag>
 Tensor
-mixed_dtypes_linear_dispatch_dtype(
+mixed_dtypes_linear_cutlass(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
     const Tensor& bias) {
   const int length_m = input.size(0);
   const int length_k = weight.size(0);
-  const int length_n = weight.size(1);
+  const int length_n = scale.size(0);
 
-  using ElementInputB = uint8_t;
   using ElementOutput = ElementInputA;
 
   using SmArch = cutlass::arch::Sm80;
@@ -48,7 +47,7 @@ mixed_dtypes_linear_dispatch_dtype(
   using Operator = cutlass::arch::OpMultiplyAddDequantizeInterleavedBToA;
 
   constexpr auto ThreadblockK = 64;
-  constexpr auto ElementsPerCacheLine = 128 * 8 / cutlass::sizeof_bits<uint8_t>::value;
+  constexpr auto ElementsPerCacheLine = 128 * 8 / cutlass::sizeof_bits<ElementInputB>::value;
   constexpr auto ColumnsInterleaved   = ElementsPerCacheLine / ThreadblockK;
 
   using LayoutInputA = cutlass::layout::RowMajor;
@@ -147,37 +146,41 @@ mixed_dtypes_linear_dispatch_dtype(
   return output;
 }
 
-template<typename ElementInputA>
+template<typename ElementInputA, typename ElementInputB>
 Tensor
-mixed_dtypes_linear_dispatch_bias_activation_dtype(
+mixed_dtypes_linear_dispatch_bias_activation(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
     const Tensor& bias, const c10::string_view& activation) {
     if (bias.numel() == 0) {
       if (activation == "none") {
-        return mixed_dtypes_linear_dispatch_dtype<
+        return mixed_dtypes_linear_cutlass<
           ElementInputA,
+          ElementInputB,
           fastertransformer::EpilogueOpNoBias>(input, weight, scale, bias);
       }
-      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation_dtype: Activation "
-               "\"", activation, "\" is not supported");
+      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
+               activation, "\" is not supported");
       return Tensor{};
     }
     else {
       if (activation == "none") {
-        return mixed_dtypes_linear_dispatch_dtype<
+        return mixed_dtypes_linear_cutlass<
             ElementInputA,
+            ElementInputB,
             fastertransformer::EpilogueOpBias>(input, weight, scale, bias);
       } else if (activation == "relu") {
-        return mixed_dtypes_linear_dispatch_dtype<
+        return mixed_dtypes_linear_cutlass<
             ElementInputA,
+            ElementInputB,
             fastertransformer::EpilogueOpBiasReLU>(input, weight, scale, bias);
       } else if (activation == "silu") {
-        return mixed_dtypes_linear_dispatch_dtype<
+        return mixed_dtypes_linear_cutlass<
             ElementInputA,
+            ElementInputB,
             fastertransformer::EpilogueOpBiasSilu>(input, weight, scale, bias);
       }
-      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation_dtype: Activation "
-               "\"", activation, "\" is not supported");
+      AT_ERROR("mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
+               activation, "\" is not supported");
       return Tensor{};
     }
 }
@@ -257,40 +260,82 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
   TORCH_CHECK(input_2d.size(1) == weight.size(0),
               "_mixed_dtypes_linear: Expected input argument to have ",
               weight.size(0), " columns, but got ", input_2d.size(1));
-  TORCH_CHECK(scale.size(0) == weight.size(1),
-              "_mixed_dtypes_linear: Expected scale argument to have ",
-              weight.size(1), " elements, but got ", scale.size(0));
+  TORCH_CHECK(weight.size(1) == scale.size(0)  ||
+              2 * weight.size(1) == scale.size(0),
+              "_mixed_dtypes_linear: Expected weight argument to have either ",
+              scale.size(0), " or ", scale.size(0) / 2.f, " columns, but got ",
+              weight.size(1));
   if (bias.numel() != 0) {
-      TORCH_CHECK(bias.size(0) == weight.size(1),
+      TORCH_CHECK(bias.size(0) == scale.size(0),
                   "_mixed_dtypes_linear: Expected bias argument to have ",
-                  weight.size(1), " elements, but got ", bias.size(0));
+                  scale.size(0), " elements, but got ", bias.size(0));
   }
 
   Tensor output;
+  auto scalar_type_quant = weight.scalar_type();
+  if (weight.size(1) != scale.size(0)) {
+    scalar_type_quant = at::ScalarType::QUInt4x2;
+  }
   AT_DISPATCH_SWITCH(
       input.scalar_type(),
       "_mixed_dtypes_linear",
       AT_DISPATCH_CASE(
           at::ScalarType::Half,
           [&]() {
-            output =
-                mixed_dtypes_linear_dispatch_bias_activation_dtype<
-                    cutlass::half_t>(
-                    input_2d, weight, scale, bias, activation);
-            return;
+            AT_DISPATCH_SWITCH(
+                scalar_type_quant,
+                "_mixed_dtypes_linear",
+                AT_DISPATCH_CASE(
+                    at::ScalarType::Byte,
+                    [&]() {
+                      output =
+                          mixed_dtypes_linear_dispatch_bias_activation<
+                              cutlass::half_t,
+                              uint8_t>(input_2d, weight, scale, bias,
+                                       activation);
+                      return;
+                    })
+                AT_DISPATCH_CASE(
+                    at::ScalarType::QUInt4x2,
+                    [&]() {
+                      output =
+                          mixed_dtypes_linear_dispatch_bias_activation<
+                              cutlass::half_t,
+                              cutlass::uint4b_t>(input_2d, weight, scale, bias,
+                                                 activation);
+                      return;
+                    }));
           })
       AT_DISPATCH_CASE(
           at::ScalarType::BFloat16,
           [&]() {
-            output =
-                mixed_dtypes_linear_dispatch_bias_activation_dtype<
-                    cutlass::bfloat16_t>(
-                    input_2d, weight, scale, bias, activation);
-            return;
+            AT_DISPATCH_SWITCH(
+                scalar_type_quant,
+                "_mixed_dtypes_linear",
+                AT_DISPATCH_CASE(
+                    at::ScalarType::Byte,
+                    [&]() {
+                      output =
+                          mixed_dtypes_linear_dispatch_bias_activation<
+                              cutlass::bfloat16_t,
+                              uint8_t>(input_2d, weight, scale, bias,
+                                       activation);
+                      return;
+                    })
+                AT_DISPATCH_CASE(
+                    at::ScalarType::QUInt4x2,
+                    [&]() {
+                      output =
+                          mixed_dtypes_linear_dispatch_bias_activation<
+                              cutlass::bfloat16_t,
+                              cutlass::uint4b_t>(input_2d, weight, scale, bias,
+                                                 activation);
+                      return;
+                    }));
           }));
 
   auto output_sizes = input_sizes;
-  output_sizes.back() = weight.size(1);
+  output_sizes.back() = scale.size(0);
   return output.reshape(output_sizes);
 #else
   AT_ERROR("_mixed_dtypes_linear: ROCm doesn't support CUTLASS");

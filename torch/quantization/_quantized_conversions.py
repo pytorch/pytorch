@@ -4,9 +4,10 @@ import torch
 # Transpose the weight matrix, and then reorder its elements according
 # to underlying requirements of CUTLASS library, so that it could be
 # used for CUTLASS-based mixed datatypes linear operation.
-def quantized_weight_reorder_for_mixed_dtypes_linear(weight):
+def quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(weight, dtypeq):
     assert weight.dim() == 2
     assert weight.dtype == torch.int8
+    assert dtypeq == torch.int8 or dtypeq == torch.quint4x2
     assert weight.device.type == "cuda"
 
     device = weight.device
@@ -17,7 +18,7 @@ def quantized_weight_reorder_for_mixed_dtypes_linear(weight):
     ncols, nrows = weight.shape  # because input would be transposed
     # above
     assert nrows % 64 == 0
-    assert ncols % 64 == 0
+    assert ncols % (32 if dtypeq == torch.quint4x2 else 64) == 0
 
     # subbyte_transpose
     # not needed as input would be transposed above
@@ -76,6 +77,11 @@ def quantized_weight_reorder_for_mixed_dtypes_linear(weight):
     outp[1::4] = tmp[2::4]
     outp[2::4] = tmp[1::4]
     outp[3::4] = tmp[3::4]
-    outp = (outp.to(torch.int) + 128).to(tmp.dtype)
+    if dtypeq == torch.int8:
+        outp = (outp.to(torch.int) + 128).to(tmp.dtype)
+    elif dtypeq == torch.quint4x2:
+        outp0 = (outp & 0xF) + 8
+        outp1 = ((outp >> 4) & 0xF) + 8
+        outp = (((outp1 & 0xF) << 4) | (outp0 & 0xF)).to(tmp.dtype)
 
     return outp.view(nrows, ncols).view(torch.uint8)
