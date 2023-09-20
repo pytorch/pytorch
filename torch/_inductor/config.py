@@ -64,6 +64,9 @@ post_grad_custom_post_pass = None
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
+efficient_conv_bn_eval_fx_passes = False
+
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
@@ -72,6 +75,9 @@ batch_fusion = True
 
 # enable reordering pass
 reordering = True
+
+# Scale down RBLOCK for better occupancy
+dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
@@ -432,6 +438,9 @@ class aot_inductor:
     # If a relative path is specified, it will be used as a subdirectory under the default caching path;
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
+
+    # Wether to codegen abi compatible model.so
+    abi_compatible = is_fbcode()
 
 
 class cuda:

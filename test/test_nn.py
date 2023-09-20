@@ -5102,7 +5102,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         mixed_dtype = False
                     helper(self, nn.BatchNorm2d, shape, dtype, mixed_dtype, torch.channels_last)
 
-        precisons = {torch.float: 1e-4, torch.bfloat16: None, torch.float16: None}
+        precisons = {torch.float: 1e-4, torch.bfloat16: 1e-4, torch.float16: None}
         for shape in [(4, 8, 2, 10, 10), (4, 1, 2, 9, 9), (4, 9, 1, 1, 1)]:
             for dtype in [torch.float, torch.bfloat16, torch.float16]:
                 for mixed_dtype in [False, True]:
@@ -5617,6 +5617,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input = torch.tensor(12.)
         out = F.cosine_similarity(input.to(torch.int8), input, dim=-1)
         self.assertEqual(out, 1.)
+
+        # Check broadcasting #109333
+        a = torch.ones(2, 3, dtype=torch.float)
+        b = torch.ones(1, 1, dtype=torch.float)
+        out = F.cosine_similarity(a, b)
+        self.assertEqual(out, torch.ones(2, dtype=torch.float))
+
+        a = torch.ones(2, 3, dtype=torch.float)
+        b = torch.ones(1, dtype=torch.float)
+        out = F.cosine_similarity(a, b)
+        self.assertEqual(out, torch.ones(2, dtype=torch.float))
+
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)

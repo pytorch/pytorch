@@ -58,6 +58,10 @@ class PgHooks(MultiProcessTestCase):
         pg0 = dist.new_group(ranks=[0, 1])
         pg1 = dist.new_group(ranks=[2, 3])
 
+        # Each rank only observe two PGs being created: the default PG and one covering its ranks
+        # We don't emit events for PG creation if the current rank doesn't belong to it.
+        # For example, say you're rank 1, you'll get an event for pg0 but not pg1 even though the API contact
+        # dictates you need to call new_group for both.
         self.assertEqual(len(pgs), 2)
         self.assertEqual(pgs[1][0], pg0 if self.rank < 2 else pg1)
 
@@ -117,7 +121,6 @@ class CollectiveHooks:
         self.assertEqual(2, len(starts))
         self.assertEqual(2, len(ends))
 
-
         def check_op(idx, coll_name):
             self.assertEqual(default_pg_name, starts[idx].pg_name)
             self.assertEqual(self.backend_name, starts[idx].backend)
@@ -134,6 +137,7 @@ class CollectiveHooks:
 
         check_op(0, "ALLGATHER")
         check_op(1, "ALLREDUCE")
+
 
 class GlooHooks(MultiProcessTestCase, CollectiveHooks):
     def setUp(self) -> None:

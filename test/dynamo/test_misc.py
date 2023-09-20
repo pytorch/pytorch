@@ -13,6 +13,7 @@ import operator
 import os
 import random
 import sys
+import threading
 import traceback
 import typing
 import unittest
@@ -68,6 +69,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+T = typing.TypeVar("T")
 
 
 # Specializes a test to run only if translation validation is set.
@@ -1338,6 +1340,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
                 continue
+            if op is operator.imatmul and (t1_np or t2_np):
+                # skip
+                # in numpy, in place matmul does not work single
+                # dimensional arrays
+                continue
             t1 = torch.rand(5)
             if t1_np:
                 t1 = t1.numpy()
@@ -1388,6 +1395,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_numpy_force(self):
+        def fn(x):
+            return x.numpy(force=False)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        def fn(x):
+            return x.numpy(force=True)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3, requires_grad=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_recompilation_scalar(self):
         def fn(x, a):
@@ -2182,6 +2208,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_typing_typevar(self):
+        def fn(x):
+            def sumt(y: torch.Tensor) -> torch.Tensor:
+                return torch.sum(y)
+
+            def foo(c: typing.Callable[[T], T], y: T) -> T:
+                return c(y)
+
+            return foo(sumt, x)
+
+        x = torch.randn(3)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_typing_union_and_optional(self):
         def fn(x):
@@ -3480,38 +3524,99 @@ def fn():
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    # '__torch__.torch.SymInt (of Python compilation unit at: 0x4c9c0e0)'
-    # object has no attribute or method '__ne__'
-    # NB: I don't think this ever can actually work, cuz TorchScript
-    # can't deal with SymInt inputs
-    @expectedFailureDynamic
-    @torch._dynamo.config.patch(raise_on_backend_change=True)
-    def test_change_backends(self):
-        @torch._dynamo.optimize("eager", nopython=True)
-        def fn1():
-            return x + 1
+    def _optimize_then_check_exp(
+        self, foo, args, cnt, exp_out, exp_frame_count, exp_n_cached_backend
+    ):
+        opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
+        self.assertEqual(exp_out, opt_out)
+        self.assertEqual(cnt.frame_count, exp_frame_count)
+        self.assertEqual(
+            len(torch._dynamo.eval_frame.guarded_backend_cache.cached_backends),
+            exp_n_cached_backend,
+        )
 
-        @torch._dynamo.optimize("ts")
-        def fn2():
-            return x + 2
+    def test_backend_match_guard(self):
+        x = torch.randn([3, 4])
 
-        @torch._dynamo.optimize("eager", nopython=False)
-        def fn3():
-            return x + 1
+        def foo(x):
+            return x.sin() + x.cos()
 
-        x = torch.tensor([3, 5])
+        def foo_graph_break(x):
+            a = x.sin()
+            torch._dynamo.graph_break()
+            b = x.cos()
+            return a + b
 
-        fn1()
-        fn1()
-        fn3()
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn2)
-        fn1()
+        eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        backends = [eager_record_backend, "eager"]
+
+        # We intentionally don't reset dynamo for each backend so that we can test
+        # 1. dynamo doesn't recompile when backend stays the same, i.e. frame_count doesn't increase
+        # 2. dynamo recompiles when backend changes, i.e. frame_count is non-zero for next backend
+        def test_recompile(foo, *, exp_frame_count):
+            eager_result = foo(x)
+            for i, backend in enumerate(backends):
+                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+                # Run opt_f multiple times to make sure dynamo doesn't recompile.
+                # Specifically, frame_count doesn't increase
+                # the number of cached backends is i + 2 because we have the optimizing backend + None
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                )
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                )
+                self._optimize_then_check_exp(
+                    foo, (x,), cnt, eager_result, exp_frame_count, i + 2
+                )
+
+        test_recompile(foo, exp_frame_count=1)
         torch._dynamo.reset()
-        fn2()
-        fn2()
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn1)
-        self.assertRaises(torch._dynamo.exc.ResetRequired, fn3)
-        fn2()
+        test_recompile(foo_graph_break, exp_frame_count=2)
+
+    def test_backend_match_guard_multi_threads(self):
+        x = torch.randn([3, 4])
+
+        def foo(x):
+            return x.sin() + x.cos()
+
+        def compile_then_check_exp(*args):
+            self._optimize_then_check_exp(*args)
+            self._optimize_then_check_exp(*args)
+            self._optimize_then_check_exp(*args)
+            thread_success[threading.current_thread()] = True
+
+        eager_record_backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        backends = [eager_record_backend, "eager"]
+
+        # Test dynamo recompiles but only caches a single backend for each thread
+        eager_result = foo(x)
+        # cnt and None
+        exp_n_cached_backend = 2
+        exp_frame_count = 1
+        threads = []
+        thread_success = {}
+        for i, backend in enumerate(backends):
+            cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            thread = threading.Thread(
+                target=compile_then_check_exp,
+                args=(
+                    foo,
+                    (x,),
+                    cnt,
+                    eager_result,
+                    exp_frame_count,
+                    exp_n_cached_backend,
+                ),
+            )
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(thread_success), len(threads))
 
     def test_dynamo_min_operator_with_shape(self):
         @torch._dynamo.optimize("eager", nopython=True)
@@ -7006,6 +7111,26 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
 
+    def test_torch_device_python_type(self):
+        def fn(target):
+            target_device = target.device
+            self.assertIsInstance(target_device, torch.device)
+            a = torch.zeros(2, 3, device=target_device)
+            b = torch.zeros(2, 3, device=target_device)
+            c = torch.zeros(2, 3, device=target_device)
+            return a + b + c
+
+        from torch._dynamo.variables import TorchVariable
+
+        device = torch.device("cpu")
+        expected_variable = TorchVariable(device)
+        self.assertEqual(expected_variable.python_type(), type(device))
+
+        opt_func = torch._dynamo.optimize("inductor")(fn)
+        a = torch.tensor([2, 3], device=device)
+        res = opt_func(a)
+        self.assertIsInstance(res, torch.Tensor)
+
     def test_itertools_accumulate_tensors_default_sum(self):
         def fn(a, b, c, d, x):
             l = [a, b, c, d, x]
@@ -7342,6 +7467,20 @@ ShapeEnv not equal: field values don't match:
 """,
         )
         self._replay_and_check(main)
+
+    def test_default_dtype_change(self):
+        @torch.compile
+        def foo():
+            def inner(a, b, res_dtype):
+                print(a, b, res_dtype)
+                self.assertEqual(torch.result_type(a, b), res_dtype)
+
+            inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
+
+        torch.set_default_dtype(torch.float)
+        foo()
+        torch.set_default_dtype(torch.double)
+        foo()
 
 
 class TestTracer(JitTestCase):
