@@ -1885,6 +1885,7 @@ class CommonTemplate:
 
     @slowTest
     @expectedFailureCodegenDynamic
+    @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
