@@ -3466,6 +3466,64 @@ def meta_zero_(self):
     return self
 
 
+@register_meta(aten.div)
+@out_wrapper()
+def meta_div(self, other, rounding_mode=None):
+    if rounding_mode is None:
+        _, result_dtype = elementwise_dtypes(
+            self,
+            other,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        )
+    elif rounding_mode == "trunc" or rounding_mode == "floor":
+        _, result_dtype = elementwise_dtypes(
+            self,
+            other,
+            type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        )
+    else:
+        msg = f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found {rounding_mode}."
+        raise ValueError(msg)
+
+    if isinstance(self, torch.Tensor) and isinstance(other, torch.Tensor):
+        out_shape = _broadcast_shapes(self.shape, other.shape)
+        if out_shape == self.shape:
+            # Preserve strides of the first argument if output shape is the same as the input shape.
+            # This is required to pass CUDA tests.
+            return torch.empty_strided(
+                out_shape,
+                self.stride(),
+                dtype=result_dtype,
+                device="meta",
+                requires_grad=True,
+            )
+        else:
+            return self.new_empty(out_shape, dtype=result_dtype)
+    elif isinstance(self, torch.Tensor):
+        return torch.empty_strided(
+            self.shape,
+            self.stride(),
+            dtype=result_dtype,
+            device="meta",
+            requires_grad=True,
+        )
+    elif isinstance(other, torch.Tensor):
+        return torch.empty_strided(
+            self.shape,
+            self.stride(),
+            dtype=result_dtype,
+            device="meta",
+            requires_grad=True,
+        )
+    else:
+        return torch.empty(
+            (),  # type: ignore[arg-type]
+            dtype=result_dtype,
+            device="meta",
+            requires_grad=True,
+        )
+
+
 @register_meta(
     [
         aten.mul_.Scalar,

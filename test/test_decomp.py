@@ -382,6 +382,14 @@ CROSS_REF_BACKWARD_EXCLUDE_SET = {
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
 }
 
+# Bypasses check_decomposed for special cases
+NOT_DECOMPOSED_ALLOWLIST = {
+    # Currently, only div.Tensor_mode is decomposed; this means that if no rounding
+    # mode is provided, then tests will fail as the test will see that div did not
+    # get decomposed. However, this is expected behaviour.
+    "div",
+}
+
 all_decomposed = set()
 all_called = defaultdict(int)
 
@@ -698,13 +706,14 @@ class TestDecomp(TestCase):
             return real_out_unflat
 
     def check_decomposed(self, aten_name, mode):
-        self.assertTrue(
-            any(overload_to_aten_name(c) == aten_name for c in mode.decomposed),
-            msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
-                 f"{', '.join(map(str, list(mode.called)))}. If your op is  "
-                 f"CompositeImplicitAutograd you should skip this test "
-                 f"by updating CROSS_REF_EXCLUDE_SET.")
-        )
+        if aten_name not in NOT_DECOMPOSED_ALLOWLIST:
+            self.assertTrue(
+                any(overload_to_aten_name(c) == aten_name for c in mode.decomposed),
+                msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
+                     f"{', '.join(map(str, list(mode.called)))}. If your op is  "
+                     f"CompositeImplicitAutograd you should skip this test "
+                     f"by updating CROSS_REF_EXCLUDE_SET.")
+            )
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):

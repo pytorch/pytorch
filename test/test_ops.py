@@ -1777,6 +1777,9 @@ class TestRefsOpsInfo(TestCase):
     }
 
     not_in_decomp_table = {
+        # ref impl for div is no longer registered as a decomposition to allow adding decompositions
+        # for specific overloads of div that can be used in the core aten decomposition table
+        '_refs.div',
         # duplicated in _decomp and _refs
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
