@@ -1,18 +1,14 @@
-import copy
 import dataclasses
 import io
 import pathlib
-import typing
-from enum import auto, Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import sympy
 
 import torch
-import torch.fx._pytree as fx_pytree
-import torch.utils._pytree as pytree
 
 from torch.export.backends.registry import (
+    InvalidTorchExportBackend,
     list_backends,
     register_backend,
     register_debug_backend,
@@ -40,6 +36,7 @@ __all__ = [
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "DynamoExportedProgram",
+    "InvalidTorchExportBackend",
     "ModuleCallEntry",
     "ModuleCallSignature",
     "TorchExportException",
@@ -667,6 +664,7 @@ def register_dataclass(typ: Any) -> None:
     return register_dataclass_as_pytree_node(typ)
 
 
+InvalidTorchExportBackend.__module__ = "torch.export"
 list_backends.__module__ = "torch.export"
 register_backend.__module__ = "torch.export"
 register_debug_backend.__module__ = "torch.export"

@@ -42,6 +42,8 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRangeError
 
+__all__ = []  # type: ignore[var-annotated]
+
 
 def _convert_input_to_fake(gm, args, kwargs):
     fake_inps: List[torch.Tensor] = []
