@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    subtest,
 )
 
 
@@ -388,18 +389,18 @@ class TestArgmax(TestCase):
         )
     ]
     nan_arr = darr + [
-        ([0, 1, 2, 3, complex(0, np.nan)], 4),
-        ([0, 1, 2, 3, complex(np.nan, 0)], 4),
-        ([0, 1, 2, complex(np.nan, 0), 3], 3),
-        ([0, 1, 2, complex(0, np.nan), 3], 3),
-        ([complex(0, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-        ([complex(0, 0), complex(0, 2), complex(0, 1)], 1),
-        ([complex(1, 0), complex(0, 2), complex(0, 1)], 0),
-        ([complex(1, 0), complex(0, 2), complex(1, 1)], 2),
+        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
+        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0), decorators=[xfail]),
+        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 1), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 2), decorators=[xfail]),
         ([False, False, False, False, True], 4),
         ([False, False, False, True, False], 3),
         ([True, False, False, False, False], 0),
@@ -414,7 +415,6 @@ class TestArgmax(TestCase):
         #                      "invalid value encountered in reduce")
         if np.asarray(arr).dtype.kind in "c":
             pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
-            from unittest import
 
         val = np.max(arr)
 
@@ -492,18 +492,18 @@ class TestArgmin(TestCase):
         )
     ]
     nan_arr = darr + [
-        ([0, 1, 2, 3, complex(0, np.nan)], 4),
-        ([0, 1, 2, 3, complex(np.nan, 0)], 4),
-        ([0, 1, 2, complex(np.nan, 0), 3], 3),
-        ([0, 1, 2, complex(0, np.nan), 3], 3),
-        ([complex(0, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, np.nan), 0, 1, 2, 3], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0),
-        ([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0),
-        ([complex(0, 0), complex(0, 2), complex(0, 1)], 0),
-        ([complex(1, 0), complex(0, 2), complex(0, 1)], 2),
-        ([complex(1, 0), complex(0, 2), complex(1, 1)], 1),
+        subtest(([0, 1, 2, 3, complex(0, np.nan)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, 3, complex(np.nan, 0)], 4), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(np.nan, 0), 3], 3), decorators=[xfail]),
+        subtest(([0, 1, 2, complex(0, np.nan), 3], 3), decorators=[xfail]),
+        subtest(([complex(0, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), 0, 1, 2, 3], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, np.nan), complex(np.nan, 2), complex(np.nan, 1)], 0), decorators=[xfail]),
+        subtest(([complex(np.nan, 0), complex(np.nan, 2), complex(np.nan, np.nan)], 0), decorators=[xfail]),
+        subtest(([complex(0, 0), complex(0, 2), complex(0, 1)], 0), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(0, 1)], 2), decorators=[xfail]),
+        subtest(([complex(1, 0), complex(0, 2), complex(1, 1)], 1), decorators=[xfail]),
         ([True, True, True, True, False], 4),
         ([True, True, True, False, True], 3),
         ([False, True, True, True, True], 0),

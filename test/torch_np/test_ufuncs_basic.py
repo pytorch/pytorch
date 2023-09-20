@@ -17,6 +17,7 @@ import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_equal
 
+from unittest import SkipTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -174,7 +175,7 @@ class TestBinaryUfuncs(TestCase):
         out = np.empty_like(x, dtype=out_dtype)
 
         if ufunc in no_complex and np.issubdtype(out_dtype, np.complexfloating):
-            pytest.skip(f"{ufunc} does not accept complex.")
+            raise SkipTest(f"{ufunc} does not accept complex.")
 
         can_cast_x = np.can_cast(x, out_dtype, casting=casting)
         can_cast_y = np.can_cast(y, out_dtype, casting=casting)
