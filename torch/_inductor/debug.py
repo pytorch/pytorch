@@ -181,7 +181,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 def update_orig_fx_node_name_to_buf_name(
     nodes: SchedulerNodeList,
     node_name_to_buf_name: Dict[str, str],
-    parent_buf_name: str = None,
+    parent_buf_name: Optional[str] = None,
     n_origins: int = 0,
 ):
     if nodes is None:
@@ -234,7 +234,7 @@ def annotate_orig_fx_with_snodes(
     """
     Creates a FX Graph from a list of SchedulerNode objects.
     """
-    node_name_to_buf_name = {}
+    node_name_to_buf_name: Dict[str, str] = {}
     update_orig_fx_node_name_to_buf_name(snodes, node_name_to_buf_name)
     if node_name_to_buf_name is None:
         return
