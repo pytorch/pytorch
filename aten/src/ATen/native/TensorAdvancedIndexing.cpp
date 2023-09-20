@@ -2068,19 +2068,21 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
-  DimVector self_sizes{self.sizes()};
+  SymDimVector self_sizes{self.sym_sizes()};
   // update number of elements at dim as per indices
-  self_sizes[dim] = indices.size(dim);
-  auto broadcast_shape = infer_size(self_sizes, indices.sizes());
-  auto indices_broadcasted = at::broadcast_to(indices, broadcast_shape);
+  self_sizes[dim] = indices.sym_size(dim);
+  auto broadcast_shape = infer_size_symint(self_sizes, indices.sym_sizes());
+  auto indices_broadcasted = at::broadcast_to_symint(indices, broadcast_shape);
 
-  DimVector indices_sizes{indices.sizes()};
+  SymDimVector indices_sizes{indices.sym_sizes()};
   // update number of elements at dim as per self
-  indices_sizes[dim] = self.size(dim);
-  broadcast_shape = infer_size(indices_sizes, self.sizes());
-  auto self_broadcasted = at::broadcast_to(self, broadcast_shape);
+  indices_sizes[dim] = self.sym_size(dim);
+  broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
+  auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
-  return std::make_tuple(self_broadcasted, indices_broadcasted, dim);
+  return std::make_tuple(std::move(self_broadcasted),
+                         std::move(indices_broadcasted),
+                         std::move(dim));
 }
 
 static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
