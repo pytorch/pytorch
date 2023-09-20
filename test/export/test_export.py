@@ -523,21 +523,18 @@ class TestExport(TestCase):
     def test_dynamic_shapes_type(self):
         from typing import Dict, List
 
-        from torch._export import Dim, export__RC__ as export, dynamic_shapes_type
-
-        batch = Dim("batch")
-
-        spec = {
-            "tensor": {0: batch},
-            "dict_of_tensors": {k: {0: batch} for k in ["A", "B", "C", "D"]},
-            "list_of_tensors": [{0: batch} for _ in range(4)],
-        }
+        from torch._export import Dim, dynamic_shapes_type, export__RC__ as export
+        from torch.utils._pytree import tree_map
 
         inputs = {
             "tensor": torch.randn(3),
             "dict_of_tensors": {k: torch.randn(3) for k in ["A", "B", "C", "D"]},
             "list_of_tensors": [torch.randn(3) for _ in range(4)],
         }
+
+        batch = Dim("batch")
+        # uniformly specify dynamic shapes for all inputs
+        spec = tree_map(lambda x: {0: batch}, inputs)
 
         def foo(inputs):
             return (
@@ -555,7 +552,7 @@ class TestExport(TestCase):
         self.assertEqual(len(input_shapes), 9)
         self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
-
+        # can use spec data structure as annotation
         def foo(inputs: spec):
             return (
                 inputs["tensor"]
@@ -572,6 +569,8 @@ class TestExport(TestCase):
         self.assertEqual(len(input_shapes), 9)
         self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
+        # lift specification to type for tensors
+        # necessary because generic containers like Dict and List only take types
         BatchTensorType = dynamic_shapes_type({0: batch})
 
         spec_type = {
@@ -596,6 +595,7 @@ class TestExport(TestCase):
         self.assertEqual(len(input_shapes), 9)
         self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
+        # lift specification to type for all inputs (tensors and containers of tensors)
         t = dynamic_shapes_type(spec)
 
         def foo(inputs: t):
