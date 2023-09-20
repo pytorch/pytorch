@@ -488,16 +488,26 @@ class TensorVariable(VariableTracker):
             if not np:
                 unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
-            # TODO: support force
-            if "force" in kwargs and kwargs["force"].as_python_constant():
-                unimplemented(f"Tensor.numpy(force={kwargs['force']})")
+            if self.layout != torch.strided:
+                raise TypeError(
+                    f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
+                )
+            # We don't check that the tensor is on CPU when force is False, as this
+            # allows us to execute NumPy code on CUDA.
+            # We don't check that requires_grad=False as we are curently doing an
+            # unconditional detach.
+            # TODO: We may want to avoid detching if `requires_grad=True`
+            #       and `force=False` to allow computing gradients.
+            force = "force" in kwargs and kwargs["force"].as_python_constant()
             proxy = tx.output.create_proxy(
-                "call_function",
-                torch.detach,
-                *proxy_args_kwargs([self], {}),
+                "call_method", "detach", *proxy_args_kwargs([self], {})
             )
+            if force:
+                # TODO Add resolve_conj and resolve_neg once we support complex tensors
+                proxy = tx.output.create_proxy(
+                    "call_method", "cpu", *proxy_args_kwargs([self], {})
+                )
             return NumpyNdarrayVariable.create(tx, proxy, **options)
-
         elif name == "tolist":
             from .builder import SourcelessBuilder
 
