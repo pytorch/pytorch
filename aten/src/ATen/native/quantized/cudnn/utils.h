@@ -48,12 +48,12 @@ struct PackedLinearWeightCudnn : public LinearPackedParamsBase {
 
   at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false) override {
     throw std::runtime_error(
-    "apply_relu_out is not implemented for this packed "
+    "apply_dynamic is not implemented for this packed "
     "parameter type");
   }
   at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false) override {
     throw std::runtime_error(
-    "apply_relu_out is not implemented for this packed "
+    "apply_dynamic_relu is not implemented for this packed "
     "parameter type");
   }
 

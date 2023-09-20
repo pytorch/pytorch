@@ -55,20 +55,7 @@ struct LinearPrimitiveCache : PrimitiveCache {
     this->param = param;
   }
 
-  LinearPrimitiveCache(
-      const PrimitiveCacheKey& key,
-      const LinearParams& param,
-      const ideep::tensor& bias) {
-    this->key = key;
-    this->param = param;
-    if (!bias.is_empty()) {
-      expected_bias =
-          bias.reorder_if_differ_in(param.pd.bias_desc(), param.bias_attr);
-    }
-  }
-
   LinearParams param;
-  ideep::tensor expected_bias;
 
   // For dynamic qlinear, scale and zero point
   // are set at execution time. So we only need to compare
@@ -84,10 +71,6 @@ struct LinearPrimitiveCache : PrimitiveCache {
   LinearParams& get_param() {
     return param;
   }
-
-  ideep::tensor& get_expected_bias() {
-    return expected_bias;
-  }
 };
 
 struct ConvPrimitiveCache : PrimitiveCache {
@@ -95,25 +78,15 @@ struct ConvPrimitiveCache : PrimitiveCache {
 
   ConvPrimitiveCache(
       const PrimitiveCacheKey& key,
-      const ConvParams& params,
-      const ideep::tensor& bias) {
+      const ConvParams& params) {
     this->key = key;
     this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
   }
 
-  ideep::tensor expected_bias;
   ConvParams params;
 
   ConvParams& get_params() {
     return params;
-  }
-
-  ideep::tensor& get_bias() {
-    return expected_bias;
   }
 };
 
@@ -122,25 +95,15 @@ struct DeconvPrimitiveCache : PrimitiveCache {
 
   DeconvPrimitiveCache(
       const PrimitiveCacheKey& key,
-      const DeconvParams& params,
-      const ideep::tensor& bias) {
+      const DeconvParams& params) {
     this->key = key;
     this->params = params;
-    if (!bias.is_empty()) {
-      this->expected_bias =
-          bias.reorder_if_differ_in(params.pd.bias_desc(), params.bias_attr);
-    }
   }
 
   DeconvParams params;
-  ideep::tensor expected_bias;
 
   DeconvParams& get_params() {
     return params;
-  }
-
-  ideep::tensor& get_bias() {
-    return expected_bias;
   }
 };
 
@@ -149,6 +112,13 @@ enum PostOps {
   Relu,
   LeakyRelu,
   Tanh,
+};
+
+static std::unordered_map<std::string, PostOps> POST_OP_TABLE = {
+  {"none", NoPostOp},
+  {"relu", Relu},
+  {"leaky_relu", LeakyRelu},
+  {"tanh", Tanh}
 };
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
@@ -344,6 +314,21 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 
 namespace onednn_utils {
 
+static ideep::attr_t create_attr_by_post_op(
+    const std::string& post_op_name,
+    const torch::List<double>& post_op_args) {
+  using ideep::tensor;
+  PostOps post_op = POST_OP_TABLE[post_op_name];
+  if (post_op == Relu) {
+    return ideep::attr_t::fuse_relu();
+  } else if (post_op == LeakyRelu) {
+    return ideep::attr_t::fuse_relu_v2(/*alpha=*/post_op_args[0]);
+  } else if (post_op == Tanh) {
+    return ideep::attr_t::fuse_tanh();
+  }
+  return ideep::attr_t();
+}
+
 // Try to reorder tensor to expected desc at runtime
 // Do it in a `try...catch...` manner to avoid oneDNN's errors
 // TODO: Move it to third_party/ideep
@@ -415,5 +400,41 @@ static bool should_use_onednn_quant(
 }
 
 } // onednn_utils
+
+at::Tensor _qconv_prepack_onednn(
+    at::Tensor weight, // from CPU backend instead of QuantizedCPU
+    at::Tensor weight_scales, // Weight zero points must be 0 for onednn
+    double input_scale,
+    int64_t input_zero_point,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    c10::optional<torch::List<int64_t>> input_shape=c10::nullopt);
+
+static at::Tensor _quantized_convolution_onednn(
+    at::Tensor act, // contains quantized values but not QTensor
+    double act_scale,
+    int64_t act_zero_point,
+    at::Tensor weight, // MKLDNN tensor with quantized values
+    at::Tensor weight_scales,
+    at::Tensor weight_zero_points,
+    c10::optional<at::Tensor> bias, // Bias is packed if not None
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    bool transposed,
+    int64_t groups,
+    double inv_output_scale,
+    int64_t output_zero_point,
+    c10::optional<at::Tensor> accum=c10::nullopt, // accum to fused with conv add
+    double accum_scale=1.0,
+    int64_t accum_zero_point=0,
+    bool fp32_output=false,
+    c10::optional<c10::string_view> binary_attr=c10::nullopt,
+    c10::optional<at::Scalar> binary_alpha=c10::nullopt,
+    c10::optional<c10::string_view> unary_attr=c10::nullopt,
+    torch::List<c10::optional<at::Scalar>> unary_scalars=torch::List<c10::optional<at::Scalar>>(),
+    c10::optional<c10::string_view> unary_algorithm=c10::nullopt);
 
 #endif // #if AT_MKLDNN_ENABLED()

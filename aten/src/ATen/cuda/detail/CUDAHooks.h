@@ -29,8 +29,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCuSOLVER() const override;
   bool hasROCM() const override;
   const at::cuda::NVRTC& nvrtc() const override;
-  int64_t current_device() const override;
-  bool hasPrimaryContext(int64_t device_index) const override;
+  DeviceIndex current_device() const override;
+  bool hasPrimaryContext(DeviceIndex device_index) const override;
   Allocator* getCUDADeviceAllocator() const override;
   Allocator* getPinnedMemoryAllocator() const override;
   bool compiledWithCuDNN() const override;
@@ -43,12 +43,12 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   long versionCuDNN() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
-  int64_t cuFFTGetPlanCacheMaxSize(int64_t device_index) const override;
-  void cuFFTSetPlanCacheMaxSize(int64_t device_index, int64_t max_size) const override;
-  int64_t cuFFTGetPlanCacheSize(int64_t device_index) const override;
-  void cuFFTClearPlanCache(int64_t device_index) const override;
+  int64_t cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const override;
+  void cuFFTSetPlanCacheMaxSize(DeviceIndex device_index, int64_t max_size) const override;
+  int64_t cuFFTGetPlanCacheSize(DeviceIndex device_index) const override;
+  void cuFFTClearPlanCache(DeviceIndex device_index) const override;
   int getNumGPUs() const override;
-  void deviceSynchronize(int64_t device_index) const override;
+  void deviceSynchronize(DeviceIndex device_index) const override;
 };
 
 }}} // at::cuda::detail

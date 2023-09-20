@@ -386,7 +386,11 @@ not_implemented_re = re.compile(
                 "has no attribute '_compiled_autograd_key'",
                 # make_fx() tracing errors:
                 "Cannot access storage of BatchedTensorImpl",
+                "Cannot access storage of SparseTensorImpl",
                 "data dependent operator:",
+                "dynamic shape operator:",
+                # inductor errors:
+                "inductor does not support",
             ],
         )
     )
@@ -397,37 +401,17 @@ skip_re = re.compile(r"^test_(sparse|profiler|gradcheck|checkpoint|named_tensor)
 
 # Bugs needing investigation:
 skips = {
-    "test_accumulate_grad_tensor_reference",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' rai
-    "test_calculate_shape_util",  # AssertionError: NYI: aten._nested_tensor_from_tensor_list.default
     "test_current_graph_task_execution_order",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function <
-    "test_current_node",  # RuntimeError: aten::detach() Expected a value of type 'Tensor' for argument 'self' but in
-    "test_duplicate_backward_root",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/c
-    "test_grad_fn_attr_bindings",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/csr
-    "test_grad_unreachable_discovery",  # RuntimeError: tensor does not have a device
-    "test_grad_unreachable",  # RuntimeError: tensor does not have a device
-    "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
-    "test_graph_save_on_cpu",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/csrc/dy
-    "test_hooks_cpp",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
-    "test_index_backward_does_not_save_tensor",  # RuntimeError: expected int but got i0
     "test_input_buffer_accum",  # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
-    "test_integer_outputs",  # TypeError: unsupported operand type(s) for +: 'OpOverload' and 'str'
-    "test_lobpcg",  # RuntimeError: tried to get Double out of SymFloat
-    "test_no_unnecessary_unwrapping",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch
-    "test_numpy_requires_grad",  # AssertionError: "Can't call numpy\(\) on Tensor that requires grad. Use tensor.det
-    "test_pickle",  # TypeError: cannot pickle 'StorageWeakRef' object: a class that defines __slots__ without defini
-    "test_reentrant_with_leaf_variable_hook",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytor
-    "test_reentrant_with_non_leaf_variable_hook",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/p
-    "test_saved_variable_packing_unpacking_saved_original_with_default_hooks",  # RuntimeError: inserted INTERNAL ASS
-    "test_saved_variable_packing_unpacking_saved_original_with_hooks",  # RuntimeError: inserted INTERNAL ASSERT FAIL
+    "test_graph_save_on_cpu_cuda",  # AssertionError: 0 not greater than 0
+    "test_graph_save_on_cpu",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
+    "test_reentrant_with_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHandle.
+    "test_reentrant_with_non_leaf_variable_hook",  # torch._dynamo.exc.Unsupported: inline in skipfiles: RemovableHan
     "test_saved_variable_saved_original_inplace_detach",  # AssertionError: RuntimeError not raised
-    "test_saving_variable_to_disk",  # AttributeError: Can't pickle local object 'WeakValueDictionary.__init__.<local
+    "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
     "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
-    "test_setting_default_saved_variable_hooks_twice_should_use_inner",  # RuntimeError: inserted INTERNAL ASSERT FAI
-    "test_sharded_grad",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/csrc/dynamo/
     "test_tensor_hooks_inplace_over_view",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_tensor_hooks_inplace",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
-    "test_to_sparse_backward",  # torch._dynamo.exc.BackendCompilerFailed: backend='inner_compiler' raised:
-    "test_var_mean_differentiable",  # RuntimeError: inserted INTERNAL ASSERT FAILED at "/home/jansel/pytorch/torch/c
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
 }
 

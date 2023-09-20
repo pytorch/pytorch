@@ -361,6 +361,30 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         wrap_node = find_first_node(cnt.graphs[0], tag_activation_checkpoint)
         self.assertEqual(len(wrap_node.args), 3)
 
+    @requires_cuda()
+    def test_autocast_flash_attention(self):
+        def fn(primals_1, primals_2, primals_3):
+            return torch.ops.aten._scaled_dot_product_efficient_attention.default(
+                primals_1, primals_2, primals_3, None, True, scale=0.17677669529663687
+            )[0]
+
+        def gn(*args):
+            return torch.utils.checkpoint.checkpoint(fn, *args)
+
+        with torch.cuda.amp.autocast():
+            x = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
+            y = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
+            z = torch.randn(4, 2, 16, 32, device="cuda", requires_grad=True)
+            args = (x, y, z)
+
+            torch.manual_seed(0)
+            ref = gn(*args)
+
+            opt_gn = torch.compile(gn)
+            torch.manual_seed(0)
+            res = opt_gn(*args)
+            self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
