@@ -500,7 +500,7 @@ socket",
                             ncore_per_node,
                             args.ncores_per_instance,
                         )
-                        exit(-1)
+                        sys.exit(-1)
                     elif num_leftover_cores == 0:
                         # aren't any cross-node cores
                         logger.info(
@@ -573,7 +573,7 @@ won't take effect even if it is set explicitly."
                         "Core binding with numactl is not available, and --disable_taskset is set. \
                     Please unset --disable_taskset to use taskset instead of numactl."
                     )
-                    exit(-1)
+                    sys.exit(-1)
 
         if not args.disable_taskset:
             enable_taskset = True
