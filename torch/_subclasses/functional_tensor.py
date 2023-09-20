@@ -29,12 +29,34 @@ class FunctionalTensor(torch.Tensor):
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
 
-    # Note: FunctionalTensor is not quite like the functorch wrapper subclasses,
-    # because today functionalization runs *below* the conj/neg/zero dispatch keys.
-    # We could consider changing this to make it more inline with functorch.
+    # Note: The reason we add these extra keys to our FunctionalTensor subclass
+    # is to mirror the behavior of C++ functionalization (we can choose to change this
+    # later, as long as it doesn't break anything).
+    # FunctionalTensorWrapper copies **all** dispatch keys from the inner tensor
+    # to the wrapper, excluding functorch and python dispatch keys.
+    # Here I'm trying to re-use the keyset the functorch wrapper subclasses copy,
+    # except that they don't include ZeroTensor so I'm manually adding it in.
     _extra_dispatch_keys = torch._C._additional_keys_to_prop_for_wrapper_tensors.add(
         torch._C.DispatchKey.ZeroTensor
     )
+
+    # These are all aten ops that correspond to metadata queries.
+    # We want FunctionalTensor to be able to handle them directly.
+    metadata_fns = [
+        torch.ops.aten.is_contiguous.default,
+        torch.ops.aten.is_contiguous.memory_format,
+        torch.ops.aten.is_strides_like_format.default,
+        torch.ops.aten.is_non_overlapping_and_dense.default,
+        torch.ops.aten.size.default,
+        torch.ops.aten.sym_size.default,
+        torch.ops.aten.stride.default,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.storage_offset.default,
+        torch.ops.aten.sym_storage_offset.default,
+        torch.ops.aten.numel.default,
+        torch.ops.aten.sym_numel.default,
+        torch.ops.aten.dim.default,
+    ]
 
     def __new__(cls, elem):
         assert torch._is_functional_tensor(elem)
@@ -105,21 +127,7 @@ class FunctionalTensor(torch.Tensor):
         # FunctionalTensor needs to plumb all metadata requests to the inner tensor.
         # In theory we don't have to do this - but if we want to service metadata requests here,
         # we need to carefully make sure all metadata is accurate (including metadata mutations)
-        if func in [
-            torch.ops.aten.is_contiguous.default,
-            torch.ops.aten.is_contiguous.memory_format,
-            torch.ops.aten.is_strides_like_format.default,
-            torch.ops.aten.is_non_overlapping_and_dense.default,
-            torch.ops.aten.size.default,
-            torch.ops.aten.sym_size.default,
-            torch.ops.aten.stride.default,
-            torch.ops.aten.sym_stride.default,
-            torch.ops.aten.storage_offset.default,
-            torch.ops.aten.sym_storage_offset.default,
-            torch.ops.aten.numel.default,
-            torch.ops.aten.sym_numel.default,
-            torch.ops.aten.dim.default,
-        ]:
+        if func in FunctionalTensor.metadata_fns:
 
             def unwrap(x):
                 return x.elem
@@ -170,6 +178,8 @@ class FunctionalTensorMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
+        # This will be turned off later for pre-dispatch functionalization
+        self.decompose_composite_implicit_ops = True
 
     # No-op if FunctionalTensorMode is already in use
     def __enter__(self):
@@ -204,6 +214,19 @@ class FunctionalTensorMode(TorchDispatchMode):
                 "FunctionalTensor unrecognized subclass(es): %s", unrecognized_types
             )
             return NotImplemented
+
+        if (
+            func not in FunctionalTensor.metadata_fns
+            and self.decompose_composite_implicit_ops
+            # Not all funcs from __torch_dispatch__ are actual dispatcher ops,
+            # e.g. prim.device
+            and torch._C._dispatch_has_kernel(func.name())
+        ):
+            with self:
+                # Decomposes CompositeImplicitAutograd ops
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
         def assert_is_functional(x):
             assert torch._is_functional_tensor(x)
