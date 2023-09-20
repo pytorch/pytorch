@@ -665,3 +665,9 @@ def register_dataclass(typ: Any) -> None:
     from torch._export.utils import register_dataclass_as_pytree_node
 
     return register_dataclass_as_pytree_node(typ)
+
+
+list_backends.__module__ = "torch.export"
+register_backend.__module__ = "torch.export"
+register_debug_backend.__module__ = "torch.export"
+register_experimental_backend.__module__ = "torch.export"
