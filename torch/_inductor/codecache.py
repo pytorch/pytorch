@@ -1241,7 +1241,6 @@ class CppCodeCache:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))
         print(cpp_command)
-        breakpoint()
         key, input_path = write(source_code, "cpp", extra=cpp_command)
         if key not in cls.cache:
             from filelock import FileLock
