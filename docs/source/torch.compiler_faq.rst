@@ -632,8 +632,8 @@ on eager mode now. If you want to run it in eager mode, you would need to call
 on CPU.
 
 
-How do I debug my ``torch.compile``d NumPy code?
-------------------------------------------------
+How do I debug NumPy code under ``torch.compile``?
+--------------------------------------------------
 
 Debugging JIT compiled code is challenging, given the complexity of modern
 compilers and the daunting errors that they raise.
@@ -653,13 +653,13 @@ tracing altogether by doing
 This moves back to the behavior in 2.0 and will avoid tracing through any NumPy
 function.
 
-Of course, this is not a satisfactory answer if our program is mostly composed
-of NumPy code. In these cases, we can try to execute eagerly (without
-``torch.compile``) the NumPy code on PyTorch by importing ``import torch._numpy as np``.
+If we want to debug through the program, rather than fully deactivating the tracer,
+we can execute the NumPy code eagerly (without ``torch.compile``)
+using PyTorch as a backend by importing ``import torch._numpy as np``.
 This should just be used for **debugging purposes** and is in no way a
 replacement for the PyTorch API, as it is **much less performant** and, as a
 private API, **may change without notice**. At any rate, ``torch._numpy`` is a
-Python implementation of NumPy in terms of PyTorch and it is used internally to
+Python implementation of NumPy in terms of PyTorch and it is used internally by ``torch.compile`` to
 transform NumPy code into Pytorch code. It is rather easy to read and modify,
 so if you find any bug in it feel free to submit a PR fixing it!
 
@@ -667,8 +667,8 @@ If the program does work when importing ``torch._numpy as np``, chances are
 that the bug is in TorchDynamo. If this is the case, please feel open an issue
 with a minimal reproducer.
 
-I ``torch.compile``d a NumPy function and I did not see any speed-up.
---------------------------------------------------------------------
+I ``torch.compile`` some NumPy code and I did not see any speed-up.
+-------------------------------------------------------------------
 
 The best place to start is the
 `tutorial with general advice for how to debug this sort of torch.compile issues <https://pytorch.org/docs/main/torch.compiler_faq.html#why-am-i-not-seeing-speedups>`__.
