@@ -24,6 +24,7 @@ def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
 from ._utils import _import_dotted_name, classproperty
+from ._utils import _functionalize_sync as _sync
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 
@@ -289,6 +290,14 @@ class SymInt:
     def __repr__(self):
         return str(self.node)
 
+    def __hash__(self) -> builtins.int:
+        ret = self.node.singleton_int()
+        if ret is not None:
+            return hash(ret)
+        else:
+            # We could support constant SymInts as well, but not doing it for now
+            raise TypeError("unhashable type: non-singleton SymInt")
+
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -381,8 +390,17 @@ class SymBool:
     def __sym_not__(self) -> "SymBool":
         raise AssertionError("type stub not overridden")
 
+    def __eq__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
     def __repr__(self):
-        return self.node.str()
+        return str(self.node)
+
+    def __hash__(self):
+        if self.node.is_constant():
+            return hash(self.node.bool_())
+        else:
+            raise TypeError("unhashable type: SymBool")
 
 def sym_not(a):
     r""" SymInt-aware utility for logical negation.

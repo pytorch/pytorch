@@ -7,7 +7,11 @@ import torch
 from torch import Tensor
 from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.api import Shard
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor.op_schema import (
+    OpSchema,
+    OutputSharding,
+    RuntimeSchemaInfo,
+)
 from torch.distributed._tensor.ops.utils import (
     normalize_dim,
     normalize_dims,
@@ -588,11 +592,13 @@ def propagate_shape_and_sharding(
 
 
 def register_prop_rule_map(
-    aten_op_overload: torch._ops.OpOverload, local_op_name: Callable[..., torch.Tensor]
+    aten_op_overload: torch._ops.OpOverload,
+    local_op_name: Callable[..., torch.Tensor],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> None:
     spec: Op = ops[local_op_name]
 
-    @register_prop_rule(aten_op_overload)
+    @register_prop_rule(aten_op_overload, schema_info=schema_info)
     def reshape_prop(op_schema: OpSchema) -> OutputSharding:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
@@ -677,12 +683,28 @@ def register_prop_rule_map(
 
 
 register_prop_rule_map(aten.squeeze.default, torch.squeeze)
-register_prop_rule_map(aten.squeeze.dim, torch.squeeze)
-register_prop_rule_map(aten.view.default, Tensor.view)
-register_prop_rule_map(aten.reshape.default, torch.reshape)
-register_prop_rule_map(aten._unsafe_view.default, Tensor.view)
-register_prop_rule_map(aten.unsqueeze.default, torch.unsqueeze)
-register_prop_rule_map(aten.expand.default, Tensor.expand)
-register_prop_rule_map(aten.permute.default, torch.permute)
-register_prop_rule_map(aten.repeat.default, Tensor.repeat)
-register_prop_rule_map(aten.transpose.int, torch.transpose)
+register_prop_rule_map(
+    aten.squeeze.dim, torch.squeeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(aten.view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1))
+register_prop_rule_map(
+    aten.reshape.default, torch.reshape, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten._unsafe_view.default, Tensor.view, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.unsqueeze.default, torch.unsqueeze, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.expand.default, Tensor.expand, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.permute.default, torch.permute, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.repeat.default, Tensor.repeat, schema_info=RuntimeSchemaInfo(1)
+)
+register_prop_rule_map(
+    aten.transpose.int, torch.transpose, schema_info=RuntimeSchemaInfo(1)
+)

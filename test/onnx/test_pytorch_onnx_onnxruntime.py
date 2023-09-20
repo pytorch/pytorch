@@ -7635,6 +7635,25 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Meshgrid(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(8)
+    def test_meshgrid_indexing(self):
+        class Meshgrid(torch.nn.Module):
+            def __init__(self, indexing):
+                super().__init__()
+                self.indexing = indexing
+
+            def forward(self, x, y, z):
+                output1, output2, output3 = torch.meshgrid(
+                    x, y, z, indexing=self.indexing
+                )
+                return output1, output2, output3
+
+        x = torch.randn(5, requires_grad=True)
+        y = torch.zeros(6, requires_grad=True)
+        z = torch.randn(7, requires_grad=True)
+        for indexing in ("xy", "ij"):
+            self.run_test(Meshgrid(indexing), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid_scalar(self):
         class Meshgrid(torch.nn.Module):
             def forward(self, x, y, z):

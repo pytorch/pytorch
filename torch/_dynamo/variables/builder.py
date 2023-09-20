@@ -23,6 +23,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -44,6 +45,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConvertIntSource,
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
@@ -389,6 +391,19 @@ class VariableBuilder:
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
 
+        elif value is torch.utils._pytree.SUPPORTED_NODES:
+            result = {
+                k: UserDefinedObjectVariable(
+                    value[k],
+                    source=GetItemSource(self.get_source(), k),
+                    # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
+                    # under the assumption that the values themselves don't change.
+                    guards=self.make_guards(GuardBuilder.DICT_VERSION),
+                )
+                for k in value.keys()
+            }
+            return ConstDictVariable(result, type(value))
+
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -713,6 +728,46 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        elif isinstance(value, torch.SymBool):
+            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
+            # user provided SymBool with a SymInt in dynamo.
+
+            # Concretely,
+            # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
+            # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
+            # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
+            # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
+
+            value_hint = value.node.require_hint()
+            new_source = ConvertIntSource(self.source)
+
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                int(value_hint),
+                new_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symint),
+                source=new_source,
+            )
+
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                new_source,
+                new_symint,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=new_symint,
+            )
+            self.tx.output.tracked_fakes.append(
+                TrackedFake(new_symint, new_source, None)
+            )
+            return SymNodeVariable(
+                sym_node_proxy,
+                new_symint == 1,
+            )
         else:
             result = UserDefinedObjectVariable(
                 value,
@@ -887,7 +942,7 @@ class VariableBuilder:
         elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if (
+            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
@@ -1085,11 +1140,21 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            shape_env = self.tx.output.shape_env
+            if TracingContext.get().force_unspec_int_unbacked_size_like and isinstance(
+                value, int
+            ):
+                wrapped_value = shape_env.create_unbacked_symint()
+                _constrain_range_for_size(wrapped_value)
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(wrapped_value, self.source, None)
+                )
+
             # NB: We do not do float.  For motivation, see
             # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
-            if (
+            elif (
                 isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
@@ -1102,8 +1167,6 @@ class VariableBuilder:
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
-
-                shape_env = self.tx.output.shape_env
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
@@ -1481,6 +1544,14 @@ class TrackedFake:
 def _automatic_dynamic(e, tx, name, static_shapes):
     if static_shapes:
         return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+
+    # We preserve the dynamism of inputs. For example, when users call
+    # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
+    if any(isinstance(s, SymInt) for s in e.size()):
+        return [
+            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+            for s in e.size()
+        ], [None] * e.dim()
 
     # Prep for automatic dynamic
     frame_state_entry = None
