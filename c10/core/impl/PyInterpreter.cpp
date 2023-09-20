@@ -39,9 +39,11 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
     PANIC(python_op_registration_trampoline);
   }
 
-  void op_registration_pyimport(const char* pymodule, std::string context)
-      const override {
-    PANIC(op_registration_pyimport);
+  void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const override {
+    PANIC(throw_abstract_impl_not_imported_error);
   }
 
   void python_dispatcher(

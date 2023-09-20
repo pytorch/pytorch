@@ -1079,18 +1079,6 @@ def _find_custom_op(qualname, also_check_torch_library=False):
 
 
 def get_abstract_impl(qualname):
-    maybe_abstract_impl = get_abstract_impl_from_registry(qualname)
-    if maybe_abstract_impl:
-        return maybe_abstract_impl
-    # No abstract impl registered. Try to see if there's a pystub for it.
-    # This is a bit slow so we do it after the fast-path above
-    did_import = torch._C._dispatch_maybe_import_abstract_impl_pystub(qualname)
-    if did_import:
-        return get_abstract_impl_from_registry(qualname)
-    return None
-
-
-def get_abstract_impl_from_registry(qualname):
     if qualname not in torch._custom_op.impl.global_registry:
         return None
     custom_op = torch._custom_op.impl.global_registry[qualname]

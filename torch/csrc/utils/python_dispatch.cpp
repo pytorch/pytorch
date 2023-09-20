@@ -422,17 +422,6 @@ void initDispatchBindings(PyObject* module) {
             name, overload_name);
       });
 
-  m.def(
-      "_dispatch_maybe_import_abstract_impl_pystub", [](const char* qualname) {
-        // The abstract_impl API doesn't work with overload names yet.
-        auto result = c10::Dispatcher::singleton().findSchema({qualname, ""});
-        if (!result.has_value()) {
-          return false;
-        }
-        return c10::Dispatcher::singleton().maybeImportAbstractImplPyStub(
-            result->operator_name());
-      });
-
   m.def("_dispatch_dump", [](const char* name) -> std::string {
     auto op = c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
     if (!op) {

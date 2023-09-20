@@ -57,11 +57,14 @@ struct ConcretePyInterpreterVTable final
     torch::impl::dispatch::python_op_registration_trampoline_impl(
         op, key, stack);
   }
-  void op_registration_pyimport(const char* pymodule, std::string context)
-      const override {
+  void throw_abstract_impl_not_imported_error(
+      std::string opname,
+      const char* pymodule,
+      const char* context) const override {
     py::gil_scoped_acquire gil;
-    pybind11::module::import("torch.utils._python_dispatch")
-        .attr("op_registration_pyimport")(pymodule, context);
+    pybind11::module::import("torch._utils_internal")
+        .attr("throw_abstract_impl_not_imported_error")(
+            opname, pymodule, context);
   }
 
   bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)

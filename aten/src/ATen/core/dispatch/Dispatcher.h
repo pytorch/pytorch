@@ -223,14 +223,12 @@ public:
    * Given an operator, tells the Dispatcher that we have implemented an abstract impl
    * for this op in the given Python module. Call this a "pystub".
    */
-  RegistrationHandleRAII registerAbstractImplPyStub(OperatorName op_name, const char* pymodule);
+  RegistrationHandleRAII registerAbstractImplPyStub(OperatorName op_name, const char* pymodule, const char* context);
 
   /**
-   * Given an operator, if we have registered a pystub for it, then imports the
-   * Python module specified by the pystub. Returns true if we did an import
-   * (and false if we didn't have a pystub and therefore didn't do an import)
+   * Given an operator, throws if we have an abstract impl pystub.
    */
-  bool maybeImportAbstractImplPyStub(OperatorName op_name);
+  void throwIfHasAbstractImplPyStub(OperatorName op_name);
 
   /**
    * Register a new operator by name.

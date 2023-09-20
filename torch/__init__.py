@@ -24,6 +24,7 @@ def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
 from ._utils import _import_dotted_name, classproperty
+from ._utils import _functionalize_sync as _sync
 from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
     USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
 

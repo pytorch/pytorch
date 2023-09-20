@@ -606,12 +606,17 @@ class TORCH_API Library final {
   }
 
   /// Declares that an operator (given by name) has an abstract impl in a
-  /// Python module (pymodule). PyTorch will lazily import the pymodule
-  /// if/when the abstract impl is necessary.
-  Library& impl_abstract_pystub(const char* name, const char* pymodule) {
+  /// Python module (pymodule). If the abstract impl was not yet imported,
+  /// we will warn about it.
+  ///
+  /// Args:
+  /// - name: the name of the operator
+  /// - pymodule: the python module
+  /// - context: We may include this in the error message.
+  Library& impl_abstract_pystub(const char* name, const char* pymodule, const char* context = "") {
     at::OperatorName opname = _parseNameForLib(name);
     registrars_.emplace_back(
-      c10::Dispatcher::singleton().registerAbstractImplPyStub(opname, pymodule)
+      c10::Dispatcher::singleton().registerAbstractImplPyStub(opname, pymodule, context)
       );
     return *this;
   }

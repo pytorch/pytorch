@@ -24,9 +24,10 @@ class TestCustomOperators(TestCase):
         x = torch.randn(3, device='cpu')
         self.assertNotIn("my_custom_ops", sys.modules.keys())
 
-        gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
-        self.assertIn("my_custom_ops", sys.modules.keys())
+        with self.assertRaisesRegex(NotImplementedError, r"import the 'my_custom_ops'"):
+            gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
+        gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
         self.assertExpectedInline("""\
 def forward(self, arg0_1):
     nonzero = torch.ops.custom.nonzero.default(arg0_1);  arg0_1 = None
@@ -36,8 +37,9 @@ def forward(self, arg0_1):
     def test_abstract_impl_pystub_meta(self):
         x = torch.randn(3, device="meta")
         self.assertNotIn("my_custom_ops2", sys.modules.keys())
+        with self.assertRaisesRegex(NotImplementedError, r"import the 'my_custom_ops2'"):
+            y = torch.ops.custom.sin.default(x)
         y = torch.ops.custom.sin.default(x)
-        self.assertIn("my_custom_ops", sys.modules.keys())
 
     def test_calling_custom_op_string(self):
         output = ops.custom.op2("abc", "def")

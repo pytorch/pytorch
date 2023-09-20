@@ -257,8 +257,8 @@ void Dispatcher::deregisterDef_(
 
 namespace {
 
-using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, const char*>;
-AbstractImplPyStubsType& kAbstractImplPyStubs() {
+using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
   static AbstractImplPyStubsType _data;
   return _data;
 }
@@ -267,42 +267,39 @@ AbstractImplPyStubsType& kAbstractImplPyStubs() {
 
 RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
   OperatorName op_name,
-  const char* pymodule
+  const char* pymodule,
+  const char* context
 ) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
   // If there are duplicates, we just let it through and warn about it.
   // Throwing an error during static initialization causes a crash that
   // doesn't give any sign of what happened.
-  if (kAbstractImplPyStubs().find(op_name) != kAbstractImplPyStubs().end()) {
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found != abstractImplPyStubsSingleton().end()) {
     TORCH_WARN(
         "Tried to register an abstract impl pystub for ", op_name, " ",
-        "but there already was one. We will override the existing pystub.");
+        "that specifies the Python module ", pymodule, " "
+        "but there already was a pystub that specifies the Python module ",
+        found->second.first, ". We will override the existing pystub.");
   }
-  kAbstractImplPyStubs()[op_name] = pymodule;
+  abstractImplPyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
   return RegistrationHandleRAII([guard = this->guard_, op_name] {
     std::lock_guard<std::mutex> lock(guard->mutex);
     if (!guard->alive.load()) {
       return;
     }
-    kAbstractImplPyStubs().erase(op_name);
+    abstractImplPyStubsSingleton().erase(op_name);
   });
 }
 
-bool Dispatcher::maybeImportAbstractImplPyStub(OperatorName op_name) {
-  const char* pymodule = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(guard_->mutex);
-    auto elt = kAbstractImplPyStubs().find(op_name);
-    if (elt == kAbstractImplPyStubs().end()) {
-      return false;
-    }
-    pymodule = elt->second;
-    // We need to release the lock here because the pyimport will register things to
-    // the dispatcher and that needs to grab the lock. It's possible that someone
-    // will unload the shared library that owns the existing impl_abstract_pystub,
-    // or load a library with a different impl_abstract_pystub for the same operator,
-    // but those will cause other problems so we don't worry about it here.
+void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto elt = abstractImplPyStubsSingleton().find(op_name);
+  if (elt == abstractImplPyStubsSingleton().end()) {
+    return;
   }
+  const char* pymodule = elt->second.first;
+  const char* context = elt->second.second;
   auto* interpreter = at::impl::PythonOpRegistrationTrampoline::getInterpreter();
   TORCH_CHECK(
       interpreter != nullptr,
@@ -311,8 +308,7 @@ bool Dispatcher::maybeImportAbstractImplPyStub(OperatorName op_name) {
       "the abstract impl for this operator (necessary for Meta Tensors) "
       "was declared to exist in the Python module ", pymodule,
       " but Python is not available.");
-  (*interpreter)->op_registration_pyimport(pymodule, toString(op_name));
-  return true;
+  (*interpreter)->throw_abstract_impl_not_imported_error(toString(op_name), pymodule, context);
 }
 
 RegistrationHandleRAII Dispatcher::registerImpl(

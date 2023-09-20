@@ -9,11 +9,7 @@ static void metaFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
     torch::jit::Stack* stack) {
-  bool resolved = c10::Dispatcher::singleton().maybeImportAbstractImplPyStub(op.operator_name());
-  if (resolved) {
-    op.redispatchBoxed(dispatch_keys, stack);
-    return;
-  }
+  c10::Dispatcher::singleton().throwIfHasAbstractImplPyStub(op.operator_name());
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       op.operator_name(),

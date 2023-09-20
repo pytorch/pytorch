@@ -152,9 +152,10 @@ struct C10_API PyInterpreterVTable {
       c10::DispatchKey,
       torch::jit::Stack* stack) const = 0;
 
-  virtual void op_registration_pyimport(
+  virtual void throw_abstract_impl_not_imported_error(
+      std::string opname,
       const char* pymodule,
-      std::string context) const = 0;
+      const char* context) const = 0;
 
   // Invoke the Python dispatcher to handle this call
   virtual void python_dispatcher(
