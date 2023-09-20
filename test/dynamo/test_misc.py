@@ -7078,7 +7078,7 @@ def ___make_guard_fn():
         import numpy as np
 
         def fn(x):
-            x = x ** 2
+            x = x**2
             print("graph break.")
             return 2 * x
 
@@ -7088,7 +7088,6 @@ def ___make_guard_fn():
         x = np.arange(8)
         self.assertEqual(fn(x), compiled_fn(x))
         self.assertEqual(counter.frame_count, 2)
-
 
 
 class TestTracer(JitTestCase):
