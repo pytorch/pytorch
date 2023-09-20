@@ -74,6 +74,7 @@ decomps_to_exclude = [
     aten.clamp_max,
     aten.clamp_min,
     aten.trunc,
+    aten.unbind,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)

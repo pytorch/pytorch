@@ -372,6 +372,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.triu,
             aten.triu_,
             aten.trunc,
+            aten.unbind,
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
