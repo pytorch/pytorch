@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+T = typing.TypeVar("T")
 
 
 # Specializes a test to run only if translation validation is set.
@@ -2188,6 +2189,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_typing_typevar(self):
+        def fn(x):
+            def sumt(y: torch.Tensor) -> torch.Tensor:
+                return torch.sum(y)
+
+            def foo(c: typing.Callable[[T], T], y: T) -> T:
+                return c(y)
+
+            return foo(sumt, x)
+
+        x = torch.randn(3)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_typing_union_and_optional(self):
         def fn(x):
