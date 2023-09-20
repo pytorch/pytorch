@@ -56,6 +56,7 @@ __all__ = [
     "_broadcast_to_and_flatten",
     "treespec_dumps",
     "treespec_loads",
+    "treespec_pprint",
 ]
 
 
@@ -779,6 +780,19 @@ def treespec_loads(serialized: bytes) -> PyTreeSpec:
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
     return treespec
+
+
+class _DummyLeaf:
+    def __repr__(self) -> str:
+        return "*"
+
+
+def treespec_pprint(treespec: PyTreeSpec) -> str:
+    dummy_tree = tree_unflatten(
+        [_DummyLeaf() for _ in range(treespec.num_leaves)],
+        treespec,
+    )
+    return repr(dummy_tree)
 
 
 if optree is not None:
