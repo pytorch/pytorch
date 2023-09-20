@@ -230,7 +230,7 @@ class TestSparseSemiStructured(TestCase):
             B = torch.rand((128, 128), device=A_sparse.device).to(torch.int8)
 
             dense_result = torch.mm(A.cpu(), B.t().cpu()).to(device, dtype=torch.float16)
-            sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor, B.t(), out_dtype=torch.float16)
+            sparse_result = torch._cslt_sparse_mm(A_sparse.compressed_tensor_cusparselt, B.t(), out_dtype=torch.float16)
             assert torch.allclose(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
     @dtypes(*SEMI_STRUCTURED_SUPPORTED_DTYPES)
