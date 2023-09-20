@@ -41,7 +41,16 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
   bool* input_data = input.data_ptr<bool>();
 
   int64_t numel = input.numel();
-  Tensor output, inverse_indices, counts;
+  Tensor output = at::empty({0}, self.options());
+  Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor counts = at::empty({0}, self.options().dtype(kLong));
+
+  if (numel == 0) {
+    if (return_inverse) {
+      inverse_indices.resize_(input.sizes());
+    }
+    return std::make_tuple(output, inverse_indices, counts);
+  }
 
   int num_threads = at::get_num_threads();
   std::vector<int64_t> num_true_thread(num_threads, 0);
@@ -64,10 +73,10 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
   constexpr int false_idx = 0;
   const int true_idx = num_false > 0;
 
-  auto options = self.options();
-  output = at::empty({num_out}, self.options());
-  counts = at::empty({return_counts ? num_out : 0}, options.dtype(kLong));
-
+  output.resize_({num_out});
+  if (return_counts) {
+    counts.resize_({num_out});
+  }
   bool* output_data = output.data_ptr<bool>();
   int64_t* counts_data = return_counts ? counts.data_ptr<int64_t>() : nullptr;
 
@@ -86,7 +95,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
   }
 
   if (return_inverse) {
-    inverse_indices = at::empty(self.sizes(), options.dtype(kLong));
+    inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
