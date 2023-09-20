@@ -65,6 +65,14 @@ using fn_has_symint = typename guts::typelist::true_for_any_type<
   typename guts::infer_function_traits<T>::type::parameter_types
 >;
 
+template <typename T>
+struct fn_remove_symint;
+
+template <typename Ret, typename... Args>
+struct fn_remove_symint<Ret(Args...)> {
+  using type = Ret(typename remove_symint<Args>::type...);
+};
+
 /**
  * KernelFunction is similar to std::function but stores a kernel function.
  * You can create a KernelFunction from a boxed or unboxed function/functor/lambda

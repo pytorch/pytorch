@@ -2157,6 +2157,24 @@ TEST(OperatorRegistrationTest, getRegistrationsForDispatchKey) {
   ASSERT_TRUE(std::includes(all_ops.begin(), all_ops.end(), cpu_ops.begin(), cpu_ops.end(), cmp_lambda));
 }
 
+Tensor symint_op(const Tensor& self, const Tensor& other, c10::SymInt length) {
+  return self;
+}
+
+TEST(OperatorRegistrationTest, TestSymNonSymCompatibility) {
+  auto m = MAKE_TORCH_LIBRARY(_test);
+  m.def("_test::symint_op(Tensor self, Tensor other, SymInt length) -> Tensor");
+  auto m_cpu = MAKE_TORCH_LIBRARY_IMPL(_test, CPU);
+  m_cpu.impl("symint_op", c10::DispatchKey::CPU, TORCH_FN(symint_op));
+
+  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
+      "_test::symint_op", "");
+
+  expectThrows<c10::Error>([&] {
+    opHandle.typed<Tensor(const Tensor&, Tensor, const c10::SymInt&)>();
+  }, "Tried to access or call an operator with a wrong signature");
+}
+
 }
 
 #pragma GCC diagnostic pop
