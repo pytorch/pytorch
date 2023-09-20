@@ -880,9 +880,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(
-                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
-            )
+            if result:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+                )
+            else:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>\n"
+                )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
