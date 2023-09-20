@@ -29,7 +29,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
         fixed_output_tol: float = None,
-        output_scale_idx: int = 3,
+        output_scale_idx: int = 2,
     ) -> torch.nn.Module:
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -253,9 +253,10 @@ class TestPT2ERepresentation(QuantizationTestCase):
                 ): 0,
             }
             non_ref_node_occurrence = {
+                # quantize_per_channel is folded
                 ns.call_function(
                     torch.ops.quantized_decomposed.quantize_per_channel.default
-                ): 1,
+                ): 0,
                 ns.call_function(
                     torch.ops.quantized_decomposed.dequantize_per_channel.default
                 ): 1,
