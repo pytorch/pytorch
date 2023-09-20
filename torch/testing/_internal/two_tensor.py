@@ -1,4 +1,6 @@
 import torch
+import torch.utils._pytree as pytree
+from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
@@ -42,16 +44,18 @@ class TwoTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if kwargs is None:
             kwargs = {}
-        assert any(isinstance(x, TwoTensor) for x in args)
-        assert any(isinstance(x, TwoTensor) for x in args)
-        args_a = [x.a if isinstance(x, TwoTensor) else x for x in args]
-        args_b = [x.b if isinstance(x, TwoTensor) else x for x in args]
+        args_a = pytree.tree_map_only(TwoTensor, lambda x: x.a, args)
+        args_b = pytree.tree_map_only(TwoTensor, lambda x: x.b, args)
         out_a = func(*args_a, **kwargs)
         out_b = func(*args_b, **kwargs)
         assert type(out_a) == type(out_b)
-        if isinstance(out_a, torch.Tensor):
-            return TwoTensor(out_a, out_b)
+        out_a_flat, spec = pytree.tree_flatten(out_a)
+        out_b_flat, _ = pytree.tree_flatten(out_b)
         # for aten ops that return non-tensors, just assume that
         # our two inner tensors return the same value
-        assert out_a == out_b
-        return out_a
+        out_flat = [
+            TwoTensor(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
+            for o_a, o_b in zip(out_a_flat, out_b_flat)
+        ]
+        out = pytree.tree_unflatten(out_flat, spec)
+        return return_and_correct_aliasing(func, args, kwargs, out)

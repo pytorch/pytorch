@@ -7,7 +7,8 @@ import torch
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 
-from torch.distributed._tensor import DTensor
+from torch.distributed._tensor import DTensor, Shard
+from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.api import (
     ShardedOptimStateDictConfig,
@@ -45,34 +46,87 @@ class TestDummyModel(torch.nn.Module):
         return torch.rand(8, 8, device="cuda")
 
 
-class TestDtensorShardedOptimStateDict(DTensorTestBase):
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    @parametrize("offload_to_cpu", [True, False])
-    def test_dtensor_sharded_optim_state_dict(self, offload_to_cpu):
-        model = FSDP(TestDummyModel().cuda())
+class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
+    def _create_model(self, device_mesh=None):
+        model = FSDP(TestDummyModel().cuda(), device_mesh=device_mesh)
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
         model(model.get_input()).sum().backward()
         optim.step()
 
+        return model, optim
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_init_with_device_mesh(self):
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model, optim = self._create_model(device_mesh)
+
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(),
+            optim_state_dict_config=ShardedOptimStateDictConfig(),
+        )
+        state_dict_type = model.get_state_dict_type(model)
+        # If device_mesh is used when initializing FSDP, the field _use_dtensor will
+        # automatically be set to True.
+        self.assertEqual(state_dict_type.state_dict_config._use_dtensor, True)
+        self.assertEqual(state_dict_type.optim_state_dict_config._use_dtensor, True)
+
+        for v in model.state_dict().values():
+            self.assertEqual(len(v.placements), 1)
+            self.assertEqual(v.placements[0], (Shard(dim=0)))
+            self.assertEqual(v.device_mesh, device_mesh)
+
+        for v in optim.state_dict()["state"].values():
+            if isinstance(v, DTensor):
+                self.assertEqual(len(v.placements), 1)
+                self.assertEqual(v.placements[0], (Shard(dim=0)))
+                self.assertEqual(v.device_mesh, device_mesh)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    @parametrize("offload_to_cpu", [True, False])
+    def test_dtensor_sharded_tensor_state_dict_identical(self, offload_to_cpu):
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model, optim = self._create_model(device_mesh)
+
+        FSDP.set_state_dict_type(
+            model,
+            StateDictType.SHARDED_STATE_DICT,
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
             optim_state_dict_config=ShardedOptimStateDictConfig(
-                use_dtensor=True, offload_to_cpu=offload_to_cpu
+                offload_to_cpu=offload_to_cpu
             ),
         )
+        dtensor_sd = model.state_dict()
         dtensor_osd = FSDP.optim_state_dict(model, optim)
 
+        ref_model, ref_optim = self._create_model()
         FSDP.set_state_dict_type(
-            model,
+            ref_model,
             StateDictType.SHARDED_STATE_DICT,
             optim_state_dict_config=ShardedOptimStateDictConfig(
-                use_dtensor=False, offload_to_cpu=False
+                offload_to_cpu=offload_to_cpu
             ),
         )
-        sharded_tensor_osd = FSDP.optim_state_dict(model, optim)
+        sharded_tensor_sd = model.state_dict()
+        sharded_tensor_osd = FSDP.optim_state_dict(ref_model, ref_optim)
 
+        # Check dtensor and sharded_tensor model state dict values are identical
+        for dtensor_sd, sharded_tensor_sd in zip(
+            dtensor_sd.items(), sharded_tensor_sd.items()
+        ):
+            k1, v1 = dtensor_sd
+            k2, v2 = sharded_tensor_sd
+            if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
+                self.assertEqual(k1, k2)
+                # check whether local_tensor are the same
+                self.assertEqual(v1.to_local(), v2.local_tensor())
+                # check whether device are the same
+                self.assertEqual(v1.to_local().device, v2.local_tensor().device)
+
+        # Check dtensor and sharde_tensor optim state dict values are identical
         for dtensor_osd_state, sharded_tensor_osd_state in zip(
             dtensor_osd["state"].items(), sharded_tensor_osd["state"].items()
         ):
@@ -95,17 +149,14 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_optim_load_state_dict(self, offload_to_cpu):
-        model = FSDP(TestDummyModel().cuda())
-        optim = torch.optim.Adam(model.parameters(), lr=0.1)
-        model(model.get_input()).sum().backward()
-        optim.step()
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model, optim = self._create_model(device_mesh)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
             optim_state_dict_config=ShardedOptimStateDictConfig(
-                use_dtensor=True,
-                offload_to_cpu=offload_to_cpu,
+                offload_to_cpu=offload_to_cpu
             ),
         )
 
@@ -144,65 +195,19 @@ class TestDtensorShardedOptimStateDict(DTensorTestBase):
                 # check whether DTensor are the same
                 self.assertEqual(v1, v2)
 
-
-# TODO: consolidate test cases once we test all DTensor usage
-class TestDtensorShardedModelStateDict(DTensorTestBase):
-    @with_comms
-    @skip_if_lt_x_gpu(2)
-    @parametrize("offload_to_cpu", [True, False])
-    def test_dtensor_sharded_model_state_dict(self, offload_to_cpu):
-        # Compare the result of SHARDED_STATE_DICT using ShardedTensor and DTensor
-        # and check whether they are identical
-        model = FSDP(TestDummyModel().cuda())
-        model(model.get_input()).sum().backward()
-
-        FSDP.set_state_dict_type(
-            model,
-            StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(
-                use_dtensor=True,
-                offload_to_cpu=offload_to_cpu,
-            ),
-        )
-        dtensor_sd = model.state_dict()
-
-        FSDP.set_state_dict_type(
-            model,
-            StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(
-                use_dtensor=False,
-                offload_to_cpu=offload_to_cpu,
-            ),
-        )
-        sharded_tensor_sd = model.state_dict()
-
-        for dtensor_sd, sharded_tensor_sd in zip(
-            dtensor_sd.items(), sharded_tensor_sd.items()
-        ):
-            k1, v1 = dtensor_sd
-            k2, v2 = sharded_tensor_sd
-            if isinstance(v1, DTensor) and isinstance(v2, ShardedTensor):
-                self.assertEqual(k1, k2)
-                # check whether local_tensor are the same
-                self.assertEqual(v1.to_local(), v2.local_tensor())
-                # check whether device are the same
-                self.assertEqual(v1.to_local().device, v2.local_tensor().device)
-
     @with_comms
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     def test_dtensor_sharded_model_load_state_dict(self, offload_to_cpu):
-        model = FSDP(TestDummyModel().cuda())
-        optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        device_mesh = init_device_mesh(self.device_type, (self.world_size,))
+        model, optim = self._create_model(device_mesh)
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(
-                use_dtensor=True,
-                offload_to_cpu=offload_to_cpu,
-            ),
+            state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
         )
+        state_dict_type = model.get_state_dict_type(model)
 
         checkpoint = io.BytesIO()
         torch.save(model.state_dict(), checkpoint)
@@ -227,7 +232,6 @@ class TestDtensorShardedModelStateDict(DTensorTestBase):
             self.assertEqual(v1, v2)
 
 
-instantiate_parametrized_tests(TestDtensorShardedOptimStateDict)
-instantiate_parametrized_tests(TestDtensorShardedModelStateDict)
+instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)
 if __name__ == "__main__":
     run_tests()
