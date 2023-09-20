@@ -1,5 +1,7 @@
 import functools
+
 import torch
+
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
