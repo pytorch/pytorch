@@ -15,7 +15,7 @@ class Tensor;
 
 namespace native {
 
-void _assert_equal(const std::string& name, const bool& condition) {
+static void _assert_equal(const std::string& name, const bool& condition) {
     if (!condition) {
         std::stringstream msg;
         msg << "Tensor " << name << " mismatch!";
@@ -23,7 +23,7 @@ void _assert_equal(const std::string& name, const bool& condition) {
     }
 }
 
-void _assert_match(const c10::SymIntArrayRef& original, const c10::OptionalArrayRef<long int>& compared, const std::string& name) {
+static void _assert_match(const c10::SymIntArrayRef& original, const c10::OptionalArrayRef<long int>& compared, const std::string& name) {
     if (compared) {
         auto sym_compared = c10::SymIntArrayRef(
             reinterpret_cast<const c10::SymInt*>(compared.value().data()), compared.value().size());
@@ -31,13 +31,13 @@ void _assert_match(const c10::SymIntArrayRef& original, const c10::OptionalArray
     }
 }
 
-void _assert_match(const c10::ScalarType& original, const c10::optional<c10::ScalarType>& compared, const std::string& name) {
+static void _assert_match(const c10::ScalarType& original, const c10::optional<c10::ScalarType>& compared, const std::string& name) {
     if (compared) {
         _assert_equal(name, original == compared.value());
     }
 }
 
-void _assert_match(const caffe2::TypeMeta& original, const c10::optional<c10::ScalarType>& compared, const std::string& name) {
+static void _assert_match(const caffe2::TypeMeta& original, const c10::optional<c10::ScalarType>& compared, const std::string& name) {
     if (compared) {
         _assert_equal(name, original == compared);
     }
