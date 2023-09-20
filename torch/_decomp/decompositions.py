@@ -1180,7 +1180,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition([aten.split_with_sizes, aten.unsafe_split_with_sizes])
+@register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1206,7 +1206,19 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition([aten.split.Tensor, aten.unsafe_split.Tensor])
+@register_decomposition(aten.unsafe_split.Tensor)
+def unsafe_split(input: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
+    return aten.split.Tensor(input, split_size, dim)
+
+
+@register_decomposition(aten.unsafe_split_with_sizes.default)
+def unsafe_split_with_sizes(
+    input: Tensor, split_sizes: List[int], dim: int = 0
+) -> Tuple[Tensor, ...]:
+    return aten.split_with_sizes.default(input, split_sizes, dim)
+
+
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]

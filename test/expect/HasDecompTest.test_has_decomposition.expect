@@ -1290,6 +1290,7 @@ aten::unique_dim.out
 aten::unique_dim_consecutive
 aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
+aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
 aten::unsqueeze_copy
 aten::unsqueeze_copy.out
