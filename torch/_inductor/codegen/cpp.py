@@ -2886,7 +2886,6 @@ class KernelGroup:
                 code.writeline(f"auto {old} = {new};")
             code.splice(self.loops_code)
 
-        print(code)
         codecache_def = IndentedBuffer()
         if not V.graph.cpp_wrapper:
             codecache_def.writeline("async_compile.cpp('''")
