@@ -341,6 +341,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
+  void enableCollectivesTiming() override;
+
   const std::unique_ptr<::gloo::rendezvous::Store>& _getStore() const {
     return store_;
   }

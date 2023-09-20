@@ -1910,7 +1910,7 @@ class SliceView(View):
         end = cls.handle_negative_index(end, new_size[dim])
 
         end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(sizevars.evaluate_min(start, new_size[dim]), end)
+        start = sizevars.evaluate_min(start, end)
         if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
             sizevars.guard_equals(end, new_size[dim])
             return x
@@ -3815,10 +3815,12 @@ class FallbackKernel(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
             exported_args = None
+            args = None
             if config.is_fbcode():
                 exported_args = self.export_extern_kernel_node()
+            else:
+                args = [*self.codegen_args(), *self.codegen_kwargs()]
 
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
                 self.kernel,
