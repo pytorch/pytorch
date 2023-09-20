@@ -520,6 +520,100 @@ class TestExport(TestCase):
         efoo = export(foo, inputs)
         self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
 
+    def test_dynamic_shapes_type(self):
+        from typing import Dict, List
+
+        from torch._export import Dim, export__RC__ as export, dynamic_shapes_type
+
+        batch = Dim("batch")
+
+        spec = {
+            "tensor": {0: batch},
+            "dict_of_tensors": {k: {0: batch} for k in ["A", "B", "C", "D"]},
+            "list_of_tensors": [{0: batch} for _ in range(4)],
+        }
+
+        inputs = {
+            "tensor": torch.randn(3),
+            "dict_of_tensors": {k: torch.randn(3) for k in ["A", "B", "C", "D"]},
+            "list_of_tensors": [torch.randn(3) for _ in range(4)],
+        }
+
+        def foo(inputs):
+            return (
+                inputs["tensor"]
+                + inputs["dict_of_tensors"]["A"]
+                + inputs["list_of_tensors"][0]
+            )
+
+        ep = export(foo, (inputs,), dynamic_shapes={"inputs": spec})
+        input_shapes = [
+            str(node.meta["val"].shape)
+            for node in ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(len(input_shapes), 9)
+        self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
+
+
+        def foo(inputs: spec):
+            return (
+                inputs["tensor"]
+                + inputs["dict_of_tensors"]["A"]
+                + inputs["list_of_tensors"][0]
+            )
+
+        ep = export(foo, (inputs,))
+        input_shapes = [
+            str(node.meta["val"].shape)
+            for node in ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(len(input_shapes), 9)
+        self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
+
+        BatchTensorType = dynamic_shapes_type({0: batch})
+
+        spec_type = {
+            "tensor": BatchTensorType,
+            "dict_of_tensors": Dict[str, BatchTensorType],
+            "list_of_tensors": List[BatchTensorType],
+        }
+
+        def foo(inputs: spec_type):
+            return (
+                inputs["tensor"]
+                + inputs["dict_of_tensors"]["A"]
+                + inputs["list_of_tensors"][0]
+            )
+
+        ep = export(foo, (inputs,))
+        input_shapes = [
+            str(node.meta["val"].shape)
+            for node in ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(len(input_shapes), 9)
+        self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
+
+        t = dynamic_shapes_type(spec)
+
+        def foo(inputs: t):
+            return (
+                inputs["tensor"]
+                + inputs["dict_of_tensors"]["A"]
+                + inputs["list_of_tensors"][0]
+            )
+
+        ep = export(foo, (inputs,))
+        input_shapes = [
+            str(node.meta["val"].shape)
+            for node in ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(len(input_shapes), 9)
+        self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
+
     def test_error_does_not_reference_eager_fallback(self):
         def fn_ddo(x):
             y = x.nonzero()
@@ -1284,6 +1378,36 @@ class TestExport(TestCase):
             nodes[2].name in ep.graph_signature.inputs_to_buffers
         )
 
+    def test_preserve_shape_dynamism_for_unused_inputs(self):
+        @dataclass
+        class Input:
+            f: torch.Tensor
+            p: torch.Tensor
+
+        torch._export.utils.register_dataclass_as_pytree_node(Input)
+
+        class Module(torch.nn.Module):
+            def forward(self, x: Input):
+                return x.f + 1
+
+        mod = Module()
+        example_inputs = (Input(f=torch.ones(10, 4), p=torch.zeros(10, 4)),)
+        ep_static = export(mod, example_inputs)
+        for node in ep_static.graph.nodes:
+            if node.op == 'placeholder':
+                for s in node.meta['val'].shape:
+                    self.assertIsInstance(s, int)
+
+        x = example_inputs[0]
+        constraints = [dynamic_dim(x.f, 0), dynamic_dim(x.p, 0)]
+        ep_dynamic = export(mod, example_inputs, constraints=constraints)
+        for node in ep_dynamic.graph.nodes:
+            if node.op == 'placeholder':
+                for i, s in enumerate(node.meta['val'].shape):
+                    if i == 0:
+                        self.assertIsInstance(s, torch.SymInt)
+                    else:
+                        self.assertIsInstance(s, int)
 
 if __name__ == '__main__':
     run_tests()

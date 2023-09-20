@@ -1,3 +1,4 @@
+import builtins
 import copy
 import dataclasses
 import io
@@ -11,7 +12,7 @@ import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence, Mapping, TypedDict
 from unittest.mock import patch
 
 import sympy
@@ -79,16 +80,17 @@ def Dim(name, *, min=None, max=None):
     Note that different dimensions of the same tensor, or of different tensors,
     can be described by the same type.
     """
-    _min = 2 if min is None else min
-    _max = sys.maxsize if max is None else max
+    _min = 2 if min is None else builtins.max(min, 2)
+    _max = sys.maxsize if max is None else builtins.min(max, sys.maxsize)
+    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     return _Dim(name, (int,), {"min": _min, "max": _max})
 
 
-def dims(*names: str):
+def dims(*names: str, min=None, max=None):
     """
     Util to create multiple Dim types.
     """
-    return tuple(Dim(name) for name in names)
+    return tuple(Dim(name, min=min, max=max) for name in names)
 
 
 class _(int):
@@ -108,6 +110,24 @@ but such ways are not backward-compatibile with Python 3.8 and
 cause CI failures.
 """
 TensorType = Tuple
+
+
+class _TensorType(type):
+    pass
+
+
+def dynamic_shapes_type(spec):
+    if isinstance(spec, type):
+        return spec
+    if isinstance(spec, Sequence):
+        types = tuple(dynamic_shapes_type(v) for v in spec)
+        return Tuple[types]
+    if isinstance(spec, Mapping):
+        if all(type(k) is int and type(v) is _Dim for k, v in spec.items()):
+            return _TensorType(f"TensorType({spec})", (), {"shape": spec})
+        types = {k: dynamic_shapes_type(v) for k, v in spec.items()}
+        name = ", ".join(f"{k}={v}" for k, v in types.items())
+        return TypedDict(f"TypedDict({name})", types)
 
 
 def export__RC__(
@@ -152,12 +172,15 @@ def export__RC__(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    from typing import get_origin, get_args
+    from typing import get_origin, get_args, _TypedDictMeta
 
     def assoc_zip(combined_args, dynamic_shapes):
-        if isinstance(combined_args, tuple):
+        if isinstance(combined_args, (tuple, list)):
             if isinstance(dynamic_shapes, Sequence):
                 for arg, shape in zip(combined_args, dynamic_shapes):
+                    yield from assoc_zip(arg, shape)
+            elif get_origin(dynamic_shapes) is tuple:
+                for arg, shape in zip(combined_args, get_args(dynamic_shapes)):
                     yield from assoc_zip(arg, shape)
             else:
                 assert get_origin(dynamic_shapes) is list, f"Unexpected {dynamic_shapes} matching tuple"
@@ -167,6 +190,9 @@ def export__RC__(
         elif isinstance(combined_args, dict):
             if isinstance(dynamic_shapes, Mapping):
                 for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
+                    yield from assoc_zip(arg, shape)
+            elif isinstance(dynamic_shapes, _TypedDictMeta):
+                for arg, shape in zip(combined_args.values(), dynamic_shapes.__annotations__.values()):
                     yield from assoc_zip(arg, shape)
             else:
                 assert get_origin(dynamic_shapes) is dict, f"Unexpected {dynamic_shapes} matching dict"
@@ -182,8 +208,12 @@ def export__RC__(
     symbols = defaultdict(list)
 
     def update_symbols(tensor, shape):
-        if get_origin(shape) is tuple:
+        if get_origin(shape) is tuple:  # TensorType
             for i, dim in enumerate(get_args(shape)):
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+        elif isinstance(shape, _TensorType):
+            for i, dim in shape.shape.items():
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
         elif isinstance(shape, dict):
@@ -409,9 +439,29 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                 if path == root and ty is root_cls:
                     add_root = False
             if add_root:
-                # TODO(zhxchen17) normalize all the way down to dot strings.
-                node.meta["nn_module_stack"] = {root_key: (root, root_cls), **nn_module_stack}
+                def normalize_path(path):
+                    try:
+                        parts = []
 
+                        class Path:
+                            def __getattr__(self, name):
+                                parts.append(name)
+                                return self
+
+                            def __getitem__(self, idx):
+                                parts.append(str(idx))
+                                return self
+
+                        eval(path, {"L": {"self": Path()}})
+                        return ".".join(parts)
+                    except Exception:  # TODO(zhxchen17) Remove this.
+                        return path
+
+                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                node.meta["nn_module_stack"] = {
+                    key: (normalize_path(path), ty)
+                    for key, (path, ty) in nn_module_stack.items()
+                }
 
 def export(
     f: Callable,
