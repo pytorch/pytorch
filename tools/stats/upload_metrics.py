@@ -47,9 +47,17 @@ class EnvVarMetric:
                 f"Missing {self.name}. Please set the {self.env_var} "
                 "environment variable to pass in this value."
             )
-        if self.type_conversion_fn:
-            return self.type_conversion_fn(value)
-        return value
+        try:
+            if self.type_conversion_fn:
+                return self.type_conversion_fn(value)
+            return value
+        except TypeError:
+            # For optional inputs that don't natively convert from None types,
+            # we want to return None instead of raising an error.
+            if value is None:
+                return None
+            else:
+                raise
 
 
 def emit_metric(
@@ -85,6 +93,7 @@ def emit_metric(
         EnvVarMetric("build_environment", "BUILD_ENVIRONMENT"),
         EnvVarMetric("job", "GITHUB_JOB"),
         EnvVarMetric("test_config", "TEST_CONFIG", required=False),
+        EnvVarMetric("pr_number", "PR_NUMBER", required=False, type_conversion_fn=int),
         EnvVarMetric("run_id", "GITHUB_RUN_ID", type_conversion_fn=int),
         EnvVarMetric("run_number", "GITHUB_RUN_NUMBER", type_conversion_fn=int),
         EnvVarMetric("run_attempt", "GITHUB_RUN_ATTEMPT", type_conversion_fn=int),
@@ -104,7 +113,7 @@ def emit_metric(
             "calling_module": calling_module,
             "calling_function": calling_function,
             "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f"),
-            **{m.name: m.value() for m in env_var_metrics},
+            **{m.name: m.value() for m in env_var_metrics if m.value()},
         }
     except ValueError as e:
         warn(f"Not emitting metrics for {metric_name}. {e}")
