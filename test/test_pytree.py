@@ -265,10 +265,10 @@ class TestPytree(TestCase):
         self.assertExpectedInline(
             repr(spec),
             """\
-TreeSpec(TupleVariable, None, [*,
-  TreeSpec(ListVariable, None, [*,
+TreeSpec(tuple, None, [*,
+  TreeSpec(list, None, [*,
     *,
-    TreeSpec(ListVariable, None, [*])])])""",
+    TreeSpec(list, None, [*])])])""",
         )
 
     def test_broadcast_to_and_flatten(self):
