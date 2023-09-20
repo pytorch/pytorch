@@ -196,7 +196,9 @@ def speculate_subgraph(
                 output = f.call_function(tx, args, sub_kwargs)
 
             if should_flatten_outputs:
-                maybe_unwrap_tree_flatten = UserFunctionVariable(pytree._maybe_unwrap_tree_flatten)
+                maybe_unwrap_tree_flatten = UserFunctionVariable(
+                    pytree._maybe_unwrap_tree_flatten
+                )
                 output = maybe_unwrap_tree_flatten.call_function(tx, [output], {})
 
             if restore_side_effects:

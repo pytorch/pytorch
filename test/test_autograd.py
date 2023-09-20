@@ -6159,7 +6159,7 @@ for shape in [(1,), ()]:
             model_checkpoint_without_reentrant,
             inp,
             use_reentrant=False
-        )["result"].sum()
+        ).sum()
 
         self.assertEqual(out_checkpoint, out_no_checkpoint)
 
