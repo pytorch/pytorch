@@ -493,17 +493,6 @@ class TensorVariable(VariableTracker):
                     f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
                 )
             force = "force" in kwargs and kwargs["force"].as_python_constant()
-            if not force:
-                if self.device.type != "cpu":
-                    raise TypeError(
-                        f"can't convert {self.device} device type tensor to numpy. "
-                        "Use Tensor.cpu() to copy the tensor to host memory first."
-                    )
-                if self.requires_grad:
-                    raise TypeError(
-                        "Can't call numpy() on Tensor that requires grad. "
-                        "Use tensor.detach().numpy() instead."
-                    )
             proxy = tx.output.create_proxy(
                 "call_method", "detach", *proxy_args_kwargs([self], {})
             )
