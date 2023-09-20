@@ -21,10 +21,20 @@ from torch.testing._internal.optests import (
 )
 
 
+def is_abstract(tensor: torch.Tensor) -> bool:
+    if tensor.is_meta:
+        return True
+    if torch._subclasses.fake_tensor.is_fake(tensor):
+        return True
+    return False
+
+
 def safe_schema_check(
     op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> Any:
     args, kwargs = deepcopy_tensors((args, kwargs))
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
     with SchemaCheckMode():
         result = op(*args, **kwargs)
         return result
@@ -33,6 +43,8 @@ def safe_schema_check(
 def safe_autograd_registration_check(
     op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> None:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return
     # Don't perform autograd_registration_check if none of the inputs require grad.
     if not pytree.tree_any_only(
         torch.Tensor, lambda x: x.requires_grad, (args, kwargs)
@@ -45,6 +57,8 @@ def safe_autograd_registration_check(
 def safe_fake_check(
     op: torch._ops.OpOverload, args: Tuple[Any, ...], kwargs: Dict[str, Any]
 ) -> None:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
     args, kwargs = deepcopy_tensors((args, kwargs))
     return fake_check(op, args, kwargs)
 
@@ -55,6 +69,9 @@ def safe_aot_autograd_check(
     kwargs: Dict[str, Any],
     dynamic: bool,
 ) -> Any:
+    if pytree.tree_any_only(torch.Tensor, is_abstract, (args, kwargs)):
+        return None
+
     def func(*args, **kwargs):
         args, kwargs = pytree.tree_map_only(torch.Tensor, torch.clone, (args, kwargs))
         return op(*args, **kwargs)
@@ -329,7 +346,7 @@ class OpCheckMode(TorchFunctionMode):
         self.failures_dict_path = failures_dict_path
 
         # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
-        # Maps qualname -> List[exception]
+        # Maps qualname -> List[(Exception, func, maybe args, maybe kwargs)]
         self.seen_ops_to_errors = {}
 
     def maybe_raise_errors_on_exit(self) -> None:
