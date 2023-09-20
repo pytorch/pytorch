@@ -307,6 +307,8 @@ py::object c10d_dequeue_python_event() {
   data["operation"] = evt.operation;
   data["timestamp"] = evt.timestamp;
   data["duration"] = evt.duration_ms.value_or(-1);
+  if (evt.error_message)
+    data["error_message"] = evt.error_message.value();
 
   return data;
 }

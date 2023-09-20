@@ -17,6 +17,16 @@ void Backend::init() {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
 }
 
+std::string exceptionPtrWhat(const std::exception_ptr& eptr) {
+  try {
+    std::rethrow_exception(eptr);
+  } catch (const std::exception& e) {
+    return e.what();
+  } catch (...) {
+    return "<unknown error>";
+  }
+}
+
 void commonEventinit(
     details::EventInfo& evt,
     const Backend& backend,
@@ -27,6 +37,9 @@ void commonEventinit(
   evt.backend = backend.getBackendName();
   evt.sequence_number = work.getSequencenumber();
   evt.operation = c10d::opTypeToString(work.retrieveOpType());
+  // isCompleted is mutable :facepalm:
+  if (const_cast<Work&>(work).isCompleted() && !work.isSuccess())
+    evt.error_message = exceptionPtrWhat(work.exception());
 }
 
 void Backend::emitCollectiveStart(const Work& work) {

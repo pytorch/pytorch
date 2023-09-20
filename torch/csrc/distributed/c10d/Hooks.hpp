@@ -19,6 +19,7 @@ struct TORCH_API EventInfo {
   std::string operation;
   int64_t timestamp;
   c10::optional<float> duration_ms;
+  c10::optional<std::string> error_message;
 };
 
 // TODO do we want to expose something else here?

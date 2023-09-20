@@ -854,6 +854,10 @@ void ProcessGroupNCCL::waitForPendingWorks() {
 }
 
 void ProcessGroupNCCL::enableCollectivesTiming() {
+  if (SHOULD_TEAR_DOWN(asyncErrorHandling_)) {
+    TORCH_WARN(
+        "ProcessGroupNCCL::enableCollectivesTiming() won't be able to report errors since NCCL_ASYNC_ERROR_HANDLING is configured to teardown");
+  }
   enableTiming_.store(true);
 }
 void abortCommsFromMap(
