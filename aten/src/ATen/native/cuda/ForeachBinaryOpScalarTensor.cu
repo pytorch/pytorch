@@ -18,7 +18,8 @@ namespace at::native {
 template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
-    const Tensor& scalar) {
+    const Tensor& scalar,
+    bool has_empty_tensors) {
   TORCH_CHECK(
       scalar.dim() == 0 && scalar.numel() == 1,
       "scalar tensor expected to be 0 dim but it has ",
@@ -32,15 +33,19 @@ std::vector<Tensor> foreach_binary_op(
       tensors[0].device(),
       " but is on ",
       scalar.device());
-  std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
     vec_res.emplace_back(at::native::empty_like(t));
   }
 
-  tensor_lists.emplace_back(tensors.vec());
-  tensor_lists.emplace_back(std::move(vec_res));
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  if (has_empty_tensors) {
+    tensor_lists = filter_out_empty_tensors({tensors, vec_res});
+  } else {
+    tensor_lists.emplace_back(tensors.vec());
+    tensor_lists.emplace_back(std::move(vec_res));
+  }
 
   using opmath_t = at::opmath_type<T>;
   multi_tensor_apply<2>(
@@ -52,7 +57,7 @@ std::vector<Tensor> foreach_binary_op(
           /* res_arg_index */ 1>(),
       Op<opmath_t>(),
       scalar.data_ptr<T>());
-  return tensor_lists[1];
+  return vec_res;
 }
 
 template <typename T, template <class> class Op>
@@ -102,11 +107,14 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
           tensors, scalar);                                                 \
     }                                                                       \
                                                                             \
+    std::vector<Tensor> nonempty_tensors;                                   \
     if (has_empty_tensors) {                                                \
-      tensors = filter_out_empty_tensors(tensors);                          \
+      nonempty_tensors = filter_out_empty_tensors(tensors);                 \
+    } else {                                                                \
+      nonempty_tensors = tensors.vec();                                     \
     }                                                                       \
                                                                             \
-    FUNCTION##_<OP>(tensors, scalar);                                       \
+    FUNCTION##_<OP>(nonempty_tensors, scalar);                              \
   }                                                                         \
                                                                             \
   std::vector<Tensor> foreach_tensor_##NAME##_tensor_kernel_cuda(           \
@@ -122,24 +130,24 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
           tensors, scalar);                                                 \
     }                                                                       \
                                                                             \
-    if (has_empty_tensors) {                                                \
-      tensors = filter_out_empty_tensors(tensors);                          \
-    }                                                                       \
-                                                                            \
-    return FUNCTION<OP>(tensors, scalar);                                   \
+    return FUNCTION<OP>(tensors, scalar, has_empty_tensors);                \
   }
 
 template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors,
-    const Tensor& scalar) {
+    const Tensor& scalar,
+    bool has_empty_tensors) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kHalf,
       kBFloat16,
       tensors[0].scalar_type(),
       "foreach_binary_op_scalar_cuda",
-      [&]() { return foreach_binary_op<scalar_t, Op>(tensors, scalar); });
+      [&]() {
+        return foreach_binary_op<scalar_t, Op>(
+            tensors, scalar, has_empty_tensors);
+      });
 }
 
 template <template <class> class Op>

@@ -65,7 +65,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
             LerpFunctor<opmath_t>());
       });
 
-  return tensor_lists[3];
+  return vec_res;
 }
 
 void foreach_tensor_lerp_ternary_cuda_(
@@ -148,7 +148,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
             weight.to<opmath_t>());
       });
 
-  return tensor_lists[2];
+  return vec_res;
 }
 
 void foreach_tensor_lerp_list_cuda_(
