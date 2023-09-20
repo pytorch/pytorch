@@ -549,8 +549,8 @@ slightly deviate from those of NumPy:
 
 - NumPy scalars: We model them as 0-D arrays. That is, ``np.float32(3)`` returns
   a 0-D array under ``torch.compile``. To avoid a graph break, it is best to use this 0-D
-  array. If this is not possible, one may often recover the original behavior
-  by casting the NumPy scalar to the relevant Python scalar type ``bool/int/float``.
+  array. If this breaks your code, you can workaround this by casting the NumPy scalar
+  to the relevant Python scalar type ``bool/int/float``.
 
 - Negative strides: ``np.flip`` and slicing with a negative step return a copy.
 
@@ -558,7 +558,7 @@ slightly deviate from those of NumPy:
   are described in `NEP 50 <https://numpy.org/neps/nep-0050-scalar-promotion.html)>`__.
   ``torch.compile`` implements NEP 50 rather than the current soon-to-be deprecated rules.
 
-- ``{tril,triu}_indices_from`` return arrays rather than lists of tuples.
+- ``{tril,triu}_indices_from/{tril,triu}_indices`` return arrays rather than a tuple of arrays.
 
 There are other features for which we do not support tracing and we gracefully
 fallback to NumPy for their execution:
@@ -581,25 +581,28 @@ fallback to NumPy for their execution:
 
 - ``__array_function__``, ``__array_interface__`` and ``__array_wrap__``.
 
-- ``ndarray.ctypes`` attribute not supported.
+- ``ndarray.ctypes`` attribute.
 
 Can I execute NumPy code on CUDA via ``torch.compile``?
 -------------------------------------------------------
 
-Yes you can! To do so, you may simply execute your code under ``torch.device("cuda")``
+Yes you can! To do so, you may simply execute your code within a ``torch.device("cuda")``
+context. Consider the example
 
 .. code-block:: python
 
+   import torch
+   import numpy as np
+
    @torch.compile
-   def numpy_fn(X: ndarray, Y: ndarray): -> ndarray
-       # Compute the ndarray Z here
-       return Z
+   def numpy_fn(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
 
-
-   X = np.random.randn(1000, 1000)
-   Y = np.random.randn(1000, 1000)
+   X = np.random.randn(1024, 64)
+   Y = np.random.randn(1024, 64)
    with torch.device("cuda"):
        Z = numpy_fn(X, Y)
+
 
 In this example, ``numpy_fn`` will be executed in CUDA. For this to be
 possible, ``torch.compile`` automatically moves ``X`` and ``Y`` from CPU
@@ -611,15 +614,13 @@ to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
 .. code-block:: python
 
    @torch.compile
-   def numpy_fn(X: Tensor, Y: Tensor): -> Tensor
-       X = X.numpy()
-       Y = Y.numpy()
-       # Compute Z here
-       Z = torch.from_numpy(Z)
-       return Z
+   def numpy_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
+       X, Y = X.numpy(), Y.numpy()
+       Z = np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+       return torch.from_numpy(Z)
 
-   X = torch.randn(1000, 1000, device="cuda")
-   Y = torch.randn(1000, 1000, device="cuda")
+   X = torch.randn(1024, 64)
+   Y = torch.randn(1024, 64)
    with torch.device("cuda"):
        Z = numpy_fn(X, Y)
 
@@ -648,37 +649,38 @@ tracing altogether by doing
 
 .. code-block:: python
 
-   from torch._dynamo import config config.trace_numpy = False
+   from torch._dynamo import config
+   config.trace_numpy = False
 
-This moves back to the behavior in 2.0 and will avoid tracing through any NumPy
-function.
+This disables tracing through any NumPy functions, and allows us to discern whether
+the bug is entirely in the PyTorch code.
 
-If we want to debug through the program, rather than fully deactivating the tracer,
-we can execute the NumPy code eagerly (without ``torch.compile``)
+If the bug lies in the traced NumPy code, we can execute the NumPy code eagerly (without ``torch.compile``)
 using PyTorch as a backend by importing ``import torch._numpy as np``.
 This should just be used for **debugging purposes** and is in no way a
 replacement for the PyTorch API, as it is **much less performant** and, as a
 private API, **may change without notice**. At any rate, ``torch._numpy`` is a
 Python implementation of NumPy in terms of PyTorch and it is used internally by ``torch.compile`` to
 transform NumPy code into Pytorch code. It is rather easy to read and modify,
-so if you find any bug in it feel free to submit a PR fixing it!
+so if you find any bug in it feel free to submit a PR fixing it or simply open
+an issue.
 
 If the program does work when importing ``torch._numpy as np``, chances are
 that the bug is in TorchDynamo. If this is the case, please feel open an issue
-with a minimal reproducer.
+with a `minimal reproducer <https://pytorch.org/docs/2.1/torch.compiler_troubleshooting.html>`__.
 
 I ``torch.compile`` some NumPy code and I did not see any speed-up.
 -------------------------------------------------------------------
 
 The best place to start is the
-`tutorial with general advice for how to debug this sort of torch.compile issues <https://pytorch.org/docs/main/torch.compiler_faq.html#why-am-i-not-seeing-speedups>`__.
+`tutorial with general advice for how to debug these sort of torch.compile issues <https://pytorch.org/docs/main/torch.compiler_faq.html#why-am-i-not-seeing-speedups>`__.
 
 Some graph breaks may happen because of the use of unsupported features. See
 :ref:`nonsupported-numpy-feats`. More generally, it is useful to keep in mind
 that some widely used NumPy features do not play well with compilers. For
-example, in-place modifications make reasoning difficult, so the compiler
-removes them in a pass called "functionalization". As such, it is best to avoid
-in-place ops, or the use of the ``out=`` parameter, and instead simply use
+example, in-place modifications make reasoning difficult within the compiler and
+often yield worse performance than their out-of-place counterparts.As such, it is best to avoid
+them. Same goes for the use of the ``out=`` parameter. Instead, prefer
 out-of-place ops and let ``torch.compile`` optimize the memory use. Same goes
 for data-dependent ops like masked indexing through boolean masks, or
 data-dependent control flow like ``if`` or ``while`` constructions.
