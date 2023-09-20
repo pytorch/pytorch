@@ -236,7 +236,7 @@ struct TORCH_API Module : public Object {
 
   Module copy() const;
 
-  Module deepcopy() const;
+  Module deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the

@@ -76,11 +76,11 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
   if (tensor_logical_rank >= logical_rank) {
     return tensor;
   }
-  VmapDimVector new_sizes(tensor.sizes().begin(), tensor.sizes().end());
+  VmapSymDimVector new_sizes(tensor.sym_sizes().begin(), tensor.sym_sizes().end());
   for (int64_t i = 0; i < logical_rank - tensor_logical_rank; i++) {
     new_sizes.insert(new_sizes.begin() + 1, 1);
   }
-  return tensor.view(new_sizes);
+  return tensor.view_symint(SymIntArrayRef{new_sizes.begin(), new_sizes.end()});
 }
 
 void check_randomness(RandomnessType randomness, bool any_tensor_batched) {

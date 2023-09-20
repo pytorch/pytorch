@@ -259,6 +259,21 @@ class NegateSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class ConvertIntSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"cast_symbool_to_symint_guardless({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
 class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
     is_kw: bool = False
@@ -473,6 +488,19 @@ class ConstantSource(Source):
 
     def make_guard(self, fn, is_volatile=False):
         raise NotImplementedError()
+
+
+@dataclasses.dataclass(frozen=True)
+class NumpyTensorSource(ChainedSource):
+    def name(self) -> str:
+        return f"__as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("torch", "as_tensor")
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
 
 
 # This is a synthetic source that is associated with the singleton

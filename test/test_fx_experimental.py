@@ -5,6 +5,7 @@ import numbers
 import operator
 import pickle
 import sys
+import sympy
 import tempfile
 import unittest
 from types import BuiltinFunctionType
@@ -48,7 +49,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -1247,8 +1248,8 @@ class {test_classname}(torch.nn.Module):
                 self.seq = torch.nn.Sequential(torch.nn.BatchNorm1d(2, 2))
                 self.linear = torch.nn.Linear(2, 2)
                 self.attr = torch.randn(2)
-                self.attr2 = torch.nn.Buffer(torch.randn(2))
-                self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
+                self.register_buffer("attr2", torch.randn(2))
+                self.register_buffer("attr3", torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
                 return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
@@ -1699,6 +1700,168 @@ class TestModule(torch.nn.Module):
             args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
             self.assertIs(kwargs["input"], inp1)
             self.assertIs(kwargs["the_template"], inp2)
+
+
+if TEST_Z3:
+    import z3
+
+    import torch._dynamo.config
+
+    from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
+    from torch.utils._sympy.functions import FloorDiv, Mod
+
+    class TestTranslationValidation(TestCase):
+        def _prepare_for_translation_validation(self):
+            validator = TranslationValidator()
+
+            # SymPy symbols.
+            s0, s1, s2 = sympy.symbols("s0 s1 s2", integer=True)
+
+            # Z3 symbols.
+            [validator.add_var(s, int) for s in (s0, s1, s2)]
+            z0, z1, z2 = (validator.z3var(s) for s in (s0, s1, s2))
+
+            return (s0, s1, s2), (z0, z1, z2), validator
+
+        def test_sympy_to_z3(self):
+
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            test_cases = [
+                # Integer constants.
+                (sympy.S.Zero, z3.IntVal(0)),
+                (sympy.S.One, z3.IntVal(1)),
+                (sympy.S.NegativeOne, z3.IntVal(-1)),
+                (sympy.Integer(2), z3.IntVal(2)),
+                (
+                    s0,
+                    z0,
+                ),
+                # Arithmetic operations.
+                *[
+                    (op(s0, s1), op(z0, z1))
+                    for op in (
+                        operator.add,
+                        operator.mul,
+                        operator.pow,
+                    )
+                ],
+                # Logical operations.
+                *[
+                    (sympy_op(s0, s1), z3_op(z0, z1))
+                    for sympy_op, z3_op in (
+                        (sympy.Eq, operator.eq),
+                        (sympy.Ne, operator.ne),
+                        (sympy.Lt, operator.lt),
+                        (sympy.Le, operator.le),
+                        (sympy.Gt, operator.gt),
+                        (sympy.Ge, operator.ge),
+                    )
+                ],
+                # Other operations.
+                (
+                    s0 - s1,
+                    z0 + z3.IntVal(-1) * z1,
+                ),
+                (
+                    s0 / s1,
+                    z3.ToReal(z0) * (z1**-1),
+                ),
+                (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+                (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
+                (
+                    Mod(s2, (s0 / s1)),
+                    z2
+                    - z3.ToReal(z3.ToInt(z3.ToReal(z2) / (z3.ToReal(z0) * z1**-1)))
+                    * (z3.ToReal(z0) * z1**-1),
+                ),
+                (
+                    Mod(s2, s0**3),
+                    z2 - z3.ToReal(z3.ToInt(z3.ToReal(z2) / z0**3)) * z0**3,
+                ),
+            ]
+
+            toZ3 = SympyToZ3(validator)
+            for sympy_expr, z3_expr in test_cases:
+                result = toZ3.run(sympy_expr)
+                self.assertTrue(
+                    z3_expr.eq(result), msg=f"expected: {z3_expr}. Got: {result}"
+                )
+
+        def test_sat(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z0 > 5)
+            validator.add_source_expr(z1 / 2 > z0)
+
+            # Solutions for target is a subset of the solutions for the source.
+            validator.add_target_expr(s0 > 20)
+            validator.add_target_expr(s1 > s0**2)
+
+            validator.validate()
+
+        def test_unsat(self):
+            (
+                (s0, s1, s2),
+                (z0, z1, z2),
+                validator,
+            ) = self._prepare_for_translation_validation()
+
+            validator.add_source_expr(z0 > 5)
+            validator.add_source_expr(z1 / 2 > z0)
+
+            # Solutions for target is NOT a subset of the solutions for the source.
+            validator.add_target_expr(s0 > 20)
+            # This expression is less restrictive than its counterpart.
+            validator.add_target_expr(s1 > s0 + 2)
+
+            with self.assertRaisesRegex(ValidationException, "translation validation failed."):
+                validator.validate()
+
+        def test_z3str(self):
+            a = z3.Int("a")
+            b = z3.Int("b")
+            special = z3.Real("this.size()[2]")
+
+            test_cases = [
+                (z3.IntVal(42), "42"),
+                # Variable.
+                (a, "a"),
+                # Name with special characters.
+                (special, "this.size()[2]"),
+                # Renamed function fpplications.
+                (a != b, "(!= a b)"),
+                (a ** b, "(pow a b)"),
+                # Chain of associative operations.
+                *[
+                    (op(op(a, 5), b), f"({opstr} 5 a b)")
+                    for op, opstr in [
+                        (operator.add, "+"),
+                        (operator.mul, "*")
+                    ]
+                ],
+                # Revert 'Not' conversions.
+                (a != b, "(!= a b)"),
+                (a < b, "(> b a)"),
+                (a > b, "(> a b)"),
+                # Ignore 'ToInt' and 'ToReal' functions.
+                (z3.ToInt(special) + a, "(+ this.size()[2] a)"),
+                (z3.ToReal(a + b), "(+ a b)"),
+                # Convert to floor division: 'idiv'.
+                (z3.ToInt(z3.ToReal(a) / z3.ToReal(b)), "(idiv a b)"),
+            ]
+
+            for expr, expected in test_cases:
+                self.assertEqual(z3str(expr), expected)
+
 
 instantiate_device_type_tests(TestNormalizeOperators, globals())
 

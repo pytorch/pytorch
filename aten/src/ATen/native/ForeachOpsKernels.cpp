@@ -19,6 +19,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_div_native.h>
@@ -52,6 +53,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
@@ -60,6 +62,43 @@
 #endif
 
 namespace at::native {
+
+#define FOREACH_BINARY_OP_TENSOR(OP)                            \
+  void foreach_tensor_##OP##_tensor_kernel_slow_(               \
+      TensorList tensors, const Tensor& scalar) {               \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar tensor expected to be 0 dim but it has ",       \
+        scalar.dim(),                                           \
+        " dimensions and ",                                     \
+        scalar.numel(),                                         \
+        " elements.");                                          \
+    check_foreach_api_restrictions(tensors);                    \
+                                                                \
+    for (auto& t : tensors) {                                   \
+      t.OP##_(scalar);                                          \
+    }                                                           \
+  }                                                             \
+                                                                \
+  std::vector<Tensor> foreach_tensor_##OP##_tensor_kernel_slow( \
+      TensorList tensors, const Tensor& scalar) {               \
+    TORCH_CHECK(                                                \
+        scalar.dim() == 0 && scalar.numel() == 1,               \
+        "scalar tensor expected to be 0 dim but it has ",       \
+        scalar.dim(),                                           \
+        " dimensions and ",                                     \
+        scalar.numel(),                                         \
+        " elements.");                                          \
+    check_foreach_api_restrictions(tensors);                    \
+                                                                \
+    std::vector<Tensor> result;                                 \
+    result.reserve(tensors.size());                             \
+    for (const auto& t : tensors) {                             \
+      result.emplace_back(t.OP(scalar));                        \
+    }                                                           \
+                                                                \
+    return result;                                              \
+  }
 
 #define FOREACH_BINARY_OP_SCALAR(OP)                            \
   void foreach_tensor_##OP##_scalar_kernel_slow_(               \
@@ -256,6 +295,8 @@ FOREACH_BINARY_OP_LIST_ALPHA(add);
 FOREACH_BINARY_OP_LIST_ALPHA(sub);
 FOREACH_BINARY_OP_LIST_ALPHA(lerp);
 
+FOREACH_BINARY_OP_TENSOR(mul);
+
 FOREACH_BINARY_OP_SCALAR(add);
 FOREACH_BINARY_OP_SCALAR(sub);
 FOREACH_BINARY_OP_SCALAR(mul);
@@ -277,6 +318,17 @@ FOREACH_BINARY_OP_LIST(div);
 FOREACH_BINARY_OP_LIST(clamp_min);
 FOREACH_BINARY_OP_LIST(clamp_max);
 FOREACH_BINARY_OP_LIST(pow);
+// _foreach_copy_
+void foreach_tensor_copy_list_kernel_slow_(
+    TensorList self,
+    TensorList src,
+    const bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
+
+  for (const auto i : c10::irange(self.size())) {
+    self[i].copy_(src[i], non_blocking);
+  }
+}
 
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);

@@ -9,14 +9,12 @@ import torch
 from typing import NamedTuple
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf, NoTest
+from torch.testing._internal.common_utils import skipIfRocm, skipCUDANonDefaultStreamIf, NoTest, TEST_CUDA
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-# Check if GPU is available
-TEST_CUDA = torch.cuda.is_available()
 # Check if multiple GPU's are available
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 

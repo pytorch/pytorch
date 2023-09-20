@@ -31,7 +31,7 @@ def with_temp_dir(
         self.temp_dir = object_list[0]
 
         try:
-            func(self)
+            func(self, *args, **kwargs)
         finally:
             if dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)

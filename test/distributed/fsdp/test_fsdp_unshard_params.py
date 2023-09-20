@@ -258,6 +258,11 @@ class TestUnshardParams(TestUnshardParamsBase):
         """
         Tests that unsharding parameters respects the expected reshard behavior
         between forward and backward as well as after backward.
+
+        For mixed precision, we should *not* respect the reshard behavior
+        because the ``summon_full_params()`` forces full precision, which uses
+        a different all-gather tensor than the one already in memory and will
+        not persist any modifications correctly.
         """
         self.run_subtests(
             {
@@ -321,6 +326,12 @@ class TestUnshardParams(TestUnshardParamsBase):
             offload_to_cpu=offload_to_cpu,
         ):
             pass
+        if mixed_precision is not None:
+            # After forcing full precision, we must invalidate the existing
+            # unsharded low-precision flat parameter since it will not persist
+            # changes from the `summon_full_params()` context, so we cannot
+            # respect the reshard behavior
+            expected_outer_flat_param_unsharded_numel = 0
         self.assertEqual(
             expected_outer_flat_param_unsharded_numel,
             _get_unsharded_storage_size(outer_flat_param),
@@ -423,7 +434,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             CUDAInitMode.CUDA_BEFORE,
             deterministic=True,
         )
-        model.buffer = nn.Buffer(torch.ones(1))
+        model.register_buffer("buffer", torch.ones(1))
         # Wrap the top-level with FSDP since `named_parameters()` and
         # `named_buffers` will contain FSDP prefixes if called on a non-FSDP
         # root module
@@ -436,7 +447,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             ),
             self.process_group,
         )
-        fsdp_model.buffer = nn.Buffer(torch.ones(1))
+        fsdp_model.register_buffer("buffer", torch.ones(1))
         with FSDP.summon_full_params(fsdp_model):
             for call in ["named_parameters", "named_buffers"]:
                 for (n1, p1), (n2, p2) in itertools.zip_longest(

@@ -14,6 +14,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 
+#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
@@ -205,6 +206,28 @@ static py::object ophandle_call_boxed(
   }
   return torch::jit::createPyObjectForStack(std::move(stack));
 }
+
+// A small RAII guard that lets you explicitly *remove* a key from the TLS
+// exclude set.
+class SetExcludeDispatchKeyGuard {
+ public:
+  SetExcludeDispatchKeyGuard(at::DispatchKey k, bool set_excluded)
+      : k(k), old(c10::impl::tls_is_dispatch_key_excluded(k)) {
+    c10::impl::tls_set_dispatch_key_excluded(k, set_excluded);
+  }
+  ~SetExcludeDispatchKeyGuard() {
+    c10::impl::tls_set_dispatch_key_excluded(k, old);
+  }
+  SetExcludeDispatchKeyGuard(const SetExcludeDispatchKeyGuard&) = delete;
+  SetExcludeDispatchKeyGuard operator=(const SetExcludeDispatchKeyGuard&) =
+      delete;
+  SetExcludeDispatchKeyGuard(SetExcludeDispatchKeyGuard&&) = delete;
+  SetExcludeDispatchKeyGuard operator=(SetExcludeDispatchKeyGuard&&) = delete;
+
+ private:
+  at::DispatchKey k;
+  bool old;
+};
 
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
@@ -560,6 +583,8 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(CompositeExplicitAutograd)
       DEF_ONE(CompositeImplicitAutogradNestedTensor)
       DEF_ONE(CompositeImplicitAutograd)
+      // NestedTensor is not a backend key
+      DEF_ONE(AutogradNestedTensor)
       DEF_ONE(AutogradOther)
       DEF_ONE(Autograd)
       DEF_ONE(BackendSelect)
@@ -667,8 +692,12 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ExcludeDispatchKeyGuard,
       c10::DispatchKeySet>(m, "ExcludeDispatchKeyGuard");
 
+  py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
+      m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
       m, "_ExcludeDispatchKeyGuard");
+  py_context_manager<SetExcludeDispatchKeyGuard, c10::DispatchKey, bool>(
+      m, "_SetExcludeDispatchKeyGuard");
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
@@ -738,6 +767,22 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerFrontMode) ||
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
+
+  m.def("_get_singleton_int", [](int64_t data) {
+    return c10::SymInt(
+        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
+  });
+
+  m.def("_get_constant_bool_symnode", [](int64_t data) {
+    return c10::SymNode(
+        c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
+  });
+
+  using c10::impl::TorchDispatchModeKey;
+  py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
+      .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
+      .value("PROXY", TorchDispatchModeKey::PROXY)
+      .value("FAKE", TorchDispatchModeKey::FAKE);
 }
 
 // TODO: dedupe with the kernel

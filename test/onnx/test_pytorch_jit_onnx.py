@@ -5,6 +5,7 @@ import pytorch_test_common
 import torch
 from pytorch_test_common import skipIfNoCuda
 from torch.onnx import verification
+from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 
@@ -18,7 +19,7 @@ def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
     PyTorch tensor inputs.
     """
 
-    torch.onnx.symbolic_helper._set_opset_version(opset_version)
+    GLOBALS.export_onnx_opset_version = opset_version
     graph = torch.onnx.utils._optimize_graph(
         graph, operator_export_type, params_dict={}
     )

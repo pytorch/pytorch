@@ -35,7 +35,9 @@ from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS, IS_JETSON,
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
-                                                  IS_MACOS)
+                                                  IS_MACOS, TEST_CUDA)
+import functools
+import operator
 
 
 try:
@@ -74,11 +76,6 @@ skipIfNoNumpy = unittest.skipIf(not HAS_NUMPY, "no NumPy")
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
-# We cannot import TEST_CUDA from torch.testing._internal.common_cuda here, because if we do that,
-# the TEST_CUDNN line from torch.testing._internal.common_cuda will be executed multiple times
-# as well during the execution of this test suite, and it will cause
-# CUDA OOM error on Windows.
-TEST_CUDA = torch.cuda.is_available()
 if TEST_CUDA:
     torch.cuda.memory._set_allocator_settings('expandable_segments:False')
 
@@ -1342,7 +1339,7 @@ except RuntimeError as e:
         # [no auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1401,7 +1398,7 @@ except RuntimeError as e:
         # [auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1437,7 +1434,7 @@ except RuntimeError as e:
         # [auto-batching & drop_last] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)

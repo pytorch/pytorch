@@ -49,7 +49,7 @@ WHEEL_CONTAINER_IMAGES = {
     },
     "cpu": "pytorch/manylinux-builder:cpu",
     "cpu-cxx11-abi": "pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi",
-    "cpu-aarch64": "quay.io/pypa/manylinux2014_aarch64",
+    "cpu-aarch64": "pytorch/manylinuxaarch64-builder:cpu-aarch64",
 }
 
 CONDA_CONTAINER_IMAGES = {

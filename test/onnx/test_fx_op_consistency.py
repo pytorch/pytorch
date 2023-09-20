@@ -115,6 +115,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "index_put",
         "logit",
         "mean",
+        "native_batch_norm",
         # "new_empty",  non-deterministic
         # "new_empty_strided",  non-deterministic
         "new_full",
@@ -126,6 +127,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.avg_pool1d",
         "nn.functional.avg_pool2d",
         "nn.functional.avg_pool3d",
+        "nn.functional.batch_norm",
         "nn.functional.conv1d",
         # "nn.functional.conv2d",  AssertionError: The values for attribute 'shape' do not match in float32
         # "nn.functional.conv3d",  extra opinfo needed
@@ -135,6 +137,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "nn.functional.dropout",
         "nn.functional.elu",
         "nn.functional.embedding",
+        "nn.functional.embedding_bag",
         "nn.functional.max_pool1d",
         "nn.functional.max_pool2d",
         "nn.functional.max_pool3d",
@@ -186,10 +189,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Addmm")
     ),
     xfail(
-        "all",
-        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
-    ),
-    xfail(
         "allclose", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -203,12 +202,8 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support("ReduceMin", "bool, int16")
     ),
     xfail(
-        "any",
-        reason="[PostInline][ORT][ShapeInferenceError] axis must be in [-rank, rank-1]. input rank was 0"
-    ),
-    xfail(
         "arange",
-        dtypes=(torch.uint8, torch.int8),
+        dtypes=(torch.uint8,),
         reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
     ),
     xfail(
@@ -400,6 +395,11 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_onnx_does_not_support("Max_pool2d"),
     ),
     xfail(
+        "nn.functional.max_pool3d",
+        dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES,
+        reason=onnx_test_common.reason_onnx_does_not_support("Max_pool3d"),
+    ),
+    xfail(
         "nonzero",
         dtypes=(torch.int8, torch.int16),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support("NonZero", "int8, int16"),
@@ -451,14 +451,6 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         "unflatten", dtypes=onnx_test_common.BOOL_TYPES,
         reason=onnx_test_common.reason_onnx_does_not_support("Unflatten")
     ),
-    xfail(
-        "var_mean", dtypes=(torch.float16, ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
-    ),
-    xfail(
-        "var_mean", variant_name="unbiased", dtypes=(torch.float16, ),
-        reason=onnx_test_common.reason_onnx_script_does_not_support("var_mean", "float16")
-    ),
 )
 # fmt: on
 
@@ -486,11 +478,6 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         matcher=lambda sample: sample.input[0].equal(torch.tensor([])),
         reason="core dump - cat does not support zero-dim tensors yet",
     ),
-    skip(
-        "div",
-        matcher=lambda sample: sample.kwargs.get("rounding_mode") is not None,
-        reason="rounding_mode is not yet supported",
-    ),
     xfail(
         "index_put",
         matcher=lambda sample: (sample.args[0][0].dtype == torch.bool)
@@ -498,6 +485,14 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         reason=onnx_test_common.reason_dynamo_does_not_support(
             "https://github.com/pytorch/pytorch/issues/101150"
         ),
+    ),
+    xfail(
+        "native_batch_norm",
+        matcher=lambda sample: sample.args[4]
+        and (
+            isinstance(sample.args[0], torch.Tensor) and sample.args[0].shape == (1,)
+        ),  # Edge case with training=True and mean being 1d tensor of single element.
+        reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1]) != torch.Size([]).",
     ),
     xfail(
         "nn.functional.avg_pool1d",
@@ -545,6 +540,15 @@ SKIP_XFAIL_SUBTESTS: tuple[onnx_test_common.DecorateMeta, ...] = (
         "nn.functional.cross_entropy",
         matcher=lambda sample: not isinstance(sample.kwargs.get("weight"), int),
         reason="ONNX SoftmaxCrossEntropyLoss op only accept argument[weight] is int type",
+    ),
+    skip(
+        "nn.functional.embedding_bag",
+        matcher=lambda sample: sample.kwargs.get("padding_idx") is not None or True,
+        reason=(
+            "Torchlib does not support 'padding_idx' overload for _embedding_bag and _embedding_bag_forward_only. "
+            "'padding_idx=-1' is emitted for aten op when 'padding_idx' is not provided. "
+            "See https://github.com/microsoft/onnxscript/issues/1056 for details."
+        ),
     ),
     skip(
         "nn.functional.max_pool3d",
@@ -656,6 +660,12 @@ def _run_test_output_match(
                     # Relax atol and rtol for float32 based on empirical results
                     rtol = 1e-5
                     atol = 2e-5
+                elif (
+                    dtype == torch.float16
+                    and op.name in test_suite.fp16_low_precision_list
+                ):
+                    rtol = 1e-2
+                    atol = 1e-3
                 else:
                     rtol = None
                     atol = None
@@ -690,6 +700,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     opset_version = -1
     op_level_debug: bool = False
     dynamic_shapes: bool = False
+
+    fp16_low_precision_list = [
+        "nn.functional.batch_norm",
+        "native_batch_norm",
+    ]
 
     @common_device_type.ops(
         [op for op in OPS_DB if op.name in TESTED_OPS],

@@ -84,6 +84,34 @@ void MPSHooks::profilerStopTrace() const {
   at::mps::getMPSProfiler().StopTrace();
 }
 
+uint32_t MPSHooks::acquireEvent(bool enable_timing) const {
+  return at::mps::getMPSEventPool()->acquireEvent(enable_timing);
+}
+
+void MPSHooks::releaseEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->releaseEvent(event_id);
+}
+
+void MPSHooks::recordEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->recordEvent(event_id, /* syncEvent*/ true);
+}
+
+void MPSHooks::waitForEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->waitForEvent(event_id, /* syncEvent*/ true);
+}
+
+void MPSHooks::synchronizeEvent(uint32_t event_id) const {
+  at::mps::getMPSEventPool()->synchronizeEvent(event_id);
+}
+
+bool MPSHooks::queryEvent(uint32_t event_id) const {
+  return at::mps::getMPSEventPool()->queryEvent(event_id);
+}
+
+double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
+  return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
 using at::MPSHooksRegistry;
 using at::RegistererMPSHooksRegistry;
 

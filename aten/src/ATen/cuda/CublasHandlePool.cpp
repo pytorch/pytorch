@@ -9,7 +9,7 @@
 #include <string>
 #include <tuple>
 
-namespace at { namespace cuda {
+namespace at::cuda {
 
 namespace {
 
@@ -137,4 +137,4 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace at::cuda

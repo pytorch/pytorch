@@ -186,9 +186,7 @@ def third_party(name):
 
 def get_pt_compiler_flags():
     return select({
-        "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accommodate for eigen
-        ],
+        "DEFAULT": _PT_COMPILER_FLAGS,
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
 
@@ -844,6 +842,7 @@ def define_buck_targets(
             ("aten/src", "ATen/native/cpu/**/*.h"),
             ("aten/src", "ATen/native/sparse/*.h"),
             ("aten/src", "ATen/native/nested/*.h"),
+            ("aten/src", "ATen/native/nested/cuda/*.h"),
             ("aten/src", "ATen/native/quantized/*.h"),
             ("aten/src", "ATen/native/quantized/cpu/*.h"),
             ("aten/src", "ATen/native/transformers/*.h"),
@@ -901,7 +900,6 @@ def define_buck_targets(
                 # Don't need on mobile.
                 "torch/csrc/Exceptions.h",
                 "torch/csrc/python_headers.h",
-                "torch/csrc/utils/auto_gil.h",
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
             ],
         ),

@@ -1048,7 +1048,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
-        guts::disjunction<
+        std::disjunction<
             std::is_invocable_r<IValue, T, Future&>,
             std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
         "The callback must have signature IValue(Future&) or "
@@ -1573,9 +1573,12 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
 
   c10::intrusive_ptr<Object> copy() const;
 
-  c10::intrusive_ptr<Object> deepcopy() const;
+  c10::intrusive_ptr<Object> deepcopy(
+      c10::optional<at::Device> device = c10::nullopt) const;
 
-  c10::intrusive_ptr<Object> deepcopy(IValue::HashAliasedIValueMap& memo) const;
+  c10::intrusive_ptr<Object> deepcopy(
+      IValue::HashAliasedIValueMap& memo,
+      c10::optional<at::Device> device = c10::nullopt) const;
 
   bool is_weak_compilation_ref() const {
     return !type_.holds_strong_ref();
@@ -1915,9 +1918,9 @@ template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
     std::enable_if_t<
-        !guts::disjunction<
+        !std::disjunction<
             std::is_lvalue_reference<Args>...,
-            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
   const auto& vals = ivalue.toTupleRef().elements();
@@ -2095,9 +2098,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 template <
     typename... Args,
     std::enable_if_t<
-        !guts::disjunction<
+        !std::disjunction<
             std::is_lvalue_reference<Args>...,
-            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
@@ -2106,9 +2109,9 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 template <
     typename... Args,
     std::enable_if_t<
-        !guts::disjunction<
+        !std::disjunction<
             std::is_lvalue_reference<Args>...,
-            guts::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {

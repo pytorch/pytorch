@@ -25,39 +25,6 @@ import sympy
 import torch
 from torch import sym_float, sym_int, sym_max
 
-try:
-    try:
-        from nvfuser import DataType  # type: ignore[import, attr-defined]
-    except ImportError:
-        from nvfuser._C import DataType  # type: ignore[import]
-
-    _torch_dtype_to_nvfuser_dtype_map = {
-        torch.cdouble: DataType.ComplexDouble,
-        torch.cfloat: DataType.ComplexFloat,
-        torch.double: DataType.Double,
-        torch.float: DataType.Float,
-        torch.half: DataType.Half,
-        torch.bfloat16: DataType.BFloat16,
-        torch.long: DataType.Int,
-        torch.int: DataType.Int32,
-        torch.uint8: DataType.Int32,
-        torch.bool: DataType.Bool,
-        # Python scalars
-        complex: DataType.ComplexDouble,
-        float: DataType.Double,
-        int: DataType.Int,
-        bool: DataType.Bool,
-    }
-except ImportError:
-    _torch_dtype_to_nvfuser_dtype_map = {}
-
-
-def getnvFuserDtype(dtype: Union[torch.dtype, NumberTypeType]):
-    """
-    Translates from torch.dtype to nvFuser's DataType enum
-    """
-    return _torch_dtype_to_nvfuser_dtype_map[dtype]
-
 
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
@@ -110,11 +77,16 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 
-def same_shape(a: ShapeType, b: ShapeType) -> bool:
+def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
     for x, y in zip(a, b):
+        if allow_rhs_unbacked:
+            # TODO: We should check that the symbols are consistent
+            # with each other
+            if isinstance(y, torch.SymInt):
+                continue
         if x != y:
             return False
 
@@ -123,7 +95,13 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
+def compare_tensor_meta(
+    a: TensorLikeType,
+    b: TensorLikeType,
+    check_strides=False,
+    *,
+    allow_rhs_unbacked=False,
+):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -134,7 +112,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
+    if not same_shape(a.shape, b.shape, allow_rhs_unbacked=allow_rhs_unbacked):
         msg = f"Shapes {a.shape} and {b.shape} are not equal!"
         raise AssertionError(msg)
 
@@ -800,6 +778,31 @@ def extract_shape_from_varargs(
     if validate:
         validate_shape(shape)  # type: ignore[arg-type]
     return shape  # type: ignore[return-value]
+
+
+def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
+    ndim = max(len(a), len(b))
+    expandedSizes = [0] * ndim
+
+    for i in range(ndim - 1, -1, -1):
+        offset = ndim - 1 - i
+        dimA = len(a) - 1 - offset
+        dimB = len(b) - 1 - offset
+        sizeA = a[dimA] if dimA >= 0 else 1
+        sizeB = b[dimB] if dimB >= 0 else 1
+
+        torch._check(
+            (sizeA == sizeB) or (sizeA == 1) or (sizeB == 1),
+            lambda: (
+                f"The size of tensor a ({sizeA}) must match the size of "
+                f"tensor b ({sizeB}) at non-singleton dimension {i}"
+            ),
+        )
+
+        # 1s map to the other size (even 0)
+        expandedSizes[i] = sizeB if sizeA == 1 else sizeA
+
+    return tuple(expandedSizes)
 
 
 def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
