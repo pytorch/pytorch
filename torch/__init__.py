@@ -1768,15 +1768,14 @@ if TYPE_CHECKING:
     from torch import _inductor as _inductor
     from torch import onnx as onnx
 
-_lazy_modules = {
-    "_dynamo",
-    "_inductor",
-    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-    "onnx",
-}
+else:
+    _lazy_modules = {
+        "_dynamo",
+        "_inductor",
+        # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+        "onnx",
+    }
 
-
-if not TYPE_CHECKING:
     def __getattr__(name):
         # Deprecated attrs
         replacement = _deprecated_attrs.get(name)
