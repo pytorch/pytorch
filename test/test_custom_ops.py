@@ -1737,6 +1737,19 @@ class MiniOpTest(CustomOpTestCaseBase):
         result = torch.ops.aten.mm.default(x, y)
         self.assertEqual(result, x @ y)
 
+    def test_mm_meta(self):
+        x = torch.randn(2, 3, requires_grad=True, device="meta")
+        y = torch.randn(3, 5, device="meta")
+        result = torch.ops.aten.mm.default(x, y)
+        self.assertEqual(result.shape, (x @ y).shape)
+
+    def test_mm_fake(self):
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.randn(2, 3, requires_grad=True, device="cpu")
+            y = torch.randn(3, 5, device="cpu")
+            result = torch.ops.aten.mm.default(x, y)
+            self.assertEqual(result.shape, (x @ y).shape)
+
     def test_mm_errors(self):
         x = torch.randn(2, 3, requires_grad=True)
         y = torch.randn(4, 5)
@@ -1804,6 +1817,78 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
                 expected_test = f"{test}__{orig_test}"
                 self.assertTrue(hasattr(MiniOpTest, expected_test), msg=expected_test)
 
+    def test_generate_repro_save_data(self):
+        from torch.testing._internal.optests.generate_tests import generate_repro
+
+        args = (torch.ones(2, 2),)
+        kwargs = {"mat2": torch.zeros(2, 2)}
+        actual = generate_repro(
+            "test_schema",
+            torch.ops.aten.sin.default,
+            args,
+            kwargs,
+            save_data=True,
+            dry_run=True,
+        )
+        actual = re.sub(r"torch.load\(\".*\.pt\"\)", 'torch.load("repro.pt")', actual)
+        self.assertExpectedInline(
+            actual,
+            """\
+# =========================================================
+# BEGIN REPRO SCRIPT
+# =========================================================
+import torch
+from torch.testing._internal.optests import opcheck
+
+# Make sure you have loaded the library that contains the op
+# via an import or torch.ops.load_library(...)
+op = torch.ops.aten.sin.default
+
+args, kwargs = torch.load("repro.pt")
+opcheck(op, args, kwargs, test_utils="test_schema")
+# =========================================================
+# END REPRO SCRIPT
+# =========================================================
+""",
+        )
+
+    def test_generate_repro_no_save_data(self):
+        from torch.testing._internal.optests.generate_tests import generate_repro
+
+        args = (torch.ones(2, 2),)
+        kwargs = {"mat2": torch.zeros(2, 2)}
+        actual = generate_repro(
+            "test_schema",
+            torch.ops.aten.sin.default,
+            args,
+            kwargs,
+            save_data=False,
+            dry_run=True,
+        )
+        self.assertExpectedInline(
+            actual,
+            """\
+# =========================================================
+# BEGIN REPRO SCRIPT
+# =========================================================
+import torch
+from torch.testing._internal.optests import opcheck
+
+# Make sure you have loaded the library that contains the op
+# via an import or torch.ops.load_library(...)
+op = torch.ops.aten.sin.default
+
+# If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1
+# we will fill them in same (args, kwargs) as in your test
+args = ()  # args to the operator
+kwargs = {}  # kwargs to the operator
+opcheck(op, args, kwargs, test_utils="test_schema")
+# =========================================================
+# END REPRO SCRIPT
+# =========================================================
+""",
+        )
+
     def test_failures_dict_validation(self):
         from torch.testing._internal.optests.generate_tests import (
             FailuresDict,
@@ -1814,11 +1899,11 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
             "mini_op_test::incorrect_schema": {
                 "test_aot_dispatch_static__test_delayed_error": {
                     "comment": "",
-                    "status": "XFAIL",
+                    "status": "success",
                 }
             }
         }
-        with self.assertRaisesRegex(RuntimeError, "got status=XFAIL"):
+        with self.assertRaisesRegex(RuntimeError, "got status=success"):
             validate_failures_dict_structure(
                 FailuresDict("", failures), mini_op_test_checks, MiniOpTest
             )

@@ -3815,10 +3815,12 @@ class FallbackKernel(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
             exported_args = None
+            args = None
             if config.is_fbcode():
                 exported_args = self.export_extern_kernel_node()
+            else:
+                args = [*self.codegen_args(), *self.codegen_kwargs()]
 
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
                 self.kernel,
