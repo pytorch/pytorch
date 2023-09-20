@@ -3,12 +3,10 @@ import dataclasses
 import functools
 import inspect
 import operator
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.fx
-from torch.fx import _pytree as fx_pytree
-from torch.utils import _pytree as pytree
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -181,25 +179,6 @@ class BaseListVariable(VariableTracker):
             lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
             comps,
         ).add_options(options)
-
-    # List-like implementations for pytree
-    def __len__(self):
-        return len(self.items)
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            index = SliceVariable(
-                [
-                    ConstantVariable(index.start),
-                    ConstantVariable(index.stop),
-                    ConstantVariable(index.step),
-                ]
-            )
-        elif isinstance(index, int):
-            index = ConstantVariable(index)
-        else:
-            raise TypeError("Invalid index type. Must be int or slice.")
-        return self.getitem_const(index)
 
 
 class RangeVariable(BaseListVariable):
@@ -730,56 +709,6 @@ class ListIteratorVariable(VariableTracker):
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
-
-
-def _listvariable_flatten(d: ListVariable) -> Tuple[List[Any], pytree.Context]:
-    return d.items, None
-
-
-def _listvariable_unflatten(values: List[Any], context: pytree.Context) -> ListVariable:
-    assert all(isinstance(x, VariableTracker) for x in values)
-
-    # Guard propagation happens in the BaseListVariable constructor
-    return ListVariable(values, mutable_local=MutableLocal())
-
-
-def _register_dynamo_list_to_tree_spec():
-    pytree._register_pytree_node(
-        ListVariable,
-        _listvariable_flatten,
-        _listvariable_unflatten,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        ListVariable,
-        _listvariable_flatten,
-    )
-
-
-def _tuplevariable_flatten(d: TupleVariable) -> Tuple[List[Any], pytree.Context]:
-    return d.items, None
-
-
-def _tuplevariable_unflatten(
-    values: List[Any], context: pytree.Context
-) -> TupleVariable:
-    assert all(isinstance(x, VariableTracker) for x in values)
-
-    # Guard propagation happens in the BaseListVariable constructor
-    return TupleVariable(values)
-
-
-def _register_dynamo_tuple_to_tree_spec():
-    pytree._register_pytree_node(
-        TupleVariable,
-        _tuplevariable_flatten,
-        _tuplevariable_unflatten,
-    )
-
-    fx_pytree.register_pytree_flatten_spec(
-        TupleVariable,
-        _tuplevariable_flatten,
-    )
 
 
 class SetVariable(VariableTracker):
