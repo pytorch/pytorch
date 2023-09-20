@@ -40,7 +40,7 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
 static Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
   at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
   out = out.to(self.device()).to(self.suggest_memory_format());
-  // Trust the `copy_` to handle the quantization and the boundary chacks.
+  // Trust the `copy_` to handle the quantization and the boundary checks.
   self.copy_(out);
   return self;
 }
@@ -55,7 +55,8 @@ Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
-  return fill_out(self, value.item());
+  self.copy_(value);
+  return self;
 }
 
 Tensor& fill_quantized_(Tensor& self, const Tensor& value) {
