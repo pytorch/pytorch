@@ -217,7 +217,7 @@ class TuningProcessPool:
             return
 
         devices = self.get_device_list()
-        log.debug("Device list: %s", devices)
+        log.debug("Sub-process autotune device list: %s", devices)
 
         # Launch the child processes and push a msg to "warm up"
         self.processes = queue.Queue()

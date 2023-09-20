@@ -2,13 +2,17 @@
 import os
 import unittest
 
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
-from torch._inductor.autotune_process import BenchmarkRequest, TuningProcessPool
+from torch._inductor.autotune_process import (
+    BenchmarkRequest,
+    CUDA_VISIBLE_DEVICES,
+    TuningProcessPool,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
@@ -28,7 +32,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CUDA, requires_multigpu
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -467,20 +471,30 @@ class TestDoBench(TestCase):
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
-    def __init__(self, value: float, valid_devices: Tuple[Optional[str], ...]) -> None:
+    def __init__(
+        self, value: float, multi_device: bool, parent_visible_devices: Optional[str]
+    ) -> None:
         self.value = value
-        self.valid_devices = valid_devices
+        self.multi_device = multi_device
+        self.parent_visible_devices = parent_visible_devices
 
     def benchmark(
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
-        # Verify that the visible devices env var is set; it should be a single
-        # valid device number. Note that we can't perform this validation directly
-        # from the test body because benchmarks execute in a separate process. If
-        # the check fails, however, the test will detect the failure by virtue of
-        # not receiving the expected result back.
-        device = os.environ.get("CUDA_VISIBLE_DEVICES")
-        assert device in self.valid_devices
+        # Verify that the visible devices env var is set correctly. If multi-device
+        # auto-tuning is disabled, the visible devices should be unmanipulated from
+        # the parent process. If multi-device auto-tuning is enabled, the visible
+        # devices should be a _single_ valid device number. Note that we can't perform
+        # this validation directly from the test body because benchmarks execute in a
+        # separate process. If the check fails, however, the test will detect the
+        # failure by virtue of not receiving the expected result back.
+        visible_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
+        if not self.multi_device:
+            assert visible_devices == self.parent_valid_devices
+        else:
+            valid_devices = self.parent_visible_devices.split(",")
+            assert visible_devices in valid_devices
+
         return self.value
 
 
@@ -500,9 +514,9 @@ class TestTuningProcess(TestCase):
             tuning_pool = TuningProcessPool()
             tuning_pool.initialize()
 
-            # First force the tuning process to "crash" by setting an
-            # empty set of valid devices.
-            bmreq = TestBenchmarkRequest(3.14, valid_devices=())
+            # First force the tuning process to "crash" by setting a bogus
+            # string for the expected visible devices.
+            bmreq = TestBenchmarkRequest(3.14, False, "invalid")
             choice = TestTritonTemplateCaller(bmreq)
 
             timings = tuning_pool.benchmark([choice])
@@ -512,7 +526,7 @@ class TestTuningProcess(TestCase):
             # Then send another request and make sure the sub-process
             # has restarted and is operational. 'valid_devices' expected
             # to be None because autotune_multi_device is off.
-            choice.bmreq.valid_devices = (None,)
+            choice.bmreq.parent_valid_devices = os.environ.get(CUDA_VISIBLE_DEVICES)
 
             timings = tuning_pool.benchmark([choice])
             self.assertTrue(choice in timings)
@@ -520,20 +534,27 @@ class TestTuningProcess(TestCase):
 
             tuning_pool.terminate()
 
-    @requires_multigpu()
     def test_tuning_pool_multiple_devices(self):
         with config.patch({"autotune_multi_device": True}):
-            valid_devices = ("3", "4")
-            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(valid_devices)
+            # Adapt the test to the available devices (and whether CUDA_VISIBLE_DEVICES
+            # is already set in the environment); use a subset of the available devices
+            # to ensure only the subset are visible to the sub-processes.
+            if CUDA_VISIBLE_DEVICES in os.environ:
+                visible_devices = os.environ[CUDA_VISIBLE_DEVICES].split(",")
+            else:
+                visible_devices = [str(d) for d in range(torch.cuda.device_count())]
+
+            parent_visible_devices = ",".join(visible_devices[-2:])
+            os.environ[CUDA_VISIBLE_DEVICES] = parent_visible_devices
 
             tuning_pool = TuningProcessPool()
             tuning_pool.initialize()
 
             choice1 = TestTritonTemplateCaller(
-                TestBenchmarkRequest(3.14, valid_devices)
+                TestBenchmarkRequest(3.14, True, parent_visible_devices),
             )
             choice2 = TestTritonTemplateCaller(
-                TestBenchmarkRequest(2.718, valid_devices)
+                TestBenchmarkRequest(2.718, True, parent_visible_devices),
             )
 
             timings = tuning_pool.benchmark([choice1, choice2])
