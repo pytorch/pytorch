@@ -642,18 +642,14 @@ compilers and the daunting errors that they raise.
 contains a few tips and tricks on how to tackle this task.
 
 If the above is not enough to pinpoint the origin of the issue, there are still
-a few other NumPy specific tools we can use. If we find a bug that is blocking
-our development and we are tracing through mixed PyTorch <> NumPy code where
-the NumPy part is not particularly bulky, we can simply deactivate the NumPy
-tracing altogether by doing
+a few other NumPy-specific tools we can use. We can discern whether the bug
+is entirely in the PyTorch code by disabling tracing through NumPy functions:
+
 
 .. code-block:: python
 
    from torch._dynamo import config
    config.trace_numpy = False
-
-This disables tracing through any NumPy functions, and allows us to discern whether
-the bug is entirely in the PyTorch code.
 
 If the bug lies in the traced NumPy code, we can execute the NumPy code eagerly (without ``torch.compile``)
 using PyTorch as a backend by importing ``import torch._numpy as np``.
