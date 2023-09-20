@@ -492,6 +492,12 @@ class TensorVariable(VariableTracker):
                 raise TypeError(
                     f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
                 )
+            # We don't check that the tensor is on CPU when force is False, as this
+            # allows us to execute NumPy code on CUDA.
+            # We don't check that requires_grad=False as we are curently doing an
+            # unconditional detach.
+            # TODO: We may want to avoid detching if `requires_grad=True`
+            #       and `force=False` to allow computing gradients.
             force = "force" in kwargs and kwargs["force"].as_python_constant()
             proxy = tx.output.create_proxy(
                 "call_method", "detach", *proxy_args_kwargs([self], {})
