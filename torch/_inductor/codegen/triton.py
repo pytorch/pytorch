@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import collections
 import contextlib
 import dataclasses
@@ -8,7 +6,7 @@ import itertools
 import logging
 import math
 import operator
-from typing import Any, Counter, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Set
 
 import sympy
 
@@ -534,7 +532,7 @@ class IterationRanges:
         numel: sympy.Expr,
         prefix: str,
         *,
-        kernel: TritonKernel,
+        kernel: "Kernel",
         divisor=sympy.Integer(1),
         length=sympy.Integer(1),
     ):
@@ -559,7 +557,7 @@ class IterationRangesRoot(IterationRanges):
         numel: sympy.Expr,
         prefix: str,
         index: int,
-        kernel: TritonKernel,
+        kernel: "Kernel",
         pid_cache=None,
     ):
         if pid_cache is None:
@@ -710,8 +708,8 @@ class IterationRangesEntry(IterationRanges):
         self.expr = expr
 
     def set_name(self, name):
-        self.codegen = lambda: name  # type: ignore[assignment]
-        self.codegen.cache_clear = lambda: None  # type: ignore[method-assign]
+        self.codegen = lambda: name
+        self.codegen.cache_clear = lambda: None
         self.name = name
 
     def cache_clear(self):
@@ -730,7 +728,7 @@ class IterationRangesEntry(IterationRanges):
 
     def precomputed_args(self):
         # for dynamic shapes, find parts of indexing expressions that have to be precomputed
-        precomputed_args: List[sympy.Expr] = []
+        precomputed_args = []
         if isinstance(self.expr, sympy.Symbol):
             return precomputed_args
         assert isinstance(self.expr, (FloorDiv, ModularIndexing)), type(self.expr)
@@ -752,7 +750,7 @@ class IterationRangesEntry(IterationRanges):
 
 
 class TritonKernel(Kernel):
-    overrides = TritonOverrides  # type: ignore[assignment]
+    overrides = TritonOverrides
     sexpr = pexpr
 
     def __init__(
@@ -768,19 +766,19 @@ class TritonKernel(Kernel):
         super().__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.mutations = mutations
-        self.range_trees: List[IterationRangesRoot] = []
+        self.range_trees = []
         self.range_tree_nodes = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
-        self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
+        self.suffix = IndentedBuffer()
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
         # Upper bounds for indirect_indexing and their str representation
-        self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
+        self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
@@ -886,10 +884,10 @@ class TritonKernel(Kernel):
 
     @staticmethod
     def _split_iteration_ranges(
-        groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
+        groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]
     ):
         sv = V.graph.sizevars
-        new_ranges: List[List[sympy.Expr]] = [[] for _ in groups]
+        new_ranges = [[] for _ in groups]
         remaining = [sv.simplify(g) for g in groups]
         var_count = itertools.count()
 
@@ -952,9 +950,7 @@ class TritonKernel(Kernel):
         return new_ranges, return_getters_groups
 
     @classmethod
-    def is_compatible(
-        cls, groups: Iterable[sympy.Expr], lengths: List[List[sympy.Expr]]
-    ):
+    def is_compatible(cls, groups: List[sympy.Expr], lengths: List[List[sympy.Expr]]):
         try:
             cls._split_iteration_ranges(groups, lengths)
             return True
@@ -1083,7 +1079,6 @@ class TritonKernel(Kernel):
 
         mask_vars: Set[str] = set()
         for var in index_vars:
-            assert isinstance(var, sympy.Symbol)
             if override_mask:
                 pass
             elif var.name.startswith("tmp"):
@@ -1353,7 +1348,6 @@ class TritonKernel(Kernel):
             load_buffer = self.loads
 
         result_var = self.cse.generate(load_buffer, line)
-        assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = mask_vars
 
         if append_broadcast:
@@ -1493,7 +1487,7 @@ class TritonKernel(Kernel):
 
         dim = len(self.range_trees) - 1 - int(bool(self.no_x_dim))
         acc_type = triton_acc_type(src_dtype)
-        result_var: Any = self.cse.newvar()
+        result_var = self.cse.newvar()
         result_var.mask_vars = {var for var in masks if var[0] != "r"}
         cond = " & ".join(masks)
 
@@ -1558,7 +1552,7 @@ class TritonKernel(Kernel):
                 )
 
             if reduction_type in {"argmax", "argmin"}:
-                accumulator_index = f"_{result_var}_index"  # type: ignore[assignment]
+                accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
                     f"{accumulator_index} = tl.full({self.dense_size_str()}, {long_max}, tl.int64)"
@@ -2019,7 +2013,7 @@ class TritonKernel(Kernel):
 
         return f"[{', '.join(sizes)}]"
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None):
+    def call_kernel(self, name: str, node: IRNode = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -2196,8 +2190,8 @@ class TritonScheduling(BaseScheduling):
     can_fuse_horizontal = can_fuse
 
     def generate_node_schedule(self, nodes, numel, rnumel):
-        node_schedule: List[Any] = []
-        current_loop_writes: Set[str] = set()
+        node_schedule = []
+        current_loop_writes = set()
         is_current_reductions = set()
         done = set()
 
@@ -2432,7 +2426,7 @@ class TritonScheduling(BaseScheduling):
 
         self.codegen_node_schedule_with_kernel(node_schedule, kernel)
 
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             src_code = kernel.codegen_kernel()
 
             for node in node_schedule:
@@ -2551,7 +2545,7 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
+        with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
             src_code = (
                 partial_code
@@ -2595,7 +2589,7 @@ class TritonScheduling(BaseScheduling):
                     subkernel,
                 )
 
-                with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                with V.set_kernel_handler(subkernel):
                     for node in node_schedule:
                         if node not in (EnableReduction, DisableReduction):
                             node.mark_run()
@@ -2634,7 +2628,7 @@ class TritonScheduling(BaseScheduling):
         ]
         write_names = {dep.name for dep in rw.writes}
 
-        tilings: List[CandidateTiling] = []
+        tilings = []
 
         for dep in deps:
             strides = V.graph.sizevars.stride_hints(dep.index, rw.range_vars)
@@ -2698,7 +2692,7 @@ class TritonScheduling(BaseScheduling):
             return (numel, reduction_numel)
 
         seen_names = set()
-        candidate_tiles: Counter[Any] = collections.Counter()
+        candidate_tiles = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
                 if tiling.name in seen_names:
@@ -2751,9 +2745,9 @@ class TritonScheduling(BaseScheduling):
 
 @dataclasses.dataclass
 class CandidateTiling:
-    tiling: Tuple[sympy.Expr, sympy.Expr]
+    tiling: List[sympy.Expr]
     score: int  # higher is better
-    name: Optional[str] = None
+    name: str = None
 
     @staticmethod
     def is_good_size(s):
