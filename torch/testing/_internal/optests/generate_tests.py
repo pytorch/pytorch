@@ -24,7 +24,7 @@ from torch.testing._internal.optests import (
 def is_abstract(tensor: torch.Tensor) -> bool:
     if tensor.is_meta:
         return True
-    if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
+    if torch._subclasses.fake_tensor.is_fake(tensor):
         return True
     return False
 
@@ -346,7 +346,7 @@ class OpCheckMode(TorchFunctionMode):
         self.failures_dict_path = failures_dict_path
 
         # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
-        # Maps qualname -> List[exception]
+        # Maps qualname -> List[(Exception, func, maybe args, maybe kwargs)]
         self.seen_ops_to_errors = {}
 
     def maybe_raise_errors_on_exit(self) -> None:
