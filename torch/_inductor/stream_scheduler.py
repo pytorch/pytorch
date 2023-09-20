@@ -6,6 +6,8 @@ log = logging.getLogger(__name__)
 import torch
 import os
 import json
+import sys
+sys.setrecursionlimit(5000)  # by default it is 1000
 
 HIGH_KERNEL_VOLUMN = 36864
 
