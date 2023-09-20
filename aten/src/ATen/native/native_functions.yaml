@@ -9541,7 +9541,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: nextafter_out
+    CPU, CUDA, MPS: nextafter_out
   tags: pointwise
 
 - func: nextafter(Tensor self, Tensor other) -> Tensor
