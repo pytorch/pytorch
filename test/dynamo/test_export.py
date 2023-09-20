@@ -3249,8 +3249,9 @@ class GraphModule(torch.nn.Module):
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
-            [[], [], [], []],
+            # Outter shape env should have guard in it because when dynamo traces fn, it propagate the guards
+            # to outter shape env.
+            [["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"]],
         )
 
     def test_invalid_input_global(self) -> None:

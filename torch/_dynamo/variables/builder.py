@@ -126,6 +126,7 @@ from .misc import (
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .optimizer import OptimizerVariable
 from .tensor import (
+    InputSymNodeVariable,
     NumpyNdarrayVariable,
     SymNodeVariable,
     TensorSubclassVariable,
@@ -751,9 +752,10 @@ class VariableBuilder:
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
-            return SymNodeVariable(
+            return InputSymNodeVariable(
                 sym_node_proxy,
                 new_symint == 1,
+                value,
             )
         else:
             result = UserDefinedObjectVariable(

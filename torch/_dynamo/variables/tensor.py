@@ -756,6 +756,40 @@ class SymNodeVariable(VariableTracker):
         )
 
 
+class InputSymNodeVariable(SymNodeVariable):
+    """
+    InputSymNodeVariable represents a symbolic input. Compared with SymNodeVariable, it tracks
+    both the original symbolic input and the symbol that dynamo generated in its own shape_env for tracing.
+    Whenver dynamo tries to evaluate_expr on dynamo generated symbol, the same should be applied to the original
+    symbol. This is to propagate the guards to outter shape env.
+    """
+
+    @classmethod
+    def create(cls, tx, proxy, sym_num, original_sym_num, **options):
+        assert sym_num is not None, "sym_num cannot be None."
+        assert origina_sym_num is not None, "sym_num cannot be None."
+
+        if "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == sym_num
+        proxy.node.meta["example_value"] = sym_num
+
+        if isinstance(sym_num, (sympy.Integer, int)):
+            return ConstantVariable(int(sym_num))
+
+        return InputSymNodeVariable(proxy, sym_num, original_sym_num, **options)
+
+    def __init__(self, proxy, sym_num, original_sym_num, **kwargs):
+        super().__init__(proxy, sym_num, **kwargs)
+        self.original_sym_num = original_sym_num
+
+    def evaluate_expr(self, output_graph=None):
+        # Propagate the guards to outside shape_env
+        orig_res = guard_scalar(self.original_sym_num)
+        dynamo_res = guard_scalar(self.sym_num)
+        assert orig_res == dynamo_res
+        return dynamo_res
+
+
 class TensorWithTFOverrideVariable(VariableTracker):
     """
     Represents a tensor subclass instance with a __torch_function__ override.

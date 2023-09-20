@@ -473,6 +473,7 @@ class GraphModule(torch.nn.Module):
                 )
                 for i, size in enumerate(sizes):
                     pred = fake_inp.size(0) == size
+                    actual_guard_str = [str(guard.expr) for guard in shape_env.guards]
                     f_cond(pred)
                     actual = normalize_gm(
                         backend.graphs[exp_frame_count[i] - 1].print_readable(
@@ -503,18 +504,11 @@ class GraphModule(torch.nn.Module):
             exp_graphs=[true_graph, true_graph, false_graph, false_graph],
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
-                [],
-                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
-                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
-                [
-                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
-                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
-                ],
-                [
-                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
-                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
-                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
-                ],
+                # s0 is specialized and guarded in outter shape_env when dynamo traces the if-statement in fn
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
+                ["Eq(s0, 3)"],
             ],
         )
 
@@ -525,17 +519,25 @@ class GraphModule(torch.nn.Module):
             exp_graphs=[false_graph, false_graph, true_graph, true_graph],
             exp_frame_count=[1, 1, 2, 2],
             exp_shape_env_guards=[
-                [],
-                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
-                ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
+                # s0 is specialized and guarded in outter shape_env when dynamo traces the if-statement in fn
+                ["Ne(s0, 4)"],
+                # the second guard Ne(...) basically means Ne(s0, 5). It has a Picewise call because
+                # dynamo creates a symint with symbool with Piecewise. At guard checking time, dynamo tries to evalute
+                # the Ne(...) expression to determine if the guard fails or not. Ne(...) guard is added because of that.
+                ["Ne(s0, 4)", "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
+                # Eq(...) guard is added due to the same reason as above. But this time the guard fails and dynamo triggers
+                # a re-compilation and add a Eq(s0, 3) guard when evaluting the if-statement in fn.
                 [
+                    "Ne(s0, 4)",
                     "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
                     "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Eq(s0, 3)",
                 ],
                 [
+                    "Ne(s0, 4)",
                     "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
                     "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
-                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Eq(s0, 3)",
                 ],
             ],
         )
