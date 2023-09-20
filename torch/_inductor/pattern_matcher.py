@@ -288,7 +288,7 @@ class _TargetExpr(PatternExpr):
         return (
             isinstance(node, torch.fx.Node)
             and node.op == self.op
-            and node.target in self.fns_set
+            and extract_target(node) in self.fns_set
         )
 
     def _match_users(self, node: torch.fx.Node, ctx: MatchContext):
@@ -427,6 +427,14 @@ class CallMethod(_TargetArgsExpr):
     op = "call_method"
 
 
+class CallModule(_TargetArgsExpr):
+    """
+    Matches a call_module node in the FX graphs: `module(*args, **kwargs)`
+    """
+
+    op = "call_module"
+
+
 class _TargetExprVarArgs(_TargetExpr):
     """
     Matches a call_function node with any arguments which are passed into the pattern
@@ -453,6 +461,10 @@ class CallFunctionVarArgs(_TargetExprVarArgs):
 
 class CallMethodVarArgs(_TargetExprVarArgs):
     op = "call_method"
+
+
+class CallModuleVarArgs(_TargetExprVarArgs):
+    op = "call_module"
 
 
 class ListOf(PatternExpr):
@@ -991,9 +1003,10 @@ class PatternMatcherPass:
             )
         count = 0
         for node in reversed(graph.nodes):
+            target = extract_target(node)
             if (
-                node.op in ["call_function", "call_method"]
-                and node.target in self.patterns
+                node.op in ["call_function", "call_method", "call_module"]
+                and target in self.patterns
             ):
                 # conservatively not applying pattern for cpu input,
                 # since some of the patterns induce codegen and split nodes.
@@ -1001,7 +1014,7 @@ class PatternMatcherPass:
                 if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
                     continue
 
-                for entry in self.patterns[node.target]:
+                for entry in self.patterns[target]:
                     if node._erased:
                         break
                     m = entry.pattern.match(node)
@@ -1237,3 +1250,13 @@ def filter_nodes(nodes, fn):
         fns.extend([getattr(fn, overload) for overload in fn.overloads()])
 
     return [node for node in nodes if node.target in fns]
+
+
+def extract_target(node: Node):
+    """For call_function and call_method, we directly use the target function;
+    For call_module, the target is string, and we treat the module class
+     as a function.
+    """
+    if node.op == "call_module":
+        return getattr(node.graph.owning_module, node.target).__class__
+    return node.target
