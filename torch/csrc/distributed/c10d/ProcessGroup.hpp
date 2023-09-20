@@ -680,6 +680,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   const std::string& getGroupName() const;
   void setGroupName(const std::string& name);
+  static c10::intrusive_ptr<c10d::ProcessGroup> resolveFromName(
+      const std::string& name);
 
  protected:
   // Implementations of this interface need to call this to setup

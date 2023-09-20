@@ -159,10 +159,36 @@ const std::string& ProcessGroup::getGroupName() const {
   return deviceTypeToBackend_.begin()->second->getGroupName();
 }
 
+static thread_local std::
+    unordered_map<std::string, c10::weak_intrusive_ptr<c10d::ProcessGroup>>
+        groupRegistry;
+
 void ProcessGroup::setGroupName(const std::string& name) {
+  if (groupRegistry.find(name) != groupRegistry.end()) {
+    // This should ideally be FATAL. Using WARNING for now for
+    // potential backward compatibility issues.
+    LOG(WARNING) << "The process group name " << name
+                 << " has already been taken.";
+  }
+  c10::raw::intrusive_ptr::incref(this);
+  groupRegistry.emplace(
+      name, c10::intrusive_ptr<c10d::ProcessGroup>::reclaim(this));
   for (auto& kv : deviceTypeToBackend_) {
     kv.second->setGroupName(name);
   }
+}
+
+c10::intrusive_ptr<c10d::ProcessGroup> ProcessGroup::resolveFromName(
+    const std::string& name) {
+  auto it = groupRegistry.find(name);
+  if (it == groupRegistry.end()) {
+    LOG(FATAL) << "No process group is registered under the name " << name;
+  }
+  auto ret = it->second.lock();
+  if (ret == nullptr) {
+    LOG(FATAL) << "Process group " << name << " has already been destroyed";
+  }
+  return ret;
 }
 
 } // namespace c10d

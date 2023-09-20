@@ -1766,6 +1766,13 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)");
+  module.def(
+      "_resolve_process_group_from_name",
+      [](const std::string& name) -> c10::intrusive_ptr<::c10d::ProcessGroup> {
+        return ::c10d::ProcessGroup::resolveFromName(name);
+      },
+      py::arg("process_groups"),
+      py::call_guard<py::gil_scoped_release>());
 
   py::enum_<::c10d::ProcessGroup::BackendType>(processGroup, "BackendType")
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
