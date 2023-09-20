@@ -145,16 +145,11 @@ struct as_shared_type<const T*> {
 
 struct TORCH_API Type {
   friend TORCH_API bool operator==(const Type& lhs, const Type& rhs);
-  private:
+ private:
   TypeKind kind_;
 
   protected:
   Type(TypeKind kind) : kind_(kind) {}
-
-  Type(const Type&) = default;
-  Type& operator=(const Type&) = default;
-  Type(Type&&) noexcept = default;
-  Type& operator=(Type&&) noexcept = default;
 
   virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
     return str();

@@ -1,7 +1,7 @@
 .. _torch.export:
 
 torch.export
-=====================
+============
 
 .. warning::
     This feature is a prototype under active development and there WILL BE
@@ -575,9 +575,13 @@ Read More
 
 API Reference
 -------------
-
+.. py:module:: torch.export.backends
 .. automodule:: torch.export
 .. autofunction:: export
+.. autofunction:: list_backends
+.. autofunction:: register_backend
+.. autofunction:: register_debug_backend
+.. autofunction:: register_experimental_backend
 .. autofunction:: dynamic_dim
 .. autofunction:: constrain_as_size
 .. autofunction:: constrain_as_value
