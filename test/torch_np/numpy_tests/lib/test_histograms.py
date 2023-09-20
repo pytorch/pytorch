@@ -31,12 +31,6 @@ skip = functools.partial(skipif, True)
 
 
 class TestHistogram(TestCase):
-    def setup_method(self):
-        pass
-
-    def teardown_method(self):
-        pass
-
     def test_simple(self):
         n = 100
         v = np.random.rand(n)

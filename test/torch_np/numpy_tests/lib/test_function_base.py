@@ -798,7 +798,7 @@ class TestDiff(TestCase):
 @xfail  # (reason="TODO: implement")
 @instantiate_parametrized_tests
 class TestDelete(TestCase):
-    def setup_method(self):
+    def setUp(self):
         self.a = np.arange(5)
         self.nd_a = np.arange(5).repeat(2).reshape(1, 5, 2)
 
@@ -1717,7 +1717,7 @@ class TestUnwrap(TestCase):
 
 
 @instantiate_parametrized_tests
-class TestFilterwindows:
+class TestFilterwindows(TestCase):
     @parametrize("dtype", np.typecodes["AllInteger"] + np.typecodes["Float"])
     @parametrize("M", [0, 1, 10])
     def test_hanning(self, dtype: str, M: int) -> None:

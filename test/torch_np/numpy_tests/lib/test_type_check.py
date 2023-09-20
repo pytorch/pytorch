@@ -1,6 +1,9 @@
 # Owner(s): ["module: dynamo"]
 
-import pytest
+
+import functools
+
+from unittest import expectedFailure as xfail, skipIf as skipif
 
 import torch._numpy as np
 from pytest import raises as assert_raises
@@ -17,18 +20,8 @@ from torch._numpy import (
     real_if_close,
 )
 from torch._numpy.testing import assert_, assert_array_equal, assert_equal
+from torch.testing._internal.common_utils import run_tests, TestCase
 
-
-from unittest import expectedFailure as xfail, skipIf as skipif
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-    subtest
-)
-
-import functools
 skip = functools.partial(skipif, True)
 
 
@@ -36,7 +29,7 @@ def assert_all(x):
     assert_(np.all(x), x)
 
 
-@xfail  #(reason="common_type not implemented")
+@xfail  # (reason="common_type not implemented")
 class TestCommonType(TestCase):
     def test_basic(self):
         ai32 = np.array([[1, 2], [3, 4]], dtype=np.int32)
@@ -53,7 +46,7 @@ class TestCommonType(TestCase):
         assert_(common_type(acd) == np.cdouble)
 
 
-@xfail  #(reason="not implemented")
+@xfail  # (reason="not implemented")
 class TestMintypecode(TestCase):
     def test_default_1(self):
         for itype in "1bcsuwil":
@@ -103,7 +96,7 @@ class TestMintypecode(TestCase):
         assert_equal(mintypecode("idD"), "D")
 
 
-@xfail  #(reason="TODO: decide on if [1] is a scalar or not")
+@xfail  # (reason="TODO: decide on if [1] is a scalar or not")
 class TestIsscalar(TestCase):
     def test_basic(self):
         assert_(np.isscalar(3))
@@ -433,7 +426,7 @@ class TestRealIfClose(TestCase):
         assert_all(isrealobj(b))
 
 
-@xfail  #(reason="not implemented")
+@xfail  # (reason="not implemented")
 class TestArrayConversion(TestCase):
     def test_asfarray(self):
         a = asfarray(np.array([1, 2, 3]))
