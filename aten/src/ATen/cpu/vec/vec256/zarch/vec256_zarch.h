@@ -2410,13 +2410,13 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     return a.mergee().data();
   }
 
-  vinner_data abs_() const {
-    auto ret = abs_2_();
-    return Vectorized<T>{ret}.real().sqrt().data();
+  static T abs_helper(const T &value)
+  {
+    return T(std::abs(value));
   }
 
   Vectorized<T> abs() const {
-    return Vectorized<T>{abs_()};
+    return mapOrdinary(abs_helper);
   }
 
   Vectorized<T> exp() const {

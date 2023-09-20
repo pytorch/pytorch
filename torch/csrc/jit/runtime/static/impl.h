@@ -248,6 +248,19 @@ class StaticRuntime;
 
 using SROperator = std::function<void(ProcessedNode*)>;
 
+#ifdef FBCODE_CAFFE2
+struct TORCH_API SROperatorObserver {
+  using OperatorCallback = void (*)(const Node*);
+  OperatorCallback startCb = nullptr;
+  OperatorCallback endCb = nullptr;
+
+  static void setCurrentThreadObserver(SROperatorObserver* observer);
+  static SROperatorObserver* getCurrentThreadObserver();
+  static void onStart(const Node* name);
+  static void onEnd(const Node* name);
+};
+#endif
+
 // A `BlockInfo` instance stores all of the shared state that each
 // `BlockRunner` will need to access. Most of this information is
 // read-only and shared between threads.

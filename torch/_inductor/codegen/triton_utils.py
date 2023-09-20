@@ -1,10 +1,12 @@
+from typing import Dict, List, Union
+
 from .. import config
 from ..utils import instance_descriptor
 from ..virtualized import V
 from .common import SizeArg, TensorArg
 
 
-def signature_of(arg, *, size_dtype: str):
+def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
     from triton.runtime.jit import JITFunction
 
     if isinstance(arg, TensorArg):
@@ -28,46 +30,47 @@ def signature_of(arg, *, size_dtype: str):
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
 
 
-def signature_to_meta(signature, *, size_dtype: str):
+def signature_to_meta(
+    signature: List[Union[TensorArg, SizeArg]], *, size_dtype: str
+) -> Dict[int, str]:
     return {
         i: signature_of(arg, size_dtype=size_dtype) for i, arg in enumerate(signature)
     }
 
 
-def config_of(args):
-    from ..compile_fx import ALIGNMENT
-
-    def is_aligned(x):
-        if isinstance(x, TensorArg):
-            return x.buffer not in V.graph.unaligned_buffers
-        if isinstance(x, SizeArg):
-            # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
-            # _maybe_evaluate_static...
-            if x.name.startswith("load_seed_offset"):
-                return False
-            else:
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, ALIGNMENT)
-        raise NotImplementedError(f"unhandled {type(x)}: {x}")
-
-    def is_aligned_8(x):
+def config_of(args: List[Union[TensorArg, SizeArg]]) -> instance_descriptor:
+    def is_aligned(
+        x: Union[TensorArg, SizeArg], alignment: int, include_tensor: bool
+    ) -> bool:
         """
         Roughly follow triton code here:
         https://github.com/openai/triton/blob/5282ed890d453e10b9ee30076ef89115dd197761/python/triton/runtime/jit.py#L208-L222
         """
         if isinstance(x, TensorArg):
-            return False
+            if include_tensor:
+                return not V.graph.scheduler.is_unaligned_buffer(x.buffer)
+            else:
+                return False
         if isinstance(x, SizeArg):
             # TODO(voz): These are kinda redundant, if we can solve out statically_known_multiple_of with
             # _maybe_evaluate_static...
             if x.name.startswith("load_seed_offset"):
                 return False
             else:
-                return V.graph.sizevars.statically_known_multiple_of(x.expr, 8)
+                return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
         raise NotImplementedError(f"unhandled {type(x)}: {x}")
 
     if config.triton.divisible_by_16:
-        divisible_by_16 = tuple(i for i, arg in enumerate(args) if is_aligned(arg))
+        divisible_by_16 = tuple(
+            i
+            for i, arg in enumerate(args)
+            if is_aligned(arg, alignment=16, include_tensor=True)
+        )
     else:
         divisible_by_16 = ()
-    divisible_by_8 = tuple(i for i, arg in enumerate(args) if is_aligned_8(arg))
+    divisible_by_8 = tuple(
+        i
+        for i, arg in enumerate(args)
+        if is_aligned(arg, alignment=8, include_tensor=False)
+    )
     return instance_descriptor(divisible_by_16, (), (), divisible_by_8)

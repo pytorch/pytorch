@@ -516,10 +516,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_constant_random(self):
         def f():
@@ -530,10 +527,7 @@ def forward(self, x_1):
         def test_f():
             make_fx(f, tracing_mode=self.tracing_mode)()
 
-        if self.tracing_mode == "fake":
-            self.assertRaises(DataDependentOutputException, test_f)
-        else:
-            self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
+        self.assertRaisesRegex(RuntimeError, "data-dependent", test_f)
 
     def test_decomposition_interpreter(self):
         def fn(x):
@@ -969,6 +963,20 @@ def forward(self, x_1, y_1):
         gm = make_fx(f, tracing_mode="symbolic")(src_tokens, torch.randn(5))
         self.assertEqual(len(gm.shape_env.guards), 0)
 
+    # https://github.com/pytorch/pytorch/issues/108195
+    def test_symbolic_repeat_interleave(self):
+        def f(y, x):
+            return y.repeat_interleave(x, dim=1)
+
+        y = torch.tensor([[1, 2], [3, 4]])
+        x = torch.tensor([2, 3])
+        r = str(make_fx(f, tracing_mode="symbolic")(y, x).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, y_1, x_1):
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
+    index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
+    return index_select""")
+
     def test_adv_index_batch(self):
         def f(src_tokens):
             bsz, src_len = src_tokens.size()[:2]
@@ -1039,6 +1047,23 @@ def forward(self, a_1):
     mul = torch.ops.aten.mul.Tensor(a_1, _local_scalar_dense);  a_1 = _local_scalar_dense = None
     return mul""")
 
+    def test_tensor_symfloat(self):
+        def f(a):
+            r = torch.tensor(a.size(0) ** 2.0)
+            assert r.dtype is torch.float
+            return r
+
+        gm = make_fx(f, tracing_mode="symbolic")(torch.randn(2))
+        r = str(gm.code).strip()
+        # NB: this specializes, which is fine, the point is to make sure the
+        # dtype inference is correct
+        self.assertExpectedInline(r, """\
+def forward(self, a_1):
+    _tensor_constant0 = self._tensor_constant0
+    lift_fresh_copy = torch.ops.aten.lift_fresh_copy.default(_tensor_constant0);  _tensor_constant0 = None
+    return lift_fresh_copy""")
+        self.assertEqual(gm._tensor_constant0, torch.tensor(4.0))
+
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
@@ -1053,6 +1078,25 @@ def forward(self, a_1):
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return empty"""  # noqa: B950
+        )
+
+
+    def test_setitem_symint(self):
+        # from moco
+        # https://github.com/pytorch/pytorch/issues/101939
+        def f(x):
+            x[0] = x.size(0)
+            return x
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.randn(10)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    scalar_tensor = torch.ops.aten.scalar_tensor.default(sym_size, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  sym_size = None
+    select = torch.ops.aten.select.int(x_1, 0, 0)
+    copy_ = torch.ops.aten.copy_.default(select, scalar_tensor);  select = scalar_tensor = None
+    return x_1"""  # noqa: B950
         )
 
     def test_dynamic_pointwise_scalar(self):
@@ -1532,10 +1576,6 @@ make_fx_failures = {
 }
 
 fake_tensor_failures = {
-    # FakeTensor fallback doesn't work
-    xfail('_segment_reduce', 'lengths'),
-    # cannot do these as they rely on tensor data
-    xfail('repeat_interleave'),
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
@@ -1570,11 +1610,8 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.pixel_unshuffle', ''),  # aten.pixel_unshuffle.default - couldn't find symbolic meta function/deco...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('repeat_interleave', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('_segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
-    xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
     xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
@@ -1604,7 +1641,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
 outplace_symbolic_tensor_failures = {
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-    xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
 }
 
 inplace_symbolic_tensor_failures = {
