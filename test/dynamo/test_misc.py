@@ -28,7 +28,6 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
-from test.distributions.test_distributions import TEST_NUMPY
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
@@ -7075,11 +7074,7 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(counter.frame_count, 1)
 
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @torch._dynamo.config(trace_numpy=True)
     def test_trace_ndarray_frame(self):
-        import numpy as np
-
         def fn(x):
             x = x**2
             print("graph break.")
