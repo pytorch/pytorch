@@ -3487,7 +3487,17 @@ def meta_div(self, other, rounding_mode=None):
 
     if isinstance(self, torch.Tensor) and isinstance(other, torch.Tensor):
         out_shape = _broadcast_shapes(self.shape, other.shape)
-        return self.new_empty(out_shape, dtype=result_dtype)
+        if out_shape == self.shape:
+            # Preserve strides of the first argument if output shape is the same as the input shape.
+            # This is required to pass CUDA tests.
+            return torch.empty_strided(
+                out_shape,
+                self.stride(),
+                dtype=result_dtype,
+                device="meta",
+            )
+        else:
+            return self.new_empty(out_shape, dtype=result_dtype)
     elif isinstance(self, torch.Tensor):
         return torch.empty_strided(
             self.shape,

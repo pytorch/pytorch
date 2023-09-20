@@ -4026,17 +4026,24 @@ def trunc(self: Tensor, **kwargs) -> Tensor:
 
 
 @register_decomposition([aten.div.Tensor_mode])
-def div_tensor_mode(
-    self: Tensor, other: Tensor, *, rounding_mode: Optional[str]
-) -> Tensor:
-    # aten::div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
+def div_tensor_mode(self, other, *, rounding_mode: Optional[str]) -> Tensor:
+    compute_dtype, result_dtype = utils.elementwise_dtypes(
+        self, other, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    # If rounding mode is not None, then the intermediate quotient needs to be computed
+    # and stored in the compute_dtype to maintain precision.
+    if rounding_mode is not None:
+        self = self.to(compute_dtype)
+        other = other.to(compute_dtype)
+
     quotient = torch.div(self, other)
+
     if rounding_mode is None:
         return quotient
     elif rounding_mode == "trunc":
-        return torch.trunc(quotient)
+        return torch.trunc(quotient).to(result_dtype)
     elif rounding_mode == "floor":
-        return torch.floor(quotient)
+        return torch.floor(quotient).to(result_dtype)
     else:
         raise RuntimeError(
             f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found '{rounding_mode}'"
