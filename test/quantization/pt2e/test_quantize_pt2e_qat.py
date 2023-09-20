@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-from typing import Any, Optional, Tuple
 import unittest
+from typing import Any, Optional, Tuple
 
 import torch
 from torch._export import capture_pre_autograd_graph
