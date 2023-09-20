@@ -828,9 +828,7 @@ def cannot_be_moved_to_cuda(node):
         return True
 
     # can take mixed devices - bail for now
-    incompatible_ops = (
-        aten._embedding_bag.default,
-    )
+    incompatible_ops = (aten._embedding_bag.default,)
 
     return node.target in incompatible_ops
 

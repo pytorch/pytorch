@@ -69,6 +69,7 @@ class TestMoveConstructorsToCuda(TestCase):
         inp = torch.rand([200, 200])
         self._check_fn(foo, True, inp)
 
+    @requires_multigpu()
     def test_multi_gpu(self):
         def foo(x):
             return (
