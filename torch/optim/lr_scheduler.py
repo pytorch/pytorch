@@ -905,7 +905,7 @@ class ChainedScheduler(LRScheduler):
             self._schedulers[idx].load_state_dict(s)
 
 
-class ReduceLROnPlateau:
+class ReduceLROnPlateau(LRScheduler):
     """Reduce learning rate when a metric has stopped improving.
     Models often benefit from reducing the learning rate by a factor
     of 2-10 once learning stagnates. This scheduler reads a metrics

@@ -195,47 +195,144 @@ ReluCompileError:""",
         inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
         assume_static_by_default=False,
         translation_validation=True,
+        translation_validation_no_bisect=True,
         suppress_errors=False,
     )
     def test_trigger_on_error(self):
         from torch.fx.experimental.validator import ValidationException
 
         @torch.compile
-        def fn(x):
-            return x.reshape(-1, 4)
+        def fn(x, shape):
+            return x.split(shape)
 
         self.assertExpectedInlineMunged(
             ValidationException,
-            lambda: fn(torch.randn(20)),
+            lambda: fn(torch.randn(20), (5, 10, 5)),
             """\
 translation validation failed.
 
 Model:
+  ==> L['shape'][0]: 2
+  ==> L['shape'][1]: 2
+  ==> L['shape'][2]: 4
+  ==> L['x'].size()[0]: 9
   ==> L['x'].storage_offset(): 0
-  ==> s0: 4
   ==> L['x'].stride()[0]: 1
-  ==> L['x'].size()[0]: 4
+  ==> s0: 9
+  ==> s1: 2
+  ==> s2: 2
+  ==> s3: 4
 
 Assertions:
-  ==> (== L['x'].size()[0] s0)
-  ==> (> s0 1)
-  ==> (Not (And (< L['x'].size()[0] 4) (>= L['x'].size()[0] 0)))
-  ==> (True)
   ==> (== 0 L['x'].storage_offset())
   ==> (== 1 L['x'].stride()[0])
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][2] s3)
+  ==> (== L['x'].size()[0] s0)
+  ==> (> s0 1)
   ==> (True)
 
 Target Expressions:
-  ==> (>= 9223372036854775806 s0)
-  ==> (== 4 L['x'].size()[0])
+  ==> (!= (+ s3 (* 2 s1)) s0)
+  ==> (!= s1 s3)
+  ==> (<= (* 2 s1) (+ s0 (* -1 s3)))
+  ==> (<= (* 2 s1) s0)
+  ==> (<= (* 2 s1) s0)
+  ==> (<= (+ s3 (* 2 s1)) s0)
+  ==> (<= 0 (+ s0 (* -1 s1)))
+  ==> (<= 0 s1)
+  ==> (<= 0 s3)
+  ==> (<= 2 s1)
+  ==> (<= 2 s2)
+  ==> (<= 2 s3)
+  ==> (<= 6 s0)
+  ==> (<= s1 s0)
   ==> (== 0 L['x'].storage_offset())
-  ==> (> s0 0)
   ==> (== 1 L['x'].stride()[0])
-  ==> (<= 2 s0)
-  ==> (== 4 s0)
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s1)
+  ==> (== L['shape'][2] s3)
+  ==> (== L['x'].size()[0] s0)
+  ==> (== s2 s1)
+  ==> (> s0 0)
+  ==> (>= 9223372036854775802 s1)
+  ==> (>= 9223372036854775802 s2)
+  ==> (>= 9223372036854775802 s3)
+  ==> (>= 9223372036854775806 s0)
+  ==> (And (<= (* 2 s1) s0) (<= (* -1 s0) (* 2 s1)))
+  ==> (And (<= s1 s0) (<= (* -1 s0) s1))
 
 Failed Source Expressions:
-  ==> (!= 4 L['x'].size()[0])""",
+  ==> (!= L['shape'][0] L['shape'][1])
+  ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])
+  ==> (== L['shape'][0] L['shape'][2])""",
+        )
+
+    @skipIf(not TEST_Z3, "z3 not installed")
+    @torch._dynamo.config.patch(
+        inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY=True,
+        assume_static_by_default=False,
+        translation_validation=True,
+        suppress_errors=False,
+    )
+    def test_trigger_bisect_on_error(self):
+        from torch.fx.experimental.validator import BisectValidationException
+
+        @torch.compile
+        def fn(x, shape):
+            return x.split(shape)
+
+        self.assertExpectedInlineMunged(
+            BisectValidationException,
+            lambda: fn(torch.randn(20), (5, 10, 5)),
+            """\
+translation validation failed when evaluating: Eq(s1 + s2 + s3, s0)
+
+Failure ocurred while running node:
+    %split : [num_users=3] = call_method[target=split](args = (%l_x_, (%l_shape_0_, %l_shape_1_, %l_shape_2_)), kwargs = {})
+
+Model:
+  ==> L['shape'][0]: -9223372036854775807
+  ==> L['shape'][1]: -9223372036854775807
+  ==> L['shape'][2]: -9223372036854775807
+  ==> L['x'].size()[0]: 3
+  ==> L['x'].storage_offset(): 0
+  ==> L['x'].stride()[0]: 1
+  ==> s0: 3
+  ==> s1: -9223372036854775807
+  ==> s2: -9223372036854775807
+  ==> s3: -9223372036854775807
+
+Assertions:
+  ==> (== 0 L['x'].storage_offset())
+  ==> (== 1 L['x'].stride()[0])
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][2] s3)
+  ==> (== L['x'].size()[0] s0)
+  ==> (> s0 1)
+
+Target Expressions:
+  ==> (!= (+ s1 s2 s3) s0)
+  ==> (<= -9223372036854775808 s1)
+  ==> (<= -9223372036854775808 s2)
+  ==> (<= -9223372036854775808 s3)
+  ==> (<= 2 s0)
+  ==> (== 0 L['x'].storage_offset())
+  ==> (== 1 L['x'].stride()[0])
+  ==> (== L['shape'][0] s1)
+  ==> (== L['shape'][1] s2)
+  ==> (== L['shape'][2] s3)
+  ==> (== L['x'].size()[0] s0)
+  ==> (> s0 0)
+  ==> (>= 9223372036854775806 s0)
+  ==> (>= 9223372036854775807 s1)
+  ==> (>= 9223372036854775807 s2)
+  ==> (>= 9223372036854775807 s3)
+
+Failed Source Expressions:
+  ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
         )
 
 

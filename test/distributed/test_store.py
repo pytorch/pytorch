@@ -1,16 +1,19 @@
 # Owner(s): ["oncall: distributed"]
 
+import datetime
 import os
 import socket
 import sys
 import tempfile
 import time
+import threading
 from datetime import timedelta
 from sys import platform
 
 import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
+from torch.distributed import DistNetworkError, DistError
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 
@@ -253,6 +256,9 @@ class TCPStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+    def _create_store_with_ws(self, addr, world_size):
+        return create_tcp_store(addr, world_size, wait_for_workers=False)
+
     def test_address_already_in_use(self):
         err_msg_reg = "^The server socket has failed to listen on any local "
         with self.assertRaisesRegex(RuntimeError, err_msg_reg):
@@ -361,7 +367,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
 
     def _multi_worker_helper(self, world_size):
         addr = DEFAULT_HOSTNAME
-        server_store = create_tcp_store(addr, world_size, wait_for_workers=False)
+        server_store = self._create_store_with_ws(addr, world_size)
         server_store.set("key", "value")
         port = server_store.port
 
@@ -397,6 +403,17 @@ class TCPStoreTest(TestCase, StoreTestBase):
         v0, v1 = store.multi_get(["foo", "bar"])
         self.assertEqual(b"po", v0)
         self.assertEqual(b"tato", v1)
+
+class LibUvTCPStoreTest(TCPStoreTest):
+
+    def _create_store(self):
+        store = create_tcp_store(use_libuv=True)
+        store.set_timeout(timedelta(seconds=300))
+        return store
+
+    def _create_store_with_ws(self, addr, world_size):
+        return create_tcp_store(addr, world_size, wait_for_workers=False, use_libuv=True)
+
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -544,12 +561,13 @@ class RendezvousTCPTest(TestCase):
             next(gen)
 
     def test_dns_timeout(self):
-        with self.assertRaisesRegex(TimeoutError, "client socket has timed out after.*dnsnotexist"):
+        with self.assertRaisesRegex(DistNetworkError, "client socket has timed out after.*dnsnotexist") as manager:
             gen = dist.rendezvous(
                 "tcp://dnsnotexist:23456?world_size=2&rank=0",
                 timeout=timedelta(seconds=1),
             )
             next(gen)
+        self.assertTrue(isinstance(manager.exception, DistError))
 
     @retry_on_connect_failures
     def test_nominal(self):
@@ -600,6 +618,11 @@ class RendezvousTCPTest(TestCase):
         time_diff = end - start
         self.assertGreater(test_store_timeout.seconds * 10, time_diff)
 
+    def test_tcp_store_url_with_libuv(self):
+        url = self.create_tcp_url()
+        gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
+        store0, rank0, size0 = next(gen0)
+        self.assertTrue(store0.libuvBackend)
 
 class DummyStore(dist.Store):
     def __init__(self):
@@ -697,7 +720,9 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
         dist.HashStore(),
         dist.PrefixStore("pre", dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)),
         create_tcp_store(),
-        dist.PrefixStore("pre", create_tcp_store())
+        create_tcp_store(use_libuv=True),
+        dist.PrefixStore("pre", create_tcp_store()),
+        dist.PrefixStore("pre", create_tcp_store(use_libuv=True)),
     ]
 
     @property
@@ -708,8 +733,8 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
-    # Iterates over self.stores, keep 5 in sync with len(self.stores).
-    @parametrize("i", range(5))
+    # Iterates over self.stores, keep 7 in sync with len(self.stores).
+    @parametrize("i", range(7))
     def test_wait(self, i):
         store = self.stores[i]
         store.set_timeout(timedelta(seconds=2))
@@ -721,6 +746,53 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
 
 
 instantiate_parametrized_tests(TestMultiThreadedWait)
+
+@skip_if_win32()
+class TimeoutTest(TestCase):
+    def tearDown(self):
+        import signal
+        super().tearDown()
+        signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+
+    def test_interrupt_doesnt_break_wait(self):
+        import signal
+        rank_res = [None, None]
+
+        def run(rank, my_store):
+            nonlocal rank_res
+            try:
+                if rank == 0:
+                    time.sleep(4)
+                    my_store.set("foo", "bar")
+                else:
+                    my_store.wait(["foo"], datetime.timedelta(seconds=10))
+                rank_res[rank] = True
+            except Error as e:
+                rank_res[rank] = e
+            time.sleep(1)
+
+        rank0_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=0, world_size=2, is_master=True, wait_for_workers=False)
+        rank1_store = dist.TCPStore(
+            host_name=DEFAULT_HOSTNAME, port=rank0_store.port, world_size=2, is_master=False, wait_for_workers=False)
+
+        ths = []
+        for i in range(2):
+            t = threading.Thread(target=run, args=(i, [rank0_store, rank1_store][i],))
+            t.start()
+            ths.append(t)
+
+        def handler(a, b):
+            pass
+
+        signal.signal(signal.SIGUSR1, handler)
+        time.sleep(1)
+        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+
+        for t in ths:
+            t.join()
+        self.assertTrue(rank_res[0], "rank0")
+        self.assertTrue(rank_res[1], "rank1")
 
 if __name__ == "__main__":
     assert (

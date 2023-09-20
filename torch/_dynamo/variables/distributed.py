@@ -92,7 +92,7 @@ class PlacementVariable(DistributedVariable):
 
         from torch.distributed._tensor.placement_types import Placement
 
-        return istype(value, Placement)
+        return isinstance(value, Placement)
 
     def as_python_constant(self):
         return self.value
