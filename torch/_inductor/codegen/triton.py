@@ -1817,7 +1817,7 @@ class TritonKernel(Kernel):
         size_hints = []
         for numel in self.numels:
             numel_hint = V.graph.sizevars.symbolic_hint(numel)
-            if not isinstance(numel_hint, int):
+            if not isinstance(numel_hint, (int, sympy.Integer)):
                 # This default heuristic hint was picked carefuly: it is
                 # large, to ensure that we don't shrink the block size (since
                 # if you don't have many elements, it'd be wasteful to pick a
