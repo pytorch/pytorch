@@ -106,9 +106,6 @@ class CudaInterface(DeviceInterface):
 
         @staticmethod
         def get_device_properties(device: _device_t = None):
-            if not torch.cuda.is_available():
-                return {}
-
             if device is not None:
                 if isinstance(device, str):
                     device = torch.device(device)

@@ -1678,7 +1678,8 @@ class CUDACodeCache:
 
 def caching_device_properties():
     for _, device_interface in get_registered_device_interfaces():
-        device_interface.Worker.get_device_properties()
+        if device_interface.is_available():
+            device_interface.Worker.get_device_properties()
 
 
 def _worker_compile(
