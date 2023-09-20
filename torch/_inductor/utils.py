@@ -36,12 +36,12 @@ from unittest import mock
 import sympy
 
 import torch
-
 from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
+
 from . import config
 
 log = logging.getLogger(__name__)
@@ -310,7 +310,7 @@ def synchronize(device: str = "cuda"):
 
 
 def timed(
-    model: Callable[..., Any], example_inputs, device: str = "cuda", times: int = 1
+    model: Callable[..., Any], example_inputs, times: int = 1, device: str = "cuda"
 ) -> float:
     synchronize(device)
     torch.manual_seed(1337)
@@ -325,9 +325,9 @@ def timed(
 
 
 def print_performance(
-    fn, args=(), device: str = "cuda", times=10, repeat=10, baseline=1.0
+    fn, args=(), times=10, repeat=10, baseline=1.0, device: str = "cuda"
 ):
-    timings = torch.tensor([timed(fn, args, device, times) for _ in range(repeat)])
+    timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
