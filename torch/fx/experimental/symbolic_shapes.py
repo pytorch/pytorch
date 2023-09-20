@@ -66,8 +66,12 @@ __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP", "free_symbols", "is_symbol_binding_fx_node",
-    "is_concrete_bool",
+    "is_concrete_bool", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
 ]
+
+# FX node metadata keys for symbolic shape FX graph.
+SHAPEENV_EVENT_KEY = "shapeenv_event"
+CURRENT_NODE_KEY = "current_node"
 
 # These are modules that contain generic code for interacting with ShapeEnv
 # which are unlikely to identify a particular interesting guard statement
@@ -1018,6 +1022,19 @@ class SymNode:
     def bool_(self):
         return self.guard_bool("", 0)
 
+    def is_symbolic(self):
+        return True
+
+    def singleton_int(self):
+        return None
+
+    def is_constant(self):
+        return False
+
+def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
+    if isinstance(val, (int, float, bool)):
+        return False
+    return val.node.is_symbolic()
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -1267,7 +1284,12 @@ unary_magic_methods = {
     'sym_not',
 }
 
-bool_magic_methods = {"and", "or", "sym_not"}
+# Most methods are only registered on SymInt and SymFloat
+# Some methods are only be registered on SymBool
+only_bool_magic_methods = {"and", "or", "sym_not"}
+# Methods that are also on SymBool, in addition to on SymInt and SymFloat
+also_bool_magic_methods = {"eq"}
+bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
@@ -1286,6 +1308,10 @@ def method_to_operator(method):
         op = getattr(operator, method_attr)
     return op
 
+def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
+    int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
+    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
+
 SYMPY_INTERP = {
     'Eq': operator.eq,
     'Ne': operator.ne,
@@ -1301,6 +1327,7 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
 }
 
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
@@ -1492,20 +1519,53 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
+    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+        if isinstance(x, (int, float, bool)):
+            return x
+        if isinstance(x, SymBool):
+            return x.node.guard_bool("", 0)
+        raise AssertionError("expect to be called with constant SymBools")
+
+    def is_constant(x):
+        if isinstance(x, (int, float, bool)):
+            return True
+        if isinstance(x, (SymInt, SymFloat, SymBool)):
+            return x.node.is_constant()
+        return False
+
+    # Before and after performing the operation, check if any operands are constant.
+    # If so, extract out the constant values first. If `self` itself is a
+    # constant, then "redispatch" by calling back into the operator. Sometimes
+    # this means that operations involving SymBool return plain bools.
+    # Alternatively, we could also rewrap into constant Symbool (i.e. by
+    # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
+    # today for no particular reason.
     def unary_magic_impl(self):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        return wrap_node(getattr(self.node, method_attr)(other_node))
+        ret = wrap_node(getattr(self.node, method_attr)(other_node))
+        return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        return wrap_node(getattr(other_node, method_attr)(self.node))
+        ret = wrap_node(getattr(other_node, method_attr)(self.node))
+        return get_constant(ret) if is_constant(ret) else ret
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
@@ -1515,11 +1575,13 @@ def _make_user_magic(method, user_type):
             setattr(user_type, f"__r{method}__", rbinary_magic_impl)
 
 for method, func in magic_methods.items():
-    if method in bool_magic_methods:
+    if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
-    else:
-        _make_user_magic(method, SymInt)
-        _make_user_magic(method, SymFloat)
+        continue
+    if method in also_bool_magic_methods:
+        _make_user_magic(method, SymBool)
+    _make_user_magic(method, SymInt)
+    _make_user_magic(method, SymFloat)
 
 del method
 del func
@@ -2412,6 +2474,11 @@ class ShapeEnv:
             self.name_to_node.pop(node.name)
             self.graph.erase_node(node)
 
+    def add_fx_node_metadata(self, node: torch.fx.Node) -> None:
+        from torch._dynamo.utils import get_current_node
+        node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
+        node.meta[CURRENT_NODE_KEY] = get_current_node()
+
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
 
@@ -2701,6 +2768,9 @@ class ShapeEnv:
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
+    def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
+        return str(symbol).startswith("i")
+
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
@@ -2723,7 +2793,10 @@ class ShapeEnv:
     ) -> "sympy.Expr":
         # 'positive' is None for unspecified symbols, since we can't
         # assume that it will be neither positive nor negative.
-        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None)
+
+        # We don't want to specialize zero one val for unspecified symbol
+        # so that we can always get a new symbol despite val.
+        return self.create_symbol(val, source, dynamic_dim, constraint_dim, positive=None, do_not_specialize_zero_one=True)
 
     @record_shapeenv_event()
     def create_symbol(
@@ -2733,7 +2806,13 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
         positive: Optional[bool] = True,
+        do_not_specialize_zero_one: bool = False,
     ) -> "sympy.Expr":
+        if do_not_specialize_zero_one:
+            specialize_zero_one = False
+        else:
+            specialize_zero_one = self.specialize_zero_one
+
         assert isinstance(source, Source), f"{type(source)} {source}"
         assert not (positive and val < 0), f"positive set for negative value: {val}"
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
@@ -2753,7 +2832,7 @@ class ShapeEnv:
         else:
             raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        if val in (0, 1) and self.specialize_zero_one:
+        if val in (0, 1) and specialize_zero_one:
             r = self.val_to_var[val]
         elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
@@ -3761,6 +3840,14 @@ class ShapeEnv:
                 eql, _ = self.create_fx_call_function(operator.eq, (fx_node, concrete_val))
                 node, fresh = self.create_fx_call_function(torch._assert, (eql,))
 
+            assert node is not None
+            # If this is a fresh node, we have to remember the event index that
+            # corresponds to this assertion node.
+            # Reason: so that, given an assertion node, we can replay the ShapeEnv
+            # events until the point where this assertion node was freshly created.
+            if fresh:
+                self.add_fx_node_metadata(node)
+
         # After creating the FX node corresponding to orig_expr, we must make sure that
         # no error will be raised until the end of this function.
         #
@@ -3799,9 +3886,12 @@ class ShapeEnv:
 
             self._check_frozen(expr, concrete_val)
 
-            if torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY and isinstance(hint, bool):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    expr = sympy.Not(expr)
+            if (
+                    torch._dynamo.config.inject_EVALUATE_EXPR_flip_equality_TESTING_ONLY
+                    and isinstance(hint, bool)
+                    and isinstance(expr, (sympy.Eq, sympy.Ne))
+            ):
+                expr = sympy.Not(expr)
 
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
                 self._maybe_guard_eq(expr, bool(concrete_val))
@@ -3881,7 +3971,10 @@ class ShapeEnv:
             and fx_node is not None
             and not self._suppress_guards_tls()
         ):
-            self.create_fx_call_function(torch._assert, (fx_node,))
+            node, fresh = self.create_fx_call_function(torch._assert, (fx_node,))
+            assert node is not None
+            if fresh:
+                self.add_fx_node_metadata(node)
 
         self._check_frozen(expr, sympy.true)
 
