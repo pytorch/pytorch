@@ -63,9 +63,14 @@ class AOTInductorModelRunner:
             constraints=constraints,
         )
 
+        launcher = aot_inductor_launcher
+        is_cpu = any(x.device.type == "cpu" for x in example_inputs)
+        if is_cpu:
+            launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+
         optimized = torch.utils.cpp_extension.load_inline(
             name="aot_inductor",
-            cpp_sources=[aot_inductor_launcher],
+            cpp_sources=[launcher],
             functions=["run"],
             extra_ldflags=[so_path],
             with_cuda=True,
@@ -172,6 +177,21 @@ class AOTInductorTestsTemplate:
         example_inputs = (
             torch.randn(10, 10, device="cuda"),
             torch.randn(10, 10, device="cuda"),
+        )
+        self.check_model(Repro(), example_inputs)
+
+    def test_simple_cpu(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device="cpu")
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        example_inputs = (
+            torch.randn(10, 10, device="cpu"),
+            torch.randn(10, 10, device="cpu"),
         )
         self.check_model(Repro(), example_inputs)
 
