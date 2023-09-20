@@ -6,6 +6,7 @@
 
 #ifdef AT_PER_OPERATOR_HEADERS
 #include <ATen/ops/_assert_tensor_metadata_native.h>
+#include <ATen/ops/_functional_assert_tensor_metadata_native.h>
 #endif
 
 namespace at {

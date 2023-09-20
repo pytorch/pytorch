@@ -60,8 +60,10 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: f32[2]):
         invocation: f32[2] = functools_dynamo_interceding_fn_wrapper(grad_1);  grad_1 = None
-        empty_strided: f32[2] = torch.ops.aten.empty_strided.default([2], [1], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)   # noqa: B950
-        detach: f32[2] = torch.ops.aten.detach.default(invocation);  invocation = None
+        empty_strided: f32[2] = torch.ops.aten.empty_strided.default([2], [1], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+        assert_1: f32[2] = torch._functional_assert_tensor_metadata(invocation, (2,), (1,), torch.float32);  invocation = None
+        empty_strided_1: f32[2] = torch.ops.aten.empty_strided.default([2], [1], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
+        detach: f32[2] = torch.ops.aten.detach.default(assert_1);  assert_1 = None
         detach_1: f32[2] = torch.ops.aten.detach.default(detach);  detach = None
         detach_2: f32[2] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         detach_3: f32[2] = torch.ops.aten.detach.default(detach_2);  detach_2 = None
