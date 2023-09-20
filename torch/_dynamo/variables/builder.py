@@ -114,11 +114,11 @@ from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ComptimeVariable,
-    GetAttrFunctionVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
@@ -675,14 +675,11 @@ class VariableBuilder:
             )
         elif isinstance(value, types.GetSetDescriptorType):
             return GetSetDescriptorVariable(
-                value, guards=self.make_guards(GuardBuilder.ID_MATCH)
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
             )
-        elif isinstance(value, types.MethodWrapperType) and value.__name__ == "__get__":
-            return GetAttrFunctionVariable(
-                value,
-                value.__self__.__name__,
-                source=self.source,
-                guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
             )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
@@ -1753,6 +1750,8 @@ class SourcelessBuilder:
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

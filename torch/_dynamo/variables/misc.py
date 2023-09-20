@@ -635,23 +635,31 @@ class GetAttrVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
-class GetAttrFunctionVariable(VariableTracker):
-    def __init__(self, get_fn, name, **kwargs):
+class MethodWrapperVariable(VariableTracker):
+    def __init__(self, method_wrapper, **kwargs):
         super().__init__(**kwargs)
-        self.get_fn = get_fn
-        self.name = name
+        self.method_wrapper = method_wrapper
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        assert len(args) == 1 and len(kwargs) == 0
-        return args[0].var_getattr(tx, self.name)
+        if (
+            self.method_wrapper.__name__ == "__get__"
+            and isinstance(self.method_wrapper.__self__, types.GetSetDescriptorType)
+            and self.method_wrapper.__self__.__objclass__ is torch._C._TensorBase
+            and isinstance(args[0], variables.TensorVariable)
+        ):
+            assert len(args) == 1 and len(kwargs) == 0
+
+            return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
+
+        super().call_function(tx, args, kwargs)
 
     def is_python_constant(self):
         return True
 
     def as_python_constant(self):
-        return self.get_fn
+        return self.method_wrapper
 
 
 class GetSetDescriptorVariable(VariableTracker):
