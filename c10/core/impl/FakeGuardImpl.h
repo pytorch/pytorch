@@ -97,6 +97,9 @@ template <DeviceType T>
 thread_local DeviceIndex FakeGuardImpl<T>::current_device_ = 0;
 
 template <DeviceType T>
+constexpr DeviceType FakeGuardImpl<T>::static_type;
+
+template <DeviceType T>
 thread_local std::array<StreamId, kFakeGuardImplMaxDevices>
     FakeGuardImpl<T>::current_streams_ = {0, 0, 0, 0, 0, 0, 0, 0};
 
