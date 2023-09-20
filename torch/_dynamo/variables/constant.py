@@ -4,7 +4,7 @@ from typing import Dict, List
 import torch
 
 from .. import variables
-from ..exc import unimplemented
+from ..exc import unimplemented, UserError, UserErrorType
 from ..utils import istype, np
 from .base import typestr, VariableTracker
 
@@ -33,7 +33,7 @@ class ConstantVariable(VariableTracker):
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
 
-        if isinstance(value, np.number):
+        if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
             self.value = value
@@ -81,6 +81,12 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError from e
 
     def const_getattr(self, tx, name):
+        if isinstance(self.value, type):
+            raise UserError(
+                UserErrorType.ANTI_PATTERN,
+                "Can't access members of type(obj) for a generated custom object. "
+                "Please use __class__ instead",
+            )
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError()

@@ -74,6 +74,8 @@ select = [
     "PIE807",
     "PIE810",
     "PLE",
+    "PLR1722", # use sys exit
+    "PLW3301", # nested min max
     "RUF017",
     "TRY302",
 ]

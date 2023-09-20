@@ -2083,7 +2083,7 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     size = [1, 5, 10]
 
     for batch, m, n in product(batches, size, size):
-        for k in range(min(3, min(m, n))):
+        for k in range(min(3, m, n)):
             a = make_arg((*batch, m, k))
             b = make_arg((*batch, n, k))
             yield SampleInput(a, b, **kwargs)
@@ -7288,69 +7288,6 @@ def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwar
     for case, scale in product(cases, scale_vals):
         yield SampleInput(make_arg(case), make_mask(case), scale)
 
-def sample_inputs_embedding_bag_dense_backward(op_info, device, dtype, requires_grad, **kwargs):
-    for sample in sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
-        weight = sample.input  # NB: is flipped with indices!
-        assert len(sample.args) == 1
-        indices = sample.args[0]
-        offsets = sample.kwargs.pop('offsets', None)
-        per_sample_weights = sample.kwargs.pop('per_sample_weights', None)
-        # Some of the logic here is cribbed from torch.nn.functional.embedding_bag
-        if offsets is None:
-            offsets = torch.arange(0, indices.numel(), indices.size(1), dtype=indices.dtype, device=indices.device)
-            indices = indices.reshape(-1)
-            if per_sample_weights is not None:
-                per_sample_weights = per_sample_weights.reshape(-1)
-        num_weights = weight.size(0)
-        scale_grad_by_freq = sample.kwargs.pop('scale_grad_by_freq', False)
-        mode = sample.kwargs.pop('mode', 'mean')
-        if mode == "sum":
-            mode_enum = 0
-        elif mode == "mean":
-            mode_enum = 1
-        elif mode == "max":
-            mode_enum = 2
-        padding_idx = sample.kwargs.pop('padding_idx', None)
-        include_last_offset = sample.kwargs.pop('include_last_offset', False)
-
-        if padding_idx is None:
-            padding_idx = -1
-        else:
-            from torch._meta_registrations import maybe_wrap_dim
-            padding_idx = maybe_wrap_dim(padding_idx, weight.size(0))
-
-        sample.kwargs.pop('max_norm', None)  # not used by the op
-        sample.kwargs.pop('norm_type', None)  # not used by the op
-
-        # This is a precondition for the function, so force it
-        indices = indices.contiguous()
-        offsets = offsets.contiguous()
-
-        if sample.kwargs.pop('sparse', False):
-            # don't do sparse samples
-            continue
-
-        assert not sample.kwargs, sample.kwargs
-
-        # Run the internal op to compute maximum_indices/offset2bag/etc
-        # sparse=False.  Force grad enabled to ensure the gradient stuff
-        # gets allocated.
-        weight.requires_grad = True
-        with torch.enable_grad():
-            output, offset2bag, bag_size, maximum_indices = torch.ops.aten.embedding_bag.padding_idx(
-                weight, indices, offsets, scale_grad_by_freq, mode_enum, False, per_sample_weights, include_last_offset, padding_idx
-            )
-
-        grad = torch.randn_like(output)
-
-        yield SampleInput(
-            grad,
-            args=(
-                indices, offset2bag, bag_size, maximum_indices, num_weights, scale_grad_by_freq,
-                mode_enum, per_sample_weights, padding_idx
-            ),
-        )
-
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -9966,7 +9903,20 @@ op_db: List[OpInfo] = [
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestMathBits', 'test_conj_view', device_type='cuda')],
+                   'TestMathBits', 'test_conj_view', device_type='cuda'),
+               DecorateInfo(
+                   unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
+                   'TestDecomp',
+                   'test_comprehensive',
+                   dtypes=(torch.bfloat16, torch.float16),
+               ),
+               DecorateInfo(
+                   unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
+                   'TestDecomp',
+                   'test_quick',
+                   dtypes=(torch.bfloat16, torch.float16),
+               ),
+           ],
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
@@ -12294,8 +12244,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('native_batch_norm',
            aten_name='native_batch_norm',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -12325,8 +12274,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('_native_batch_norm_legit',
            aten_name='_native_batch_norm_legit',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -12779,8 +12727,7 @@ op_db: List[OpInfo] = [
            supports_expanded_weight=True,),
     OpInfo('nn.functional.instance_norm',
            # no ref because instance_norm will often have numerical instability (large numbers or nan)
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13973,8 +13920,7 @@ op_db: List[OpInfo] = [
     # See https://github.com/pytorch/pytorch/pull/63218#discussion_r688549391 for more details
     OpInfo('nn.functional.batch_norm',
            aten_name='batch_norm',
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13984,7 +13930,7 @@ op_db: List[OpInfo] = [
                # see https://github.com/pytorch/pytorch/issues/71286
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
-                            device_type='cpu', dtypes=(torch.bfloat16,)),
+                            device_type='cpu', dtypes=(torch.bfloat16, torch.float16)),
                # Trying to use forward AD with miopen_batch_norm that does not support it
                # because it has not been implemented yet.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
@@ -14039,12 +13985,6 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestBwdGradients",
-                "test_fn_grad",
-                active_if=TEST_WITH_ROCM,
-            )
         ),
         skips=(
             # RuntimeError: expected int at position 0, but got: Tensor
@@ -17783,27 +17723,6 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
-        "_embedding_bag_dense_backward",
-        op=torch.ops.aten._embedding_bag_dense_backward.default,
-        aten_name="_embedding_bag_dense_backward",
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16),
-        supports_out=False,
-        supports_autograd=False,
-        sample_inputs_func=sample_inputs_embedding_bag_dense_backward,
-        skips=(
-            # It might be OK to call contiguous() in the backward anyway, in
-            # case of direct use
-            DecorateInfo(unittest.skip('precondition for function is contiguity'), 'TestCommon', 'test_noncontiguous_samples'),
-            # NYI
-            DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
-                'TestInductorOpInfo', 'test_comprehensive'
-            ),
-        ),
-    ),
-    OpInfo(
         "nn.functional.dropout2d",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
@@ -17986,7 +17905,18 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
             # tests running very slowly break slow tests, so we skip them instead of using `slowTest`.
             DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_operator'),
+            DecorateInfo(
+                unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
+                'TestDecomp',
+                'test_comprehensive',
+                dtypes=(torch.bfloat16, torch.float16),
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
+                'TestDecomp',
+                'test_quick',
+                dtypes=(torch.bfloat16, torch.float16))),
         supports_out=False,
         supports_gradgrad=True,
         supports_forward_ad=True,
