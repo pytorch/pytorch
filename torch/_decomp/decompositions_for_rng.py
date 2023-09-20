@@ -64,7 +64,7 @@ class PhiloxState:
     """
     Represents a PhiloxRngState - (seed, offset) where offset = base_offset +
     relative_offset. seed and base_offset basically point to the rng state just
-    before tracing starts. relative offset tracks the totaly consumed offset at
+    before tracing starts. relative offset tracks the totally consumed offset at
     trace time.
     """
 
@@ -235,6 +235,8 @@ extra_random_decomps = get_decompositions(
         aten.normal_functional,
         aten.log_normal,
         aten.log_normal_,
+        aten.rrelu_with_noise,
+        aten.rrelu_with_noise_,
         aten.uniform_,
     ]
 )

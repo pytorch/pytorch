@@ -115,7 +115,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         enabled (bool): if ``False``, the RNG is not forked.  This is a convenience
             argument for easily disabling the context manager without having
             to delete it and unindent your Python code under it.
-        deivce(str): device type str, default is `cuda`. As for custom device,
+        deivce_type (str): device type str, default is `cuda`. As for custom device,
             see details in [Note: support the custom device with privateuse1]
     """
 
@@ -140,14 +140,14 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
             message = (f"{device_type.upper()} reports that you have {num_devices} available devices, and "
                        f"you have used {_caller} without explicitly specifying which devices are being used. "
                        f"For safety, we initialize *every* {device_type.upper()} device by default, which can "
-                       "be quite slow if you have a lot of {device_type.upper()}s. If you know that you are only"
-                       " making use of a few {device_type.upper()} devices, set the environment variable "
+                       f"be quite slow if you have a lot of {device_type.upper()}s. If you know that you are only"
+                       f" making use of a few {device_type.upper()} devices, set the environment variable "
                        f"{device_type.upper()}_VISIBLE_DEVICES or the '{_devices_kw}' keyword argument of {_caller} "
                        "with the set of devices you are actually using. For example, if you are using CPU only, "
                        "set device.upper()_VISIBLE_DEVICES= or devices=[]; if you are using device 0 only, "
                        f"set {device_type.upper()}_VISIBLE_DEVICES=0 or devices=[0].  To initialize all devices "
-                       "and suppress this warning, set the '{_devices_kw}' keyword argument to "
-                       "`range(torch.{device_type}.device_count())`.")
+                       f"and suppress this warning, set the '{_devices_kw}' keyword argument to "
+                       f"`range(torch.{device_type}.device_count())`.")
             warnings.warn(message)
             _fork_rng_warned_already = True
         devices = list(range(num_devices))

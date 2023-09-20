@@ -62,6 +62,10 @@ std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarType) {
       return std::make_pair("bits8", "");
     case at::ScalarType::Bits16:
       return std::make_pair("bits16", "");
+    case at::ScalarType::Float8_e5m2:
+      return std::make_pair("float8_e5m2", "");
+    case at::ScalarType::Float8_e4m3fn:
+      return std::make_pair("float8_e4m3fn", "");
     default:
       throw std::runtime_error("Unimplemented scalar type");
   }
@@ -79,8 +83,7 @@ void initializeDtypes() {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)};
 
   for (at::ScalarType scalarType : all_scalar_types) {
-    std::string primary_name, legacy_name;
-    std::tie(primary_name, legacy_name) = getDtypeNames(scalarType);
+    auto [primary_name, legacy_name] = getDtypeNames(scalarType);
     PyObject* dtype = THPDtype_New(scalarType, primary_name);
     torch::registerDtypeObject((THPDtype*)dtype, scalarType);
     Py_INCREF(dtype);

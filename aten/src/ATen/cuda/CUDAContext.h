@@ -21,8 +21,7 @@
 #include <c10/util/Logging.h>
 #include <ATen/cuda/Exceptions.h>
 
-namespace at {
-namespace cuda {
+namespace at::cuda {
 
 /*
 A common CUDA interface for ATen.
@@ -83,5 +82,4 @@ TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

@@ -148,27 +148,17 @@ def pad_addmm(
         ]
 
 
-def get_flops(dtype):
-    from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
-
-    assert dtype in (torch.float16, torch.bfloat16, torch.float32)
-    if dtype in (torch.float16, torch.bfloat16):
-        return get_max_tensorcore_tflops(dtype)
-
-    if torch.backends.cuda.matmul.allow_tf32:
-        return get_max_tensorcore_tflops(torch.float32)
-    else:
-        return get_max_simd_tflops(torch.float32)
-
-
 def is_mm_compute_bound(M, K, N, dtype):
-    from triton.testing import get_dram_gbps
-
-    arithmetic_intensity = (M * N * K) / (M * K + N * K + M * N)
+    denominator = M * K + N * K + M * N
+    if denominator == 0:
+        return False
+    arithmetic_intensity = (M * N * K) / denominator
 
     # Fails with AMD
     try:
-        machine_balance = (1000 * get_flops(dtype)) / get_dram_gbps()
+        machine_balance = (
+            1000 * utils.get_device_tflops(dtype)
+        ) / utils.get_gpu_dram_gbps()
     except Exception:
         return True
 
@@ -388,10 +378,6 @@ def pad_bmm(mat1, mat2, m_padded_length, k_padded_length, n_padded_length):
 
 @functools.lru_cache(None)
 def _pad_mm_init():
-    from ..._dynamo.utils import counters
-
-    counters_ref = counters["inductor"].copy()
-
     from .joint_graph import patterns
 
     if torch.cuda.is_available():
@@ -414,8 +400,6 @@ def _pad_mm_init():
     # workaround https://github.com/pytorch/pytorch/issues/97894
     # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
     rep = {"beta": 0.213377, "alpha": 0.113377}
-
-    counters_ref = counters["inductor"].copy()
 
     for pattern, replacement, args, workaround, extra_check in [
         (
@@ -459,7 +443,3 @@ def _pad_mm_init():
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
-
-    counters[
-        "inductor"
-    ] = counters_ref  # clear view matches encountered during mm tracing

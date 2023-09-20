@@ -5,14 +5,11 @@ import unittest
 import torch
 
 import torch._dynamo
-import torch._dynamo.backends.ipex
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
-from torch._dynamo.backends.ipex import has_ipex
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -99,38 +96,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    @unittest.skipIf(not has_ipex(), "requires ipex")
-    def test_ipex_fp32(self):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
-        model = model.to(memory_format=torch.channels_last)
-        model = model.eval()
-        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
-        r1 = model(input)
-        for dynamic_shapes in [True, False]:
-            torch._dynamo.reset()
-            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
-            with torch.no_grad():
-                for _ in range(3):
-                    r2 = opt_model(input)
-            self.assertTrue(same(r1, r2))
-            self.assertEqual(r2.dtype, torch.float32)
-
-    @unittest.skipIf(not has_ipex(), "requires ipex")
-    def test_ipex_bf16(self):
-        model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
-        model = model.to(memory_format=torch.channels_last)
-        model = model.eval()
-        input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
-        r1 = model(input)
-        for dynamic_shapes in [True, False]:
-            torch._dynamo.reset()
-            opt_model = torch._dynamo.optimize("ipex", dynamic=dynamic_shapes)(model)
-            with torch.no_grad(), torch.cpu.amp.autocast():
-                for _ in range(3):
-                    r2 = opt_model(input)
-            self.assertTrue(same(r1, r2.float(), tol=0.1))
-            self.assertEqual(r2.dtype, torch.bfloat16)
-
     def _check_backend_works(self, backend):
         model = Seq().eval()
         input = torch.randn(2, 10)
@@ -156,21 +121,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @requires_cuda()
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
-
-    @skipIfRocm
-    @requires_cuda()
-    def test_aot_ts_nvfuser(self):
-        self._check_backend_works("aot_ts_nvfuser")
-
-    @requires_cuda()
-    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
-    def test_nvprims_nvfuser(self):
-        self._check_backend_works("nvprims_nvfuser")
-
-    @requires_cuda()
-    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
-    def test_nvprims_aten(self):
-        self._check_backend_works("nvprims_aten")
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_onnxrt(self):

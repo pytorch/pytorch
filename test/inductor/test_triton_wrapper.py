@@ -12,7 +12,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 class TestTritonWrapper(TestCase):
     def get_compiled_module(self):
         compiled_module = None
-        for k, v in PyCodeCache.cache.items():
+        for v in PyCodeCache.cache.values():
             if hasattr(v, "benchmark_compiled_module"):
                 self.assertTrue(
                     compiled_module is None, "Found multiple compiled modules"

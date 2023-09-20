@@ -1,11 +1,12 @@
-import torch
-import contextlib
-from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List, Set
-from torch.utils.hooks import RemovableHandle
-from torch.utils._python_dispatch import TorchDispatchMode
-from collections import defaultdict
-import weakref
 import abc
+import contextlib
+import weakref
+from collections import defaultdict
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+
+import torch
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.hooks import RemovableHandle
 
 __all__ = [
     "saved_tensors_hooks",
@@ -16,6 +17,7 @@ __all__ = [
     "Node",
     "increment_version",
 ]
+
 
 class Node(abc.ABC):
     @abc.abstractmethod
@@ -35,7 +37,7 @@ class Node(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_functions(self) -> Tuple[Tuple[Optional['Node'], int], ...]:
+    def next_functions(self) -> Tuple[Tuple[Optional["Node"], int], ...]:
         ...
 
     @abc.abstractmethod
@@ -124,10 +126,12 @@ class Node(abc.ABC):
     @classmethod
     def __subclasshook__(cls, C):
         if cls is Node:
-            if ((C is not None and C is getattr(torch._C._functions, C.__name__, None))
-                    or issubclass(C, torch.autograd.function.BackwardCFunction)):
+            if (
+                C is not None and C is getattr(torch._C._functions, C.__name__, None)
+            ) or issubclass(C, torch.autograd.function.BackwardCFunction):
                 return True
         return NotImplemented
+
 
 def increment_version(tensor):
     """This function can be used to let autograd know that a given Tensor was modified
@@ -144,7 +148,8 @@ def increment_version(tensor):
     """
     torch._C._increment_version(tensor)
 
-class saved_tensors_hooks():
+
+class saved_tensors_hooks:
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
     Use this context-manager to define how intermediary results of an operation
@@ -205,14 +210,21 @@ class saved_tensors_hooks():
         Only one pair of hooks is allowed at a time. When recursively nesting this
         context-manager, only the inner-most pair of hooks will be applied.
     """
-    def __init__(self, pack_hook: Callable[[torch.Tensor], Any], unpack_hook: Callable[[Any], torch.Tensor]):
+
+    def __init__(
+        self,
+        pack_hook: Callable[[torch.Tensor], Any],
+        unpack_hook: Callable[[Any], torch.Tensor],
+    ):
         self.pack_hook = pack_hook
         self.unpack_hook = unpack_hook
 
     def __enter__(self):
-        torch._C._autograd._push_saved_tensors_default_hooks(self.pack_hook, self.unpack_hook)
+        torch._C._autograd._push_saved_tensors_default_hooks(
+            self.pack_hook, self.unpack_hook
+        )
 
-    def __exit__(self, *args: Any):
+    def __exit__(self, *args: object):
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
 
@@ -258,6 +270,7 @@ class save_on_cpu(saved_tensors_hooks):
         >>> # all intermediary tensors are released (deleted) after the call to backward
 
     """
+
     def __init__(self, pin_memory=False, device_type="cuda"):
         device_module = getattr(torch, device_type, torch.cuda)
 
@@ -268,7 +281,8 @@ class save_on_cpu(saved_tensors_hooks):
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
-                pin_memory=(device_module.is_available() and not tensor.is_sparse))
+                pin_memory=(device_module.is_available() and not tensor.is_sparse),
+            )
             packed.copy_(tensor)
             return (tensor.device, packed)
 
@@ -302,7 +316,9 @@ def disable_saved_tensors_hooks(error_message):
 
     """
     try:
-        maybe_prev_message = torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        maybe_prev_message = (
+            torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        )
         torch._C._autograd._saved_tensors_hooks_disable(error_message)
         yield
     finally:
@@ -313,7 +329,10 @@ def disable_saved_tensors_hooks(error_message):
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
-def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequence[Optional[torch.Tensor]]], None]):
+def register_multi_grad_hook(
+    tensors: Sequence[torch.Tensor],
+    fn: Callable[[Sequence[Optional[torch.Tensor]]], None],
+):
     r"""Registers a multi-grad backward hook.
 
     The hook will be called after gradients with respect to every tensor in
@@ -388,6 +407,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
                 fn(buffer[id])
                 del count[id]
                 del buffer[id]
+
         return inner_hook
 
     class Handle(RemovableHandle):
@@ -428,14 +448,18 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
 #    - if the clone exists, the tensor must've been modified in-place
 _allow_mutation_on_saved_tensors_enabled = False
 
+
 def _get_tid(t) -> Tuple[int, int, int]:
     return (id(t), t.data_ptr(), t._version)
+
 
 def _get_sid(t) -> Tuple[int, int]:
     return (t.data_ptr(), t._version)
 
-class _Handle():
+
+class _Handle:
     pass
+
 
 class _swap_with_cloned(saved_tensors_hooks):
     def __init__(self, ctx):
@@ -462,7 +486,8 @@ class _swap_with_cloned(saved_tensors_hooks):
             handle = tup
             error_msg = (
                 "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
-                "in which the graph was originally recorded.")
+                "in which the graph was originally recorded."
+            )
             assert _allow_mutation_on_saved_tensors_enabled, error_msg
             if handle in ctx.cloned:
                 res = ctx.cloned[handle]
@@ -472,6 +497,7 @@ class _swap_with_cloned(saved_tensors_hooks):
             return res
 
         super().__init__(pack_hook, unpack_hook)
+
 
 class _CloneArgBeforeMutateMode(TorchDispatchMode):
     def __init__(self, ctx):
@@ -509,18 +535,24 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
         rs = func(*args, **kwargs)
         return rs
 
-class _AllowMutationOnSavedContext():
+
+class _AllowMutationOnSavedContext:
     def __init__(self):
         self.cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
         self.original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-        self.tid_to_weakhandle: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
-        self.sid_to_tid: Dict[Tuple[int, int], Set[Tuple[int, int, int]]] = defaultdict(set)
+        self.tid_to_weakhandle: weakref.WeakValueDictionary = (
+            weakref.WeakValueDictionary()
+        )
+        self.sid_to_tid: Dict[Tuple[int, int], Set[Tuple[int, int, int]]] = defaultdict(
+            set
+        )
 
     def clear(self):
         self.cloned.clear()
         self.original.clear()
         self.tid_to_weakhandle.clear()
         self.sid_to_tid.clear()
+
 
 @contextlib.contextmanager
 def allow_mutation_on_saved_tensors():
@@ -560,7 +592,9 @@ def allow_mutation_on_saved_tensors():
     with _swap_with_cloned(ctx), _CloneArgBeforeMutateMode(ctx):
         try:
             if _allow_mutation_on_saved_tensors_enabled:
-                raise RuntimeError("allow_mutation_on_saved_tensors contexts cannot be nested")
+                raise RuntimeError(
+                    "allow_mutation_on_saved_tensors contexts cannot be nested"
+                )
             _allow_mutation_on_saved_tensors_enabled = True
             yield ctx
         finally:

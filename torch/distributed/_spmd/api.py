@@ -143,7 +143,7 @@ def _rematerialize_optimizer(
     assert opt is not None
 
     # update opt.state with proxy tensors
-    orig_states: Dict[str, Any] = copy(opt.state)
+    orig_states = copy(opt.state)
     for n in named_states:
         # opt.state's key type is string, but optimizer uses Parameter as keys
         opt.state[params[n]] = named_states[n]  # type: ignore[index]
@@ -271,11 +271,17 @@ SPMD_DECOMP_TABLE = {
     aten._foreach_mul_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_mul.Scalar
     ),
+    aten._foreach_div_.Scalar: partial(
+        _foreach_binop_scalar_decomp, aten._foreach_div.Scalar
+    ),
     aten._foreach_neg_.default: partial(
         _foreach_unaop_decomp, aten._foreach_neg.default
     ),
     aten._foreach_reciprocal_.default: partial(
         _foreach_unaop_decomp, aten._foreach_reciprocal.default
+    ),
+    aten._foreach_sqrt_.default: partial(
+        _foreach_unaop_decomp, aten._foreach_sqrt.default
     ),
     aten._foreach_sub_.Scalar: partial(
         _foreach_binop_scalar_decomp, aten._foreach_sub.Scalar
@@ -383,7 +389,7 @@ def _compile(
     # can trace operations applied to them.
     def stateless_func(func, params, buffers, named_states, args, kwargs):
         with stateless._reparametrize_module(
-            cast(nn.Module, mod), {**params, **buffers}
+            mod, {**params, **buffers}
         ), _rematerialize_optimizer(
             opt, named_states, params
         ) if opt else nullcontext():

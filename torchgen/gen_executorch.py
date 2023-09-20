@@ -426,6 +426,10 @@ def gen_headers(
                     backend_indices=backend_indices,
                     native_function_decl_gen=dest.compute_native_function_declaration,
                 ),
+                "headers": [
+                    "#include <ATen/ATen.h>",
+                    "#include <torch/torch.h>",
+                ],
             },
         )
         aten_headers.append('#include "CustomOpsNativeFunctions.h"')
@@ -444,16 +448,26 @@ def gen_headers(
             ),
         },
     )
+    headers = {
+        "headers": [
+            "#include <executorch/runtime/core/exec_aten/exec_aten.h> // at::Tensor etc.",
+            "#include <executorch/codegen/macros.h> // TORCH_API",
+            "#include <executorch/runtime/kernel/kernel_runtime_context.h>",
+        ],
+    }
     if use_aten_lib:
         cpu_fm.write(
             "NativeFunctions.h",
-            lambda: {
-                "nativeFunctions_declarations": get_native_function_declarations(
-                    grouped_native_functions=native_functions,
-                    backend_indices=backend_indices,
-                    native_function_decl_gen=dest.compute_native_function_declaration,
-                ),
-            },
+            lambda: dict(
+                {
+                    "nativeFunctions_declarations": get_native_function_declarations(
+                        grouped_native_functions=native_functions,
+                        backend_indices=backend_indices,
+                        native_function_decl_gen=dest.compute_native_function_declaration,
+                    ),
+                },
+                **headers,
+            ),
         )
     else:
         ns_grouped_kernels = get_ns_grouped_kernels(
@@ -463,11 +477,14 @@ def gen_headers(
         )
         cpu_fm.write(
             "NativeFunctions.h",
-            lambda: {
-                "nativeFunctions_declarations": get_native_function_declarations_from_ns_grouped_kernels(
-                    ns_grouped_kernels=ns_grouped_kernels,
-                ),
-            },
+            lambda: dict(
+                {
+                    "nativeFunctions_declarations": get_native_function_declarations_from_ns_grouped_kernels(
+                        ns_grouped_kernels=ns_grouped_kernels,
+                    ),
+                },
+                **headers,
+            ),
         )
 
 
@@ -575,7 +592,7 @@ def translate_native_yaml(
         None
     """
     if use_aten_lib:
-        with open(aten_yaml_path, "r") as aten_yaml:
+        with open(aten_yaml_path) as aten_yaml:
             out_file.writelines(aten_yaml.readlines())
         return
 
@@ -604,7 +621,7 @@ def translate_native_yaml(
         or os.stat(native_yaml_path).st_size == 0
     ):
         return
-    with open(native_yaml_path, "r") as native_yaml:
+    with open(native_yaml_path) as native_yaml:
         native_es = yaml.load(native_yaml, Loader=LineLoader)
         if not native_es:
             return
@@ -641,7 +658,7 @@ def parse_yaml(
     Union[Dict[DispatchKey, Dict[OperatorName, BackendMetadata]], ETKernelIndex],
 ]:
     if path and os.path.exists(path) and os.stat(path).st_size > 0:
-        with open(path, "r") as f:
+        with open(path) as f:
             es = yaml.load(f, Loader=LineLoader)
 
         # Check for kernel index structure

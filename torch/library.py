@@ -4,7 +4,7 @@ import traceback
 import torch
 import weakref
 
-__all__ = ['Library', 'impl', 'define']
+__all__ = ['Library', 'impl', 'define', 'fallthrough_kernel']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -15,6 +15,11 @@ _impls: Set[str] = set()
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
 
+def fallthrough_kernel():
+    """
+    A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
+    """
+    raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 class Library:
     """
@@ -55,7 +60,7 @@ class Library:
         weakref.finalize(self, _del_library, _impls, self._op_impls)
 
     def __repr__(self):
-        return "Library(kind={}, ns={}, dispatch_key={})>".format(self.kind, self.ns, self.dispatch_key)
+        return f"Library(kind={self.kind}, ns={self.ns}, dispatch_key={self.dispatch_key})>"
 
     def define(self, schema, alias_analysis=""):
         r'''Defines a new operator and its semantics in the ns namespace.
@@ -75,7 +80,7 @@ class Library:
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
         # AliasAnalysis type in C++
         if alias_analysis not in ["", "FROM_SCHEMA", "CONSERVATIVE"]:
-            raise RuntimeError("Invalid alias_analysis type {}".format(alias_analysis))
+            raise RuntimeError(f"Invalid alias_analysis type {alias_analysis}")
         return self.m.define(schema, alias_analysis)
 
     def impl(self, op_name, fn, dispatch_key=''):
@@ -83,7 +88,8 @@ class Library:
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
-            fn: function that's the operator implementation for the input dispatch key.
+            fn: function that's the operator implementation for the input dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
 
@@ -94,7 +100,7 @@ class Library:
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         '''
         if not callable(fn):
-            raise TypeError("Input function is required to be a callable but found type {}".format(type(fn)))
+            raise TypeError(f"Input function is required to be a callable but found type {type(fn)}")
         if dispatch_key == '':
             dispatch_key = self.dispatch_key
 

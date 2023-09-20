@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # This file is generated, do not modify it!
 #
 # To update this file, run the update masked docs script as follows:

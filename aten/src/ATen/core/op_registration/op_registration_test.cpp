@@ -532,31 +532,29 @@ TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithRegularKernel_th
   EXPECT_TRUE(called_autograd);
 }
 
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallAutogradKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
+TEST(
+    OperatorRegistrationTest,
+    whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
+  auto registrar = c10::RegisterOperators().op(
+      "_test::dummy(Tensor dummy) -> ()",
+      c10::RegisterOperators::options()
+          .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
+          .kernel<decltype(autograd_kernel), &autograd_kernel>(
+              DispatchKey::Autograd));
 
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
 
-  // catchAll now maps to CompositeImplicitAutograd which has higher precedence than Autograd
+  // catchAll now maps to CompositeImplicitAutograd which has
+  // higher precedence than Autograd
   called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
+  op->typed<void(Tensor)>().call(
+      dummyTensor(DispatchKey::CPU, /*requires_grad=*/true));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
-}
-
-TEST(OperatorRegistrationTest, whenRegisteringAutogradKernelWithCatchAllKernel_thenCanCallCatchallKernel) {
-  auto registrar = c10::RegisterOperators().op("_test::dummy(Tensor dummy) -> ()", c10::RegisterOperators::options()
-    .catchAllKernel<decltype(nonautograd_kernel), nonautograd_kernel>()
-    .kernel<decltype(autograd_kernel), &autograd_kernel>(DispatchKey::Autograd));
-
-  auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
-  ASSERT_TRUE(op.has_value());
 
   called_nonautograd = called_autograd = false;
-  op->typed<void (Tensor)>().call(dummyTensor(DispatchKey::CPU));
+  op->typed<void(Tensor)>().call(dummyTensor(DispatchKey::CPU));
   EXPECT_TRUE(called_nonautograd);
   EXPECT_FALSE(called_autograd);
 }

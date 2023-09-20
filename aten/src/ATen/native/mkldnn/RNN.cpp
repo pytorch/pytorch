@@ -9,6 +9,7 @@
 #include <c10/core/GradMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -214,23 +215,6 @@ static Tensor _shuffle_bias(const Tensor& bias_ih, const Tensor& bias_hh, int64_
   return bias_ih + bias_hh;
 }
 
-// Create mkldnn memory view from ATen tensor
-static inline ideep::tensor get_mkldnn_tensor(
-    const Tensor& tensor, const ideep::tensor::desc& desc) {
-  TORCH_CHECK(
-      tensor.device().is_cpu(),
-      "get_mkldnn_tensor expects CPU tensor input");
-  TORCH_CHECK(
-      tensor.layout() == at::Layout::Strided,
-      "get_mkldnn_tensor expects dense tensor input");
-  TORCH_CHECK(
-      tensor.scalar_type() == at::ScalarType::Float ||
-          tensor.scalar_type() == at::ScalarType::BFloat16 ||
-          tensor.scalar_type() == at::ScalarType::Half,
-      "get_mkldnn_tensor expects float or bfloat16 tensor input");
-  return {desc, tensor.data_ptr()};
-}
-
 std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
     const Tensor& w0,
     const Tensor& w1,
@@ -266,30 +250,31 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer(const Tensor& input,
   auto weight_ih = _shuffle_weight(w0, rnn.mode);
   auto weight_hh = _shuffle_weight(w1, rnn.mode);
 
+  // Packed weight will be mkldnn layout while bias won't be packed
   auto bias = has_biases
       ? _shuffle_bias(w2, w3, rnn.mode)
-      : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options());
+      : at::zeros({rnn.num_bias_gates * rnn.hidden_size}, weight_ih.options().layout(at::Layout::Strided));
 
   // per layer input size
   int64_t input_size = input.size(2);
-  auto x = get_mkldnn_tensor(
+  ideep::tensor w1_, w2_;
+  auto x = itensor_view_from_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input)));
-  auto hx = get_mkldnn_tensor(
+  auto hx = itensor_view_from_dense(
       hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_)));
-  auto cx = get_mkldnn_tensor(
+  auto cx = itensor_view_from_dense(
       cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_)));
-  auto b = get_mkldnn_tensor(
+  auto b = itensor_view_from_dense(
       bias, rnn.bias_desc(get_mkldnn_dtype(bias)));
-  auto y = get_mkldnn_tensor(
+  auto y = itensor_view_from_dense(
       output, rnn.dst_layer_desc(get_mkldnn_dtype(output)));
-  auto hy = get_mkldnn_tensor(
+  auto hy = itensor_view_from_dense(
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_)));
-  auto cy = get_mkldnn_tensor(
+  auto cy = itensor_view_from_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_)));
-  auto w1_ = get_mkldnn_tensor(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
-  auto w2_ = get_mkldnn_tensor(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
-
+  w1_ = weight_ih.is_mkldnn() ? itensor_from_tensor(weight_ih) : itensor_view_from_dense(weight_ih, rnn.weights_layer_desc(input_size, get_mkldnn_dtype(weight_ih)));
+  w2_ = weight_hh.is_mkldnn() ? itensor_from_tensor(weight_hh) : itensor_view_from_dense(weight_hh, rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh)));
   if (at::GradMode::is_enabled()) {
     Tensor workspace = Tensor();
     auto pd = ideep::lstm_forward_training::prepare(
@@ -362,27 +347,27 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 
   // per layer input size
   int64_t input_size = input.size(2);
-  auto x = get_mkldnn_tensor(
+  auto x = itensor_view_from_dense(
       input,
       rnn.src_layer_desc(input_size, get_mkldnn_dtype(input.scalar_type())));
-  auto hx = get_mkldnn_tensor(
+  auto hx = itensor_view_from_dense(
       hx_, rnn.src_iter_desc(get_mkldnn_dtype(hx_.scalar_type())));
-  auto cx = get_mkldnn_tensor(
+  auto cx = itensor_view_from_dense(
       cx_, rnn.src_iter_c_desc(get_mkldnn_dtype(cx_.scalar_type())));
-  auto w1 = get_mkldnn_tensor(
+  auto w1 = itensor_view_from_dense(
       weight_ih,
       rnn.weights_layer_desc(
           input_size, get_mkldnn_dtype(weight_ih.scalar_type())));
-  auto w2 = get_mkldnn_tensor(
+  auto w2 = itensor_view_from_dense(
       weight_hh,
       rnn.weights_iter_desc(get_mkldnn_dtype(weight_hh.scalar_type())));
-  auto b = get_mkldnn_tensor(
+  auto b = itensor_view_from_dense(
       bias, rnn.bias_desc(get_mkldnn_dtype(bias.scalar_type())));
-  auto y = get_mkldnn_tensor(
+  auto y = itensor_view_from_dense(
       output, rnn.dst_layer_desc(get_mkldnn_dtype(output.scalar_type())));
-  auto hy = get_mkldnn_tensor(
+  auto hy = itensor_view_from_dense(
       hy_, rnn.dst_iter_desc(get_mkldnn_dtype(hy_.scalar_type())));
-  auto cy = get_mkldnn_tensor(
+  auto cy = itensor_view_from_dense(
       cy_, rnn.dst_iter_c_desc(get_mkldnn_dtype(cy_.scalar_type())));
 
   // Create diff_* ATen tensor and corresponding ideep tensor as fp32
@@ -399,18 +384,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
   auto diff_b_ =
       at::empty(bias.sizes(), bias.options().dtype(at::ScalarType::Float));
 
-  auto diff_x = get_mkldnn_tensor(
+  auto diff_x = itensor_view_from_dense(
       diff_x_, rnn.src_layer_desc(input_size, ideep::tensor::data_type::f32));
-  auto diff_hx = get_mkldnn_tensor(
+  auto diff_hx = itensor_view_from_dense(
       diff_hx_, rnn.src_iter_desc(ideep::tensor::data_type::f32));
-  auto diff_cx = get_mkldnn_tensor(
+  auto diff_cx = itensor_view_from_dense(
       diff_cx_, rnn.src_iter_c_desc(ideep::tensor::data_type::f32));
-  auto diff_w1 = get_mkldnn_tensor(
+  auto diff_w1 = itensor_view_from_dense(
       diff_w1_,
       rnn.weights_layer_desc(input_size, ideep::tensor::data_type::f32));
-  auto diff_w2 = get_mkldnn_tensor(
+  auto diff_w2 = itensor_view_from_dense(
       diff_w2_, rnn.weights_iter_desc(ideep::tensor::data_type::f32));
-  auto diff_b = get_mkldnn_tensor(
+  auto diff_b = itensor_view_from_dense(
       diff_b_, rnn.bias_desc(ideep::tensor::data_type::f32));
 
   // Convert grad_y, grad_hy, grad_cy to fp32 in non-fp32 backward
@@ -428,18 +413,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
         grad_cy.sizes(), grad_cy.options().dtype(at::ScalarType::Float));
     grad_cy_.copy_(grad_cy);
 
-    diff_y = get_mkldnn_tensor(
+    diff_y = itensor_view_from_dense(
         grad_y_, rnn.dst_layer_desc(get_mkldnn_dtype(grad_y_.scalar_type())));
-    diff_hy = get_mkldnn_tensor(
+    diff_hy = itensor_view_from_dense(
         grad_hy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_hy_.scalar_type())));
-    diff_cy = get_mkldnn_tensor(
+    diff_cy = itensor_view_from_dense(
         grad_cy_, rnn.dst_iter_desc(get_mkldnn_dtype(grad_cy_.scalar_type())));
   } else {
-    diff_y = get_mkldnn_tensor(
+    diff_y = itensor_view_from_dense(
         grad_output, rnn.dst_layer_desc(ideep::tensor::data_type::f32));
-    diff_hy = get_mkldnn_tensor(
+    diff_hy = itensor_view_from_dense(
         grad_hy, rnn.dst_iter_desc(ideep::tensor::data_type::f32));
-    diff_cy = get_mkldnn_tensor(
+    diff_cy = itensor_view_from_dense(
         grad_cy, rnn.dst_iter_desc(ideep::tensor::data_type::f32));
   }
 
@@ -503,9 +488,10 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
       auto layer_hx = hx[index];
       auto layer_cx = cx[index];
       auto reverse = (direction > 0);
+      // bias won't be packed
       auto outputs = at::mkldnn_rnn_layer(layer_input, layer_weights[0], layer_weights[1],
-                                        has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options()),
-          has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options()), layer_hx,
+                                        has_biases ? layer_weights[2] : at::zeros(layer_weights[0].sizes(), layer_weights[0].options().layout(at::Layout::Strided)),
+          has_biases ? layer_weights[3] : at::zeros(layer_weights[1].sizes(), layer_weights[1].options().layout(at::Layout::Strided)), layer_hx,
           layer_cx, reverse, batch_sizes, mode, hidden_size, num_layers, has_biases, bidirectional, batch_first, train);
       layer_output[direction] = std::get<0>(outputs);
       layer_hy[index] = std::get<1>(outputs);

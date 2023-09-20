@@ -12,6 +12,7 @@ from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    TensorMeta,
 )
 
 aten = torch.ops.aten  # pyre-ignore
@@ -61,11 +62,9 @@ def _prop__foreach_binop_list(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(self, self, scalar) if scalar else (self, self),
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -108,13 +107,11 @@ def _prop__foreach_addcop_scalar(op_schema: OpSchema):
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(self, self, self, scalar)
                     if scalar
                     else (self, self, self),
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -158,11 +155,9 @@ def _prop__fused_adam(op_schema: OpSchema):
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=new_schemas + op_schema.args_schema[NT:],
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -190,11 +185,9 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(new_self, target) + op_schema.args_schema[2:],
                     kwargs_schema=op_schema.kwargs_schema,
-                    is_inplace=op_schema.is_inplace,
-                    is_out_variant=op_schema.is_out_variant,
                 )
             ],
         )
@@ -203,9 +196,9 @@ def _prop_nll_loss_forward(op_schema: OpSchema) -> OutputSharding:
             output_spec=(
                 # by default, nll_loss_forward conducts a reduction and returns
                 # a scalar tensor, and hence the _Partial placements.
-                DTensorSpec(mesh=self.mesh, placements=[_Partial()]),
+                DTensorSpec(mesh=self.mesh, placements=(_Partial(),)),
                 # the 2nd output total_weight is always a scalar tensor
-                DTensorSpec(mesh=self.mesh, placements=[Replicate()]),
+                DTensorSpec(mesh=self.mesh, placements=(Replicate(),)),
             )
         )
 
@@ -266,7 +259,7 @@ def _prop_select(op_schema: OpSchema) -> OutputSharding:
             new_placements.append(p)
 
     return OutputSharding(
-        output_spec=DTensorSpec(mesh=tensor.mesh, placements=new_placements)
+        output_spec=DTensorSpec(mesh=tensor.mesh, placements=tuple(new_placements))
     )
 
 
@@ -322,7 +315,7 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     weight_grad = (
         DTensorSpec(
             mesh=weight.mesh,
-            placements=[_Partial()] * weight.mesh.ndim,
+            placements=tuple([_Partial()] * weight.mesh.ndim),
         )
         if weight
         else None
@@ -330,7 +323,7 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     bias_grad = (
         DTensorSpec(
             mesh=bias.mesh,
-            placements=[_Partial()] * bias.mesh.ndim,
+            placements=tuple([_Partial()] * bias.mesh.ndim),
         )
         if bias
         else None
@@ -356,7 +349,6 @@ def _refine_sharding(
     # consider the operating dimension as a singleton to prevent sharding on it
     # however, if active_dim is None, this means the input and output shapes are equal and
     # we'll apply exactly the pointwise rule.
-    from torch.fx.passes.shape_prop import TensorMetadata
 
     args_schema = []
     for s in op_schema.args_schema[:2]:
@@ -365,28 +357,22 @@ def _refine_sharding(
             DTensorSpec(
                 mesh=s.mesh,  # type: ignore[attr-defined]
                 placements=s.placements,  # type: ignore[attr-defined]
-                tensor_meta=TensorMetadata(
+                tensor_meta=TensorMeta(
                     shape=torch.Size(
                         s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]
                     )
                     if active_dim is not None
                     else s.shape,
-                    dtype=s.tensor_meta.dtype,
-                    requires_grad=s.tensor_meta.requires_grad,
                     stride=s.tensor_meta.stride,
-                    memory_format=s.tensor_meta.memory_format,
-                    is_quantized=s.tensor_meta.is_quantized,
-                    qparams=s.tensor_meta.qparams,
+                    dtype=s.tensor_meta.dtype,
                 ),
             )
         )
 
     op_schema = OpSchema(
-        func_schema=op_schema.func_schema,
+        op=op_schema.op,
         args_schema=args_schema,  # type: ignore[arg-type]
         kwargs_schema={},
-        is_inplace=op_schema.is_inplace,
-        is_out_variant=op_schema.is_out_variant,
     )
     output_sharding = pointwise_rule(op_schema, linearity=False)
     if output_sharding.output_spec:
@@ -452,7 +438,7 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
             output_spec=None,
             schema_suggestions=[
                 OpSchema(
-                    func_schema=op_schema.func_schema,
+                    op=op_schema.op,
                     args_schema=(
                         DTensorSpec(
                             mesh=input.mesh,

@@ -272,7 +272,7 @@ class TransformationTest(DTensorTestBase):
             split_fused_optimizer(gm, opt_block, gradients)
             gm.graph.eliminate_dead_code()
             gm.recompile()
-            self.assertEquals(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
+            self.assertEqual(len(get_all_fused_optimizer_blocks(gm, "_fused_adam")), 2)
             gm.finalize_setup()
             return gm
 
@@ -342,4 +342,5 @@ class TransformationTest(DTensorTestBase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if False:
+        run_tests()

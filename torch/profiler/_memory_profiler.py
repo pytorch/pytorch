@@ -16,6 +16,8 @@ from typing import (
     Union,
 )
 
+from typing_extensions import Literal
+
 import torch
 from torch._C import FunctionSchema
 from torch._C._autograd import _ProfilerResult
@@ -30,12 +32,11 @@ from torch._C._profiler import (
 from torch._utils import _element_size
 from torch.profiler import _utils
 
-from typing_extensions import Literal
-
 KeyAndID = Tuple["Key", int]
 TensorAndID = Tuple["TensorKey", int]
 
 log = logging.getLogger(__name__)
+
 
 class Category(enum.Enum):
     INPUT = enum.auto()
@@ -45,6 +46,7 @@ class Category(enum.Enum):
     AUTOGRAD_DETAIL = enum.auto()
     PARAMETER = enum.auto()
     OPTIMIZER_STATE = enum.auto()
+
 
 _CATEGORY_TO_COLORS = {
     Category.PARAMETER: "darkgreen",
@@ -59,11 +61,15 @@ _CATEGORY_TO_COLORS = {
 
 _CATEGORY_TO_INDEX = {c: i for i, c in enumerate(_CATEGORY_TO_COLORS)}
 
+
 class Action(enum.Enum):
     PREEXISTING = enum.auto()
     CREATE = enum.auto()
     INCREMENT_VERSION = enum.auto()
     DESTROY = enum.auto()
+
+
+_ACTION_TO_INDEX = {i: i.value for i in Action}
 
 
 @dataclasses.dataclass(eq=True, unsafe_hash=False, frozen=True)
@@ -85,7 +91,7 @@ class _Storage:
     def __repr__(self) -> str:
         return f"{hex(self.ptr):>18} ({self.allocation_id})"
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, _Storage) and self.allocation_id == other.allocation_id
 
     def __hash__(self) -> int:
@@ -309,6 +315,8 @@ class SchemaMatcher:
             # Note that record_function annotations also go through this path,
             # so it is expected that some names will not correspond to PyTorch
             # operators.
+            if "::" not in name:
+                return None
             return tuple(torch._C._jit_get_schemas_for_operator(name))
         except RuntimeError:
             return None
@@ -687,14 +695,18 @@ class MemoryProfile:
                     ptr_and_device = (alloc_fields.ptr, key.device)
                     if is_allocation:
                         if ptr_and_device in live_unknown:
-                            output.append((t, Action.INCREMENT_VERSION, (key, 0), alloc_size))
+                            output.append(
+                                (t, Action.INCREMENT_VERSION, (key, 0), alloc_size)
+                            )
                         else:
                             live_unknown[ptr_and_device] = True
                             output.append((t, Action.CREATE, (key, 0), alloc_size))
                     else:
                         output.append((t, Action.DESTROY, (key, 0), -alloc_size))
                         if not live_unknown.pop(ptr_and_device, False):
-                            output.append((-1, Action.PREEXISTING, (key, 0), -alloc_size))
+                            output.append(
+                                (-1, Action.PREEXISTING, (key, 0), -alloc_size)
+                            )
 
         snapshot = self._category_snapshot()
         last_version = dict(sorted(snapshot.keys()))
@@ -737,11 +749,11 @@ class MemoryProfile:
 
         for node in self._data_flow_graph.flow_nodes:
             all_tensor_versions.update(((k, v) for k, (_, v) in node.inputs.items()))
-            all_tensor_versions.update(((key, 0) for key in node.intermediates))
+            all_tensor_versions.update((key, 0) for key in node.intermediates)
             all_tensor_versions.update(node.outputs.items())
 
         for i in self._categories._values.values():
-            all_tensor_versions.update(((key, 0) for key in i._by_id_keyset))
+            all_tensor_versions.update((key, 0) for key in i._by_id_keyset)
 
         return {
             (key, version): self._categories.get(key, version)
@@ -968,6 +980,7 @@ class MemoryProfile:
                             key, version, Category.AUTOGRAD_DETAIL
                         )
 
+
 class MemoryProfileTimeline:
     def __init__(self, memory_profile):
         """The minimum representation of the memory profile timeline
@@ -1043,28 +1056,103 @@ class MemoryProfileTimeline:
         times, sizes = self._coalesce_timeline(device)
         # TODO: Write a faster serialize (orjson not available in CI)
         import json
-        with open(path, 'w') as f:
+
+        with open(path, "w") as f:
             json.dump([times, sizes], f)
 
-    def export_memory_timeline_html(self, path, device, figsize=(20, 12), title=None) -> None:
+    def export_memory_timeline_raw(self, path, device_str) -> None:
+        """Saves the memory timeline as raw memory event tuples in the
+        form of (timestamp, action, numbytes, category)
+        as a JSON formatted file to the given path for the given
+        device."""
+        device = torch.device(device_str)
+        raw_events: List[Tuple[int, int, int, int]] = []
+
+        def get_category_index(key, version):
+            category = (
+                self.categories.get(key, version)
+                if isinstance(key, TensorKey)
+                else None
+            )
+            return _CATEGORY_TO_INDEX[category]
+
+        for t, action, (key, version), numbytes in self.timeline:
+            if key.device != device:
+                continue
+
+            if action in (Action.PREEXISTING, Action.CREATE):
+                raw_events.append(
+                    (
+                        t,
+                        _ACTION_TO_INDEX[action],
+                        numbytes,
+                        get_category_index(key, version),
+                    )
+                )
+
+            elif action == Action.INCREMENT_VERSION:
+                raw_events.append(
+                    (
+                        t,
+                        _ACTION_TO_INDEX[action],
+                        -numbytes,
+                        get_category_index(key, version),
+                    )
+                )
+                raw_events.append(
+                    (
+                        t,
+                        _ACTION_TO_INDEX[action],
+                        numbytes,
+                        get_category_index(key, version + 1),
+                    )
+                )
+
+            elif action == Action.DESTROY:
+                raw_events.append(
+                    (
+                        t,
+                        _ACTION_TO_INDEX[action],
+                        -numbytes,
+                        get_category_index(key, version),
+                    )
+                )
+
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
+        import json
+
+        with open(path, "w") as f:
+            json.dump(raw_events, f)
+
+    def export_memory_timeline_html(
+        self, path, device, figsize=(20, 12), title=None
+    ) -> None:
         """Exports the memory timeline as an HTML file which contains
         the memory timeline plot embedded as a PNG file."""
         # Check if user has matplotlib installed, return gracefully if not.
         import importlib.util
+
         matplotlib_spec = importlib.util.find_spec("matplotlib")
         if matplotlib_spec is None:
-            print("export_memory_timeline_html failed because matplotlib was not found.")
+            print(
+                "export_memory_timeline_html failed because matplotlib was not found."
+            )
             return
+
+        from base64 import b64encode
+        from os import remove
+        from tempfile import NamedTemporaryFile
 
         import matplotlib.pyplot as plt
         import numpy as np
-        from base64 import b64encode
-        from tempfile import NamedTemporaryFile
-        from os import remove
 
         mt = self._coalesce_timeline(device)
         times, sizes = np.array(mt[0]), np.array(mt[1])
         stacked = np.cumsum(sizes, axis=1) / 1024**3
+        max_memory_allocated = torch.cuda.max_memory_allocated()
+        max_memory_reserved = torch.cuda.max_memory_reserved()
 
         # Plot memory timeline as stacked data
         fig = plt.figure(figsize=figsize, dpi=80)
@@ -1078,24 +1166,28 @@ class MemoryProfileTimeline:
         axes.set_xlabel("Time (us)")
         axes.set_ylabel("Memory (GB)")
         title = "\n\n".join(
-            ([title] if title else []) + [f"Max: {stacked[:, -1].max():.2f} GB"]
+            ([title] if title else [])
+            + [
+                f"Max memory allocated: {max_memory_allocated/(10**9):.2f} GB \n"
+                f"Max memory reserved: {max_memory_reserved/(10**9):.2f} GB"
+            ]
         )
         axes.set_title(title)
 
         # Embed the memory timeline image into the HTML file
-        tmpfile = NamedTemporaryFile('wb', suffix='.png', delete=False)
+        tmpfile = NamedTemporaryFile("wb", suffix=".png", delete=False)
         tmpfile.close()
-        fig.savefig(tmpfile.name, format='png')
+        fig.savefig(tmpfile.name, format="png")
 
-        with open(tmpfile.name, 'rb') as tmp:
-            encoded = b64encode(tmp.read()).decode('utf-8')
-            html = """<html>
+        with open(tmpfile.name, "rb") as tmp:
+            encoded = b64encode(tmp.read()).decode("utf-8")
+            html = f"""<html>
 <head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
 <body>
-  <img src=\'data:image/png;base64,{}\'>
+  <img src='data:image/png;base64,{encoded}'>
 </body>
-</html>""".format(encoded)
+</html>"""
 
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 f.write(html)
         remove(tmpfile.name)

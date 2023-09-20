@@ -1,4 +1,5 @@
 from numbers import Number
+
 import torch
 from torch import nan
 from torch.distributions import constraints
@@ -6,7 +7,8 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['FisherSnedecor']
+__all__ = ["FisherSnedecor"]
+
 
 class FisherSnedecor(Distribution):
     r"""
@@ -14,7 +16,7 @@ class FisherSnedecor(Distribution):
 
     Example::
 
-        >>> # xdoctest: +IGNORE_WANT("non-deterinistic")
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> m = FisherSnedecor(torch.tensor([1.0]), torch.tensor([2.0]))
         >>> m.sample()  # Fisher-Snedecor-distributed with df1=1 and df2=2
         tensor([ 0.2453])
@@ -23,7 +25,7 @@ class FisherSnedecor(Distribution):
         df1 (float or Tensor): degrees of freedom parameter 1
         df2 (float or Tensor): degrees of freedom parameter 2
     """
-    arg_constraints = {'df1': constraints.positive, 'df2': constraints.positive}
+    arg_constraints = {"df1": constraints.positive, "df2": constraints.positive}
     support = constraints.positive
     has_rsample = True
 
@@ -65,7 +67,12 @@ class FisherSnedecor(Distribution):
     def variance(self):
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 4] = nan
-        return 2 * df2.pow(2) * (self.df1 + df2 - 2) / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
+        return (
+            2
+            * df2.pow(2)
+            * (self.df1 + df2 - 2)
+            / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
+        )
 
     def rsample(self, sample_shape=torch.Size(())):
         shape = self._extended_shape(sample_shape)

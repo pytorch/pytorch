@@ -1,10 +1,10 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/EmptyTensor.h>
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <torch/library.h>
+#include <ATen/mps/EmptyTensor.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
@@ -43,7 +43,6 @@ TensorBase empty_mps(
     int64_t nelements = c10::multiply_integers(size);
     auto dtype = dtype_or_default(dtype_opt);
     TORCH_CHECK_TYPE(dtype != ScalarType::Double, MPS_ERROR_DOUBLE_NOT_SUPPORTED);
-    TORCH_CHECK_TYPE(!c10::isComplexType(dtype), "Complex types are unsupported on MPS");
     TORCH_CHECK_TYPE(dtype != ScalarType::BFloat16, "BFloat16 is not supported on MPS");
 
     auto dtype_meta = scalarTypeToTypeMeta(dtype);

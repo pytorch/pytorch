@@ -213,12 +213,21 @@ def stacksize_analysis(instructions):
 
         for inst, next_inst in zip(instructions, instructions[1:] + [None]):
             stack_size = stack_sizes[inst]
+            # CALL_FINALLY in Python 3.8 is handled differently when determining stack depth.
+            # See https://github.com/python/cpython/blob/3.8/Python/compile.c#L5450.
+            # Essentially, the stack effect of CALL_FINALLY is computed with jump=True,
+            # but the resulting stack depth is propagated to the next instruction, not the
+            # jump target.
+            is_call_finally = (
+                sys.version_info < (3, 9) and inst.opcode == dis.opmap["CALL_FINALLY"]
+            )
             if inst.opcode not in TERMINAL_OPCODES:
                 assert next_inst is not None, f"missing next inst: {inst}"
                 stack_sizes[next_inst].offset_of(
-                    stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
+                    stack_size,
+                    stack_effect(inst.opcode, inst.arg, jump=is_call_finally),
                 )
-            if inst.opcode in JUMP_OPCODES:
+            if inst.opcode in JUMP_OPCODES and not is_call_finally:
                 stack_sizes[inst.target].offset_of(
                     stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
                 )

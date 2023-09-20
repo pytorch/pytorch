@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: The build environment
+      ALPINE_IMAGE:
+        required: false
+        type: string
+        default: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
       PYTORCH_ROOT:
         required: true
         type: string
@@ -58,7 +62,7 @@ on:
       runs_on:
         required: true
         type: string
-        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, and linux.rocm.gpu
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, linux.t4g.2xlarge, and linux.rocm.gpu
     secrets:
       github-token:
         required: true
@@ -84,7 +88,7 @@ jobs:
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
       DESIRED_PYTHON: ${{ inputs.DESIRED_PYTHON }}
       # Needed for conda builds
-      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
       ANACONDA_USER: pytorch
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
@@ -130,12 +134,16 @@ jobs:
         # Setup the environment
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
 
       - name: Clean workspace
         shell: bash
@@ -210,3 +218,5 @@ jobs:
       - name: Chown workspace
         if: always()
         uses: ./pytorch/.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}

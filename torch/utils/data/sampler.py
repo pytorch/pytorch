@@ -83,8 +83,8 @@ class Sampler(Generic[T_co]):
     #     This prevents triggering some fallback behavior. E.g., the built-in
     #     `list(X)` tries to call `len(X)` first, and executes a different code
     #     path if the method is not found or `NotImplemented` is returned, while
-    #     raising an `NotImplementedError` will propagate and and make the call
-    #     fail where it could have use `__iter__` to complete the call.
+    #     raising a `NotImplementedError` will propagate and make the call fail
+    #     where it could have used `__iter__` to complete the call.
     #
     # Thus, the only two sensible things to do are
     #
@@ -134,12 +134,10 @@ class RandomSampler(Sampler[int]):
         self.generator = generator
 
         if not isinstance(self.replacement, bool):
-            raise TypeError("replacement should be a boolean value, but got "
-                            "replacement={}".format(self.replacement))
+            raise TypeError(f"replacement should be a boolean value, but got replacement={self.replacement}")
 
         if not isinstance(self.num_samples, int) or self.num_samples <= 0:
-            raise ValueError("num_samples should be a positive integer "
-                             "value, but got num_samples={}".format(self.num_samples))
+            raise ValueError(f"num_samples should be a positive integer value, but got num_samples={self.num_samples}")
 
     @property
     def num_samples(self) -> int:
@@ -218,16 +216,14 @@ class WeightedRandomSampler(Sampler[int]):
                  replacement: bool = True, generator=None) -> None:
         if not isinstance(num_samples, int) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
-            raise ValueError("num_samples should be a positive integer "
-                             "value, but got num_samples={}".format(num_samples))
+            raise ValueError(f"num_samples should be a positive integer value, but got num_samples={num_samples}")
         if not isinstance(replacement, bool):
-            raise ValueError("replacement should be a boolean value, but got "
-                             "replacement={}".format(replacement))
+            raise ValueError(f"replacement should be a boolean value, but got replacement={replacement}")
 
         weights_tensor = torch.as_tensor(weights, dtype=torch.double)
         if len(weights_tensor.shape) != 1:
             raise ValueError("weights should be a 1d sequence but given "
-                             "weights have shape {}".format(tuple(weights_tensor.shape)))
+                             f"weights have shape {tuple(weights_tensor.shape)}")
 
         self.weights = weights_tensor
         self.num_samples = num_samples
@@ -264,11 +260,9 @@ class BatchSampler(Sampler[List[int]]):
         # check here.
         if not isinstance(batch_size, int) or isinstance(batch_size, bool) or \
                 batch_size <= 0:
-            raise ValueError("batch_size should be a positive integer value, "
-                             "but got batch_size={}".format(batch_size))
+            raise ValueError(f"batch_size should be a positive integer value, but got batch_size={batch_size}")
         if not isinstance(drop_last, bool):
-            raise ValueError("drop_last should be a boolean value, but got "
-                             "drop_last={}".format(drop_last))
+            raise ValueError(f"drop_last should be a boolean value, but got drop_last={drop_last}")
         self.sampler = sampler
         self.batch_size = batch_size
         self.drop_last = drop_last

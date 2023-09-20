@@ -4,7 +4,7 @@ import logging
 from unittest.mock import patch
 
 import torch
-from torch._dynamo import eval_frame
+from torch._dynamo import disable
 from torch._dynamo.utils import counters, defake
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils._python_dispatch import _disable_current_modes
@@ -30,7 +30,7 @@ def aot_autograd(**kwargs):
 
         def _wrapped_bw_compiler(*args, **kwargs):
             # stop TorchDynamo from trying to compile our generated backwards pass
-            return eval_frame.disable(eval_frame.disable(bw_compiler)(*args, **kwargs))
+            return disable(disable(bw_compiler)(*args, **kwargs))
 
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
@@ -54,7 +54,7 @@ def aot_autograd(**kwargs):
             with enable_aot_logging(), patch_config:
                 cg = aot_module_simplified(gm, example_inputs, **kwargs)
                 counters["aot_autograd"]["ok"] += 1
-                return eval_frame.disable(cg)
+                return disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise

@@ -75,6 +75,11 @@ class CoordescTuner:
             # large enough. We should not pick this large RBLOCK anyway
             return 2**30
 
+    def get_warpsmax(self):
+        # Currently, CUDA has a maximum of 1024 threads, so 32 is the max
+        # number of warps.
+        return 1024 // 32
+
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
 
@@ -120,6 +125,8 @@ class CoordescTuner:
             return val > self.get_zmax()
         if name == "RBLOCK":
             return val > self.get_rmax()
+        if name == "num_warps":
+            return val > self.get_warpsmax()
 
         return False
 
@@ -264,8 +271,10 @@ class CoordescTuner:
                 if cur_val is None:
                     continue
 
+                # It's possible that candidate_values is empty.
+                # E.g., if XBLOCK is 1 initially and size_hint for x is also 1.
+                # We would not try either larger or smaller XBLOCK in this case.
                 candidate_values = self.get_neighbour_values(name, cur_val)
-                assert len(candidate_values) > 0
 
                 for next_val in candidate_values:
                     candidate_config = copy.deepcopy(best_config)

@@ -251,7 +251,7 @@ def get_static_quant_module_class(
         else DEFAULT_STATIC_QUANT_MODULE_MAPPINGS, additional_static_quant_mapping)
     static_quant_module_class = all_mappings.get(float_module_class, None)
     assert static_quant_module_class is not None, \
-        "Floating point module class {}".format(str(float_module_class)) + \
+        f"Floating point module class {str(float_module_class)}" + \
         " does not have a corresponding quantized module class"
     return copy.deepcopy(static_quant_module_class)
 
@@ -266,7 +266,7 @@ def get_dynamic_quant_module_class(
     all_mappings = get_combined_dict(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS, additional_dynamic_quant_mapping)
     dynamic_quant_module_class = all_mappings.get(float_module_class, None)
     assert dynamic_quant_module_class is not None, \
-        "Floating point module class {}".format(str(float_module_class)) + \
+        f"Floating point module class {str(float_module_class)}" + \
         " does not have a corresponding quantized module class"
     return copy.deepcopy(dynamic_quant_module_class)
 
@@ -300,10 +300,10 @@ def get_default_qconfig_propagation_list() -> Set[Callable]:
     attribute to in prepare
     '''
     QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
-        (set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.keys()) |
-         set(DEFAULT_QAT_MODULE_MAPPINGS.keys()) |
-         set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
-         _INCLUDE_QCONFIG_PROPAGATE_LIST)
+        set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.keys()) |
+        set(DEFAULT_QAT_MODULE_MAPPINGS.keys()) |
+        set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
+        _INCLUDE_QCONFIG_PROPAGATE_LIST
     )
     return copy.deepcopy(QCONFIG_PROPAGATE_MODULE_CLASS_LIST)
 
@@ -332,7 +332,7 @@ def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     '''
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, \
-        'Operator {} does not have corresponding quantized op'.format(str(float_op))
+        f'Operator {str(float_op)} does not have corresponding quantized op'
     return quantized_op
 
 def _get_special_act_post_process(module: torch.nn.Module) -> Optional[Callable]:

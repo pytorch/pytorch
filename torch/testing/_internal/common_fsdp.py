@@ -339,10 +339,11 @@ class TransformerWithSharedParams(FSDPTestModel):
             else:
                 tformer_pg = group
 
+            m = TransformerWithSharedParams(
+                tformer_pg, cuda_init_mode, add_bn, deterministic
+            )
             fsdp_model = FSDP(
-                TransformerWithSharedParams(
-                    tformer_pg, cuda_init_mode, add_bn, deterministic
-                ),
+                m,
                 fsdp_pg,
                 auto_wrap_policy=auto_wrap_policy,
                 **fsdp_kwargs,
@@ -880,7 +881,7 @@ class FSDPTest(MultiProcessTestCase):
 
     @property
     def init_method(self):
-        return "{}{file_name}".format(FILE_SCHEMA, file_name=self.file_name)
+        return f"{FILE_SCHEMA}{self.file_name}"
 
     def _check_cpu_offload(self, fsdp_model, cpu_offload):
         self.assertEqual(cpu_offload, fsdp_model.cpu_offload)

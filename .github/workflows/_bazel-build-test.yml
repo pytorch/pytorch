@@ -76,7 +76,7 @@ jobs:
 
       - name: Calculate docker image
         id: calculate-docker-image
-        uses: ./.github/actions/calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
 
@@ -112,7 +112,17 @@ jobs:
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -122,58 +132,12 @@ jobs:
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
-          # detached container should get cleaned up by teardown_ec2_linux
-          # shellcheck disable=SC2086
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BUILD_ENVIRONMENT \
-            -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e SCCACHE_BUCKET \
-            -e SKIP_SCCACHE_INITIALIZATION=1 \
-            -e TORCH_CUDA_ARCH_LIST \
-            -e OUR_GITHUB_JOB_ID \
-            -e CUDA_VERSION \
-            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --security-opt seccomp=unconfined \
-            --cap-add=SYS_PTRACE \
-            --tty \
-            --detach \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
-
-      - name: Test
-        id: test
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
-        env:
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_WORKFLOW: ${{ github.workflow }}
-          GITHUB_JOB: ${{ github.job }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          PYTORCH_RETRY_TEST_CASES: 1
-          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
-          SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-          CUDA_VERSION: ${{ inputs.cuda-version }}
-        run: |
-          # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
-
+          # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
-          # shellcheck disable=SC2086,SC2090
+          # shellcheck disable=SC2086
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -188,10 +152,13 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e REENABLED_ISSUES \
+            -e TORCH_CUDA_ARCH_LIST \
+            -e OUR_GITHUB_JOB_ID \
+            -e CUDA_VERSION \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
-            -e CUDA_VERSION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -203,7 +170,15 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c '.ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
+          echo "container_id=${container_name}" >> "${GITHUB_ENV}"
+
+      - name: Test
+        id: test
+        # Time out the test phase after 3.5 hours
+        timeout-minutes: 120
+        run: |
+          docker exec -t "${container_id}" sh -c '.ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
 
       - name: Print remaining test logs
         shell: bash

@@ -739,8 +739,15 @@ class Tracer(TracerBase):
                 self.root = torch.nn.Module()
                 fn = root
 
-            tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
+            tracer_cls: Optional[Type[Tracer]] = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
+            if hasattr(fn, '__code__'):
+                code = fn.__code__
+                self.graph._co_fields = {
+                    'co_name': code.co_name,
+                    'co_filename': code.co_filename,
+                    'co_firstlineno': code.co_firstlineno,
+                }
 
             # When we encounter a Tensor value that's not a parameter, we look if it
             # is some other attribute on the model. Construct a dict mapping Tensor
@@ -832,9 +839,11 @@ class Tracer(TracerBase):
         return new_tracer
 
 
-# List of pairs of (global dict, function name) functions
-# to patch for the purposes of the wrap() API.
-_wrapped_fns_to_patch: List[Tuple[dict, str]] = []
+# Dictionary of (id(globals dict), function name) => globals_dict to patch for
+# the purposes of the wrap() API.
+# We key by the globals dict id and function name to ensure we're wrapping a given
+# function only once.
+_wrapped_fns_to_patch: Dict[Tuple[int, str], dict] = {}
 
 # List of methods on classes to wrap (class type, function name)
 # this currently only works for Tensor.* methods that aren't traced properly
@@ -995,7 +1004,7 @@ def _patch_wrapped_functions(patcher: _Patcher):
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper.
     """
-    for frame_dict, name in _wrapped_fns_to_patch:
+    for (_, name), frame_dict in _wrapped_fns_to_patch.items():
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
         else:
@@ -1081,7 +1090,7 @@ def wrap(fn_or_name: Union[str, Callable]):
 
     # consider implementing Callable version of this via _autowrap_function_ids / _autowrap_search
     # semantics would be slightly different, but would add support `from x import wrapped_function`
-    _wrapped_fns_to_patch.append((f.f_globals, fn_name))
+    _wrapped_fns_to_patch[(id(f.f_globals), fn_name)] = f.f_globals
     return fn_or_name
 
 

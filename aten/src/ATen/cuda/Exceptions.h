@@ -40,9 +40,9 @@ class CuDNNError : public c10::Error {
     }                                                                                           \
   } while (0)
 
-namespace at { namespace cuda { namespace blas {
+namespace at::cuda::blas {
 C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
-}}} // namespace at::cuda::blas
+} // namespace at::cuda::blas
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \
   do {                                                          \
@@ -67,9 +67,16 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 // cusolver related headers are only supported on cuda now
 #ifdef CUDART_VERSION
 
-namespace at { namespace cuda { namespace solver {
+namespace at::cuda::solver {
 C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
-}}} // namespace at::cuda::solver
+
+constexpr const char* _cusolver_backend_suggestion =            \
+  "If you keep seeing this error, you may use "                 \
+  "`torch.backends.cuda.preferred_linalg_library()` to try "    \
+  "linear algebra operators with other supported backends. "    \
+  "See https://pytorch.org/docs/stable/backends.html#torch.backends.cuda.preferred_linalg_library";
+
+} // namespace at::cuda::solver
 
 // When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
 // When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
@@ -85,13 +92,15 @@ C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
           "cusolver error: ",                                           \
           at::cuda::solver::cusolverGetErrorMessage(__err),             \
           ", when calling `" #EXPR "`",                                 \
-          ". This error may appear if the input matrix contains NaN."); \
+          ". This error may appear if the input matrix contains NaN. ", \
+          at::cuda::solver::_cusolver_backend_suggestion);              \
     } else {                                                            \
       TORCH_CHECK(                                                      \
           __err == CUSOLVER_STATUS_SUCCESS,                             \
           "cusolver error: ",                                           \
           at::cuda::solver::cusolverGetErrorMessage(__err),             \
-          ", when calling `" #EXPR "`");                                \
+          ", when calling `" #EXPR "`. ",                               \
+          at::cuda::solver::_cusolver_backend_suggestion);              \
     }                                                                   \
   } while (0)
 

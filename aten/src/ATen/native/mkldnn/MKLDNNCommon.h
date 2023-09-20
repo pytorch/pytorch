@@ -24,6 +24,12 @@ TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 // ideep::tensor will share the underlying buffer
 TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor);
 
+// Construct an `ideep::tensor` "view" from dense tensor using given desc, note
+// the ideep::tensor will share the underlying buffer
+TORCH_API ideep::tensor itensor_view_from_dense(
+    const at::Tensor& tensor,
+    const ideep::tensor::desc& desc);
+
 // Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
 TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor);
 

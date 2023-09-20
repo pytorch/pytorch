@@ -1032,9 +1032,7 @@ c10::SymbolicShape ComputeShapeForSlice(
   final_shape = input_shape;
   for (const auto idx : c10::irange(axes_vector.size())) {
     auto axis = axes_vector[idx];
-    if (axis < 0) {
-      axis += input_shape.size();
-    }
+    TORCH_INTERNAL_ASSERT(axis >= 0);
     if (!input_shape[axis].is_static()) {
       final_shape[axis] = c10::ShapeSymbol::newSymbol();
       continue;
@@ -1070,20 +1068,18 @@ c10::SymbolicShape ComputeShapeForSlice(
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
-  auto valid = true;
+  bool valid = ConstantValueMap::HasShape(n->input(0)->debugName());
+
   // For opset version <= 9, starts, ends, axes, steps are attributes,
   // so their values are always valid.
   if (opset_version >= 10) {
-    valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
-        ConstantValueMap::HasValue(n->input(2)->debugName());
-    for (const auto input_idx : c10::irange(3U, 5U)) {
-      if (n->inputs().size() > input_idx) {
-        valid = valid &&
-            ConstantValueMap::HasValue(n->input(input_idx)->debugName());
-      }
+    // We can only infer shapes if 'axes' is known.
+    if (n->inputs().size() > 3) {
+      valid = valid && ConstantValueMap::HasValue(n->input(3)->debugName());
     }
   }
-  if (!ConstantValueMap::HasShape(n->input(0)->debugName()) || !valid) {
+
+  if (!valid) {
     if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
       auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
       UpdateRank(n->output(), rank);
@@ -1097,27 +1093,49 @@ void ProcessSliceNode(Node* n, int opset_version) {
 
       std::vector<int64_t> start_vector;
       std::vector<int64_t> end_vector;
+      std::vector<int64_t> step_vector;
+
       std::vector<int64_t> axes_vector(input0_shape_value.size(), 0);
       for (const auto i : c10::irange(input0_shape_value.size())) {
         axes_vector[i] = i;
       }
-      std::vector<int64_t> step_vector;
+      if (opset_version >= 10 && n->inputs().size() > 3) {
+        axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
+            n->input(3)->debugName());
+      } else if (opset_version < 10 && n->hasAttributeS("axes")) {
+        axes_vector = n->is(attr::axes);
+      }
+      for (auto& axis : axes_vector) {
+        if (axis < 0) {
+          axis += input0_shape_value.size();
+        }
+      }
 
       if (opset_version < 10) {
         start_vector = n->is(attr::starts);
         end_vector = n->is(attr::ends);
-        if (n->hasAttributeS("axes")) {
-          axes_vector = n->is(attr::axes);
-        }
       } else {
+        // If starts, ends, or step are unknown,
+        // then mark all dimensions in 'axes' as unknown.
+        std::vector<uint64_t> indices = {1U, 2U, 4U};
+        bool start_end_step_known =
+            std::all_of(indices.begin(), indices.end(), [&n](auto i) {
+              return (i >= n->inputs().size()) ||
+                  ConstantValueMap::HasValue(n->input(i)->debugName());
+            });
+        if (!start_end_step_known) {
+          auto final_shape = input0_shape_value;
+          for (const auto axis : axes_vector) {
+            final_shape[axis] = c10::ShapeSymbol::newSymbol();
+          }
+          UpdateShape(n->output(), final_shape);
+          return;
+        }
+
         start_vector = ConstantValueMap::GetValueInto1DInt64Vector(
             n->input(1)->debugName());
         end_vector = ConstantValueMap::GetValueInto1DInt64Vector(
             n->input(2)->debugName());
-        if (n->inputs().size() > 3) {
-          axes_vector = ConstantValueMap::GetValueInto1DInt64Vector(
-              n->input(3)->debugName());
-        }
         if (n->inputs().size() > 4) {
           step_vector = ConstantValueMap::GetValueInto1DInt64Vector(
               n->input(4)->debugName());
@@ -2326,8 +2344,8 @@ size_t ONNXAssignOutputShape(
     // Support for dict data type is limited to fixed size dictionaries in
     // ONNX.
     // Dictionary values are unrolled and keys are not preserved.
-    auto unrolled_dict =
-        py::reinterpret_borrow<py::list>(PyDict_Items(output_obj));
+    auto* items = PyDict_Items(output_obj);
+    auto unrolled_dict = py::reinterpret_borrow<py::list>(items);
     TORCH_INTERNAL_ASSERT(PyList_Check(unrolled_dict.ptr()));
     for (const auto i : c10::irange(unrolled_dict.size())) {
       outputs_index = ONNXAssignOutputShape(
@@ -2338,6 +2356,7 @@ size_t ONNXAssignOutputShape(
           is_script,
           opset_version);
     }
+    Py_DECREF(items);
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
   } else if (PyNone_Check(output_obj)) {

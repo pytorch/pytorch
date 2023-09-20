@@ -3916,9 +3916,7 @@ class TestQuantizeFx(QuantizationTestCase):
             elif arg_node.op == "call_module":
                 self.assertTrue(
                     not _is_activation_post_process(getattr(model, arg_node.target)),
-                    "Arg: {0} of node: {1} is observed but is not a float tensor".format(
-                        arg_node, node
-                    ),
+                    f"Arg: {arg_node} of node: {node} is observed but is not a float tensor",
                 )
 
         for node in model.graph.nodes:
@@ -5519,19 +5517,19 @@ class TestQuantizeFx(QuantizationTestCase):
         self.addCleanup(cleanUp)
 
         @_register_fusion_pattern("dummy_fusion")
-        class DummyFusion():
+        class DummyFusion:
             pass
 
         @_register_quant_pattern("dummy_quant")
-        class DummyQuant():
+        class DummyQuant:
             pass
 
         @_register_quant_pattern("dummy_quant2", default_fixed_qparams_range_0to1_observer)
-        class DummyQuant2():
+        class DummyQuant2:
             pass
 
         @_register_quant_pattern("dummy_quant3", default_fixed_qparams_range_neg1to1_observer)
-        class DummyQuant3():
+        class DummyQuant3:
             pass
 
         self.assertEqual(_DEFAULT_FUSION_PATTERNS["dummy_fusion"], DummyFusion)
@@ -8304,7 +8302,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
                 self.avg_pool3d = torch.nn.AvgPool3d(3)
-                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d(1)
                 self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
 

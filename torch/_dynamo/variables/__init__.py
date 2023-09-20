@@ -6,21 +6,29 @@ from .ctx_manager import (
     CUDAStreamContextVariable,
     CUDAStreamVariable,
     DeterministicAlgorithmsVariable,
+    DisabledSavedTensorsHooksVariable,
     GradModeVariable,
     WithExitFunctionVariable,
 )
-from .dicts import ConstDictVariable, DataClassVariable, DefaultDictVariable
+from .dicts import (
+    ConstDictVariable,
+    CustomizedDictVariable,
+    DataClassVariable,
+    DefaultDictVariable,
+)
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
+from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
+    SetVariable,
     SliceVariable,
     TupleVariable,
 )
@@ -47,7 +55,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .torch import TorchHigherOrderOperatorVariable, TorchVariable
+from .torch import TorchVariable
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 __all__ = [
@@ -60,6 +68,7 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "DataClassVariable",
+    "CustomizedDictVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",

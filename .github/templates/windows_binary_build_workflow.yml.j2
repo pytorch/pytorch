@@ -84,7 +84,11 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
 {%- if config["gpu_arch_type"] == "cuda" %}
+{%- if branches == "nightly" %}
     runs-on: windows.8xlarge.nvidia.gpu
+{%- else %}
+    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+{%- endif %}
 {%- else %}
     runs-on: windows.4xlarge.nonephemeral
 {%- endif %}

@@ -1,181 +1,262 @@
 import collections
 import functools
+import inspect
 import warnings
 from functools import partial
-from typing import Any, Deque, Dict, List, NamedTuple, Set, Tuple
+from typing import Any, Callable, Dict, List, Set, Tuple, Type, Union
 
-import torch
 import torch.nn as nn
-from torch.distributed.fsdp._common_utils import _is_fsdp_flattened
-from torch.distributed.fsdp._utils import _override_module_mixed_precision
+from torch.distributed.fsdp._common_utils import (
+    _get_module_fsdp_state,
+    _override_module_mixed_precision,
+)
 
 from torch.distributed.fsdp.wrap import (
-    _FSDPPolicy,
+    _construct_wrap_fn,
     _or_policy,
+    _Policy,
+    _post_order_apply,
     _recursive_wrap,
+    _run_mixed_precision_override_policy,
     _wrap_module_cls_individually,
 )
 
 
-class FullyShardedModuleState(NamedTuple):
-    """
-    Module state for ``_get_fully_sharded_module_to_states()``, representing
-    a logical grouping (e.g. parameters to be flattened together).
-    """
-
-    params: List[nn.Parameter]
-    buffers: List[torch.Tensor]
-
-
 def _auto_wrap(
-    auto_wrap_kwargs: Dict[str, Any],
-    fsdp_kwargs: Dict[str, Any],
-    module_wrapper_cls: Any,  # e.g. `FullyShardedDataParallel`
-) -> None:
+    root_module: nn.Module,
+    policy: Union[Callable, _Policy],
+    ignored_modules: Set[nn.Module],
+    ignored_params: Set[nn.Parameter],
+    root_kwargs: Dict[str, Any],
+    fsdp_fn: Callable,  # e.g. `FullyShardedDataParallel` or `fully_shard`
+):
     """
-    Recursively auto wraps the root module given by the key "module" in
-    ``auto_wrap_kwargs`` with the arguments in ``auto_wrap_kwargs`` and
-    ``fsdp_kwargs``.
+    Auto wraps modules in ``root_module`` 's tree according to ``policy``
+    following a post-order traversal.
 
-    Precondition: ``auto_wrap_policy`` contains the arguments expected by
-    ``_recursive_wrap()``, where ``auto_wrap_policy`` is not ``None``.
-    ``fsdp_kwargs`` contains all FSDP arguments except ``module``.
+    Precondition: ``root_kwargs`` should contain all arguments except
+    ``module``. This function accepts the kwargs dict directly since it gets
+    forwarded into the post-order traversal function.
     """
-    auto_wrap_policy = auto_wrap_kwargs["auto_wrap_policy"]
-    # Support new way to pass an auto wrap policy
-    if isinstance(auto_wrap_policy, _FSDPPolicy):
-        auto_wrap_policy = auto_wrap_policy.policy
-    root_module = auto_wrap_kwargs["module"]
-    assert auto_wrap_policy is not None
-    # For auto wrapping, submodules should not already be wrapped with FSDP
-    # since double wrapping is not supported
-    for module_name, module in root_module.named_modules():
-        if isinstance(module, module_wrapper_cls):
-            raise ValueError(
-                f"Expected {module_name} to NOT be FullyShardedDataParallel "
-                "if using an `auto_wrap_policy`"
+    mixed_precision = root_kwargs["mixed_precision"]
+    is_wrapper = inspect.isclass(fsdp_fn)
+    # TODO: We may relax this no-nested-wrapping constraint to support manual
+    # wrapping followed by auto wrapping.
+    _check_nested_wrapping(root_module)
+
+    if isinstance(policy, _Policy):
+        root_kwargs["auto_wrap_policy" if is_wrapper else "policy"] = None
+        target_module_to_kwargs = policy._run_policy(
+            root_module, ignored_modules, root_kwargs
+        )
+        if mixed_precision is not None:
+            target_module_to_kwargs = _run_mixed_precision_override_policy(
+                root_module,
+                mixed_precision._module_classes_to_ignore,
+                ignored_modules,
+                root_kwargs,
+                target_module_to_kwargs,
             )
-    mixed_precision = fsdp_kwargs["mixed_precision"]
-    if mixed_precision is not None:
-        for mp_module_to_override in mixed_precision._module_classes_to_ignore:
-            # Make modules of this particular type run in fp32 by wrapping them in their own
-            # FSDP unit.
-            _override_module_mixed_precision(root_module, mp_module_to_override)
+            overridden_module_classes = _override_module_mixed_precision(
+                root_module, mixed_precision._module_classes_to_ignore
+            )
+            _warn_on_overridden_mixed_precision(overridden_module_classes)
+        use_orig_params = root_kwargs.get("use_orig_params", False)
+        _validate_frozen_params(
+            root_module,
+            set(target_module_to_kwargs.keys()),
+            ignored_params,
+            use_orig_params,
+        )
+        wrap_fn = _construct_wrap_fn(root_module, target_module_to_kwargs, fsdp_fn)
+        _post_order_apply(root_module, wrap_fn)
+        return
 
-        auto_wrap_policy = functools.partial(
+    recursive_wrap_kwargs = {
+        "module": root_module,
+        "auto_wrap_policy": policy,
+        "wrapper_cls": fsdp_fn,
+        "ignored_modules": ignored_modules,
+        "ignored_params": ignored_params,
+        "only_wrap_children": True,
+    }
+    if mixed_precision is not None:
+        # Wrap modules of the ignored types separately and register forward
+        # hooks to cast to fp32 and back to the original dtype, respectively
+        overridden_module_classes = _override_module_mixed_precision(
+            root_module, mixed_precision._module_classes_to_ignore
+        )
+        policy = functools.partial(
             _or_policy,
             policies=[
-                auto_wrap_policy,
+                policy,
                 partial(
                     _wrap_module_cls_individually,
                     module_classes=mixed_precision._module_classes_to_ignore,
                 ),
             ],
         )
-        warnings.warn(
-            "Both mixed precision and an `auto_wrap_policy` were specified "
-            "for FSDP, where the wrapped module has batch norm submodules. "
-            "The batch norm submodules will be wrapped as separate FSDP "
-            "instances with mixed precision disabled since some batch norm "
-            "kernels do not support low precision."
-        )
-    auto_wrap_kwargs["auto_wrap_policy"] = auto_wrap_policy
-    _recursive_wrap(**auto_wrap_kwargs, **fsdp_kwargs)
+        recursive_wrap_kwargs["auto_wrap_policy"] = policy
+        _warn_on_overridden_mixed_precision(overridden_module_classes)
+    _recursive_wrap(**recursive_wrap_kwargs, **root_kwargs)  # type: ignore[arg-type]
 
 
-def _get_fully_sharded_module_to_states(
+def _check_nested_wrapping(root_module: nn.Module):
+    for module_name, module in root_module.named_modules():
+        if _get_module_fsdp_state(module) is not None:
+            raise ValueError(
+                "FSDP auto wrapping requires modules to not already have "
+                f"FSDP applied but found {module_name} in\n{root_module}"
+            )
+
+
+def _warn_on_overridden_mixed_precision(
+    overridden_module_classes: Set[Type[nn.Module]],
+):
+    if len(overridden_module_classes) == 0:
+        return
+    warnings.warn(
+        "Both mixed precision and an auto_wrap_policy were specified to FSDP, "
+        f"where the wrapped module has submodules of type:\n{overridden_module_classes}\n"
+        "These modules will be wrapped as separate FSDP instacnes with mixed "
+        "precision disabled."
+    )
+
+
+def _validate_frozen_params(
     root_module: nn.Module,
-    auto_wrap_policy: _FSDPPolicy,
-    ignored_modules: Set[nn.Module],
+    modules_to_wrap: Set[nn.Module],
     ignored_params: Set[nn.Parameter],
-) -> Dict[nn.Module, FullyShardedModuleState]:
+    use_orig_params: bool,
+):
     """
-    Returns a mapping from fully sharded module to its parameters, buffers,
-    parameter names, and buffer names, where each entry logically represents a
-    grouping according to the given auto wrap policy and ignored
-    modules/parameters. However, this method does not actually perform any
-    module wrapping.
-
-    The mapped-to values are the states from the subtree rooted at the
-    corresponding submodule key, excluding child submodules in the mapping and
-    ignored state. Sibling submodules cannot be grouped together. The parameter
-    and buffer names are prefixed starting from the submodule.
-
-    Each non-ignored parameter and buffer appears exactly once in the returned
-    ``dict``, and the ``dict`` is ordered by increasing tree depth. A mapped-to
-    parameter list may be empty if the fully sharded module has no parameters
-    or if its parameters were assigned to a parent fully sharded module
-    instead.
+    This checks that, given ``modules_to_wrap``, each module would manage
+    parameters that are uniformly frozen or non-frozen. This uniformity
+    requirement is strict for ``use_orig_params=False`` (hard error) and highly
+    recommended for ``use_orig_params=True`` (user warning).
     """
-    # Record the modules to wrap without actually wrapping
-    wrapped_modules_set: Set[nn.Module] = set()  # these are only logically wrapped
-    wrapper_cls = functools.partial(_record_module_wrapper_cls, wrapped_modules_set)
-    if auto_wrap_policy is not None:
-        _recursive_wrap(
-            root_module,
-            auto_wrap_policy=auto_wrap_policy.policy,
-            wrapper_cls=wrapper_cls,
-            ignored_modules=ignored_modules,
-            ignored_params=ignored_params,
-            only_wrap_children=False,
+    post_order_named_modules = _get_post_order_named_modules(root_module)
+    visited_modules: Set[nn.Module] = set()
+    for module_name, module in post_order_named_modules:
+        if module in modules_to_wrap:
+            param_to_fqn = _get_managed_param_to_fqn(
+                module, ignored_params, visited_modules, module_name
+            )
+            frozen_param_fqns: List[str] = []
+            frozen_param_numel = 0
+            nonfrozen_param_fqns: List[str] = []
+            nonfrozen_param_numel = 0
+            for param, fqn in param_to_fqn.items():
+                if param.requires_grad:
+                    nonfrozen_param_fqns.append(fqn)
+                    nonfrozen_param_numel += param.numel()
+                else:
+                    frozen_param_fqns.append(fqn)
+                    frozen_param_numel += param.numel()
+            if len(frozen_param_fqns) > 0 and len(nonfrozen_param_fqns) > 0:
+                msg = f"{module_name} has both parameters with requires_grad=True and False."
+                if use_orig_params:
+                    total_param_numel = frozen_param_numel + nonfrozen_param_numel
+                    msg += (
+                        " We do not recommend wrapping such modules since "
+                        "the gradient memory usage will be higher than expected "
+                        f"({total_param_numel} numel instead of {nonfrozen_param_numel} numel "
+                        "before sharding via reduce-scatter). "
+                    )
+                else:
+                    msg += " FSDP does not support wrapping such modules when use_orig_params=False. "
+                msg += "If possible, wrap the frozen parameters with FSDP separately.\n"
+                msg += (
+                    f"The following parameters have requires_grad=True:\n{nonfrozen_param_fqns}\n"
+                    f"The following parameters have requires_grad=False:\n{frozen_param_fqns}"
+                )
+                if use_orig_params:
+                    warnings.warn(msg)
+                else:
+                    raise ValueError(msg)
+
+
+def _get_post_order_named_modules(
+    root_module: nn.Module,
+) -> List[Tuple[str, nn.Module]]:
+    """
+    This returns the named modules following a post-order traversal, which is a
+    valid reverse topological sort. We achieve this using the reverse of a
+    stack-based DFS order instead of reversing ``root_module.named_modules()``
+    since the former gives the modules in registration order at each level in
+    the module tree (as opposed to the reverse), which allows us to error/warn
+    on the first registered module that violates the condition.
+
+    For example, consider the following module structure:
+        M(
+          S1(),
+          S2(
+            SS1(),
+            SS2(),
+          ),
+          S3(),
         )
-    # Always include the root module even if not wrapped by the given policy
-    wrapped_modules_set.add(root_module)
-
-    fully_sharded_module_to_states = collections.OrderedDict()
-    visited_params = set()
-    for ignored_param in ignored_params:
-        visited_params.add(ignored_param)
-    visited_buffers = set()
-    # Construct `wrapped_modules` to follow `.modules()` order to ensure that
-    # downstream data structures (`._handles`) match those of the wrapper path.
-    # NOTE: Since `.modules()` follows a depth-first order, which is a
-    # topological sort, and we iterate over `wrapped_modules` following that
-    # order, parent-child shared parameters are assigned to the parent module.
-    wrapped_modules: List[nn.Module] = []
-    for module in root_module.modules():
-        if module in wrapped_modules_set:
-            wrapped_modules.append(module)
-    for submodule in wrapped_modules:
-        # Perform a DFS from `submodule` and record all unvisited state that is
-        # not already associated with another module in `wrapped_modules`. We
-        # use DFS to follow the `.modules()` order.
-        deque: Deque[Tuple[nn.Module, str]] = collections.deque()
-        deque.append((submodule, ""))
-        params: List[nn.Parameter] = []
-        buffers: List[torch.Tensor] = []
-        while len(deque) > 0:
-            module, prefix = deque.popleft()
-            # Reverse `named_children()`, use `appendleft()`, and add to the
-            # deque before processing to perform non-recursive DFS
-            for child_module_name, child_module in reversed(
-                list(module.named_children())
-            ):
-                if child_module not in wrapped_modules_set:
-                    deque.appendleft((child_module, prefix + child_module_name + "."))
-            for param in module.parameters(recurse=False):
-                if param not in visited_params and not _is_fsdp_flattened(param):
-                    params.append(param)
-                    visited_params.add(param)
-            for buffer in module.buffers(recurse=False):
-                if buffer not in visited_buffers:
-                    buffers.append(buffer)
-                    visited_buffers.add(buffer)
-        fully_sharded_module_to_states[submodule] = FullyShardedModuleState(
-            params, buffers
-        )
-    return fully_sharded_module_to_states
-
-
-def _record_module_wrapper_cls(
-    wrapped_modules_set: Set[nn.Module],
-    module: nn.Module,
-    **kwargs,
-) -> nn.Module:
+    The reverse DFS order is [S1, SS1, SS2, S2, S3, M], while the reverse
+    ``named_modules()`` order is [S3, SS2, SS1, S2, S1, M].
     """
-    This defines a pseudo-wrapper class to be passed to ``_recursive_wrap()``
-    that records the wrapped module to the input ``wrapped_modules_set``
-    without actually wrapping with a class.
+    visited_modules = {root_module}
+    stack = [("", root_module)]
+    # Append and reverse at the end for linear-time algorithm
+    reverse_post_order_named_modules: List[Tuple[str, nn.Module]] = []
+    while stack:
+        module_name, module = stack.pop()
+        reverse_post_order_named_modules.append((module_name, module))
+        for child_module_name, child_module in module.named_children():
+            if child_module is None:  # only for overrides of `named_children()`
+                continue
+            if child_module not in visited_modules:
+                visited_modules.add(child_module)
+                if module_name != "":
+                    child_module_name = module_name + "." + child_module_name
+                stack.append((child_module_name, child_module))
+    post_order_named_modules = list(reversed(reverse_post_order_named_modules))
+    return post_order_named_modules
+
+
+def _get_managed_param_to_fqn(
+    module_to_wrap: nn.Module,
+    ignored_params: Set[nn.Parameter],
+    visited_modules: Set[nn.Module],
+    root_prefix: str,
+) -> Dict[nn.Parameter, str]:
     """
-    wrapped_modules_set.add(module)
-    return module
+    This returns a dict that maps managed parameter to its FQN for the given
+    ``module_to_wrap``. The dict's keys are exactly the parameters that would
+    be managed by the module, where this is achieved by calling this function
+    on the modules to wrap in reverse topological order, destructively updating
+    ``visited_modules``, and not traversing into those modules. The FQNs are
+    prefixed from the root (via ``root_prefix``) to be more informative.
+
+    NOTE: This function is meant to be called pre-wrapping and iteratively in
+    reverse topological order to cover the full module tree. This differs from
+    the ``_get_param_to_fqn()`` function meant to be called post-wrapping and
+    on the full module tree in one shot. Given those differences, we do not try
+    to unify the two.
+    """
+    param_to_fqn: Dict[nn.Parameter, str] = {}
+    # Run BFS (or any tree traversal works)
+    queue = collections.deque([(module_to_wrap, root_prefix)])
+    visited_modules.add(module_to_wrap)
+    while queue:
+        module, prefix = queue.popleft()
+        for param_name, param in module.named_parameters(recurse=False):
+            if param not in ignored_params:
+                fqn = param_name if prefix == "" else prefix + "." + param_name
+                param_to_fqn[param] = fqn
+        for child_module_name, child_module in module.named_children():
+            if child_module is None:  # only for overrides of `named_children()`
+                continue
+            if child_module not in visited_modules:
+                visited_modules.add(child_module)
+                child_prefix = (
+                    child_module_name
+                    if prefix == ""
+                    else prefix + "." + child_module_name
+                )
+                queue.append((child_module, child_prefix))
+    return param_to_fqn

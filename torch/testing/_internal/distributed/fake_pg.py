@@ -1,5 +1,3 @@
-import os
-
 import torch.distributed as dist
 
 from torch._C._distributed_c10d import (
@@ -7,9 +5,15 @@ from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceOptions,
     BarrierOptions,
-    ReduceScatterOptions
+    ReduceScatterOptions,
+    BroadcastOptions,
+    ScatterOptions,
+    AllToAllOptions
 )
 from torch.futures import Future
+
+from typing import List
+from torch import Tensor
 
 
 def ret_work(ret):
@@ -38,6 +42,13 @@ class FakeProcessGroup(dist.ProcessGroup):
         return ret_work(tensor_list)
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
+        # NOTE: in general it's not good form to try to make FakePG work with 'real data',
+        # but the reasoning here is that we want FakePG to work with DeviceMesh's init
+        # code that have the data validation, which makes it worth the tradeoff.
+        # In general user should use MTPG or normal PG for cases where they may care about
+        # real data from collectives
+        for chunk in output_tensors[0]:
+            chunk.copy_(input_tensor[0])
         return ret_work(output_tensors)
 
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
@@ -65,6 +76,51 @@ class FakeProcessGroup(dist.ProcessGroup):
         # it should be no-op for fake pg
         pass
 
+    def broadcast(self, tensors: List[Tensor], opts=BroadcastOptions()):
+        return ret_work(tensors)
+
+    def scatter(
+        self,
+        output_tensors: List[Tensor],
+        input_tensors: List[List[Tensor]],
+        opts=ScatterOptions(),
+    ):
+        return ret_work(output_tensors)
+
+    def alltoall(
+        self,
+        output_tensors: List[Tensor],
+        input_tensors: List[Tensor],
+        opts=AllToAllOptions(),
+    ):
+        return ret_work(output_tensors)
+
+    def alltoall_base(
+        self,
+        output_tensor: Tensor,
+        input_tensor: Tensor,
+        output_split_sizes: List[int],
+        input_split_sizes: List[int],
+        opts=AllToAllOptions(),
+    ):
+        return ret_work(output_tensor)
+
+    def send(
+        self,
+        tensors: List[Tensor],
+        dstRank: int,
+        tag: int,
+    ):
+        return ret_work(None)
+
+    def recv(
+        self,
+        tensors: List[Tensor],
+        srcRank: int,
+        tag: int,
+    ):
+        return ret_work(tensors)
+
     def getBackendName(self):
         return "fake"
 
@@ -80,9 +136,6 @@ class FakeStore(dist.Store):
     pass
 
 def _create_fake_pg(prefix_store, rank, world_size, timeout):
-    # disable barrier after init for fake pg, as it does not
-    # need to sync with other processes/threads
-    os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
     return FakeProcessGroup(rank, world_size)
 
 dist.Backend.register_backend("fake", _create_fake_pg, devices=['cpu', 'cuda'])

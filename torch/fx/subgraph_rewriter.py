@@ -202,7 +202,7 @@ def replace_pattern_with_filters(
     gm: GraphModule,
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
-    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
@@ -222,7 +222,7 @@ def _replace_pattern(
     gm: GraphModule,
     pattern: Union[Callable, GraphModule],
     replacement: Union[Callable, GraphModule],
-    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 

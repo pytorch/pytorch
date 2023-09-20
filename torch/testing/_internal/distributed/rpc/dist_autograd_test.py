@@ -226,7 +226,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
             fut = rpc.rpc_async(worker_name(dst), method, args=(args))
             return fut.wait()
         else:
-            raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+            raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
     def _exec_func(self, exec_mode, method, *args):
         return self._exec_func_with_dst(
@@ -288,7 +288,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), fn, args=(t1, t2)
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
@@ -355,7 +355,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     args=(t1, t2, dst_rank, self.world_size, 1),
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             # Barrier to ensure all RPCs are done.
             dist.barrier()
@@ -449,7 +449,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     ),
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             rpc.rpc_sync(
                 worker_name((self.rank + 1) % self.world_size),
@@ -505,7 +505,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), torch.add, args=(t1, t2)
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             rpc.rpc_sync(
                 worker_name(dst_rank), _set_rpc_done, args=(context_id, 1)
@@ -548,7 +548,7 @@ class CommonDistAutogradTest(RpcAgentTestFixture):
                     worker_name(dst_rank), torch.stack, args=(tensors,)
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             self.assertEqual(torch.stack(tensors), ret)
 
@@ -1292,7 +1292,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         for context_id in context_ids:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Could not find autograd context with id: {}".format(context_id),
+                f"Could not find autograd context with id: {context_id}",
             ):
                 dist_autograd._retrieve_context(context_id)
 
@@ -1357,7 +1357,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                     worker_name(dst_rank), ret_requires_grad
                 ).to_here()
             else:
-                raise ValueError("Unrecognized ExecMode {}".format(exec_mode))
+                raise ValueError(f"Unrecognized ExecMode {exec_mode}")
 
             dist_autograd.backward(context_id, [ret.sum()])
 
@@ -1748,7 +1748,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         context_id = 100  # dummy context_id
         with self.assertRaisesRegex(
             RuntimeError,
-            "Could not find autograd context with id: {}".format(context_id),
+            f"Could not find autograd context with id: {context_id}",
         ):
             res = rpc.rpc_sync(
                 worker_name(self._next_rank()), torch.add, args=(t1, t2)
@@ -2031,7 +2031,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         context_id = 100  # dummy context_id
         with self.assertRaisesRegex(
             RuntimeError,
-            "Could not find autograd context with id: {}".format(context_id),
+            f"Could not find autograd context with id: {context_id}",
         ):
             dist_autograd.backward(context_id, [t1.sum()])
 
@@ -2234,7 +2234,7 @@ class DistAutogradTest(CommonDistAutogradTest):
         t2 = torch.rand((3, 3), requires_grad=True)
         with dist_autograd.context() as context_id:
             loss = rpc.rpc_sync(
-                'worker{}'.format(self._next_rank()),
+                f'worker{self._next_rank()}',
                 DistAutogradTest._python_udf_with_backward_error,
                 args=(t1, t2)).sum()
 

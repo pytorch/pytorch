@@ -15,7 +15,7 @@ __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList
 T = TypeVar('T', bound=Module)
 
 
-# Copied from torch.nn.modules.module, required for a cusom __repr__ for ModuleList
+# Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
@@ -103,12 +103,12 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
-    def _get_item_by_idx(self, iterator, idx) -> T:
+    def _get_item_by_idx(self, iterator, idx) -> T:  # type: ignore[misc, type-var]
         """Get the idx-th item of the iterator"""
         size = len(self)
         idx = operator.index(idx)
         if not -size <= idx < size:
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         idx %= size
         return next(islice(iterator, idx, None))
 
@@ -148,8 +148,7 @@ class Sequential(Module):
             return ret
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
@@ -164,8 +163,7 @@ class Sequential(Module):
             return self
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def __mul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):
@@ -229,11 +227,11 @@ class Sequential(Module):
     def insert(self, index: int, module: Module) -> 'Sequential':
         if not isinstance(module, Module):
             raise AssertionError(
-                'module should be of type: {}'.format(Module))
+                f'module should be of type: {Module}')
         n = len(self._modules)
         if not (-n <= index <= n):
             raise IndexError(
-                'Index out of range: {}'.format(index))
+                f'Index out of range: {index}')
         if index < 0:
             index += n
         for i in range(n, index, -1):
@@ -282,7 +280,7 @@ class ModuleList(Module):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         if idx < 0:
             idx += len(self)
         return str(idx)
@@ -587,7 +585,7 @@ class ParameterList(Module):
         """Get the absolute index for the list of modules"""
         idx = operator.index(idx)
         if not (-len(self) <= idx < len(self)):
-            raise IndexError('index {} is out of range'.format(idx))
+            raise IndexError(f'index {idx} is out of range')
         if idx < 0:
             idx += len(self)
         return str(idx)
@@ -667,7 +665,7 @@ class ParameterList(Module):
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
                 if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
-                    device_str = ' ({})'.format(p.device)
+                    device_str = f' ({p.device})'
                 else:
                     device_str = ''
                 parastr = '{} containing: [{} of size {}{}]'.format(
@@ -834,7 +832,7 @@ class ParameterDict(Module):
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        return ParameterDict(((k, default) for k in keys))
+        return ParameterDict((k, default) for k in keys)
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
@@ -894,7 +892,7 @@ class ParameterDict(Module):
             if isinstance(p, torch.Tensor):
                 size_str = 'x'.join(str(size) for size in p.size())
                 if p.device.type in ["cuda", torch._C._get_privateuse1_backend_name()]:
-                    device_str = ' ({})'.format(p.device)
+                    device_str = f' ({p.device})'
                 else:
                     device_str = ''
                 parastr = '{} containing: [{} of size {}{}]'.format(

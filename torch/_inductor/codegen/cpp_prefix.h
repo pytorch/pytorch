@@ -12,15 +12,136 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Math.h>
 
+#include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
+#include <c10/util/Half.h>
+
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+#define INDUCTOR_USE_VECTOR_TYPES() 1
+#else
+#define INDUCTOR_USE_VECTOR_TYPES() 0
+#endif
+
+#if INDUCTOR_USE_VECTOR_TYPES()
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
 
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
+
+template <typename T>
+struct Welford {
+  T mean = T(0);
+  T m2 = T(0);
+  T weight = T(0);
+};
+
+
+template <typename T>
+struct IsVecType: std::false_type {};
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
+#endif
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
+  if constexpr (!IsVecType<T>::value) {
+    if (a.weight == 0) {
+      return b;
+    }
+    if (b.weight == 0) {
+      return a;
+    }
+  }
+  auto delta = b.mean - a.mean;
+  auto new_weight = a.weight + b.weight;
+  auto wb_over_w = b.weight / new_weight;
+  if constexpr (IsVecType<T>::value) {
+    // Guard against division by zero
+    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
+  }
+  auto result = Welford<T>{
+    a.mean + delta * wb_over_w,
+    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
+    new_weight
+  };
+  return result;
+}
+
+template <typename T>
+Welford<T> welford_combine(const Welford<T> &acc, T data) {
+  // Add a single data point
+  auto delta = data - acc.mean;
+  auto new_weight = acc.weight + T(1);
+  auto new_mean = acc.mean + delta / new_weight;
+  auto new_delta = data - new_mean;
+  auto result = Welford<T>{
+    new_mean,
+    acc.m2 + delta * new_delta,
+    new_weight
+  };
+  return result;
+}
+
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> vec_shuffle_down(at::vec::Vectorized<scalar_t> x, size_t n) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  x.store(array);
+  for (size_t i = 0; i + n < Vec::size(); i += 2 * n) {
+    array[i] = array[i + n];
+  }
+  return Vec::loadu(array);
+}
+
+#ifdef CPU_CAPABILITY_AVX2
+inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x, size_t n) {
+  using vec_t = at::vec::Vectorized<float>;
+#define SHUFFLE_MASK(z, y, x, w) ((z << 6) | (y << 4) | (x << 2) | w)
+  switch (n) {
+  case 1:
+    return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(1, 1, 3, 3)));
+  case 2:
+    return vec_t(_mm256_permute_ps(x, SHUFFLE_MASK(2, 2, 2, 2)));
+  case 4:
+    return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
+  }
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+}
+#endif
+
+template <typename scalar_t>
+Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
+  using Vec = at::vec::Vectorized<scalar_t>;
+  for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto shuffled = Welford<Vec>{
+      vec_shuffle_down(acc.mean, n),
+      vec_shuffle_down(acc.m2, n),
+      vec_shuffle_down(acc.weight, n)
+    };
+    acc = welford_combine(acc, shuffled);
+  }
+
+  Welford<scalar_t> result;
+  alignas(alignof(Vec)) scalar_t array[Vec::size()];
+  acc.mean.store(array);
+  result.mean = array[0];
+
+  acc.m2.store(array);
+  result.m2 = array[0];
+
+  acc.weight.store(array);
+  result.weight = array[0];
+
+  return result;
+}
+#endif
+
 
 template <typename T> inline T mod(T a, T b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
@@ -71,13 +192,15 @@ template <> struct AsIntegerType<double> { typedef uint64_t type; };
 template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
 
 template <typename T>
-inline T fetch_value(volatile T *addr) {
+typename std::enable_if<!std::is_reduced_floating_point<T>::value, T>::type
+inline fetch_value(volatile T *addr) {
   return *addr;
 }
 
-template <>
-inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
-  return bfloat16(addr->x);
+template <typename T>
+typename std::enable_if<std::is_reduced_floating_point<T>::value, T>::type
+inline fetch_value(volatile T *addr) {
+  return T(addr->x, T::from_bits());
 }
 
 template <typename T>
@@ -125,6 +248,61 @@ inline float flag_to_float_scalar(T src) {
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 
+inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectorized<float> mask) {
+  at::vec::Vectorized<float> zero_vec(0);
+# if defined(CPU_CAPABILITY_AVX512)
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+    return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+# else // AVX2
+    auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+    return _mm256_maskload_ps(src, mmask);
+# endif
+}
+
+template <typename T>
+typename std::enable_if<std::is_same<T, bfloat16>::value || std::is_same<T, half>::value, at::vec::Vectorized<T>>::type
+inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
+# if defined(CPU_CAPABILITY_AVX512)
+  auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+  auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+  auto zero = _mm256_set1_epi16(0);
+  auto temp = _mm256_mask_loadu_epi16(zero, mmask, src);
+  return _mm512_inserti32x8(_mm512_castsi256_si512(temp), zero, 1);
+# else // AVX2
+  auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+  auto mmask_vec = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+  __at_align__ uint32_t mmask[8];
+  _mm256_storeu_si256(reinterpret_cast<__m256i*>(mmask), mmask_vec);
+  __at_align__ uint16_t result[16];
+  for (auto i = 0; i < 8; i++) {
+    result[i] = mmask[i] == 0xFFFFFFFF ? src[i].x: uint16_t(0);
+  }
+  return at::vec::Vectorized<T>::loadu(result);
+# endif
+}
+
+inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, at::vec::Vectorized<float> mask) {
+# if defined(CPU_CAPABILITY_AVX512)
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+    auto zero = _mm_set1_epi8(0);
+    auto temp = _mm_mask_loadu_epi8(zero, mmask, src);
+    return _mm512_inserti64x2(_mm512_set1_epi32(0), temp, 0);
+# else // AVX2
+    auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+    auto mmask_vec = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+    __at_align__ uint32_t mmask[8];
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(mmask), mmask_vec);
+    __at_align__ uint8_t result[32];
+    for (auto i = 0; i < 8; i++) {
+      result[i] = mmask[i] == 0xFFFFFFFF ? src[i]: uint8_t(0);
+    }
+    return at::vec::Vectorized<uint8_t>::loadu(result);
+# endif
+}
+
 template <typename T>
 inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
@@ -135,18 +313,19 @@ inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   return at::vec::Vectorized<float>::loadu(dst_tmp);
 }
 
-inline at::vec::Vectorized<float> cvt_bf16_to_fp32(
-    at::vec::Vectorized<bfloat16> src) {
+template <typename scalar_t>
+inline at::vec::Vectorized<float> cvt_lowp_fp_to_fp32(
+    at::vec::Vectorized<scalar_t> src) {
   at::vec::Vectorized<float> res_vec1(0);
   at::vec::Vectorized<float> res_vec2(0);
-  std::tie(res_vec1, res_vec2) = at::vec::convert_bfloat16_float(src);
+  std::tie(res_vec1, res_vec2) = at::vec::convert_to_float<scalar_t>(src);
   return res_vec1;
 }
 
-inline at::vec::Vectorized<bfloat16> cvt_fp32_to_bf16(
+template <typename scalar_t>
+inline at::vec::Vectorized<scalar_t> cvt_fp32_to_lowp_fp(
     at::vec::Vectorized<float> src) {
-  auto res = at::vec::convert_float_bfloat16(src, src);
-  return res;
+  return at::vec::convert_from_float<scalar_t>(src, src);
 }
 
 inline at::vec::Vectorized<float> mask_convert_to_float(at::vec::Vectorized<float> src) {

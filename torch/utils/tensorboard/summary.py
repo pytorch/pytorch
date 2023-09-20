@@ -1,14 +1,20 @@
 import json
 import logging
 import os
-from typing import Optional
+import struct
 
+from typing import Any, List, Optional
+
+import torch
 import numpy as np
+
 from google.protobuf import struct_pb2
 
-from tensorboard.compat.proto.summary_pb2 import HistogramProto
-from tensorboard.compat.proto.summary_pb2 import Summary
-from tensorboard.compat.proto.summary_pb2 import SummaryMetadata
+from tensorboard.compat.proto.summary_pb2 import (
+    HistogramProto,
+    Summary,
+    SummaryMetadata,
+)
 from tensorboard.compat.proto.tensor_pb2 import TensorProto
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
@@ -18,11 +24,93 @@ from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
 
-__all__ = ['hparams', 'scalar', 'histogram_raw', 'histogram', 'make_histogram', 'image', 'image_boxes', 'draw_boxes',
-           'make_image', 'video', 'make_video', 'audio', 'custom_scalars', 'text', 'pr_curve_raw', 'pr_curve', 'compute_curve',
-           'mesh']
+__all__ = [
+    "half_to_int",
+    "int_to_half",
+    "hparams",
+    "scalar",
+    "histogram_raw",
+    "histogram",
+    "make_histogram",
+    "image",
+    "image_boxes",
+    "draw_boxes",
+    "make_image",
+    "video",
+    "make_video",
+    "audio",
+    "custom_scalars",
+    "text",
+    "tensor_proto",
+    "pr_curve_raw",
+    "pr_curve",
+    "compute_curve",
+    "mesh",
+]
 
 logger = logging.getLogger(__name__)
+
+def half_to_int(f: float) -> int:
+    """Casts a half-precision float value into an integer.
+
+    Converts a half precision floating point value, such as `torch.half` or
+    `torch.bfloat16`, into an integer value which can be written into the
+    half_val field of a TensorProto for storage.
+
+    To undo the effects of this conversion, use int_to_half().
+
+    """
+    buf = struct.pack("f", f)
+    return struct.unpack("i", buf)[0]
+
+def int_to_half(i: int) -> float:
+    """Casts an integer value to a half-precision float.
+
+    Converts an integer value obtained from half_to_int back into a floating
+    point value.
+
+    """
+    buf = struct.pack("i", i)
+    return struct.unpack("f", buf)[0]
+
+def _tensor_to_half_val(t: torch.Tensor) -> List[int]:
+    return [half_to_int(x) for x in t.flatten().tolist()]
+
+def _tensor_to_complex_val(t: torch.Tensor) -> List[float]:
+    return torch.view_as_real(t).flatten().tolist()
+
+def _tensor_to_list(t: torch.Tensor) -> List[Any]:
+    return t.flatten().tolist()
+
+# type maps: torch.Tensor type -> (protobuf type, protobuf val field)
+_TENSOR_TYPE_MAP = {
+    torch.half: ("DT_HALF", "half_val", _tensor_to_half_val),
+    torch.float16: ("DT_HALF", "half_val", _tensor_to_half_val),
+    torch.bfloat16: ("DT_BFLOAT16", "half_val", _tensor_to_half_val),
+    torch.float32: ("DT_FLOAT", "float_val", _tensor_to_list),
+    torch.float: ("DT_FLOAT", "float_val", _tensor_to_list),
+    torch.float64: ("DT_DOUBLE", "double_val", _tensor_to_list),
+    torch.double: ("DT_DOUBLE", "double_val", _tensor_to_list),
+    torch.int8: ("DT_INT8", "int_val", _tensor_to_list),
+    torch.uint8: ("DT_UINT8", "int_val", _tensor_to_list),
+    torch.qint8: ("DT_UINT8", "int_val", _tensor_to_list),
+    torch.int16: ("DT_INT16", "int_val", _tensor_to_list),
+    torch.short: ("DT_INT16", "int_val", _tensor_to_list),
+    torch.int: ("DT_INT32", "int_val", _tensor_to_list),
+    torch.int32: ("DT_INT32", "int_val", _tensor_to_list),
+    torch.qint32: ("DT_INT32", "int_val", _tensor_to_list),
+    torch.int64: ("DT_INT64", "int64_val", _tensor_to_list),
+    torch.complex32: ("DT_COMPLEX32", "scomplex_val", _tensor_to_complex_val),
+    torch.chalf: ("DT_COMPLEX32", "scomplex_val", _tensor_to_complex_val),
+    torch.complex64: ("DT_COMPLEX64", "scomplex_val", _tensor_to_complex_val),
+    torch.cfloat: ("DT_COMPLEX64", "scomplex_val", _tensor_to_complex_val),
+    torch.bool: ("DT_BOOL", "bool_val", _tensor_to_list),
+    torch.complex128: ("DT_COMPLEX128", "dcomplex_val", _tensor_to_complex_val),
+    torch.cdouble: ("DT_COMPLEX128", "dcomplex_val", _tensor_to_complex_val),
+    torch.uint8: ("DT_UINT8", "uint32_val", _tensor_to_list),
+    torch.quint8: ("DT_UINT8", "uint32_val", _tensor_to_list),
+    torch.quint4x2: ("DT_UINT8", "uint32_val", _tensor_to_list),
+}
 
 
 def _calc_scale_factor(tensor):
@@ -93,19 +181,19 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
     """
     import torch
     from tensorboard.plugins.hparams.api_pb2 import (
+        DataType,
         Experiment,
         HParamInfo,
         MetricInfo,
         MetricName,
         Status,
-        DataType,
     )
     from tensorboard.plugins.hparams.metadata import (
-        PLUGIN_NAME,
-        PLUGIN_DATA_VERSION,
         EXPERIMENT_TAG,
-        SESSION_START_INFO_TAG,
+        PLUGIN_DATA_VERSION,
+        PLUGIN_NAME,
         SESSION_END_INFO_TAG,
+        SESSION_START_INFO_TAG,
     )
     from tensorboard.plugins.hparams.plugin_data_pb2 import (
         HParamsPluginData,
@@ -145,8 +233,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             or not all(isinstance(d, type(hparam_dict[k])) for d in v)
         ):
             raise TypeError(
-                "parameter: hparam_domain_discrete[{}] should be a list of same type as "
-                "hparam_dict[{}].".format(k, k)
+                f"parameter: hparam_domain_discrete[{k}] should be a list of same type as hparam_dict[{k}]."
             )
     hps = []
 
@@ -303,6 +390,43 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
         return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
 
 
+def tensor_proto(tag, tensor):
+    """Outputs a `Summary` protocol buffer containing the full tensor.
+    The generated Summary has a Tensor.proto containing the input Tensor.
+    Args:
+      name: A name for the generated node. Will also serve as the series name in
+        TensorBoard.
+      tensor: Tensor to be converted to protobuf
+    Returns:
+      A tensor protobuf in a `Summary` protobuf.
+    Raises:
+      ValueError: If tensor is too big to be converted to protobuf, or
+                     tensor data type is not supported
+    """
+    if tensor.numel() * tensor.itemsize >= (1 << 31):
+        raise ValueError(
+            "tensor is bigger than protocol buffer's hard limit of 2GB in size"
+        )
+
+    if tensor.dtype in _TENSOR_TYPE_MAP:
+        dtype, field_name, conversion_fn = _TENSOR_TYPE_MAP[tensor.dtype]
+        tensor_proto = TensorProto(
+            **{
+                "dtype": dtype,
+                "tensor_shape": TensorShapeProto(
+                    dim=[TensorShapeProto.Dim(size=x) for x in tensor.shape]
+                ),
+                field_name: conversion_fn(tensor),
+            },
+        )
+    else:
+        raise ValueError(f"{tag} has unsupported tensor dtype {tensor.dtype}")
+
+    plugin_data = SummaryMetadata.PluginData(plugin_name="tensor")
+    smd = SummaryMetadata(plugin_data=plugin_data)
+    return Summary(value=[Summary.Value(tag=tag, metadata=smd, tensor=tensor_proto)])
+
+
 def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_counts):
     # pylint: disable=line-too-long
     """Outputs a `Summary` protocol buffer with a histogram.
@@ -456,7 +580,10 @@ def image_boxes(
     tensor_boxes = make_np(tensor_boxes)
     tensor_image = tensor_image.astype(np.float32) * _calc_scale_factor(tensor_image)
     image = make_image(
-        tensor_image.clip(0, 255).astype(np.uint8), rescale=rescale, rois=tensor_boxes, labels=labels
+        tensor_image.clip(0, 255).astype(np.uint8),
+        rescale=rescale,
+        rois=tensor_boxes,
+        labels=labels,
     )
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
@@ -494,6 +621,7 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
         ANTIALIAS = Image.ANTIALIAS
     image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
+
     output = io.BytesIO()
     image.save(output, format="PNG")
     image_string = output.getvalue()
@@ -818,8 +946,8 @@ def mesh(
     Returns:
       Merged summary for mesh/point cloud representation.
     """
-    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
     from tensorboard.plugins.mesh import metadata
+    from tensorboard.plugins.mesh.plugin_data_pb2 import MeshPluginData
 
     json_config = _get_json_config(config_dict)
 

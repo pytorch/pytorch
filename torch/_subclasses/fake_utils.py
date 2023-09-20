@@ -1,3 +1,4 @@
+import functools
 import warnings
 from typing import Callable, Union
 
@@ -9,6 +10,7 @@ from torch._subclasses.fake_tensor import (
     tree_flatten_only,
     UnsupportedFakeTensorException,
 )
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
 
@@ -74,14 +76,17 @@ class CrossRefFakeMode(TorchDispatchMode):
                 aten.set_.source_Storage_storage_offset,
             )
             and not self.ignore_op_fn(func)
-            and torch.Tag.dynamic_output_shape not in func.tags  # type: ignore[attr-defined]
-            and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
-            and torch.Tag.data_dependent_output not in func.tags  # type: ignore[attr-defined]
+            and torch.Tag.dynamic_output_shape not in func.tags
+            and torch.Tag.inplace_view not in func.tags
+            and torch.Tag.data_dependent_output not in func.tags
         ):
             try:
-                with FakeTensorMode() as fake_mode:
+                # TODO: enable_python_dispatcher() here
+                with FakeTensorMode(shape_env=ShapeEnv()) as fake_mode:
                     fake_args, fake_kwargs = pytree.tree_map_only(
-                        torch.Tensor, fake_mode.from_tensor, (args, kwargs)
+                        torch.Tensor,
+                        functools.partial(fake_mode.from_tensor, static_shapes=True),
+                        (args, kwargs),
                     )
                     with warnings.catch_warnings():
                         fake_r = func(*fake_args, **fake_kwargs)
@@ -120,7 +125,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                     f"{f_output_alias_each_other} != {r_output_alias_each_other}"
                 )
 
-            for r_out, fake_out in zip(tree_flatten(r)[0], tree_flatten(fake_r)[0]):
+            for idx, (r_out, fake_out) in enumerate(
+                zip(tree_flatten(r)[0], tree_flatten(fake_r)[0])
+            ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
                 assert r_is_ten == isinstance(
                     fake_out, torch.Tensor
@@ -141,10 +148,16 @@ class CrossRefFakeMode(TorchDispatchMode):
 
                     try:
                         torch._prims.utils.compare_tensor_meta(
-                            r_out, fake_out, check_strides=self.check_strides
+                            r_out,
+                            fake_out,
+                            check_strides=self.check_strides,
+                            allow_rhs_unbacked=True,
                         )
                     except Exception as e:
-                        raise RuntimeError(
+                        error_message = (
                             f"{context} mismatched tensor metadata: {e}"
-                        ) from e
+                            if len(r_flat) == 1
+                            else f"{context} mismatched tensor metadata for output[{idx}]: {e}"
+                        )
+                        raise RuntimeError(error_message) from e
         return r

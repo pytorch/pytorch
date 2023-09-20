@@ -1,17 +1,20 @@
+from __future__ import annotations
+
 import logging
+from typing import Optional, Sequence
 
 import torch
-from torch import _prims
+from torch import _prims, Tensor
 
 log = logging.getLogger(__name__)
 
 
 def make_prim(
-    schema,
+    schema: str,
     impl_aten,
     return_type=_prims.RETURN_TYPE.NEW,
-    doc="",
-    tags=None,
+    doc: str = "",
+    tags: Optional[Sequence[torch.Tag]] = None,
 ):
     def meta(*args, **kwargs):
         return _prims.TensorMeta(impl_aten(*args, **kwargs))
@@ -26,6 +29,17 @@ def make_prim(
     )
 
 
+def eager_force_stride(input_tensor: Tensor, stride) -> tuple[int, ...]:
+    if input_tensor.stride() == stride:
+        return input_tensor
+    new_tensor = input_tensor.clone().as_strided(
+        input_tensor.shape,
+        stride,
+    )
+    new_tensor.copy_(input_tensor)
+    return new_tensor
+
+
 # Custom prims used for handling randomness
 seed = make_prim(
     "inductor_seed(Device device) -> Tensor",
@@ -36,7 +50,7 @@ seed = make_prim(
 seeds = make_prim(
     "inductor_seeds(int count, Device device) -> Tensor",
     lambda count, device: torch.randint(2**63 - 1, [count], device=device),
-    doc="Horizontally fusion of many inductor_seed() calls",
+    doc="Horizontal fusion of many inductor_seed() calls",
     tags=(torch.Tag.nondeterministic_seeded,),
 )
 lookup_seed = make_prim(
@@ -54,4 +68,16 @@ randint = make_prim(
     "inductor_randint(SymInt low, SymInt high, SymInt[] size, Tensor seed) -> Tensor",
     lambda low, high, size, seed: torch.randint(low, high, size, device=seed.device),
     doc="torch.randint() using backend-specific RNG that can be fused",
+)
+force_stride_order = make_prim(
+    "inductor_force_stride_order(Tensor input, SymInt[] stride) -> Tensor",
+    lambda input_tensor, stride: eager_force_stride(input_tensor, stride),
+    doc="Force the stride order for input tensor. No-op if the input tensor already has the stride. Do a copy otherwise",
+)
+masked_scatter_with_index = make_prim(
+    "inductor_masked_scatter_with_index(Tensor input, Tensor mask, Tensor source_idx, Tensor source) -> Tensor",
+    lambda input_tensor, mask, index, source: torch.masked_scatter(
+        input_tensor, mask, source
+    ),
+    doc="masked_scatter with precomputed indices",
 )

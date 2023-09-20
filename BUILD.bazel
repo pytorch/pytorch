@@ -289,6 +289,7 @@ header_template_rule(
     include = "aten/src",
     substitutions = {
         "@AT_CUDNN_ENABLED@": "1",
+        "@AT_CUSPARSELT_ENABLED@": "0",
         "@AT_ROCM_ENABLED@": "0",
         "@AT_MAGMA_ENABLED@": "0",
         "@NVCC_FLAGS_EXTRA@": "",

@@ -24,7 +24,7 @@ CHECKPOINT_DIR = f"/scratch/{os.environ['LOGNAME']}/checkpoint"
 
 
 def opt_at(opt, idx):
-    return list((opt.state.values()))[idx]
+    return list(opt.state.values())[idx]
 
 
 def init_model():

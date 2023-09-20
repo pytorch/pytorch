@@ -65,6 +65,7 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(histogramdd_stub);
 DEFINE_DISPATCH(histogramdd_linear_stub);
+DEFINE_DISPATCH(histogram_select_outer_bin_edges_stub);
 
 namespace {
 
@@ -153,22 +154,6 @@ void histogramdd_prepare_out(const Tensor& input, TensorList bins,
     histogramdd_prepare_out(input, bin_ct, hist, bin_edges);
 }
 
-template<typename scalar_t>
-void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
-        std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
-    // Calls aminmax on input with dim=0, reducing all but the innermost dimension of input.
-    Tensor min, max;
-    std::tie(min, max) = aminmax(input, 0);
-
-    TORCH_INTERNAL_ASSERT(min.is_contiguous() && max.is_contiguous());
-
-    const scalar_t *min_data = min.data_ptr<scalar_t>();
-    std::copy(min_data, min_data + N, leftmost_edges.begin());
-
-    const scalar_t *max_data = max.data_ptr<scalar_t>();
-    std::copy(max_data, max_data + N, rightmost_edges.begin());
-}
-
 /* Determines the outermost bin edges. For simplicity when calling into aminmax,
  * assumes that input has already been reshaped to (M, N).
  */
@@ -192,19 +177,8 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
         }
     } else if (input.numel() > 0) {
         // non-empty input
-        AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
-            if (input.is_mps()) {
-                Tensor min, max;
-                std::tie(min, max) = at::aminmax(input, 0);
 
-                for (const auto i : c10::irange(N)) {
-                    leftmost_edges[i] = min[i].item().to<scalar_t>();
-                    rightmost_edges[i] = max[i].item().to<scalar_t>();
-                }
-            } else {
-                infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
-            }
-        });
+        histogram_select_outer_bin_edges_stub(input.device().type(), input, N, leftmost_edges, rightmost_edges);
     }
 
     for (const auto dim : c10::irange(N)) {

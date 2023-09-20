@@ -103,8 +103,8 @@ class BaseDataScheduler:
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
         format_string += '\n'
-        format_string += 'Data Sparsifier {0}\n'.format(self.data_sparsifier)
-        format_string += '    {0}: {1}\n'.format(self.schedule_param, self.base_param)
+        format_string += f'Data Sparsifier {self.data_sparsifier}\n'
+        format_string += f'    {self.schedule_param}: {self.base_param}\n'
         format_string += ')'
         return format_string
 

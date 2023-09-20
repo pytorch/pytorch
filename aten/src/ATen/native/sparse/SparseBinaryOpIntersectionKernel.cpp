@@ -146,10 +146,11 @@ void sparse_mask_projection_out_cpu_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y,
-    const OptTensor& x_hash_opt = c10::nullopt) {
+    const OptTensor& x_hash_opt,
+    bool accumulate_matches) {
   using CPUValueLhsProjKernel = CPUValueSelectionIntersectionKernel<LhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueLhsProjKernel>(
-      result, x, y, x_hash_opt, c10::nullopt, /*accumulate_matches=*/false
+      result, x, y, x_hash_opt, c10::nullopt, accumulate_matches
   );
 }
 

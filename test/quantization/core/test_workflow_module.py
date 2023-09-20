@@ -832,7 +832,7 @@ class TestDistributed(QuantizationTestCase):
             self.assertEqual(
                 buffer_ids_before,
                 buffer_ids_after,
-                msg="{}: Buffers must be modified in place".format(str(observer)))
+                msg=f"{str(observer)}: Buffers must be modified in place")
 
     def test_fake_quant_preserves_buffers(self):
         """

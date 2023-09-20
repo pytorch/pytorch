@@ -643,24 +643,24 @@ if __name__ == "__main__":
         "site_config_dir",
     )
 
-    print("-- app dirs %s --" % __version__)
+    print(f"-- app dirs {__version__} --")
 
     print("-- app dirs (with optional 'version')")
     dirs = AppDirs(appname, appauthor, version="1.0")
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")
 
     print("\n-- app dirs (without optional 'version')")
     dirs = AppDirs(appname, appauthor)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")
 
     print("\n-- app dirs (without optional 'appauthor')")
     dirs = AppDirs(appname)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")
 
     print("\n-- app dirs (with disabled 'appauthor')")
     dirs = AppDirs(appname, appauthor=False)
     for prop in props:
-        print("%s: %s" % (prop, getattr(dirs, prop)))
+        print(f"{prop}: {getattr(dirs, prop)}")

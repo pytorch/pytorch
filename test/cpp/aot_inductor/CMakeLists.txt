@@ -30,19 +30,7 @@ target_link_libraries(test_aot_inductor PRIVATE
   ${CMAKE_CURRENT_BINARY_DIR}/libaot_inductor_output.so
 )
 
-target_include_directories(test_aot_inductor PRIVATE
-  ${TORCH_SRC_DIR}/_inductor/aot_inductor_include
-)
-
 if(USE_CUDA)
-  target_link_libraries(test_aot_inductor PRIVATE
-    ${C10_CUDA_BUILD_SHARED_LIBS}
-    ${CUDA_LIBRARIES}
-    ${CUDA_NVRTC_LIB}
-    ${CUDA_CUDA_LIB}
-    ${TORCH_CUDA_LIBRARIES}
-  )
-
   target_include_directories(test_aot_inductor PRIVATE ${ATen_CUDA_INCLUDE})
 
   target_compile_definitions(test_aot_inductor PRIVATE USE_CUDA)

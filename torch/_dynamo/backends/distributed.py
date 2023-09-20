@@ -111,6 +111,16 @@ def pretty_print_buckets(buckets: List[Bucket], bucket_bytes_cap: int):
         log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
 
+def has_higher_order_op(gm):
+    # Check if there is a higher order op in the graph
+    for node in gm.graph.nodes:
+        if node.op == "get_attr":
+            maybe_param = getattr(gm, node.target)
+            if isinstance(maybe_param, torch.fx.GraphModule):
+                return True
+    return False
+
+
 class DDPOptimizer:
     """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
@@ -203,9 +213,44 @@ class DDPOptimizer:
         to compile each subgraph. Finally, stiches compiled graphs into one graphmodule
         and returns its callable.
         """
+
+        # Today, optimize_ddp=True and keep_output_stride=False can lead to silent
+        # correctness issues. The problem is that ddp_optimizer works by partitioning
+        # the dynamo graph, sending each subgraph through aot autograd to inductor,
+        # and creates example inputs by eagerly interpreting each subgraph to get
+        # an output that with the same metadata that we'd get from eager mode.
+        # This is a problem though, for torch._inductor.config.keep_output_stride.
+        # The above config can cause the outputs of the first graph to have
+        # **different** strides from eager, causing the inputs that we pass
+        # to the second graph to be wrong.
+        # To really fix this, we would need to faithfully ask inductor
+        # what the outputs to each graph it expects are.
+        assert torch._inductor.config.keep_output_stride, """\
+Detected that you are running DDP with torch.compile, along with these two flags:
+- torch._dynamo.config.optimize_ddp = True
+- torch._inductor.config.keep_output_stride = False
+This combination of flags is incompatible. Please set keep_output_stride to False,
+or file a github issue."""
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
             fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+
+        if has_higher_order_op(gm):
+            # This indicates presence of a higher order op. For now, we
+            # have no way to break the higher order op into two buckets.
+            # Allowing higher order ops in the graph also requires
+            # changes in the split_module, becuase graph splitter
+            # currently assumes that all the args of all ops are
+            # tensors, but in the case of higher order ops, it could be
+            # a graph module. As a workaround, we are shortcircuiting
+            raise NotImplementedError(
+                "DDPOptimizer backend: Found a higher order op in the graph. "
+                "This is not supported. Please turn off DDP optimizer using "
+                "torch._dynamo.config.optimize_ddp=False. Note that this can "
+                "cause performance degradation because there will be one bucket "
+                "for the entire Dynamo graph. Please refer to this issue - "
+                "https://github.com/pytorch/pytorch/issues/104674."
+            )
 
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)

@@ -323,38 +323,45 @@ def _validate_sample_input_sparse_reduction_sum(sample, check_validate=False):
     dim = t_kwargs.get("dim")
     keepdim = t_kwargs.get("keepdim")
     layout = t_inp.layout
-    if layout in {
-        torch.sparse_csr,
-        torch.sparse_csc,
-        torch.sparse_bsr,
-        torch.sparse_bsc,
-    }:
-        if (isinstance(dim, int) and (t_inp.dim() != 2 or keepdim)) or (
-            isinstance(dim, (list, tuple))
-            and (((t_inp.dim() != 2 and len(dim) != t_inp.dim()) or keepdim))
-        ):
-            if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+    if isinstance(dim, (int, list, tuple)):
+        if layout in {
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        }:
+            if layout in {torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
                 return ErrorInput(
                     sample,
                     error_regex=(
-                        "empty_sparse_compressed expected sparse compressed [(]non-block[)] tensor"
-                        " layout but got Sparse(Bsr|Bsc)"
+                        "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout"
                     ),
                 )
-            else:
+            if layout in {torch.sparse_csr, torch.sparse_csc} and not keepdim:
                 return ErrorInput(
                     sample,
-                    error_type=NotImplementedError,
-                    error_regex="Could not run 'aten::sum.IntList_out' with arguments from the 'SparseCsr(CPU|CUDA)' backend",
+                    error_regex=(
+                        "reduction operations on CSR tensors with keepdim=False is unsupported"
+                    ),
                 )
-        elif t_kwargs and not keepdim:
-            # reductions on sparse compressed tensors require
-            # keepdim==True when reduction is over sparse dimensions
-            return ErrorInput(
-                sample,
-                # FIXME: raise a better exception message
-                error_regex="torch.empty: Only batched sparse compressed [(]non-block[)] tensors are supported",
-            )
+            if t_inp.dim() != 2:
+                return ErrorInput(
+                    sample,
+                    error_regex=("input_dim == 2 INTERNAL ASSERT"),
+                )
+            if layout == torch.sparse_csr:
+                if t_inp.dtype == torch.bool:
+                    return ErrorInput(
+                        sample,
+                        error_regex=("_sparse_csr_sum_cpu not implemented for 'Bool'"),
+                    )
+                if t_inp.dtype == torch.complex32:
+                    return ErrorInput(
+                        sample,
+                        error_regex=(
+                            "_sparse_csr_sum_cuda not implemented for 'ComplexHalf'"
+                        ),
+                    )
     return sample
 
 
