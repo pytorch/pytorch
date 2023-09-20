@@ -2,19 +2,20 @@ import functools
 import itertools
 import logging
 import operator
-from collections import defaultdict, namedtuple
-from typing import Any, Dict, List, Optional, Union
+from collections import Counter, defaultdict, namedtuple
+from typing import Any, Dict, List, Optional, Set, Union
 
 from sympy import Expr
 
 import torch
 import torch._inductor as inductor
+import torch.utils._pytree as pytree
+from torch import fx
 from torch._decomp import register_decomposition
 from torch._prims_common import is_integer_dtype
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -85,6 +86,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
+
+    move_constructors_to_cuda(gm.graph)
 
     fake_tensor_updater.incremental_update()
     # Keep this last, since it introduces mutation. Look at
@@ -802,3 +805,141 @@ def unfuse_bias_add_to_pointwise(match: Match, inp, mat1, mat2):
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def allows_mixed_devices(op):
+    return op in (
+        aten.index.Tensor,
+        aten.index_put.default,
+        aten.index_put_.default,
+        aten.copy.default,
+        aten.copy_.default,
+        aten.slice_scatter.default,
+    )
+
+
+def cannot_be_moved_to_cuda(node):
+    if node.target == "output":
+        return True
+
+    if not isinstance(
+        node.target, torch._ops.OpOverload
+    ) and node.target.namespace not in ("prims", "aten"):
+        return True
+
+    return False
+
+
+def get_node_device(node: fx.Node) -> Optional[torch.device]:
+    ten = node.meta.get("val")
+    return None if not isinstance(ten, torch.Tensor) else ten.device
+
+
+def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
+    cpu_indeg: Dict[fx.Node, int] = Counter()
+
+    for node in graph.nodes:
+        cpu_count = 0
+
+        def add_cpu_inp(node):
+            nonlocal cpu_count
+            device = get_node_device(node)
+            cpu_count += device is not None and device.type == "cpu"
+
+        pytree.tree_map_only(torch.fx.Node, add_cpu_inp, (node.args, node.kwargs))
+
+        if cpu_count:
+            cpu_indeg[node] = cpu_count
+
+    return cpu_indeg
+
+
+def move_constructors_to_cuda(graph):
+    if not torch.backends.cuda.is_built():
+        return
+
+    cuda_devices = set()
+    constructors = []
+
+    for node in graph.nodes:
+        device = get_node_device(node)
+        if device and device.type == "cuda":
+            cuda_devices.add(device)
+
+        if not isinstance(
+            node.target, torch._ops.OpOverload
+        ) or node.target.namespace not in ("prims", "aten"):
+            continue
+
+        if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
+            continue
+
+        if not node.kwargs.get("device") == torch.device("cpu"):
+            continue
+
+        constructors.append(node)
+
+    # not handling multiple cuda devices initially
+    if not constructors or len(cuda_devices) != 1:
+        return
+
+    cpu_indeg = get_cpu_indeg_count(graph)
+
+    # node, and constructor nodes which are ancestor nodes of this node
+    queue: List[fx.Node] = list(constructors)
+    cannot_move_to_cuda: Set[fx.Node] = set()
+    equivalent_ancestor_sets: Dict[fx.Node, Set[fx.Node]] = {
+        c: {c} for c in constructors
+    }
+
+    def make_ancestors_equivalent(set1, set2):
+        # could use union find but not worth complexity here
+        set1.update(set2)
+        for obj in set1:
+            equivalent_ancestor_sets[obj] = set1
+        return set1
+
+    constructor_ancestors: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
+
+    for c in queue:
+        constructor_ancestors[c].add(c)
+
+    while queue:
+        node = queue.pop()
+        ancestors = constructor_ancestors[node]
+
+        for user in node.users:
+            if cannot_be_moved_to_cuda(user):
+                cannot_move_to_cuda.update(ancestors)
+                break
+
+            # this node was used on a op which takes in multiple devices and output a cuda
+            # tensor. we can convert its cpu input to cuda without making further changes
+            node_device = get_node_device(user)
+            if (
+                allows_mixed_devices(user.target)
+                and node_device
+                and node_device.type == "cuda"
+            ):
+                del cpu_indeg[user]
+            else:
+                # otherwise, we should continue look at its downstream uses
+                cpu_indeg[user] -= 1
+                if cpu_indeg[user] == 0:
+                    del cpu_indeg[user]
+                    queue.append(user)
+
+            unioned_set = make_ancestors_equivalent(
+                ancestors, constructor_ancestors[user]
+            )
+            constructor_ancestors[user] = unioned_set
+
+    for node in cpu_indeg:
+        if constructor_ancestors[node]:
+            cannot_move_to_cuda.update(constructor_ancestors[node])
+
+    for node in constructors:
+        if node not in cannot_move_to_cuda:
+            kwargs = node.kwargs.copy()
+            kwargs["device"] = next(iter(cuda_devices))
+            node.kwargs = kwargs
