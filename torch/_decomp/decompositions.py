@@ -4030,20 +4030,13 @@ def div_tensor_mode(self, other, *, rounding_mode: Optional[str]) -> Tensor:
     compute_dtype, result_dtype = utils.elementwise_dtypes(
         self, other, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
-    # If rounding mode is not None, then the intermediate quotient needs to be computed
-    # and stored in the compute_dtype to maintain precision.
-    if rounding_mode is not None:
-        self = self.to(compute_dtype)
-        other = other.to(compute_dtype)
-
-    quotient = torch.div(self, other)
 
     if rounding_mode is None:
-        return quotient
+        return torch.div(self, other)
     elif rounding_mode == "trunc":
-        return torch.trunc(quotient).to(result_dtype)
+        return torch.trunc(torch.div(self, other)).to(result_dtype)
     elif rounding_mode == "floor":
-        return torch.floor(quotient).to(result_dtype)
+        return torch.floor_divide(self, other)
     else:
         raise RuntimeError(
             f"div expected rounding_mode to be one of None, 'trunc', or 'floor' but found '{rounding_mode}'"
