@@ -83,8 +83,8 @@ class Sampler(Generic[T_co]):
     #     This prevents triggering some fallback behavior. E.g., the built-in
     #     `list(X)` tries to call `len(X)` first, and executes a different code
     #     path if the method is not found or `NotImplemented` is returned, while
-    #     raising an `NotImplementedError` will propagate and and make the call
-    #     fail where it could have use `__iter__` to complete the call.
+    #     raising a `NotImplementedError` will propagate and make the call fail
+    #     where it could have used `__iter__` to complete the call.
     #
     # Thus, the only two sensible things to do are
     #
@@ -223,7 +223,7 @@ class WeightedRandomSampler(Sampler[int]):
         weights_tensor = torch.as_tensor(weights, dtype=torch.double)
         if len(weights_tensor.shape) != 1:
             raise ValueError("weights should be a 1d sequence but given "
-                             "weights have shape {}".format(tuple(weights_tensor.shape)))
+                             f"weights have shape {tuple(weights_tensor.shape)}")
 
         self.weights = weights_tensor
         self.num_samples = num_samples

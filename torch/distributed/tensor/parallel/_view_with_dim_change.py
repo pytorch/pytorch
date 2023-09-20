@@ -112,7 +112,7 @@ class _ViewAndRedistribute(torch.autograd.Function):
             return DT(
                 new_local_tensor,
                 device_mesh,
-                new_sharding_placement,
+                tuple(new_sharding_placement),
                 shape=torch.Size(shape),
                 dtype=new_local_tensor.dtype,
                 requires_grad=new_local_tensor.requires_grad,

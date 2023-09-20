@@ -12,6 +12,7 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <torch/library.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -378,7 +379,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         "quantized::qconv_prepack: ONEDNN only supports symmetric quantization of weight,"
         " whose zero point must be 0.");
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
+#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
     wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
+#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+    wgt_scales = ideep::scale_t(1, weight.q_scale());
+#else
+    TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+#endif
   } else if (qtype == c10::kPerChannelAffine) {
     TORCH_CHECK(
         !transpose,
@@ -391,17 +398,20 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
           wgt_zero_points[i]==0,
           "quantized::qconv_prepack: ONEDNN only supports symmetric quantization of weight,"
           " whose zero point must be 0.");
+#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
       wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of ONEDNN and PyTorch are reciprocal
+#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+      wgt_scales[i] = weight.q_per_channel_scales()[i].item<float>();
+#else
+      TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+#endif
     }
   } else {
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
   }
 
   // Set runtime src zero point
-  auto src_zero_point = {DNNL_RUNTIME_S32_VAL};
-  op_attr.set_zero_points(DNNL_ARG_SRC,
-                          ideep::utils::tensor_zp_mask(src_zero_point.size()),
-                          src_zero_point);
+  op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* zero_points_mask= */0);
   at::Tensor weight_copy;
   ideep::tensor::desc w_desc;
   ideep::dims dims_iohw, dims_giohw;
@@ -480,6 +490,131 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
 
 template struct PackedConvWeightsOnednn<2>;
 template struct PackedConvWeightsOnednn<3>;
+
+// Return the packed weight as Mkldnn Tensor
+at::Tensor _qconv_prepack_onednn(
+    at::Tensor weight, // from CPU backend instead of QuantizedCPU
+    at::Tensor weight_scales, // Weight zero points must be 0 for onednn
+    double input_scale,
+    int64_t input_zero_point,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    c10::optional<torch::List<int64_t>> input_shape) {
+  int kSpatialDim = weight.ndimension() - 2;
+  TORCH_CHECK(
+      weight.ndimension() == kSpatialDim + 2,
+      "Weights are expected to have ", kSpatialDim + 2, " dimensions");
+  TORCH_CHECK(
+      stride.size() == (decltype(stride.size()))kSpatialDim,
+      "stride should contain ", kSpatialDim, " elements for ",
+      kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+      padding.size() == (decltype(padding.size()))kSpatialDim,
+      "Specify front/top/left padding only. "
+      "end/bottom/right padding assumed to be equal to front/top/left");
+  TORCH_CHECK(
+      dilation.size() == (decltype(dilation.size()))kSpatialDim,
+      "dilation should contain ", kSpatialDim, " elements for ",
+      kSpatialDim, "D convolution.");
+
+  bool is_1d = (1 == kSpatialDim);
+  auto x_dims = input_shape.has_value()?input_shape.value().vec():ideep::dims();
+  if (is_1d) {
+    if (input_shape.has_value()) {
+      // N, C, L -> N, C, 1, L
+      x_dims.insert(x_dims.begin() + 2, 1);
+    }
+    if (weight.dim() == 3) {
+      weight = weight.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
+    }
+    stride = quant_utils::MakeArgForConv1d(stride, 1);
+    padding = quant_utils::MakeArgForConv1d(padding, 0);
+    dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+    kSpatialDim += 1;
+  }
+  auto w_dims = weight.sizes().vec();
+  auto strides = stride.vec();
+  auto padding_l = padding.vec();
+  auto padding_r = padding.vec();
+  auto dilates = dilation.vec();
+  auto op_attr = ideep::attr_t();
+
+  ideep::scale_t weights_scales(weight_scales.numel());
+
+  if (weight_scales.ndimension() == 0) {
+    // Weight is quant per tensor, then weight_scales will be a scalar Tensor
+    TORCH_CHECK(
+        weight_scales.numel() == 1,
+        "Weight is quant per tensor, weight scale expects 1 element but got ", weight_scales.numel(), " elements.");
+#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
+    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
+#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+    weights_scales[0] = weight_scales.item().toDouble();
+#else
+    TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+#endif
+  } else {
+    // Weight is quant per channel
+    for (int i = 0; i < weight_scales.numel(); ++i) {
+#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
+      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
+#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+      weights_scales[i] = weight_scales[i].item().toDouble();
+#else
+      TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
+#endif
+    }
+  }
+
+  if (input_scale != 1.0f) {
+    op_attr.set_scales_mask(DNNL_ARG_SRC, /* src_scales_mask= */0);
+  }
+  if (input_zero_point != 0) {
+    op_attr.set_zero_points_mask(DNNL_ARG_SRC, /* src_zero_points_mask= */0);
+  }
+
+  at::Tensor weight_copy;
+  ideep::tensor::desc w_desc;
+  ideep::dims dims_iohw, dims_giohw;
+  ideep::tag w_tag = ideep::tag::any;
+  const bool with_groups = groups > 1;
+  w_desc = ideep::convolution_forward::expected_weights_desc(
+      w_dims, dnnl::memory::data_type::s8,
+      strides, padding_l, padding_r, dilates, groups,
+      dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+      dnnl::memory::data_type::u8, x_dims, op_attr, /*is_channels_last=*/true);
+
+  // Note: Weight in Conv1D will unsqueeze into Conv2D in previous step
+  weight_copy = weight.clone(c10::MemoryFormat::Contiguous);
+
+  if (with_groups) {
+    w_tag = kSpatialDim == 2 ? ideep::tag::goihw : ideep::tag::goidhw;
+  } else {
+    w_tag = kSpatialDim == 2 ? ideep::tag::oihw : ideep::tag::oidhw;
+  }
+  ideep::dims wei_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+                                  : w_desc.get_dims();
+  ideep::tensor wgt = ideep::tensor(
+      ideep::tensor::desc({wei_dims, dnnl::memory::data_type::s8, w_tag}, groups),
+      weight_copy.data_ptr());
+
+  wgt.set_scale(weights_scales); // Scales are needed for feed_from().
+
+  ideep::tensor exp_wgt;
+  exp_wgt.init(w_desc);
+  exp_wgt.set_scale(weights_scales); // Also for feed_from()
+  exp_wgt.feed_from(wgt, /*transposed*/false); // expect wgt to be in [OC IC KH KW] format
+
+  auto packed_weight = at::native::new_with_itensor_mkldnn(
+      std::move(exp_wgt),
+      optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
+      weight_copy.options().device_opt());
+
+  return packed_weight;
+}
+
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -671,6 +806,28 @@ class QConv1dPackWeightInt8 final {
   }
 };
 
+class QConvPrepackOneDNN final {
+ public:
+  static at::Tensor run_conv(
+    at::Tensor weight, // from CPU backend instead of QuantizedCPU
+    at::Tensor weight_scales, // Weight zero points must be 0s for onednn
+    double input_scale,
+    int64_t input_zero_point,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups,
+    c10::optional<torch::List<int64_t>> input_shape) {
+#if AT_MKLDNN_ENABLED()
+    return _qconv_prepack_onednn(
+        weight, weight_scales, input_scale, input_zero_point,
+        stride, padding, dilation, groups, input_shape);
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+#endif
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // Conv
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
@@ -692,6 +849,12 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d_prepack"), TORCH_FN(QConv1dPackWeightInt8::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d_prepack"), TORCH_FN(QConvPackWeightInt8<2>::run_deconv));
   m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose3d_prepack"), TORCH_FN(QConvPackWeightInt8<3>::run_deconv));
+}
+
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
+  // New OP definition for Quantization in PyTorch 2.0 Export
+  // Conv Prepack
+  m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack"), TORCH_FN(QConvPrepackOneDNN::run_conv));
 }
 
 } // namespace

@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
-import parameterized
+import parameterized  # type: ignore[import]
 import pytorch_test_common
 import torch
 import torch.onnx
@@ -27,7 +27,7 @@ from torch.onnx._internal.fx import (
 from torch.testing._internal import common_utils
 
 try:
-    import torchvision
+    import torchvision  # type: ignore[import]
 
     HAS_TORCHVISION = True
 except ImportError:
@@ -269,15 +269,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             (dummy_input,),
         )
 
-    @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.mean.dim"
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : "
+        "Got invalid dimensions for input: arg0 for the following indices index: 0 Got: 3 Expected: 1"
     )
     @skip_if_no_torchvision
     def test_shufflenet_v2(self):
         # TODO(bowbao): see Note [training vs eval in dynamo_export]
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False).eval()
-        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
-        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
+        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=False)
+        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=False)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
@@ -374,11 +375,13 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.xfail("torch._dynamo.exc.TorchRuntimeError")
+    @pytorch_test_common.xfail(
+        "torch._dynamo.exc.Unsupported: guard on data-dependent symbolic int/float"
+    )
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
-                t = torch.zeros(d1[0], d2[0])
+                t = torch.zeros(d1[0], d2[0])  # problematic user code for dynamo
                 return t.squeeze(0)
 
         d1 = torch.tensor([1])
@@ -434,9 +437,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[((y,),)],
         )
 
-    @pytorch_test_common.xfail(
-        "fx.graph: torch._subclasses.fake_tensor.DataDependentOutputException: "
-        "aten._local_scalar_dense.default"
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "[ONNXRuntimeError] : 1 : FAIL : Non-zero status code returned while running Slice node. "
+        "Name:'_inline_aten_slice_scattern13' Status Message: slice.cc:193 "
+        "FillVectorsFromInput Starts must be a 1-D array"
     )
     def test_expand_as_fill_zero(self):
         class Model(torch.nn.Module):
@@ -453,7 +457,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "RuntimeError: Unknown call_function target: aten.lift_fresh_copy.default"
+        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Type (tensor(float)) of output arg (copy) "
+        "of node (n0__4) does not match expected type (tensor(int64))"
     )
     def test_expand_as_fill_tensor(self):
         class Model(torch.nn.Module):
@@ -470,7 +475,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "Unknown call_function target: aten.lift_fresh_copy.default"
+        "RuntimeError: at::functionalization::impl::isFunctionalTensor(self_) INTERNAL ASSERT FAILED "
+        "at '/path/to/pytorch/torch/csrc/autograd/python_torch_functions_manual.cpp':514, please report a bug to PyTorch."
     )
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
@@ -555,21 +561,53 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    def test_gpt2_tiny(self):
-        model_name = "sshleifer/tiny-gpt2"
-        # Download pytorch model
-        model = transformers.AutoModel.from_pretrained(model_name)
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+    def test_gpt2_tiny_from_config(self):
+        # Model
+        config = transformers.GPT2Config(
+            num_hidden_layers=4,
+            vocab_size=8096,
+            hidden_size=16,
+            intermediate_size=16,
+            max_position_embeddings=512,
+            num_attention_heads=2,
+            hidden_dropout_prob=0.0,
+            attention_dropout_prob=0.0,
+        )
+        model = transformers.GPT2Model(config).eval()
 
-        # Transform input tokens
-        inputs = tokenizer("Hello world!", return_tensors="pt")
-        another_inputs = tokenizer("Another Hello world!", return_tensors="pt")
+        def input_generator(batch: int, seq: int):
+            input_ids = torch.randint(0, 8096, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            position_ids = torch.arange(0, seq, dtype=torch.long)
+            position_ids = position_ids.unsqueeze(0).view(-1, seq)
+            return input_ids, attention_mask, position_ids
+
+        # Encoded inputs
+        input_ids, attention_mask, position_ids = input_generator(2, 128)
+
+        # Another encoded inputs to test dynamic shapes
+        (
+            another_input_ids,
+            another_attention_mask,
+            another_position_ids,
+        ) = input_generator(3, 256)
 
         self.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
-            [],
-            input_kwargs=inputs,
-            additional_test_inputs=[((), another_inputs)],
+            (input_ids,),
+            input_kwargs={
+                "attention_mask": attention_mask,
+                "position_ids": position_ids,
+            },
+            additional_test_inputs=[
+                (
+                    (another_input_ids,),
+                    {
+                        "attention_mask": another_attention_mask,
+                        "position_ids": another_position_ids,
+                    },
+                )
+            ],
         )
 
     def test_prims_device_put(self):
@@ -745,14 +783,20 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_pytorch_only_extra_kwargs,
         )
 
+    @pytorch_test_common.xfail(
+        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
+        "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
+        "https://github.com/huggingface/transformers/issues/21013"
+    )
     @pytorch_test_common.skip_dynamic_fx_test(
         "FakeTensor exporting is not supported by dynamic axes."
     )
     def test_fx_symbolic_tracer_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
+        device = "cpu"
 
         def create_model() -> nn.Module:
-            return transformers.AutoModel.from_pretrained(model_name)
+            return transformers.AutoModel.from_pretrained(model_name).to(device).eval()
 
         def create_args():
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
@@ -935,11 +979,18 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             export_within_fake_mode=self.export_within_fake_mode,
         )
 
+    @pytorch_test_common.xfail(
+        "[ONNXRuntimeError] : 1 : FAIL : Type Error: Data in initializer 'h_0_attn_bias' "
+        "has element type tensor(uint8) but usage of initializer in graph expects tensor(bool)"
+        "https://github.com/huggingface/transformers/issues/21013"
+        "This can be addressed by using GPT2Config, but it is not now supported by FakeTensor exporting."
+    )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
+        device = "cpu"
 
         def create_model() -> nn.Module:
-            return transformers.AutoModel.from_pretrained(model_name)
+            return transformers.AutoModel.from_pretrained(model_name).to(device).eval()
 
         def create_args():
             tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
@@ -990,6 +1041,145 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_fake_tensor_mode_exporter(
             "toy_mlp1",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    def test_fake_tensor_mode_huggingface_google_t5(self):
+        config = transformers.T5Config(
+            vocab_size=8096, d_model=64, num_layers=2, num_heads=2
+        )
+        batch, seq = 4, 256
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones((batch, seq), dtype=torch.bool)
+            decoder_input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            return {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "decoder_input_ids": decoder_input_ids,
+            }
+
+        def create_model():
+            return transformers.T5Model(config).eval()
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_google_t5",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    def test_fake_tensor_mode_huggingface_openai_whisper(self):
+        config = transformers.WhisperConfig(
+            vocab_size=8096,
+            num_mel_bins=40,
+            encoder_layers=2,
+            encoder_attention_heads=2,
+            decoder_layers=2,
+            decoder_attention_heads=2,
+            decoder_ffn_dim=384,
+            encoder_ffn_dim=384,
+            d_model=64,
+            decoder_start_token_id=8001,
+            pad_token_id=8000,
+            bos_token_id=8000,
+            eos_token_id=8000,
+            begin_suppress_tokens=[220, 8000],
+        )
+        feature_extractor = transformers.WhisperFeatureExtractor(feature_size=40)
+        device = "cpu"
+        batch = 4
+
+        def create_model() -> nn.Module:
+            return transformers.AutoModel.from_config(config).to(device).eval()
+
+        def create_args():
+            return ()
+
+        def create_kwargs():
+            input_features = torch.randn(
+                (
+                    batch,
+                    feature_extractor.feature_size,
+                    feature_extractor.nb_max_frames,
+                ),
+                dtype=torch.float32,
+            )
+            decoder_input_ids = torch.tensor([[1, 1]]) * config.decoder_start_token_id
+            return {
+                "input_features": input_features,
+                "decoder_input_ids": decoder_input_ids,
+                "return_dict": False,
+            }
+
+        self._test_fake_tensor_mode_exporter(
+            "openai_whisper",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    @pytorch_test_common.xfail(
+        "AssertionError: whole graph export entails exactly one guard export"
+    )
+    def test_fake_tensor_mode_huggingface_mosaicml_mpt(self):
+        config = transformers.MptConfig(
+            vocab_size=8096, d_model=64, n_heads=2, n_layers=3
+        )
+        batch, seq = 4, 256
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+        def create_model():
+            return transformers.MptModel(config).eval()
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_mosaicml_mpt",
+            create_model,
+            create_args,
+            create_kwargs,
+            load_checkpoint_during_init=self.load_checkpoint_during_init,
+            export_within_fake_mode=self.export_within_fake_mode,
+        )
+
+    @pytorch_test_common.skip_dynamic_fx_test(
+        "RuntimeError:: SymIntArrayRef expected to contain only concrete integers"
+    )
+    def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
+        config = transformers.BloomConfig()
+        batch, seq = 4, 256
+
+        def create_args():
+            return tuple()
+
+        def create_kwargs():
+            input_ids = torch.randint(0, config.vocab_size, (batch, seq))
+            attention_mask = torch.ones(batch, seq, dtype=torch.bool)
+            return {"input_ids": input_ids, "attention_mask": attention_mask}
+
+        def create_model():
+            return transformers.BloomModel(config).eval()
+
+        self._test_fake_tensor_mode_exporter(
+            "huggingface_bigscience_bloom_560m",
             create_model,
             create_args,
             create_kwargs,

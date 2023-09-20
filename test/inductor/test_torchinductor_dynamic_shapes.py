@@ -11,6 +11,7 @@ import torch
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_utils import (
@@ -46,6 +47,8 @@ importlib.import_module("filelock")
 # xfail by default, set is_skip=True to skip
 test_failures = {
     "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    # calling div on only symint args
+    "test_AllenaiLongformerBase_repro_dynamic_shapes": TestFailure(("cpu", "cuda")),
 }
 
 if TEST_WITH_ROCM:
@@ -228,6 +231,48 @@ class TestInductorDynamic(TestCase):
         b = torch.randn(2, 16, device=device)
         expect = fn(a, b)
         actual = cfn(a, b)
+        self.assertEqual(expect, actual)
+
+    @onlyCPU
+    def test_arithmetic_constant_folding(self, device):
+        def test(fn):
+            cfn = self.compile_fn(fn)
+            expect = fn(3)
+            actual = cfn(3)
+            self.assertEqual(expect, actual)
+
+        def add(x):
+            return x + torch.zeros(3)
+
+        test(add)
+
+        def mul(x):
+            return x * torch.ones(3)
+
+        test(mul)
+
+        def div(x):
+            return x / torch.ones(3)
+
+        test(div)
+
+    @onlyCPU
+    def test_sub_constant_folding(self, device):
+        def sub(x):
+            return x - torch.zeros(3)
+
+        cfn = self.compile_fn(sub)
+        expect = sub(3)
+        actual = cfn(3)
+        self.assertEqual(expect, actual)
+
+    def test_full(self, device):
+        def fn(a):
+            return torch.full((3,), a), torch.full((3,), torch.sym_float(a))
+
+        cfn = self.compile_fn(fn)
+        expect = fn(5)
+        actual = cfn(5)
         self.assertEqual(expect, actual)
 
 

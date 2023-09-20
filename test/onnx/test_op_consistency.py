@@ -68,6 +68,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         # "logit",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "nn.functional.scaled_dot_product_attention",
         "repeat",
+        "round",
         # "scatter_add",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         # "scatter_reduce",  # TODO: enable after fixing https://github.com/pytorch/pytorch/issues/102211
         "sqrt",
@@ -113,6 +114,14 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
     ),
     skip("nn.functional.scaled_dot_product_attention", opsets=[onnx_test_common.opsets_before(14)], reason="Need Trilu."),
     skip("nn.functional.scaled_dot_product_attention", reason="fixme: ORT crashes on Windows, segfaults randomly on Linux"),
+    xfail("round", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_0", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_3", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
+    xfail("round", variant_name="decimals_neg_3", opsets=[onnx_test_common.opsets_before(11)],
+          reason=onnx_test_common.reason_onnx_does_not_support("Round")),
     skip("scatter_reduce", variant_name="amin", opsets=[onnx_test_common.opsets_before(16)],
          reason=onnx_test_common.reason_onnx_does_not_support("ScatterElements with reduction")),
     skip("scatter_reduce", variant_name="amax", opsets=[onnx_test_common.opsets_before(16)],
@@ -246,7 +255,7 @@ def _get_test_class_name(cls, num, params_dict) -> str:
             "name": f"TestOnnxModelOutputConsistency_opset{opset}",
             "opset_version": opset,
         }
-        for opset in onnx_test_common.ONNXRT_SUPPORTED_OPSETS
+        for opset in onnx_test_common.TESTED_OPSETS
     ],
     class_name_func=_get_test_class_name,
 )
@@ -307,7 +316,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     self.run_test(model, inputs, rtol=rtol, atol=atol)
 
 
-for opset in onnx_test_common.ONNXRT_SUPPORTED_OPSETS:
+for opset in onnx_test_common.TESTED_OPSETS:
     # The name needs to match the parameterized_class name.
     test_class_name = f"TestOnnxModelOutputConsistency_opset{opset}"
     onnx_test_common.add_decorate_info(

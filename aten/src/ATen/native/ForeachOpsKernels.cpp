@@ -2,7 +2,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/ForeachUtils.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -20,7 +19,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
-#include <ATen/ops/_foreach_clamp_native.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
 #include <ATen/ops/_foreach_div_native.h>
@@ -54,6 +53,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
@@ -318,6 +318,17 @@ FOREACH_BINARY_OP_LIST(div);
 FOREACH_BINARY_OP_LIST(clamp_min);
 FOREACH_BINARY_OP_LIST(clamp_max);
 FOREACH_BINARY_OP_LIST(pow);
+// _foreach_copy_
+void foreach_tensor_copy_list_kernel_slow_(
+    TensorList self,
+    TensorList src,
+    const bool non_blocking) {
+  check_foreach_api_restrictions(self, src);
+
+  for (const auto i : c10::irange(self.size())) {
+    self[i].copy_(src[i], non_blocking);
+  }
+}
 
 FOREACH_UNARY_OP(sqrt);
 FOREACH_UNARY_OP(exp);
@@ -408,35 +419,6 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
     result.emplace_back(at::pow(self, t));
   }
   return result;
-}
-
-std::vector<Tensor> foreach_tensor_clamp_scalar_kernel_slow(
-    TensorList self,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
-  TORCH_CHECK(
-      min.has_value() || max.has_value(),
-      "Either `min` or `max` must be specified");
-  check_foreach_api_restrictions(self);
-  std::vector<Tensor> result;
-  result.reserve(self.size());
-  for (const auto& t : self) {
-    result.emplace_back(t.clamp(min, max));
-  }
-  return result;
-}
-
-void foreach_tensor_clamp_scalar_kernel_slow_(
-    TensorList self,
-    const optional<Scalar>& min,
-    const optional<Scalar>& max) {
-  TORCH_CHECK(
-      min.has_value() || max.has_value(),
-      "Either `min` or `max` must be specified");
-  check_foreach_api_restrictions(self);
-  for (auto& t : self) {
-    t.clamp_(min, max);
-  }
 }
 
 } // namespace at::native
