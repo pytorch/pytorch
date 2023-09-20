@@ -476,8 +476,6 @@ aten::sqrt_
 aten::squeeze
 aten::squeeze.dim
 aten::squeeze.dims
-aten::std.correction_out
-aten::std_mean.correction
 aten::sub.Scalar
 aten::sub.Scalar_out
 aten::sub.Tensor
@@ -504,8 +502,6 @@ aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
-aten::unsafe_split_with_sizes
-aten::unsafe_split_with_sizes.out
 aten::unsqueeze
 aten::upsample_bicubic2d
 aten::upsample_nearest1d
