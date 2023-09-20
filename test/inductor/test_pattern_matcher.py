@@ -786,7 +786,7 @@ class TestPaternMatcher(TestCase):
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_fuse_attention_roundtrip_pattern(self):
-        # are we losing anything in serialization
+        # are we losing anything in serialization in patterns
         from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
 
         global_vals = {
