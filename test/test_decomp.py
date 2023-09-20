@@ -710,9 +710,9 @@ class TestDecomp(TestCase):
             self.assertTrue(
                 any(overload_to_aten_name(c) == aten_name for c in mode.decomposed),
                 msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
-                    f"{', '.join(map(str, list(mode.called)))}. If your op is  "
-                    f"CompositeImplicitAutograd you should skip this test "
-                    f"by updating CROSS_REF_EXCLUDE_SET.")
+                     f"{', '.join(map(str, list(mode.called)))}. If your op is  "
+                     f"CompositeImplicitAutograd you should skip this test "
+                     f"by updating CROSS_REF_EXCLUDE_SET.")
             )
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
