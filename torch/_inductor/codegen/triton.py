@@ -2273,7 +2273,6 @@ class TritonScheduling(BaseScheduling):
         @contextlib.contextmanager
         def end_current_reduction_loop():
             nonlocal current_loop_has_writes
-            nonlocal current_loop_reduced_writes
             if current_loop_has_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
@@ -2281,7 +2280,8 @@ class TritonScheduling(BaseScheduling):
                         node not in done
                         and fits_in_main_body(other_node)
                         and not (
-                            current_loop_reduced_writes & other_node.recursive_predecessors
+                            current_loop_reduced_writes
+                            & other_node.recursive_predecessors
                         )
                     ):
                         schedule_node_in_loop(node)
