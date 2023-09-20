@@ -619,8 +619,8 @@ to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
        Z = np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
        return torch.from_numpy(Z)
 
-   X = torch.randn(1024, 64)
-   Y = torch.randn(1024, 64)
+   X = torch.randn(1024, 64, device="cuda")
+   Y = torch.randn(1024, 64, device="cuda")
    with torch.device("cuda"):
        Z = numpy_fn(X, Y)
 
