@@ -526,6 +526,7 @@ class GraphModuleSerializer:
 
     def serialize_input(self, arg) -> Argument:
         import torch._inductor.ir as inductor_ir
+        inductor_tensor_buffers = (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer, inductor_ir.ConcatKernel)
 
         if isinstance(arg, torch.fx.Node):
             if arg.op == "get_attr":
@@ -547,7 +548,7 @@ class GraphModuleSerializer:
                 return Argument.create(as_sym_bool=SymBoolArgument.create(as_name=arg.name))
             else:
                 return Argument.create(as_tensor=TensorArgument(name=arg.name))
-        elif isinstance(arg, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer)):
+        elif isinstance(arg, inductor_tensor_buffers):
             # Other branches are for arguments in fx node.
             # This is a special branch for handling buffers (representing tensor arguments)
             # for inductor's ExternalFallbackNode
@@ -615,17 +616,17 @@ class GraphModuleSerializer:
                 return Argument.create(
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
-            elif all(isinstance(a, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer)) for a in arg):
+            elif all(isinstance(a, inductor_tensor_buffers) for a in arg):
                 # list of tensors
                 return Argument.create(
                     as_tensors=[TensorArgument(name=a.name) for a in arg],
                 )
-            elif all(isinstance(a, (inductor_ir.InputBuffer, inductor_ir.ComputedBuffer, type(None))) for a in arg):
+            elif all(isinstance(a, (*inductor_tensor_buffers, type(None))) for a in arg):
                 # list of optional tensors
                 def serialize_optional_tensor_args(a):
                     if a is None:
                         return OptionalTensorArgument.create(as_none=())
-                    elif isinstance(a, torch._inductor.ir.InputBuffer):
+                    elif isinstance(a, inductor_tensor_buffers):
                         return OptionalTensorArgument.create(as_tensor=a.name)
                     else:
                         raise SerializeError(f"Unsupported list/tuple argument: {a}")
@@ -633,7 +634,7 @@ class GraphModuleSerializer:
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
             else:
-                raise SerializeError(f"Unsupported list/tuple argument type: {type(arg[0])}")
+                raise SerializeError(f"Unsupported list/tuple argument type: {[type(a) for a in arg]}")
         elif isinstance(arg, torch.dtype):
             return Argument.create(as_scalar_type=_TORCH_TO_SERIALIZE_DTYPE[arg])
         elif isinstance(arg, torch.device):

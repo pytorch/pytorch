@@ -27,7 +27,7 @@ namespace torch {
 namespace autograd {
 
 using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;
-using MetadataShape = c10::variant<SymIntSmallVec, at::Tensor>;
+using MetadataShape = std::variant<SymIntSmallVec, at::Tensor>;
 
 /**
  * Records TensorOptions, shape of the tensor, whether or not the Python
@@ -151,7 +151,7 @@ struct InputMetadata {
   }
 
   bool is_cpp_nested_tensor() const {
-    bool ret = c10::holds_alternative<at::Tensor>(shape_);
+    bool ret = std::holds_alternative<at::Tensor>(shape_);
     TORCH_INTERNAL_ASSERT(ret == (is_nested_ && !is_tensor_subclass_))
     return ret;
   }
@@ -161,13 +161,13 @@ struct InputMetadata {
   }
 
   c10::SymIntArrayRef shape_as_dim_vector() const {
-    const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
+    const auto& dim_shape = std::get<SymIntSmallVec>(shape_);
     return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
   }
 
   // Danger: not thread safe, caller must protect with lock
   SymIntSmallVec& mutable_shape_as_dim_vector() {
-    return c10::get<SymIntSmallVec>(shape_);
+    return std::get<SymIntSmallVec>(shape_);
   }
 
  private:
@@ -175,13 +175,13 @@ struct InputMetadata {
     if (input.is_nested() &&
         !input.unsafeGetTensorImpl()->is_python_dispatch()) {
       auto nested_size = input._nested_tensor_size();
-      return MetadataShape{c10::in_place_type<at::Tensor>, nested_size};
+      return MetadataShape{std::in_place_type<at::Tensor>, nested_size};
     }
-    return MetadataShape{c10::in_place_type<SymIntSmallVec>, input.sym_sizes()};
+    return MetadataShape{std::in_place_type<SymIntSmallVec>, input.sym_sizes()};
   }
 
   at::Tensor shape_as_tensor() const {
-    return c10::get<at::Tensor>(shape_);
+    return std::get<at::Tensor>(shape_);
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
