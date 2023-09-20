@@ -164,7 +164,6 @@ FILENAME_ALLOWLIST = {
     _module_dir(torch) + "distributed/_tensor/placement_types.py",
     _module_dir(torch) + "distributed/c10d_logger.py",
     _module_dir(torch) + "distributed/_functional_collectives.py",
-    torch.jit._trace.__file__,
     torch.distributions.normal.__file__,
     torch.distributions.independent.__file__,
     torch.distributions.utils.__file__,

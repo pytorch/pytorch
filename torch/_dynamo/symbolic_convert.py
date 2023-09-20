@@ -2261,7 +2261,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # Known sound
                 return skipfiles.SkipResult(False, "allowlist in dynamo known function")
             unimplemented(
-                f"'inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}, skip reason: {result.reason}'"  # pylint: disable=line-too-long
+                f"'inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}, skip reason: {result.reason}'"  # noqa: B950
             )
 
         if isinstance(func, UserFunctionVariable) and inspect.getattr_static(
