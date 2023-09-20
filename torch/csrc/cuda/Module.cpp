@@ -106,7 +106,7 @@ PyObject* THCPModule_exchangeDevice(PyObject* self, PyObject* arg) {
   }
 
   torch::utils::cuda_lazy_init();
-  auto current_device = c10::cuda::ExchangeDevice(device);
+  int current_device = c10::cuda::ExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
@@ -121,7 +121,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
   }
 
   torch::utils::cuda_lazy_init();
-  auto current_device = c10::cuda::MaybeExchangeDevice(device);
+  int current_device = c10::cuda::MaybeExchangeDevice(device);
 
   return THPUtils_packInt32(current_device);
   END_HANDLE_TH_ERRORS
