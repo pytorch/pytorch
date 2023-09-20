@@ -75,6 +75,9 @@ extern "C" {
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
 
+struct AOTIProxyExecutorOpaque;
+using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
+
 using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
@@ -142,6 +145,18 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
     int32_t device_index);
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+aoti_torch_create_tensor_from_blob(
+    AtenTensorHandle* ret, // returns new reference
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_addmm_out(
@@ -176,6 +191,16 @@ aoti_torch_create_cuda_stream_guard(
 AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 #endif
+
+// See `ProxyExecutor Design Note` in ir.py for more details
+AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+aoti_torch_proxy_executor_call_function(
+    AOTIProxyExecutorHandle proxy_executor,
+    int extern_node_index,
+    int num_ints,
+    int64_t* flatten_int_args,
+    int num_tensors,
+    void** flatten_tensor_args);
 
 #ifdef __cplusplus
 } // extern "C"
