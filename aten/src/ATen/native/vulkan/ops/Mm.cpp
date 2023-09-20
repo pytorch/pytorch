@@ -114,13 +114,13 @@ vTensor pack_biases(
 
       memset(dst_bias_ptr, 0, v_bias.nbytes());
 
-      for (const auto src_h : c10::irange(src_kh_sz)) {
+      for (const auto src_h : c10::irange(src_kh_sz == 1 ? 2 : src_kh_sz)) {
         for (const auto src_w : c10::irange(src_kw_sz)) {
           int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
           int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
           memcpy(
               dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
-              src_bias_ptr + src_h * src_kw_sz + src_w,
+              src_bias_ptr + (src_kh_sz == 1 ? 0 : src_h * src_kw_sz) + src_w,
               sizeof(float));
         }
       }
@@ -156,15 +156,21 @@ vTensor pack_biases(
 }
 
 bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
-  return api::available() &&
-      // Weight
-      (2 == weight.ndimension()) &&
+  if (!api::available()) {
+    return false;
+  }
+
+  const bool weight_available = (2 == weight.ndimension()) &&
       (weight.size(Layout::Parameter::height) > 0) &&
       (weight.size(Layout::Parameter::width) > 0) &&
       ((weight.device().is_cpu()) ||
        (c10::DeviceType::Vulkan == weight.device().type())) &&
-      (kFloat == weight.scalar_type()) && !weight.requires_grad() &&
-      // Bias
+      (kFloat == weight.scalar_type()) && !weight.requires_grad();
+  if (!weight_available) {
+    return false;
+  }
+
+  const bool bias_available =
       ((bias && bias->defined())
            ? ((bias->ndimension() > 0) &&
               ((bias->device().is_cpu()) ||
@@ -175,8 +181,8 @@ bool available(const Tensor& weight, const c10::optional<Tensor>& bias) {
                       weight.size(Layout::Parameter::width))
                    : true) &&
               !bias->requires_grad())
-           : true) &&
-      true;
+           : true);
+  return bias_available;
 }
 
 bool usable(const Tensor& input, const IntArrayRef unpacked_weight_sizes) {
@@ -242,11 +248,15 @@ Tensor run_addmm_context(
     const struct {
       uvec3 size;
       int32_t K;
+      uvec3 bias_size;
+      int32_t _;
       vec2 multiplier;
     } block{
         v_output.extents(),
         safe_downcast<int32_t>(
             div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+        packed_v_bias.extents(),
+        0,
         {
             alpha,
             beta,

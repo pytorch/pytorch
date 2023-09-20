@@ -6,6 +6,7 @@ import torch
 import torch._dynamo.test_case
 import torch._inductor.utils
 
+from torch._inductor import config
 from torch.profiler import ProfilerActivity
 
 from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
@@ -46,44 +47,74 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             )
         )
 
-    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
-    def test_inductor_profiling_kernel_names(self):
+    def _test_profiling_kernel_names(self, fn, args, kernel_name_str: str):
         """
         We expect a record_function event to be added on the CPU side, surrounding
         the launch of each triton kernel.
         """
-
-        def fn(x, y):
-            return (x + y).sin().cos()
-
         fn_opt = torch.compile(fn)
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
-
         for _ in range(2):
-            fn_opt(x, y)
+            fn_opt(*args)
 
         with torch.profiler.profile(activities=[ProfilerActivity.CPU]) as prof:
-            fn_opt(x, y)
+            fn_opt(*args)
 
         # The name of the kernel is expected to match the name of the kernel in debug
         # files etc. The name could change in the future, but it seems reasonable that
-        # the name should always contain "triton" and "sin" - "sin" because this
-        # kernel contains a sin op. If this changes in the future, feel free to change
-        # the assertion here.
-        # As of time of writing, the kernel name was "triton_poi_fused_add_cos_sin_0"
+        # the name should always contain "triton" and "kernel_name_str" - e.g. if the
+        # kernel contains a sin op, it should probably contain "str" in the name.
+        # If this changes in the future, feel free to change the assertion here.
         # Debugging tips: you can add prof.export_chrome_trace("test.json") inline in
         # this test, and then view test.json in chrome://tracing to see the trace.
         self.assertTrue(
             any(
                 (
                     hasattr(event, "name")
-                    and "sin" in event.name
+                    and kernel_name_str in event.name
                     and "triton" in event.name
                 )
                 for event in prof.events()
             )
         )
+
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_inductor_profiling_kernel_names_pointwise(self):
+        def fn(x, y):
+            return (x + y).sin().cos()
+
+        args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+
+        self._test_profiling_kernel_names(fn, args, "sin")
+
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_inductor_profiling_kernel_names_template(self):
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+
+            def fn(x, y):
+                return x @ y
+
+            args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+
+            self._test_profiling_kernel_names(fn, args, "mm")
+
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_inductor_profiling_kernel_names_foreach(self):
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+
+            def fn(x, y):
+                return torch._foreach_add(x, y)
+
+            x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+            y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+
+            args = (x, y)
+
+            self._test_profiling_kernel_names(fn, args, "_for_")
 
 
 if __name__ == "__main__":
