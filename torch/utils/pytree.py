@@ -27,13 +27,16 @@ from typing import (
     Union,
 )
 
+from ._pytree import TreeSpec as PyTreeSpec  # type: ignore[no-redef]
+
 try:
     import optree
 except ModuleNotFoundError:
-    optree = None
-    PyTreeSpec = None
+    optree = None  # type: ignore[assignment]
 else:
-    from optree import PyTreeSpec  # direct import for type annotations
+    from optree import (  # type: ignore[assignment]  # noqa: F811
+        PyTreeSpec,  # direct import for type annotations
+    )
 
 
 __all__ = [
@@ -252,7 +255,11 @@ def tree_flatten(
         A pair ``(leaves, treespec)`` where the first element is a list of leaf values and the
         second element is a treespec representing the structure of the pytree.
     """
-    return optree.tree_flatten(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    return optree.tree_flatten(  # type: ignore[return-value]
+        tree,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )
 
 
 def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
@@ -279,7 +286,7 @@ def tree_unflatten(leaves: Iterable[Any], treespec: PyTreeSpec) -> PyTree:
             f"tree_unflatten(values, spec): Expected `spec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return optree.tree_unflatten(treespec, leaves)
+    return optree.tree_unflatten(treespec, leaves)  # type: ignore[arg-type]
 
 
 def tree_leaves(
@@ -351,7 +358,11 @@ def tree_structure(
     Returns:
         A treespec object representing the structure of the pytree.
     """
-    return optree.tree_structure(tree, none_is_leaf=none_is_leaf, namespace=namespace)
+    return optree.tree_structure(  # type: ignore[return-value]
+        tree,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
+    )
 
 
 def tree_map(
@@ -729,7 +740,10 @@ def broadcast_prefix(
         A list of leaves in ``prefix_tree`` broadcasted to match the number of leaves in ``full_tree``.
     """
     return optree.broadcast_prefix(
-        prefix_tree, full_tree, none_is_leaf=none_is_leaf, namespace=namespace
+        prefix_tree,
+        full_tree,
+        none_is_leaf=none_is_leaf,
+        namespace=namespace,
     )
 
 
@@ -808,7 +822,7 @@ if optree is not None:
     LeafSpec = PyTreeLeafSpec
 
 else:
-    from ._pytree import (
+    from ._pytree import (  # type: ignore[no-redef,assignment]  # noqa: F401,F811
         _broadcast_to_and_flatten,
         _register_pytree_node as register_pytree_node,
         LeafSpec,

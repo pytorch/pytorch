@@ -239,6 +239,9 @@ class TreeSpec:
         repr_suffix: str = f'{children_specs_str}])'
         return repr_prefix + repr_suffix
 
+    def is_leaf(self) -> bool:
+        return isinstance(self, LeafSpec)
+
 
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
@@ -270,11 +273,11 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     return result, TreeSpec(node_type, context, children_specs)
 
 
-def tree_leaves(pytree: PyTree):
+def tree_leaves(pytree: PyTree) -> List[Any]:
     """Get a list of leaves of a pytree."""
     return tree_flatten(pytree)[0]
 
-def tree_structure(pytree: PyTree):
+def tree_structure(pytree: PyTree) -> TreeSpec:
     """Get the TreeSpec for a pytree."""
     return tree_flatten(pytree)[1]
 
