@@ -855,6 +855,9 @@ def get_cpu_indeg_count(graph) -> Dict[fx.Node, int]:
 
 
 def move_constructors_to_cuda(graph):
+    """
+    Moves intermediary tensors which are constructed on the cpu to cuda when safe
+    """
     if not torch.backends.cuda.is_built():
         return
 
@@ -883,34 +886,53 @@ def move_constructors_to_cuda(graph):
     if not constructors or len(cuda_devices) != 1:
         return
 
-    cpu_indeg = get_cpu_indeg_count(graph)
+    movable_constructors = find_movable_constructors(graph, constructors)
 
-    # node, and constructor nodes which are ancestor nodes of this node
-    queue: List[fx.Node] = list(constructors)
+    for node in movable_constructors:
+        kwargs = node.kwargs.copy()
+        kwargs["device"] = next(iter(cuda_devices))
+        node.kwargs = kwargs
+
+
+def find_movable_constructors(graph, constructors: List[fx.Node]) -> Set[fx.Node]:
+    """
+    Starting from the cpu constructors, iterate through the graph and test that all of their
+    downstream uses can safely be moved to cpu.
+    """
+    cpu_indeg: Dict[fx.Node, int] = get_cpu_indeg_count(graph)
+
+    # which constructors cannot be moved to cuda
     cannot_move_to_cuda: Set[fx.Node] = set()
-    equivalent_ancestor_sets: Dict[fx.Node, Set[fx.Node]] = {
-        c: {c} for c in constructors
-    }
 
-    def make_ancestors_equivalent(set1, set2):
+    # For any node in the graph, which constructors does it have a dependency on
+    constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
+
+    # if a cpu node has a dependency on two different cpu constructors,
+    # then if either constructor cannot be moved to cuda, the other cannot as well.
+    # In this case any node with a dependency on one will have a dependency on the other
+    equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {c: {c} for c in constructors}
+
+    def make_dependencies_equivalent(
+        set1: Set[fx.Node], set2: Set[fx.Node]
+    ) -> Set[fx.Node]:
         # could use union find but not worth complexity here
         set1.update(set2)
         for obj in set1:
-            equivalent_ancestor_sets[obj] = set1
+            equal_constructor_sets[obj] = set1
         return set1
 
-    constructor_ancestors: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
+    queue: List[fx.Node] = list(constructors)
 
     for c in queue:
-        constructor_ancestors[c].add(c)
+        constructor_dependencies[c].add(c)
 
     while queue:
         node = queue.pop()
-        ancestors = constructor_ancestors[node]
+        dependencies = constructor_dependencies[node]
 
         for user in node.users:
             if cannot_be_moved_to_cuda(user):
-                cannot_move_to_cuda.update(ancestors)
+                cannot_move_to_cuda.update(dependencies)
                 break
 
             # this node was used on a op which takes in multiple devices and output a cuda
@@ -929,17 +951,13 @@ def move_constructors_to_cuda(graph):
                     del cpu_indeg[user]
                     queue.append(user)
 
-            unioned_set = make_ancestors_equivalent(
-                ancestors, constructor_ancestors[user]
+            unioned_set = make_dependencies_equivalent(
+                dependencies, constructor_dependencies[user]
             )
-            constructor_ancestors[user] = unioned_set
+            constructor_dependencies[user] = unioned_set
 
     for node in cpu_indeg:
-        if constructor_ancestors[node]:
-            cannot_move_to_cuda.update(constructor_ancestors[node])
+        if constructor_dependencies[node]:
+            cannot_move_to_cuda.update(constructor_dependencies[node])
 
-    for node in constructors:
-        if node not in cannot_move_to_cuda:
-            kwargs = node.kwargs.copy()
-            kwargs["device"] = next(iter(cuda_devices))
-            node.kwargs = kwargs
+    return set(constructors) - cannot_move_to_cuda
