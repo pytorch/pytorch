@@ -2669,7 +2669,6 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     def test_vmap_pytree_inputs(self):
         counters.clear()
         x = torch.ones(2, 3)

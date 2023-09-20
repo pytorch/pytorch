@@ -11,7 +11,6 @@ class AveragedModel(Module):
         model: Module,
         device: Union[int, device] = ...,
         avg_fn: Callable[[Tensor, Tensor, int], Tensor] = ...,
-        use_buffers: bool = ...,
     ) -> None: ...
     def update_parameters(self, model: Module) -> None: ...
 
