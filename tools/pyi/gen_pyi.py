@@ -1203,6 +1203,7 @@ def gen_pyi(
             "long",
             "complex32",
             "complex64",
+            "chalf",
             "cfloat",
             "complex128",
             "cdouble",
@@ -1212,6 +1213,8 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
+            "float8_e5m2",
+            "float8_e4m3fn",
         ]
     ]
 
