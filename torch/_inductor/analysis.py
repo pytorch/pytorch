@@ -2,23 +2,22 @@ from torch._inductor import scheduler
 
 from . import ir
 
-def get_runtime_of_snode(snode: "BaseSchedulerNode"):
+def get_snode_runtime(snode: "BaseSchedulerNode"):
     """
     Gets the runtime of Scheduler node. Currently somewhat of a placeholder.
 
     TODO: replace with a more sophisticated cost model (e.g. analytical)
     """
-    # print(f"get_runtime_of_snode: snode.node: {snode.node}")
-    if isinstance(snode.node, ir.AllReduce):
-        return 5
+    # Collective kernels
     if isinstance(snode.node, ir.CollectiveKernel):
-        return 15
-    if isinstance(snode.node, ir.MultiOutput):
+        if isinstance(snode.node, ir.AllReduce):
+            return 5
+        else:
+            return 15
+    elif isinstance(snode.node, ir.Wait):
         return 0
-    if isinstance(snode.node, ir.Wait):
-        return 0
-    if isinstance(snode.node, ir.OutputBuffer):
-        return 0
-    if isinstance(snode.node, ir.ExternKernel):
+    # Compute kernels
+    elif isinstance(snode.node, ir.ExternKernel):
         return 10
+    # All other kernels
     return 1

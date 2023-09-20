@@ -1,8 +1,3 @@
-"""
-TODO(yf225):
-1. add unit tests for this file (e.g. simple graphs where we know what the optimal ordering looks like as ground truth)
-"""
-
 # pyre-strict
 
 import os
@@ -10,9 +5,8 @@ from typing import List
 
 import torch.fx as fx
 
-from . import ir, scheduler
-from .analysis import get_runtime_of_snode
-from .utils import printd
+from . import ir, scheduler, config
+from .analysis import get_snode_runtime
 from .dependencies import WeakDep
 
 
@@ -120,6 +114,13 @@ def assert_no_comm_nodes(snodes: List["scheduler.BaseSchedulerNode"]) -> None:
     assert not any(isinstance(snode.node, ir.CollectiveKernel) for snode in snodes)
 
 
+def estimate_op_runtime(snode: "scheduler.BaseSchedulerNode") -> int:
+    if config.estimate_op_runtime == "default":
+        return get_snode_runtime(snode)
+    else:
+        return config.estimate_op_runtime(snode)
+
+
 def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
     """
     Decides a global ordering of all compute and communication nodes. Assumes that we already have a global ordering of communication nodes.
@@ -127,7 +128,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         Step 1: Given that we've currently scheduled comm N, we now schedule all compute nodes that are required for comm N + 1 but do not depend on comm N, to run at the same time with comm N.
         Step 2: If all those compute nodes are sufficient to overlap comm N, we're done. Otherwise, we now need to look elsewhere to find compute that overlaps with comm N. We prioritize compute nodes that are needed sooner.
         Step 3: We schedule the compute nodes dependent on comm N and required for comm N + 1.
-        Step 4: We schedule comm N + 1,
+        Step 4: We schedule comm N + 1.
         Repeat this for subsequent comm nodes.
     """
     result = []
@@ -201,9 +202,9 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
         assert_no_comm_nodes(needed_by_next_comm_and_ready_compute_nodes)
 
         total_compute_runtime_cost = rolled_over_compute_cost + sum(
-            [get_runtime_of_snode(node) for node in needed_by_next_comm_and_ready_compute_nodes]
+            [estimate_op_runtime(node) for node in needed_by_next_comm_and_ready_compute_nodes]
         )
-        prev_comm_runtime_cost = get_runtime_of_snode(comm_nodes[idx - 1])
+        prev_comm_runtime_cost = estimate_op_runtime(comm_nodes[idx - 1])
         schedule_nodes(tuple_sorted(needed_by_next_comm_and_ready_compute_nodes))
 
         # Step 2: If all those compute nodes are sufficient to overlap comm `idx-1`, we're done.
@@ -236,7 +237,7 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
                     # it means we have maximized overlap for comm `idx-1`, and hence we stop looking
                     # for more compute to schedule.
                     break
-                compute_runtime_cost = get_runtime_of_snode(snode)
+                compute_runtime_cost = estimate_op_runtime(snode)
                 # If we're not able to leverage more than half of this
                 # node's compute to overlap, we skip it.
                 # TODO: Smarter heuristics here
@@ -268,7 +269,9 @@ def reorder_compute_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> 
 
 
 def reorder_compute_and_comm_for_overlap(snodes: List["scheduler.BaseSchedulerNode"]) -> List["scheduler.BaseSchedulerNode"]:
-    result = sink_waits(snodes)
-    result = raise_comms(result)
-    result = reorder_compute_for_overlap(result)
-    return result
+    ret = snodes
+    for p in config.reorder_for_compute_comm_overlap_passes:
+        if isinstance(p, str) and p in globals():
+            p = globals()[p]  # it is a builtin pass
+        ret = p(ret)
+    return ret
