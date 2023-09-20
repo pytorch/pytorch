@@ -13,9 +13,9 @@
 #else
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
+#include <ATen/ops/nextafter_native.h>
 #include <ATen/ops/polar_native.h>
 #include <ATen/ops/view_as_real.h>
-#include <ATen/ops/nextafter_native.h>
 #endif
 
 namespace at::native {
@@ -183,7 +183,7 @@ kernel void complex_mul<DTYPE>(              \
 REGISTER_COMPLEX_MUL_OP(float);
 REGISTER_COMPLEX_MUL_OP(half);
 
-template<typename T>
+template<typename T, typename U>
 kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
                       constant void  * other_       [[buffer(1)]],
                       device   void  * out_         [[buffer(2)]],
@@ -193,38 +193,34 @@ kernel void nextafter_kernel(constant void  * input_       [[buffer(0)]],
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
   constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  if (*input == *out)
+  if (*input == *other)
   {
     *out = *other;
   }
+  else if (isnan(*input) || isnan(*other))
+  {
+    *out = NAN;
+  }
   else
   {
-    uint bits = as_type<uint>(*input);
-
-    if (*other > *input)
-    {
-        bits++;
-    }
-    else
-    {
-        bits--;
-    }
-
+    U bits = as_type<U>(*input);
+    bits = bits + ((*other > *input) ? 1 : -1);
     *out = as_type<T>(bits);
   }
 }
 
-#define REGISTER_NEXTAFTER_OP(DTYPE)       \
+#define REGISTER_NEXTAFTER_OP(DTYPE, UTYPE)  \
 template                                     \
-[[host_name("nextafter_kernel_" #DTYPE)]]         \
-kernel void nextafter_kernel<DTYPE>(              \
+[[host_name("nextafter_kernel_" #DTYPE)]]    \
+kernel void nextafter_kernel<DTYPE, UTYPE>(  \
   constant void    * input,                  \
   constant void    * other,                  \
   device   void    * out,                    \
   constant uint3   * offsets,                \
   uint tid)
 
-REGISTER_NEXTAFTER_OP(float);
+REGISTER_NEXTAFTER_OP(float, uint);
+REGISTER_NEXTAFTER_OP(half, ushort);
 )BINARY_METAL";
 
 using namespace mps;
@@ -381,6 +377,7 @@ static void copysign_mps_kernel(TensorIteratorBase& iter) {
 }
 
 static void nextafter_mps_kernel(TensorIteratorBase& iter) {
+  TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "nextafter_mps not implemented for non-floating types");
   mps::binary_mps_impl(iter, "nextafter_kernel");
 }
 
