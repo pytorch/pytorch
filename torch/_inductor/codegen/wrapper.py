@@ -966,6 +966,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.int_array_id = count()  # for int array local variable declarations
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
+        self.arg_var_id = count()
 
         from .cpp import cexpr, CppPrinter
 
@@ -984,6 +985,46 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 return f"({x}/{div})"
 
         self.grid_expr_printer = GridExprCppPrinter().doprint
+
+    def generate_kernel_call(
+        self,
+        name,
+        call_args,
+        grid=None,
+        device_index=None,
+        cuda=True,
+        triton=True,
+    ):
+        """
+        Generates kernel call code.
+
+        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+
+        triton: Defines whether the GPU backend uses Triton for codegen.
+                Otherwise it uses the CUDA language for codegen.
+                Only valid when cuda == True.
+        """
+        if cuda:
+            return super().generate_kernel_call(
+                name, call_args, grid, device_index, cuda, triton
+            )
+        else:
+            if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+                from .cpp import DTYPE_TO_CPP
+
+                new_args = []
+                for arg in call_args:
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"void *{var_name}{self.ending}")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_data_ptr(&{var_name}, {arg}.get()));"
+                    )
+                    dtype = V.graph.get_dtype(arg)
+                    cpp_dtype = DTYPE_TO_CPP[dtype]
+                    new_args.append(f"({cpp_dtype}*)({var_name})")
+                self.writeline(self.wrap_kernel_call(name, new_args))
+            else:
+                self.writeline(self.wrap_kernel_call(name, call_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -1823,7 +1864,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def __init__(self):
         super().__init__()
-        self.arg_var_id = count()
         self.grid_id = count()
         self.cuda = True
 
