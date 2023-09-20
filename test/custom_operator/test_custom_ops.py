@@ -24,7 +24,7 @@ class TestCustomOperators(TestCase):
         x = torch.randn(3, device='cpu')
         self.assertNotIn("my_custom_ops", sys.modules.keys())
 
-        with self.assertRaisesRegex(NotImplementedError, r"import the 'my_custom_ops'"):
+        with self.assertRaisesRegex(torch._subclasses.fake_tensor.UnsupportedOperatorException):
             gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
         gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)

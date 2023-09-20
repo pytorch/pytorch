@@ -47,12 +47,11 @@ def resolve_library_path(path: str) -> str:
     return os.path.realpath(path)
 
 
-def throw_abstract_impl_not_found_error(opname, module, context):
+def throw_abstract_impl_not_imported_error(opname, module, context):
     raise NotImplementedError(
         f"{opname}: We could not find the abstract impl for this operator. "
         f"The operator specified that you need to import the '{module}' Python "
-        f"module to load the abstract impl."
-        f"More context: {context if context else 'n/a'}"
+        f"module to load the abstract impl. {context}"
     )
 
 
