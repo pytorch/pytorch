@@ -23,44 +23,42 @@
 
 #pragma once
 
-//qloop head files
+// qloop head files
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_mha_bwd_xdl_cshuffle_qloop_v1.hpp>
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_mha_bwd_xdl_cshuffle_qloop_v2.hpp>
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_mha_fwd_xdl_cshuffle_v2.hpp>
-//kloop head files
+// kloop head files
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_mha_bwd_xdl_cshuffle_kloop_v1.hpp>
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_mha_bwd_xdl_cshuffle_kloop_v2.hpp>
 #include <ck/tensor_operation/gpu/device/impl/device_grouped_mha_fwd_xdl_cshuffle_v1.hpp>
 
 namespace device_gemm_trait {
-using Int32 = int;
-using Int16 = unsigned short;
-using Float32 = float;
-using BFloat16 = ck::bhalf_t;
-using Float16 = ck::half_t;
-using PassThrough = ck::tensor_operation::element_wise::PassThrough;
-using Scale = ck::tensor_operation::element_wise::Scale;
-using MaskingSpec = ck::tensor_operation::device::MaskingSpecialization;
-using TensorSpec  = ck::tensor_operation::device::TensorSpecialization;
-using GemmSpec  = ck::tensor_operation::device::GemmSpecialization;
-using Index = ck::index_t;
-using AElementOp  = PassThrough;
-using B0ElementOp = PassThrough;
+using Int32         = int;
+using Int16         = unsigned short;
+using Float32       = float;
+using BFloat16      = ck::bhalf_t;
+using Float16       = ck::half_t;
+using PassThrough   = ck::tensor_operation::element_wise::PassThrough;
+using Scale         = ck::tensor_operation::element_wise::Scale;
+using MaskingSpec   = ck::tensor_operation::device::MaskingSpecialization;
+using TensorSpec    = ck::tensor_operation::device::TensorSpecialization;
+using GemmSpec      = ck::tensor_operation::device::GemmSpecialization;
+using Index         = ck::index_t;
+using AElementOp    = PassThrough;
+using B0ElementOp   = PassThrough;
 using Acc0ElementOp = Scale;
-using B1ElementOp = PassThrough;
-using CElementOp  = PassThrough;
+using B1ElementOp   = PassThrough;
+using CElementOp    = PassThrough;
 
-template <ck::index_t... Is> 
+template <ck::index_t... Is>
 using S = ck::Sequence<Is...>;
 
-static constexpr bool kDeterministic = true;
-static constexpr bool kNonDeterministic = false;       
-static constexpr auto kMaskingSpecDefault = MaskingSpec::MaskDisabled;                                        
-static constexpr auto kMaskingSpecCausal = MaskingSpec::MaskOutUpperTriangle;
+static constexpr bool kDeterministic      = true;
+static constexpr bool kNonDeterministic   = false;
+static constexpr auto kMaskingSpecDefault = MaskingSpec::MaskDisabled;
+static constexpr auto kMaskingSpecCausal  = MaskingSpec::MaskOutUpperTriangle;
 
-template <typename InputDataType_,
-          MaskingSpec kMaskingSpec_,
-          bool kIsDeterministic_>
+template <typename InputDataType_, MaskingSpec kMaskingSpec_, bool kIsDeterministic_>
 struct Forward {
   using ADataType        = InputDataType_;
   using B0DataType       = InputDataType_;
@@ -92,17 +90,18 @@ struct Forward {
   static constexpr auto kTensorSpecB1 = TensorSpec::Default;
   static constexpr auto kTensorSpecC  = TensorSpec::Default;
 
-  static constexpr auto kMaskingSpec = kMaskingSpec_;
+  static constexpr auto kMaskingSpec     = kMaskingSpec_;
   static constexpr bool kIsDeterministic = kIsDeterministic_;
 }; // device gemm traits forward
 
-template <typename InputDataType_,
-          typename OutputDataType_,
-          typename GemmDataType_,
-          typename ZDataType_,
-          Index kCShuffleBlockTransferScalarPerVectorNPerBlock_,
-          MaskingSpec kMaskingSpec_,
-          bool kIsDeterministic_>
+template <
+    typename InputDataType_,
+    typename OutputDataType_,
+    typename GemmDataType_,
+    typename ZDataType_,
+    Index kCShuffleBlockTransferScalarPerVectorNPerBlock_,
+    MaskingSpec kMaskingSpec_,
+    bool kIsDeterministic_>
 struct Backward {
   using InputDataType    = InputDataType_;
   using OutputDataType   = OutputDataType_;
@@ -121,9 +120,10 @@ struct Backward {
   static constexpr Index kNumDimM = 1;
   static constexpr Index kNumDimN = 1;
   static constexpr Index kNumDimK = 1;
-  static constexpr Index kNumDimO = 1;      
+  static constexpr Index kNumDimO = 1;
 
-  static constexpr Index kCShuffleBlockTransferScalarPerVectorNPerBlock = kCShuffleBlockTransferScalarPerVectorNPerBlock_;                                      
+  static constexpr Index kCShuffleBlockTransferScalarPerVectorNPerBlock =
+      kCShuffleBlockTransferScalarPerVectorNPerBlock_;
 
   static constexpr auto kGemmSpec = GemmSpec::MNKOPadding;
 
@@ -131,8 +131,8 @@ struct Backward {
   static constexpr auto kTensorSpecK = TensorSpec::Default;
   static constexpr auto kTensorSpecV = TensorSpec::Default;
   static constexpr auto kTensorSpecY = TensorSpec::Default;
-  
-  static constexpr auto kMaskingSpec = kMaskingSpec_;
+
+  static constexpr auto kMaskingSpec     = kMaskingSpec_;
   static constexpr bool kIsDeterministic = kIsDeterministic_;
 }; // device gemm traits backward
 } // namespace device_gemm_trait

@@ -5,8 +5,8 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
-#include <ATen/hip/HIPContext.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/hip/HIPContext.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/hip/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
@@ -30,27 +30,22 @@ constexpr auto array_of(T&&... t) -> std::array<V, sizeof...(T)> {
 }
 
 bool input_requires_grad(sdp_params params) {
-  const bool any_inputs_require_grad = params.query.requires_grad() ||
-      params.key.requires_grad() || params.value.requires_grad();
+  const bool any_inputs_require_grad =
+      params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
   return any_inputs_require_grad && gradmode_enabled;
 }
 
 bool has_for_nested_inputs(sdp_params params) {
-  return (params.query.is_nested() || params.key.is_nested() ||
-          params.value.is_nested());
+  return (params.query.is_nested() || params.key.is_nested() || params.value.is_nested());
 }
 
 std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math};
+      SDPBackend::flash_attention, SDPBackend::efficient_attention, SDPBackend::math};
 
   constexpr std::array<SDPBackend, num_backends> efficient_first{
-      SDPBackend::efficient_attention,
-      SDPBackend::flash_attention,
-      SDPBackend::math};
+      SDPBackend::efficient_attention, SDPBackend::flash_attention, SDPBackend::math};
   // Logic is taken from xformers
   // FlashAttention parallelizes across "batch_size * num_heads"
   // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
@@ -62,17 +57,14 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   if (params.query.dim() != 4) {
     return default_order;
   }
-  const auto batch_size{params.query.sym_size(0)},
-      num_heads{params.query.sym_size(1)},
-      query_lengths{params.query.sym_size(2)},
-      head_dim{params.query.sym_size(3)};
+  const auto batch_size{params.query.sym_size(0)}, num_heads{params.query.sym_size(1)},
+      query_lengths{params.query.sym_size(2)}, head_dim{params.query.sym_size(3)};
   if (batch_size > 0) {
-    const auto threads_flash = batch_size * num_heads;
-    const auto threads_cutlass =
-        threads_flash * (query_lengths / c10::SymInt(64));
-    bool more_threads_cutlass = (threads_cutlass / 2) >= threads_flash;
-    bool small_threads_flash = threads_flash < 60;
-    bool large_head_dim = head_dim.max(params.key.sym_size(3)) == 128;
+    const auto threads_flash   = batch_size * num_heads;
+    const auto threads_cutlass = threads_flash * (query_lengths / c10::SymInt(64));
+    bool more_threads_cutlass  = (threads_cutlass / 2) >= threads_flash;
+    bool small_threads_flash   = threads_flash < 60;
+    bool large_head_dim        = head_dim.max(params.key.sym_size(3)) == 128;
 
     // The training heuristic is taken from
     // https://github.com/pytorch/pytorch/pull/99644 Revisit when updated
@@ -87,15 +79,10 @@ std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
 }
 
 template <typename dtype_vector>
-bool check_tensor_dtype(
-    sdp_params params,
-    dtype_vector allowed_dtypes,
-    bool debug) {
+bool check_tensor_dtype(sdp_params params, dtype_vector allowed_dtypes, bool debug) {
   auto query_dtype = params.query.dtype();
-  if (!(query_dtype == params.key.dtype() &&
-        query_dtype == params.value.dtype() &&
-        (std::find(allowed_dtypes.begin(), allowed_dtypes.end(), query_dtype) !=
-         allowed_dtypes.end()))) {
+  if (!(query_dtype == params.key.dtype() && query_dtype == params.value.dtype() &&
+        (std::find(allowed_dtypes.begin(), allowed_dtypes.end(), query_dtype) != allowed_dtypes.end()))) {
     if (debug) {
       TORCH_WARN(
           "Expected query, key and value to all be of dtype: {",
@@ -117,9 +104,7 @@ bool check_tensor_dtype(
 bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   if (params.dropout != 0.0) {
     if (debug) {
-      TORCH_WARN(
-          "Mem_efficient does not support non_zero dropout. Dropout_p: ",
-          params.dropout);
+      TORCH_WARN("Mem_efficient does not support non_zero dropout. Dropout_p: ", params.dropout);
     }
     return false;
   }
@@ -133,8 +118,7 @@ bool try_broadcast_param_size(
     c10::string_view param_name,
     bool debug) {
   auto max_size = std::max({q_size, k_size, v_size});
-  if ((q_size != max_size && q_size != 1) ||
-      (k_size != max_size && k_size != 1) ||
+  if ((q_size != max_size && q_size != 1) || (k_size != max_size && k_size != 1) ||
       (v_size != max_size && v_size != 1)) {
     if (debug) {
       TORCH_WARN(
@@ -161,31 +145,25 @@ bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
     c10::string_view param_name,
     bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
-  const at::Tensor& sizes = nt_tensor_impl->get_nested_sizes();
-  auto num_head_dims = nt_tensor_impl->opt_size(1);
+  const at::Tensor& sizes   = nt_tensor_impl->get_nested_sizes();
+  auto num_head_dims        = nt_tensor_impl->opt_size(1);
   if (!num_head_dims.has_value()) {
     // num_head_dims is ragged
     if (debug) {
-      TORCH_WARN(
-          "Fused kernels do not support ragged num_head_dims, ",
-          param_name,
-          "has a ragged num_heads.");
+      TORCH_WARN("Fused kernels do not support ragged num_head_dims, ", param_name, "has a ragged num_heads.");
     }
     return false;
   }
 
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
-  const int64_t n_tensors = param.size(0);
+  auto* sizes_ptr                  = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors          = param.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
 
   // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
   for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] == 0) {
       if (debug) {
-        TORCH_WARN(
-            "Fused kernels do not support seq_len == 0, ",
-            param_name,
-            "has a seq len of 0.");
+        TORCH_WARN("Fused kernels do not support seq_len == 0, ", param_name, "has a seq len of 0.");
       }
       return false;
     }
@@ -200,8 +178,7 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   }
 
   bool q_is_safe = params.query.is_nested()
-      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
-            params.query, "query ", debug)
+      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.query, "query ", debug)
       : true;
   // short circuit if any is unsafe
   if (!q_is_safe) {
@@ -209,16 +186,14 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   }
 
   bool k_is_safe = params.key.is_nested()
-      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
-            params.key, "key ", debug)
+      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.key, "key ", debug)
       : true;
   if (!k_is_safe) {
     return false;
   }
 
   bool v_is_safe = params.value.is_nested()
-      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(
-            params.value, "value ", debug)
+      ? check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.value, "value ", debug)
       : true;
   if (!v_is_safe) {
     return false;
@@ -226,15 +201,13 @@ bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
 
   // We now know none of the inputs have ragged num_heads, so we can safely
   // access .size(1)
-  auto q_num_heads = params.query.size(1);
-  auto k_num_heads = params.key.size(1);
-  auto v_num_heads = params.value.size(1);
-  bool same_num_heads =
-      q_num_heads == k_num_heads && q_num_heads == v_num_heads;
+  auto q_num_heads    = params.query.size(1);
+  auto k_num_heads    = params.key.size(1);
+  auto v_num_heads    = params.value.size(1);
+  bool same_num_heads = q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
   if (!same_num_heads) {
-    return try_broadcast_param_size(
-        q_num_heads, k_num_heads, v_num_heads, "num heads ", debug);
+    return try_broadcast_param_size(q_num_heads, k_num_heads, v_num_heads, "num heads ", debug);
   }
 
   return true;
@@ -244,8 +217,7 @@ bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
   if (has_for_nested_inputs(params) && input_requires_grad(params)) {
     if (debug) {
-      TORCH_WARN(
-          "Memory efficient attention currently doesn't support training with NT inputs.");
+      TORCH_WARN("Memory efficient attention currently doesn't support training with NT inputs.");
     }
     return false;
   }
@@ -264,8 +236,7 @@ bool check_for_attn_mask(sdp_params params, bool debug) {
 
 bool check_tensor_shapes(sdp_params params, bool debug) {
   auto query_dim = params.query.dim();
-  if (!(query_dim == params.key.dim() && query_dim == params.value.dim() &&
-        (query_dim == 4))) {
+  if (!(query_dim == params.key.dim() && query_dim == params.value.dim() && (query_dim == 4))) {
     if (debug) {
       TORCH_WARN(
           "Both fused kernels requires query, key and value to be 4 dimensional, but got Query dim: ",
@@ -283,7 +254,7 @@ bool check_tensor_shapes(sdp_params params, bool debug) {
 
 bool check_safe_kv_broadcast(at::Tensor param, bool debug) {
   const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
-  auto seq_len = nt_tensor_impl->opt_size(2);
+  auto seq_len              = nt_tensor_impl->opt_size(2);
   if (!seq_len.has_value()) {
     if (debug) {
       TORCH_WARN(
@@ -304,8 +275,7 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto v_batch_size = params.value.sym_size(0);
 
   bool has_nested_input = has_for_nested_inputs(params);
-  bool same_batch_size =
-      q_batch_size == k_batch_size && q_batch_size == v_batch_size;
+  bool same_batch_size  = q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
   // num_heads logic for nested input is checked in
   // check_for_seq_len_0_nested_tensor as there is handling there to make sure
@@ -314,18 +284,16 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
     bool broadcastable_batch_size = true;
     if (!same_batch_size) {
       // try to broadcast batchsize
-      broadcastable_batch_size = try_broadcast_param_size(
-          q_batch_size, k_batch_size, v_batch_size, "batch size ", debug);
+      broadcastable_batch_size =
+          try_broadcast_param_size(q_batch_size, k_batch_size, v_batch_size, "batch size ", debug);
 
       // if only one of k or v require broadcasting of batch size, the other
       // must have a consistent seq_len dim
       if (broadcastable_batch_size) {
-        if (k_batch_size == 1 && v_batch_size != 1 &&
-            !check_safe_kv_broadcast(params.value, debug)) {
+        if (k_batch_size == 1 && v_batch_size != 1 && !check_safe_kv_broadcast(params.value, debug)) {
           return false;
         }
-        if (v_batch_size == 1 && k_batch_size != 1 &&
-            !check_safe_kv_broadcast(params.key, debug)) {
+        if (v_batch_size == 1 && k_batch_size != 1 && !check_safe_kv_broadcast(params.key, debug)) {
           return false;
         }
       }
@@ -333,11 +301,10 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
     return broadcastable_batch_size;
   }
 
-  auto q_num_heads = params.query.sym_size(1);
-  auto k_num_heads = params.key.sym_size(1);
-  auto v_num_heads = params.value.sym_size(1);
-  bool same_num_heads =
-      q_num_heads == k_num_heads && q_num_heads == v_num_heads;
+  auto q_num_heads    = params.query.sym_size(1);
+  auto k_num_heads    = params.key.sym_size(1);
+  auto v_num_heads    = params.value.sym_size(1);
+  bool same_num_heads = q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
   if (!(same_batch_size && same_num_heads)) {
     if (debug) {
@@ -358,12 +325,10 @@ bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
 
 bool check_head_dim_size(sdp_params params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
-  const auto key_size_last = params.key.sym_size(-1);
+  const auto key_size_last   = params.key.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  if (!(query_size_last == key_size_last &&
-        query_size_last == value_size_last && query_size_last % 8 == 0 &&
-        query_size_last <= 128 && value_size_last % 8 == 0 &&
-        value_size_last <= 128)) {
+  if (!(query_size_last == key_size_last && query_size_last == value_size_last && query_size_last % 8 == 0 &&
+        query_size_last <= 128 && value_size_last % 8 == 0 && value_size_last <= 128)) {
     if (debug) {
       TORCH_WARN(
           "Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 128.",
@@ -390,10 +355,9 @@ bool use_tensor_cores(sdp_params params, hipDeviceProp_t* dprops, bool is_half) 
   return false;
 }
 int64_t minimum_gemm_alignment(sdp_params params) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_half = (params.query.dtype() == at::kHalf) ||
-      (params.query.dtype() == at::kBFloat16);
-  bool use_tc = use_tensor_cores(params, dprops, is_half);
+  auto dprops                 = at::cuda::getCurrentDeviceProperties();
+  bool is_half                = (params.query.dtype() == at::kHalf) || (params.query.dtype() == at::kBFloat16);
+  bool use_tc                 = use_tensor_cores(params, dprops, is_half);
   int64_t matmul_alignment_mn = 1;
   if (dprops->major >= 8) {
     matmul_alignment_mn = 4;
@@ -408,9 +372,8 @@ int64_t minimum_gemm_alignment(sdp_params params) {
 bool check_head_dim_size_mem_efficient(sdp_params params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto value_size_last = params.value.sym_size(-1);
-  const int64_t alignment = minimum_gemm_alignment(params);
-  if (!(query_size_last == params.key.sym_size(-1) &&
-        query_size_last % alignment == 0 && query_size_last > 0 &&
+  const int64_t alignment    = minimum_gemm_alignment(params);
+  if (!(query_size_last == params.key.sym_size(-1) && query_size_last % alignment == 0 && query_size_last > 0 &&
         value_size_last % alignment == 0 && value_size_last > 0)) {
     if (debug) {
       TORCH_WARN(
@@ -456,7 +419,7 @@ bool check_runtime_disabled_mem_efficient(sdp_params params, bool debug) {
 
 bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   // Check that the gpu is capable of running flash attention
-  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto dprops  = at::cuda::getCurrentDeviceProperties();
   bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
   bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
   bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
@@ -476,7 +439,7 @@ bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
 
 bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
-  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto dprops      = at::cuda::getCurrentDeviceProperties();
   bool is_gte_sm50 = dprops->major >= 5;
   bool is_lte_sm90 = dprops->major <= 9;
   if (!(is_gte_sm50 && is_lte_sm90)) {
@@ -496,34 +459,28 @@ bool check_mem_efficient_hardware_support(sdp_params params, bool debug) {
 bool check_head_dim_gt64_and_sm_ge86_lt90(sdp_params params, bool debug) {
   // Memory Efficient Attention is throwing a cuda illegal memory error
   // on sm86 or newer when head_dim is greater than 64.
-  auto dprops = at::cuda::getCurrentDeviceProperties();
+  auto dprops           = at::cuda::getCurrentDeviceProperties();
   bool is_sm86_or_newer = (dprops->major == 8) && (dprops->minor >= 6);
   if (is_sm86_or_newer && (params.query.sym_size(-1) > 64)) {
     if (debug) {
-      TORCH_WARN(
-          "Memory Efficient Attention does not currently support head_dim greater than 64 on sm86 or newer");
+      TORCH_WARN("Memory Efficient Attention does not currently support head_dim greater than 64 on sm86 or newer");
     }
     return false;
   }
   return true;
 }
 
-bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(
-    sdp_params params,
-    bool debug) {
+bool check_requires_grad_and_head_dim_gt64_and_sm_ge86_lt90(sdp_params params, bool debug) {
   // Flash Attention will raise an error in the backward pass if the head_dim
   // size is greater than 64 And the device is sm86 or newer.
-  if (input_requires_grad(params) &&
-      !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
+  if (input_requires_grad(params) && !check_head_dim_gt64_and_sm_ge86_lt90(params, false)) {
     if (debug) {
-      TORCH_WARN(
-          "Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
+      TORCH_WARN("Flash attention currently doesn't support training with head_dim greater than 64 on sm86 or newer.");
     }
     return false;
   }
   return true;
 }
-
 
 bool use_flash_attention(sdp_params params, bool debug) {
 #ifndef USE_FLASH_ATTENTION
@@ -550,8 +507,7 @@ bool use_flash_attention(sdp_params params, bool debug) {
 
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
-    constexpr auto sm80_flash_dtypes =
-        array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
+    constexpr auto sm80_flash_dtypes = array_of<at::ScalarType>(at::kHalf, at::kBFloat16);
     return check_tensor_dtype(params, sm80_flash_dtypes, debug);
   } else {
     constexpr auto default_flash_dtypes = array_of<at::ScalarType>(at::kHalf);
@@ -565,10 +521,8 @@ bool use_mem_efficient_attention(sdp_params params, bool debug) {
   return false;
 #endif
   // Constraints specific to mem efficient attention
-  constexpr auto default_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
-  constexpr auto sm50_mem_efficient_dtypes =
-      array_of<at::ScalarType>(at::kHalf, at::kFloat);
+  constexpr auto default_mem_efficient_dtypes = array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+  constexpr auto sm50_mem_efficient_dtypes    = array_of<at::ScalarType>(at::kHalf, at::kFloat);
 
   //  Define gate functions that determine if a flash kernel can be ran
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
@@ -602,8 +556,7 @@ SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // 2. Mem Efficient Attention
   // 3. Math fallback
   auto& ctx = at::globalContext();
-  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() &&
-      !ctx.userEnabledMemEfficientSDP()) {
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP() && !ctx.userEnabledMemEfficientSDP()) {
     return SDPBackend::error;
   }
   // Get ideal kernel ordering
@@ -655,19 +608,17 @@ bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
     return true;
   }
 
-  const auto nt_q_tensor_impl =
-      at::native::get_nested_tensor_impl(params.query);
-  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
-  const int64_t n_tensors = params.query.size(0);
+  const auto nt_q_tensor_impl      = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes          = nt_q_tensor_impl->get_nested_sizes();
+  auto* sizes_ptr                  = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors          = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
 
   // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
   for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN(
-            "Packed projection for fused kernels does not support sequence_length <= 1");
+        TORCH_WARN("Packed projection for fused kernels does not support sequence_length <= 1");
       }
       return false;
     }

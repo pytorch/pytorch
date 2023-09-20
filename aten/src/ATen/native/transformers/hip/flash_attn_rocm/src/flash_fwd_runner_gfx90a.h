@@ -33,32 +33,32 @@ namespace fwd_device_gemm {
 class FlashFwdRunner {
  public:
   // constructor
-  explicit FlashFwdRunner(LaunchParams<FlashFwdParams> &launch_params)
-    : params_(launch_params.params),
-      stream_(launch_params.stream_),
-      is_deterministic_(launch_params.params.is_deterministic),
-      is_performance_mode_(launch_params.params.is_performance_mode) {}
- 
+  explicit FlashFwdRunner(LaunchParams<FlashFwdParams>& launch_params)
+      : params_(launch_params.params),
+        stream_(launch_params.stream_),
+        is_deterministic_(launch_params.params.is_deterministic),
+        is_performance_mode_(launch_params.params.is_performance_mode) {}
+
   template <bool kIsQLoop, int kHeadDim, typename T, bool kIsCausal>
   void Run();
- 
+
  private:
-  template <template <typename> typename DeviceGemmTemplate,
-            typename T, 
-            device_gemm_trait::MaskingSpec kMaskingSpec, 
-            bool kIsDeterministic>
+  template <
+      template <typename>
+      typename DeviceGemmTemplate,
+      typename T,
+      device_gemm_trait::MaskingSpec kMaskingSpec,
+      bool kIsDeterministic>
   void run_() {
     // input, output, gemm, dropout, cshuffle, masking specialization, deterministic
-    using DeviceGemmTraits = device_gemm_trait::Forward<T,
-                                                        kMaskingSpec, 
-                                                        kIsDeterministic>;
-    using DeviceGemmInstance = DeviceGemmInstanceLauncher<DeviceGemmTemplate, DeviceGemmTraits>;
+    using DeviceGemmTraits        = device_gemm_trait::Forward<T, kMaskingSpec, kIsDeterministic>;
+    using DeviceGemmInstance      = DeviceGemmInstanceLauncher<DeviceGemmTemplate, DeviceGemmTraits>;
     auto device_gemm_instance_ptr = std::make_unique<DeviceGemmInstance>();
     device_gemm_instance_ptr->Launch(params_, stream_);
   }
 
-  FlashFwdParams &params_;
-  hipStream_t &stream_;
+  FlashFwdParams& params_;
+  hipStream_t& stream_;
   const bool is_deterministic_;
   const bool is_performance_mode_;
 }; // class FlashFwdRunnerBase

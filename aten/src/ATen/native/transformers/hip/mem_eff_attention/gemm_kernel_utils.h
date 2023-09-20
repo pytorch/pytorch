@@ -12,20 +12,20 @@
 ////////////////////////////////////////////////////////////////////////////////
 // Some helper functions
 ////////////////////////////////////////////////////////////////////////////////
-#define DISPATCH_TYPES(tensor, func)                                           \
-  {                                                                            \
-    if (query.scalar_type() == at::ScalarType::Float) {                        \
-      using scalar_t = float;                                                  \
-      func();                                                                  \
-    } else if (query.scalar_type() == at::ScalarType::Half) {                  \
-      using scalar_t = cutlass::half_t;                                        \
-      func();                                                                  \
-    } else if (query.scalar_type() == at::ScalarType::BFloat16) {              \
-      using scalar_t = cutlass::bfloat16_t;                                    \
-      func();                                                                  \
-    } else {                                                                   \
+#define DISPATCH_TYPES(tensor, func)                                        \
+  {                                                                         \
+    if (query.scalar_type() == at::ScalarType::Float) {                     \
+      using scalar_t = float;                                               \
+      func();                                                               \
+    } else if (query.scalar_type() == at::ScalarType::Half) {               \
+      using scalar_t = cutlass::half_t;                                     \
+      func();                                                               \
+    } else if (query.scalar_type() == at::ScalarType::BFloat16) {           \
+      using scalar_t = cutlass::bfloat16_t;                                 \
+      func();                                                               \
+    } else {                                                                \
       TORCH_CHECK(false, "Only fp32, half & bf16 supported at the moment"); \
-    }                                                                          \
+    }                                                                       \
   }
 
 #define DISPATCH_BOOL(BOOL_V, BOOL_NAME, F) \
@@ -38,47 +38,41 @@
       F();                                  \
     }                                       \
   }
-#define DISPATCH_ARCHTAG(CC, func)                                        \
-  {                                                                       \
-    if (CC >= 80) {                                                       \
-      using ArchTag = cutlass::arch::Sm80;                                \
-      func();                                                             \
-    } else if (CC >= 75) {                                                \
-      using ArchTag = cutlass::arch::Sm75;                                \
-      func();                                                             \
-    } else if (CC >= 70) {                                                \
-      using ArchTag = cutlass::arch::Sm70;                                \
-      func();                                                             \
-    } else if (CC >= 50) {                                                \
-      using ArchTag = cutlass::arch::Sm50;                                \
-      func();                                                             \
-    } else {                                                              \
-      TORCH_CHECK(                                                     \
-          false,                                                          \
-          "Your device is too old. We require compute capability >= 50"); \
-    }                                                                     \
+#define DISPATCH_ARCHTAG(CC, func)                                                       \
+  {                                                                                      \
+    if (CC >= 80) {                                                                      \
+      using ArchTag = cutlass::arch::Sm80;                                               \
+      func();                                                                            \
+    } else if (CC >= 75) {                                                               \
+      using ArchTag = cutlass::arch::Sm75;                                               \
+      func();                                                                            \
+    } else if (CC >= 70) {                                                               \
+      using ArchTag = cutlass::arch::Sm70;                                               \
+      func();                                                                            \
+    } else if (CC >= 50) {                                                               \
+      using ArchTag = cutlass::arch::Sm50;                                               \
+      func();                                                                            \
+    } else {                                                                             \
+      TORCH_CHECK(false, "Your device is too old. We require compute capability >= 50"); \
+    }                                                                                    \
   }
 
-#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                            \
+#define CHECK_NOSPARSE_CONTIGUOUS_CUDA(TENSOR)                         \
   TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
   TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
   TORCH_CHECK(TENSOR.is_contiguous());
 
-#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                        \
+#define CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(TENSOR)                     \
   TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
   TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
-  TORCH_CHECK(                                                         \
-      TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
+  TORCH_CHECK(TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
 
-#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
-  TORCH_CHECK(                         \
-      uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
+#define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) TORCH_CHECK(uint64_t(PTR) % ALIGNMENT == 0, #PTR " is not correctly aligned")
 
-#define ASSIGN_CHECK_OVERFLOW(A, B)                                    \
-  {                                                                    \
-    A = B;                                                             \
-    TORCH_CHECK(                                                    \
-        B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
+#define ASSIGN_CHECK_OVERFLOW(A, B)                                            \
+  {                                                                            \
+    A = B;                                                                     \
+    TORCH_CHECK(B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
   }
 
 namespace gemm_kernel_utils {
@@ -101,12 +95,12 @@ constexpr CUTLASS_HOST_DEVICE integer align_up(integer n, integer m) {
 // Fallback to Simt (FMA on cuda cores) if not in a special case below
 template <typename ArchTag, typename scalar_t_, typename Enable = void>
 struct DefaultGemmType {
-  static constexpr int ThreadK = 8;
-  static constexpr int WarpK = 8;
+  static constexpr int ThreadK           = 8;
+  static constexpr int WarpK             = 8;
   static constexpr int kMinimumAlignment = 1;
-  using InstructionShape = cutlass::gemm::GemmShape<1, 1, 1>;
-  using OpClass = cutlass::arch::OpClassSimt;
-  using Operator = cutlass::arch::OpMultiplyAdd;
+  using InstructionShape                 = cutlass::gemm::GemmShape<1, 1, 1>;
+  using OpClass                          = cutlass::arch::OpClassSimt;
+  using Operator                         = cutlass::arch::OpMultiplyAdd;
 };
 
 // Specialization for tensorcores with f32
@@ -114,14 +108,13 @@ template <typename ArchTag>
 struct DefaultGemmType<
     ArchTag,
     float,
-    typename cutlass::platform::enable_if<
-        ArchTag::kMinComputeCapability >= 80>::type> {
-  static constexpr int ThreadK = 32;
-  static constexpr int WarpK = 32;
+    typename cutlass::platform::enable_if<ArchTag::kMinComputeCapability >= 80>::type> {
+  static constexpr int ThreadK           = 32;
+  static constexpr int WarpK             = 32;
   static constexpr int kMinimumAlignment = 4;
-  using OpClass = cutlass::arch::OpClassTensorOp;
-  using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
-  using Operator = cutlass::arch::OpMultiplyAddFastF32;
+  using OpClass                          = cutlass::arch::OpClassTensorOp;
+  using InstructionShape                 = cutlass::gemm::GemmShape<16, 8, 8>;
+  using Operator                         = cutlass::arch::OpMultiplyAddFastF32;
 };
 
 // Specialization for tensorcores with f16/bf16 - Sm75+
@@ -130,25 +123,24 @@ struct DefaultGemmType<
     ArchTag,
     scalar_t,
     typename cutlass::platform::enable_if<
-        ArchTag::kMinComputeCapability >= 75 &&
-        cutlass::sizeof_bits<scalar_t>::value == 16>::type> {
-  static constexpr int ThreadK = 32;
-  static constexpr int WarpK = 32;
+        ArchTag::kMinComputeCapability >= 75 && cutlass::sizeof_bits<scalar_t>::value == 16>::type> {
+  static constexpr int ThreadK           = 32;
+  static constexpr int WarpK             = 32;
   static constexpr int kMinimumAlignment = 4;
-  using OpClass = cutlass::arch::OpClassTensorOp;
-  using InstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
-  using Operator = cutlass::arch::OpMultiplyAdd;
+  using OpClass                          = cutlass::arch::OpClassTensorOp;
+  using InstructionShape                 = cutlass::gemm::GemmShape<16, 8, 8>;
+  using Operator                         = cutlass::arch::OpMultiplyAdd;
 };
 
 // Specialization for tensorcores with f16 - Volta
 template <>
 struct DefaultGemmType<cutlass::arch::Sm70, cutlass::half_t, void> {
-  static constexpr int ThreadK = 32;
-  static constexpr int WarpK = 32;
+  static constexpr int ThreadK           = 32;
+  static constexpr int WarpK             = 32;
   static constexpr int kMinimumAlignment = 2;
-  using OpClass = cutlass::arch::OpClassTensorOp;
-  using InstructionShape = cutlass::gemm::GemmShape<8, 8, 4>;
-  using Operator = cutlass::arch::OpMultiplyAdd;
+  using OpClass                          = cutlass::arch::OpClassTensorOp;
+  using InstructionShape                 = cutlass::gemm::GemmShape<8, 8, 4>;
+  using Operator                         = cutlass::arch::OpMultiplyAdd;
 };
 
 // Enables to do
@@ -160,8 +152,7 @@ struct call_conditional;
 template <typename TA, typename TB>
 struct call_conditional<true, TA, TB> {
   template <typename Arg>
-  static CUTLASS_HOST_DEVICE auto apply(TA ta, TB tb, Arg arg)
-      -> decltype(ta(arg)) {
+  static CUTLASS_HOST_DEVICE auto apply(TA ta, TB tb, Arg arg) -> decltype(ta(arg)) {
     return ta(arg);
   }
 };
@@ -169,8 +160,7 @@ struct call_conditional<true, TA, TB> {
 template <typename TA, typename TB>
 struct call_conditional<false, TA, TB> {
   template <typename Arg>
-  static CUTLASS_HOST_DEVICE auto apply(TA ta, TB tb, Arg arg)
-      -> decltype(tb(arg)) {
+  static CUTLASS_HOST_DEVICE auto apply(TA ta, TB tb, Arg arg) -> decltype(tb(arg)) {
     return tb(arg);
   }
 };
@@ -201,7 +191,7 @@ CUTLASS_DEVICE T* warp_uniform(T* ptr) {
       uint32_t asInt[2];
     };
   } p;
-  p.ptr = ptr;
+  p.ptr      = ptr;
   p.asInt[0] = warp_uniform(p.asInt[0]);
   p.asInt[1] = warp_uniform(p.asInt[1]);
   return p.ptr;
