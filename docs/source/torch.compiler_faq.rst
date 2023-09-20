@@ -540,7 +540,7 @@ to NumPy and back via ``x.numpy()``, ``torch.from_numpy``, and related functions
 Which NumPy features does ``torch.compile`` support?
 ----------------------------------------------------
 
-NumPy within ``torch.compile`` follows the latest NumPy release.
+NumPy within ``torch.compile`` follows NumPy 2.0 pre-release.
 
 Generally, ``torch.compile`` is able to trace through most NumPy constructions,
 and when it cannot, it falls back to eager and lets NumPy execute that piece of
