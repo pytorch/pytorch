@@ -2815,7 +2815,9 @@ def forward(self, x):
             a = A()
             return x.sum() + type(a).func().sum()
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Can't call type()"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
+        ):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
 
         def f_correct(x):
@@ -3763,7 +3765,6 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
         self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
 
-    @unittest.expectedFailure
     def test_fx_pytree(self):
         def foo(args):
             flat_args, spec = torch.utils._pytree.tree_flatten(args)
@@ -3806,7 +3807,7 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
                 return x + self.buffer1
 
         gm, _ = torch._dynamo.export(Module(), torch.ones(5, 5), aten_graph=False)
-        buffers = [(name, buffer) for name, buffer in gm.named_buffers()]
+        buffers = list(gm.named_buffers())
         self.assertEqual(len(buffers), 1)
 
         name, buffer = buffers[0]

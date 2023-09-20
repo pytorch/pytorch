@@ -1,8 +1,9 @@
 #include <torch/csrc/inductor/aot_runtime/interface.h>
 #include <torch/csrc/inductor/aot_runtime/model_container.h>
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <iostream>
 #include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
+#include <ATen/core/dispatch/Dispatcher.h>
+
+#include <iostream>
 #include <stdexcept>
 #include <vector>
 
@@ -53,7 +54,7 @@ AOTInductorError AOTInductorModelContainerDelete(
 
 AOTInductorError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    const AOTInductorTensorHandle inputs_handle,
+    AOTInductorTensorHandle inputs_handle,
     size_t num_inputs,
     AOTInductorTensorHandle outputs_handle,
     size_t num_outputs,
@@ -64,7 +65,7 @@ AOTInductorError AOTInductorModelContainerRun(
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
 
-  const auto* inputs = reinterpret_cast<const at::Tensor*>(inputs_handle);
+  auto* inputs = reinterpret_cast<at::Tensor*>(inputs_handle);
   std::vector<at::Tensor> input_tensors;
   input_tensors.reserve(num_inputs);
   for (size_t i = 0; i < num_inputs; i++) {

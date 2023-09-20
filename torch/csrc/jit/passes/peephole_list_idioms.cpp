@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
+#include <torch/csrc/utils/memory.h>
 #include <limits>
 #include <utility>
 
@@ -160,7 +161,7 @@ struct PeepholeOptimizeListIdiomsImpl {
       std::shared_ptr<Graph> graph,
       bool refine_list_len)
       : graph_(std::move(graph)),
-        aliasDb_(std::make_unique<AliasDb>(graph_)),
+        aliasDb_(torch::make_unique<AliasDb>(graph_)),
         refine_list_len_(refine_list_len) {}
 
   bool run() {

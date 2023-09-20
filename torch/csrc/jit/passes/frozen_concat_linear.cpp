@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/utils/memory.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
