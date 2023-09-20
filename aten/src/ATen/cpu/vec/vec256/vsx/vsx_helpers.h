@@ -100,12 +100,10 @@ vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
 #endif
 
 #define vec_not(a) vec_nor(a, a)
-#if defined(__clang__)
-#if !defined(vec_splats)
+#if defined(__clang__) && !defined(vec_splats)
 C10_ALWAYS_INLINE vint64 vec_splats(const int64_t& a) {
- return vec_splats(static_cast<signed long long>(a));
+  return vec_splats(a);
  }
-#endif
 #endif 
 // Vectorized min/max which return a if any operand is nan
 template <class T>
