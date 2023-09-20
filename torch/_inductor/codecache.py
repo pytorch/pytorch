@@ -292,11 +292,10 @@ class PersistentCache(CacheBase):
 
                 self.update_local_cache(local_cache)
 
-                if use_global_cache():
-                    timings_to_log = {
-                        choice.hash_key(): timings[choice] for choice in choices
-                    }
-                    log_vals(timings_to_log)
+                timings_to_log = {
+                    choice.hash_key(): timings[choice] for choice in choices
+                }
+                log_vals(timings_to_log)
         elif use_global_cache():
             # only check global cache, not local one
             check_cache(self.get_global_cache(), callback=log_stats)
@@ -779,7 +778,7 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode and config.is_fbcode():
+    if aot_mode:
         # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
         cuda = True
 

@@ -13,10 +13,10 @@ struct VmapInterpreterPtr {
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
   void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   c10::SymInt batchSize() const {
-    return c10::get<VmapInterpreterMeta>(base_->meta()).batchSize_;
+    return std::get<VmapInterpreterMeta>(base_->meta()).batchSize_;
   }
   RandomnessType randomness() const {
-    return c10::get<VmapInterpreterMeta>(base_->meta()).randomness_;
+    return std::get<VmapInterpreterMeta>(base_->meta()).randomness_;
   }
  private:
   const Interpreter* base_;
