@@ -7,7 +7,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <iostream>
+#include <ostream>
 #include <vector>
 
 C10_CLANG_DIAGNOSTIC_PUSH()

@@ -12,6 +12,7 @@ except ModuleNotFoundError:
     np = None
 
 import torch._C
+import torch._refs
 import torch.fx
 import torch.nn
 import torch.onnx.operators
@@ -36,7 +37,6 @@ from .ctx_manager import (
     NullContextVariable,
     TorchFunctionDisableVariable,
 )
-from .dicts import ConstDictVariable
 from .distributed import is_constant_pg_functions, is_from_local, ProcessGroupVariable
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import ListVariable, TupleVariable
@@ -601,68 +601,6 @@ class TorchVariable(VariableTracker):
             return UserFunctionVariable(
                 torch.nn.init._calculate_correct_fan, **options
             ).call_function(tx, args, {})
-        elif self.value == torch.utils._pytree.tree_flatten:
-            if len(args) != 1:
-                unimplemented("Unsupported flatten with len(args) != 1")
-
-            flattened, spec = torch.utils._pytree.tree_flatten(args[0])
-            return TupleVariable(
-                [ListVariable(flattened), ConstantVariable(spec)], **options
-            )
-        elif self.value == torch.utils._pytree.tree_unflatten:
-            if len(args) != 2:
-                unimplemented("Unsupported unflatten with len(args) != 2")
-
-            unflattened = torch.utils._pytree.tree_unflatten(args[0], args[1].value)
-
-            def _wrap_in_dynamo_variables(container):
-                if isinstance(container, VariableTracker):
-                    return container
-
-                if isinstance(container, list):
-                    return ListVariable(
-                        [_wrap_in_dynamo_variables(elem) for elem in container],
-                        **options,
-                    )
-
-                if isinstance(container, tuple):
-                    return TupleVariable(
-                        [_wrap_in_dynamo_variables(elem) for elem in container],
-                        **options,
-                    )
-
-                if isinstance(container, dict):
-                    return ConstDictVariable(
-                        {k: _wrap_in_dynamo_variables(v) for k, v in container.items()},
-                        type(container),
-                        **options,
-                    )
-
-            return _wrap_in_dynamo_variables(unflattened)
-
-        elif self.value == torch.fx._pytree.tree_flatten_spec:
-            if len(args) != 2:
-                unimplemented("Unsupported flatten_spec with len(args) != 2")
-
-            flattened, spec = torch.fx._pytree.tree_flatten_spec(args[0], args[1].value)
-            return TupleVariable(
-                [ListVariable(flattened), ConstantVariable(spec)], **options
-            )
-        elif self.value == torch.utils._pytree.tree_map_only:
-            if len(args) != 3:
-                unimplemented("Unsupported tree_map_only with len(args) != 3")
-
-            ty = args[0].value  # type
-            fn = args[1]  # map fn
-            tree = args[2]  # tree
-
-            def map_fn(v):
-                if ty == v.python_type():
-                    return fn.call_function(tx, [v], {})
-                else:
-                    return v
-
-            return torch.utils._pytree.tree_map(map_fn, tree)
         elif self.value is torch.nn.utils.rnn.pack_padded_sequence:
             unimplemented("workaround https://github.com/pytorch/pytorch/issues/93501")
         elif isinstance(self.value, types.ModuleType):
@@ -723,17 +661,20 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     else:
                         return False
 
-                # NB: OK to pass torch.tensor(tensor), this will trace fine
-                # TODO: But torch.tensor(unspec) would not trace fine.  Not
-                # handled right now.
                 data_arg = None
                 if args:
                     data_arg = args[0]
                 elif "data" in kwargs:
                     data_arg = kwargs["data"]
 
-                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
-                    unimplemented("torch.tensor call with list of unspec")
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                if not isinstance(data_arg, TensorVariable) and check_any_unspec(
+                    data_arg
+                ):
+                    # This is slower and less canonical, so only use it if we
+                    # have to
+                    fn_ = torch._refs.tensor
+
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
                 proxy=tx.output.create_proxy(
