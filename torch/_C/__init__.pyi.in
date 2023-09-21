@@ -17,13 +17,16 @@ from typing import (
     Literal,
     NamedTuple,
     Optional,
-    overload,
+    Protocol,
     Sequence,
     Set,
+    SupportsIndex,
     Tuple,
     Type,
     TypeVar,
     Union,
+    overload,
+    runtime_checkable,
 )
 from typing_extensions import ParamSpec
 
@@ -58,6 +61,26 @@ T = TypeVar("T")
 S = TypeVar("S", bound="torch.Tensor")
 P = ParamSpec("P")
 ReturnVal = TypeVar("ReturnVal", covariant=True)  # return value (always covariant)
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+@runtime_checkable
+class _NestedSequence(Protocol[_T_co]):
+    """A protocol for representing nested sequences.
+
+    References::
+        `numpy._typing._NestedSequence`
+        <https://github.com/numpy/numpy/blob/main/numpy/_typing/_nested_sequence.py>
+    """
+
+    def __len__(self, /) -> builtins.int: ...
+    def __getitem__(self, index: builtins.int, /) -> _T_co | _NestedSequence[_T_co]: ...
+    def __contains__(self, x: builtins.object, /) -> builtins.bool: ...
+    def __iter__(self, /) -> Iterator[_T_co | _NestedSequence[_T_co]]: ...
+    def __reversed__(self, /) -> Iterator[_T_co | _NestedSequence[_T_co]]: ...
+    def count(self, value: Any, /) -> builtins.int: ...
+    def index(self, value: Any, /) -> builtins.int: ...
+
 
 # Defined in torch/csrc/Device.cpp
 class device:
