@@ -167,12 +167,12 @@ class ConstantFolder(torch.fx.Interpreter):
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def constant_fold(gm, filter_fn: Optional[Callable[[torch.fx.Node], bool]] = None):
+def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None):
     cf = ConstantFolder(gm, skip_constructors=True)
     cf.run()
 
     for node, constant in cf.node_replacements.items():
-        if filter_fn is not None and not filter_fn(node):
+        if constraint_fn is not None and not constraint_fn(node):
             continue
         replace_node_with_constant(gm, node, constant)
 

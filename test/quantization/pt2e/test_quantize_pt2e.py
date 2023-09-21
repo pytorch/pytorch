@@ -98,7 +98,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         )
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         return m
 
     def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
@@ -143,7 +143,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
@@ -302,14 +302,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = torch.nn.Conv2d(2, 2, 1)
         x = torch.rand(1, 2, 14, 14)
         example_inputs = (x,)
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         # Ensure the conv has no observer inserted at output
         node_occurrence = {
             # two for input of conv
@@ -394,14 +387,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvMaxPool2d()
         x = torch.rand(1, 2, 14, 14)
         example_inputs = (x,)
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         node_occurrence = {
             # two for input of conv
             # one for input of maxpool
@@ -494,14 +480,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=False, bn=False).eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         node_occurrence = {
             # input, weight, bias, output for the conv
             # note: quantize op for weight and bias are const propagated
@@ -601,15 +580,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=False, bn=False).eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
-        m(*example_inputs)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
 
         node_occurrence = {
             # input, output for the conv
@@ -680,14 +651,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         fixed_scale = 1.0 / 256.0
         fixed_zero_point = 0
         for n in m.graph.nodes:
@@ -832,7 +796,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
@@ -950,7 +914,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(2, 2)
-                self.dont_fold_me = torch.randn(2, 2)
+                self.dont_fold_me = torch.nn.Parameter(torch.randn(2, 2))
 
             def forward(self, x):
                 t = self.dont_fold_me.t()
@@ -958,7 +922,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         quantizer = XNNPACKQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        # only quantize linear, so add add is not quantized and the constant Tensor
+        # only quantize linear, so add is not quantized and the constant Tensor
         # should not be folded
         quantizer.set_module_type(torch.nn.Linear, operator_config)
         example_inputs = (torch.randn(2, 2),)
@@ -991,8 +955,6 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         quantizer = XNNPACKQuantizer()
         operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        # only quantize linear, so add add is not quantized and the constant Tensor
-        # should not be folded
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
@@ -1034,7 +996,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
@@ -1389,7 +1351,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertEqual(
             id(m.activation_post_process_3), id(m.activation_post_process_4)
         )
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(
@@ -1787,7 +1749,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After convert: still not OK
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         with self.assertRaises(NotImplementedError):
             m.eval()
         with self.assertRaises(NotImplementedError):
@@ -1848,7 +1810,7 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
+            model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
 
@@ -1910,7 +1872,7 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
+            model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
 
@@ -1941,7 +1903,7 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
                 id(m.activation_post_process_3), id(m.activation_post_process_2)
             )
             after_prepare_result = m(*example_inputs)
-            m = convert_pt2e(m)
+            m = convert_pt2e(m, fold_quantize=True)
 
             after_quant_result = m(*example_inputs)
 
