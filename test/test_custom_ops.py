@@ -1434,7 +1434,9 @@ class TestCustomOp(CustomOpTestCaseBase):
             op(x)
 
         x = torch.randn(3, device="meta")
-        with self.assertRaisesRegex(NotImplementedError, "abstract impl registered"):
+        with self.assertRaisesRegex(
+            NotImplementedError, "no abstract impl or Meta kernel"
+        ):
             op(x)
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar")
