@@ -1233,4 +1233,5 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         assert "fn" in kwargs
         fn = kwargs["fn"]
+        # just inline into the function, Dynamo doesn't do anything special with the higher order operator
         return fn.call_function(tx, args, {})

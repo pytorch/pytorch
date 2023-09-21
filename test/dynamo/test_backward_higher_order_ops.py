@@ -20,11 +20,6 @@ def _multiply(x):
     return x * x
 
 
-def _graph_breaking_fn(x):
-    print("Boo!")
-    return _multiply(x)
-
-
 def _side_effect_stateful_fn2(x, obj):
     obj.counter = obj.counter + 1
     return _multiply(x)
@@ -32,14 +27,6 @@ def _side_effect_stateful_fn2(x, obj):
 
 def _multiply_invoke(grad):
     return _trace_wrapped(grad, fn=_multiply)
-
-
-def _graph_break_invoke(grad):
-    return _trace_wrapped(grad, fn=_graph_breaking_fn)
-
-
-def _side_effectful_invoke2(grad, fn):
-    return _trace_wrapped(grad, fn=fn)
 
 
 class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
@@ -67,8 +54,9 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
             fn = torch._dynamo.optimize(backend)(fn)
             out = fn(x, y)
-            out.backward(torch.tensor([2.0, 2.0]))
-            self.assertEqual(x.grad, 2 * x)
+            grad_out = torch.tensor([2.0, 2.0])
+            out.backward(grad_out)
+            self.assertEqual(x.grad, grad_out * y)
 
     def test_invoke_make_fx_forward_contrived(self):
         x = torch.tensor([0.5, 0.5], requires_grad=True)
@@ -79,8 +67,8 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         expected = """\
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: f32[2]):
-        invocation: f32[2] = functools_self_invoke(grad_1);  grad_1 = None
-        assert_1: f32[2] = torch._functional_assert_tensor_metadata(invocation, (2,), (1,), torch.float32);  invocation = None
+        invocation: f32[2] = functools__self_invoke(grad_1);  grad_1 = None
+        assert_1: f32[2] = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(invocation, (2,), (1,), torch.float32);  invocation = None
         detach: f32[2] = torch.ops.aten.detach.default(assert_1);  assert_1 = None
         detach_1: f32[2] = torch.ops.aten.detach.default(detach);  detach = None
         detach_2: f32[2] = torch.ops.aten.detach.default(detach_1);  detach_1 = None
@@ -105,8 +93,8 @@ class _multiply_invoke(torch.nn.Module):
         expected = """\
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: f32[2]):
-        invocation: f32[2] = functools_self_invoke(grad_1);  grad_1 = None
-        assert_1: f32[2] = torch._functional_assert_tensor_metadata(invocation, (2,), (1,), torch.float32);  invocation = None
+        invocation: f32[2] = functools__self_invoke(grad_1);  grad_1 = None
+        assert_1: f32[2] = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(invocation, (2,), (1,), torch.float32);  invocation = None
         return assert_1
 """
         self.assertExpectedInline(actual, expected)
@@ -161,6 +149,9 @@ class GraphModule(torch.nn.Module):
             graph = None
 
     def test_invoke_in_pt2_compiled_autograd_side_effect(self):
+        def _side_effectful_invoke2(grad, fn):
+            return _trace_wrapped(grad, fn=fn)
+
         graph = None
 
         def compiler_fn(gm):
@@ -226,6 +217,13 @@ class GraphModule(torch.nn.Module):
             graph = None
 
     def test_invoke_in_pt2_compiled_autograd_graph_breaks(self):
+        def _graph_breaking_fn(x):
+            print("Boo!")
+            return _multiply(x)
+
+        def _graph_break_invoke(grad):
+            return _trace_wrapped(grad, fn=_graph_breaking_fn)
+
         def compiler_fn(gm):
             return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=True)
 
