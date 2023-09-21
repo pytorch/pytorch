@@ -280,17 +280,14 @@ class AOTInductorTestsTemplate:
             torch.randn(10285, 96, device="cuda"),
             torch.randn(96, 1, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(
+        self.check_model(
             model,
             example_inputs,
-            expected,
             options={
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
-        self.assertTrue(same(actual, expected))
 
     def test_addmm(self):
         class Model(torch.nn.Module):
@@ -309,9 +306,7 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device="cuda")
         example_inputs = (a,)
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(model, example_inputs)
 
     def test_aliased_buffer_reuse(self):
         class Repro(torch.nn.Module):
