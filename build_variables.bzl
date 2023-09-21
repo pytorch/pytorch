@@ -71,6 +71,7 @@ def libtorch_generated_sources(gencode_pattern):
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
+    "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
@@ -500,6 +501,7 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aoti_torch/shim_common.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 
@@ -683,6 +685,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -1138,6 +1141,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/NativeMultiheadAttnKernel.cpp",
     "aten/src/ATen/native/cpu/PaddingKernel.cpp",
     "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
