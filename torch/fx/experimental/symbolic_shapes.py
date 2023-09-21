@@ -319,6 +319,7 @@ def guard_scalar(a):
 
 @record_shapeenv_event()
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
+    log.debug("_constrain_symbol_range %s [%s, %s] [%s, %s]", s, compiler_min, compiler_max, runtime_min, runtime_max)
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
             builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
@@ -1019,9 +1020,34 @@ class SymNode:
         # deferred so you can't backtrace easily
         return self.shape_env.defer_runtime_assert(self.expr, f"{file}:{line}", fx_node=self.fx_node)
 
+    def expect_size(self, file, line):
+        b = self.ge(self.wrap_int(0))
+        # Generate a deferred runtime assert
+        r = b.expect_true(file, line)
+        # Refine compile time range, but only if it's unbacked.
+        # If you refine range for hinted variables, you can end up making
+        # improper deductions since compile time reasoning may be
+        # incompatible with runtime reasoning.
+        if r and not self.has_hint():
+            _advise_is_size(SymInt(self))
+        return r
+
     def bool_(self):
         return self.guard_bool("", 0)
 
+    def is_symbolic(self):
+        return True
+
+    def singleton_int(self):
+        return None
+
+    def is_constant(self):
+        return False
+
+def is_symbolic(val: Union[int, SymInt, float, SymFloat, bool, SymBool]) -> bool:
+    if isinstance(val, (int, float, bool)):
+        return False
+    return val.node.is_symbolic()
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -1271,7 +1297,12 @@ unary_magic_methods = {
     'sym_not',
 }
 
-bool_magic_methods = {"and", "or", "sym_not"}
+# Most methods are only registered on SymInt and SymFloat
+# Some methods are only be registered on SymBool
+only_bool_magic_methods = {"and", "or", "sym_not"}
+# Methods that are also on SymBool, in addition to on SymInt and SymFloat
+also_bool_magic_methods = {"eq"}
+bool_magic_methods = only_bool_magic_methods | also_bool_magic_methods
 
 magic_methods_on_math = {"ceil", "floor"}
 magic_methods_on_submodule = {"sym_float", "sym_sqrt", "sym_min", "sym_max", "sym_not"}
@@ -1501,20 +1532,53 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
+    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+        if isinstance(x, (int, float, bool)):
+            return x
+        if isinstance(x, SymBool):
+            return x.node.guard_bool("", 0)
+        raise AssertionError("expect to be called with constant SymBools")
+
+    def is_constant(x):
+        if isinstance(x, (int, float, bool)):
+            return True
+        if isinstance(x, (SymInt, SymFloat, SymBool)):
+            return x.node.is_constant()
+        return False
+
+    # Before and after performing the operation, check if any operands are constant.
+    # If so, extract out the constant values first. If `self` itself is a
+    # constant, then "redispatch" by calling back into the operator. Sometimes
+    # this means that operations involving SymBool return plain bools.
+    # Alternatively, we could also rewrap into constant Symbool (i.e. by
+    # implementing wrap_bool in ConstantSymNodeImpl), but we're not doing that
+    # today for no particular reason.
     def unary_magic_impl(self):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        return wrap_node(getattr(self.node, method_attr)(other_node))
+        ret = wrap_node(getattr(self.node, method_attr)(other_node))
+        return get_constant(ret) if is_constant(ret) else ret
 
     def rbinary_magic_impl(self, other):
+        if is_constant(self):
+            return (method_to_operator(method))(get_constant(self), other)
+        if is_constant(other):
+            other = get_constant(other)
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
-        return wrap_node(getattr(other_node, method_attr)(self.node))
+        ret = wrap_node(getattr(other_node, method_attr)(self.node))
+        return get_constant(ret) if is_constant(ret) else ret
 
     if method in unary_magic_methods:
         setattr(user_type, f"__{method}__", unary_magic_impl)
@@ -1524,11 +1588,13 @@ def _make_user_magic(method, user_type):
             setattr(user_type, f"__r{method}__", rbinary_magic_impl)
 
 for method, func in magic_methods.items():
-    if method in bool_magic_methods:
+    if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
-    else:
-        _make_user_magic(method, SymInt)
-        _make_user_magic(method, SymFloat)
+        continue
+    if method in also_bool_magic_methods:
+        _make_user_magic(method, SymBool)
+    _make_user_magic(method, SymInt)
+    _make_user_magic(method, SymFloat)
 
 del method
 del func
@@ -2715,6 +2781,9 @@ class ShapeEnv:
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
+    def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
+        return str(symbol).startswith("i")
+
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
@@ -2783,8 +2852,6 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
-            self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
-            self.counter["create_symbol"] += 1
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -2815,7 +2882,14 @@ class ShapeEnv:
             if val not in vr:
                 raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
+            # Initialize default runtime range to match compile time range,
+            # for backed SymInts (this is allowed to diverge for unbacked)
+            self.runtime_var_to_range[sympy_expr] = vr
+
             r = sympy_expr
+
+            self.log.info("create_symbol %s = %s for %s [%s, %s]", sympy_expr, val, source.name(), vr.lower, vr.upper)
+            self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
