@@ -1,4 +1,5 @@
 import functools
+import numbers
 import operator
 import sys
 from enum import Enum
@@ -1179,7 +1180,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition([aten.split_with_sizes, aten.unsafe_split_with_sizes])
+@register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1205,7 +1206,19 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition([aten.split.Tensor, aten.unsafe_split.Tensor])
+@register_decomposition(aten.unsafe_split.Tensor)
+def unsafe_split(input: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
+    return aten.split.Tensor(input, split_size, dim)
+
+
+@register_decomposition(aten.unsafe_split_with_sizes.default)
+def unsafe_split_with_sizes(
+    input: Tensor, split_sizes: List[int], dim: int = 0
+) -> Tuple[Tensor, ...]:
+    return aten.split_with_sizes.default(input, split_sizes, dim)
+
+
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -4020,6 +4033,11 @@ def scaled_dot_product_flash_attention(
     )
 
 
+@register_decomposition([aten.trunc])
+def trunc(self: Tensor, **kwargs) -> Tensor:
+    return torch.where(self > 0, torch.floor(self), torch.ceil(self))
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -4027,6 +4045,23 @@ def register_inplace(aten_op, outplace_op):
         return args[0].copy_(out)
 
     return inplace_op
+
+
+@register_decomposition([aten.baddbmm])
+@out_wrapper()
+@pw_cast_for_opmath
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    result = torch.bmm(batch1, batch2)
+    if not isinstance(alpha, numbers.Number) or alpha != 1:
+        result = result * alpha
+    if beta == 0:
+        return result
+    if not isinstance(beta, numbers.Number) or beta != 1:
+        self = self * beta
+    return self + result
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

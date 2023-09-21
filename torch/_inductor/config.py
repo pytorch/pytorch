@@ -64,6 +64,9 @@ post_grad_custom_post_pass = None
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
+efficient_conv_bn_eval_fx_passes = False
+
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
@@ -517,6 +520,9 @@ class trace:
 
     # SVG figure showing post-fusion graph
     graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+
+    # SVG figure showing fx with fusion
+    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

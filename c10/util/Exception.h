@@ -101,7 +101,7 @@ class C10_API Error : public std::exception {
   /// Returns only the error message string, without source location.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
-  const char* what_without_backtrace() const noexcept {
+  virtual const char* what_without_backtrace() const noexcept {
     return what_without_backtrace_.c_str();
   }
 
@@ -224,6 +224,15 @@ struct C10_API WarnAlways {
 };
 
 } // namespace WarningUtils
+
+// Like Error, but we always report the C++ backtrace, instead of only
+// reporting when TORCH_SHOW_CPP_STACKTRACES
+class C10_API ErrorAlwaysShowCppStacktrace : public Error {
+  using Error::Error;
+  const char* what_without_backtrace() const noexcept override {
+    return what();
+  }
+};
 
 // Used in ATen for out-of-bound indices that can reasonably only be detected
 // lazily inside a kernel (See: advanced indexing).  These turn into
@@ -572,6 +581,9 @@ namespace detail {
 // Like TORCH_CHECK, but raises NotImplementedErrors instead of Errors.
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
+
+#define TORCH_CHECK_ALWAYS_SHOW_CPP_STACKTRACE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(ErrorAlwaysShowCppStacktrace, cond, "TYPE", __VA_ARGS__)
 
 #ifdef STRIP_ERROR_MESSAGES
 #define WARNING_MESSAGE_STRING(...) \

@@ -235,7 +235,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.eig": {f32, f64},
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
     "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
@@ -252,7 +251,6 @@ inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
     "atanh": {f32},
-    "nanquantile": {f32, f64},
     "nn.functional.normalize": {f16},
 }
 
