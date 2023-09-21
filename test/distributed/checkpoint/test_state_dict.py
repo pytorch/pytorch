@@ -333,6 +333,7 @@ class TestStateDict(FSDPTest):
     def test_use_dtensor(self) -> None:
         self._test_fsdp_ddp(use_composable=False, use_dtensor=True)
     """
+    # TODO: test _test_fsdp_tp case.
 
     @skip_if_lt_x_gpu(2)
     def test_apply_optimizer_in_backward(self) -> None:

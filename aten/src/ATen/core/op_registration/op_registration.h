@@ -52,13 +52,13 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  */
 class TORCH_API RegisterOperators final {
 public:
-  RegisterOperators();
-  ~RegisterOperators();
+  RegisterOperators() = default;
+  ~RegisterOperators() = default;
 
   RegisterOperators(const RegisterOperators&) = delete;
   RegisterOperators& operator=(const RegisterOperators&) = delete;
-  RegisterOperators(RegisterOperators&&) noexcept;
-  RegisterOperators& operator=(RegisterOperators&&) noexcept;
+  RegisterOperators(RegisterOperators&&) noexcept = default;
+  RegisterOperators& operator=(RegisterOperators&&) noexcept = default;
 
   class TORCH_API Options final {
   public:

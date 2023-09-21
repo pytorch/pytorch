@@ -3,7 +3,18 @@ import functools
 import gc
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch.nn as nn
@@ -15,6 +26,7 @@ from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     ShardedOptimStateDictConfig,
     ShardedStateDictConfig,
+    StatedictConfig,
     StateDictType,
 )
 from torch.distributed.fsdp._common_utils import (
@@ -454,10 +466,12 @@ def state_dict(
     optim_only: bool = False,
     options: Optional[DistributedStateDictOptions] = None,
 ) -> Tuple[Dict[str, ValueType], Dict[str, ValueType]]:
-    """Return the model state_dict and optimizers state_dict.
+    """
+        Return the model state_dict and optimizers state_dict.
 
         ``state_dict`` is a function that can process any module
-        that is parallelized by FSDP/fully_shard, DDP/replicate, tensor_parallel,
+        that is parallelized by FSDP/fully_shard, DDP/replicate,
+        tensor_parallel/parallelize_module,
         and any combination of these parallelisms. The main functions of
         ``state_dict`` are:
                 1. Creating a model and optimizer state_dict that can be resharded with
@@ -613,9 +627,10 @@ def patch_model_state_dict(
         model_only=True,
         options=options,
     )
-    load_state_dict_call = lambda state_dict: _load_state_dict_call(
-        state_dict=state_dict
-    )[1]
+
+    def load_state_dict_call():
+        _load_state_dict_call(state_dict=state_dict)[1]
+
     model.load_state_dict = load_state_dict_call
 
     _patched_state_dict.add(state_dict_call)

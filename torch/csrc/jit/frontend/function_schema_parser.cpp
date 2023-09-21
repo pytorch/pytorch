@@ -18,7 +18,6 @@ using c10::FunctionSchema;
 using c10::IValue;
 using c10::ListType;
 using c10::OperatorName;
-using c10::OptionalType;
 
 namespace torch::jit {
 

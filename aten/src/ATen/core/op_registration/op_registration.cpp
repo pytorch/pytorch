@@ -114,7 +114,7 @@ void RegisterOperators::checkNoDuplicateKernels_(const Options& options) {
 
 void RegisterOperators::registerOp_(Options&& options) {
   FunctionSchema schema =
-      std::get<FunctionSchema>(std::move(*options.schemaOrName_));
+      std::get<FunctionSchema>(std::move(options.schemaOrName_.value()));
 
   // HACK: bong in the alias analysis kind from the legacy API directly
   // into schema
@@ -137,12 +137,5 @@ void RegisterOperators::registerOp_(Options&& options) {
         "registered by RegisterOperators"));
   }
 }
-
-RegisterOperators::RegisterOperators() = default;
-RegisterOperators::~RegisterOperators() = default;
-RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
-// NOLINTNEXTLINE(bugprone-exception-escape)
-RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept =
-    default;
 
 } // namespace c10

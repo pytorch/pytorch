@@ -8,6 +8,7 @@ import pytorch_test_common
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, utils
+from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
@@ -41,6 +42,7 @@ def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
 class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
     def setUp(self):
         self.opset_version = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
+        GLOBALS.export_onnx_opset_version = self.opset_version
 
     def run_test(self, g, n, type_assertion_funcs):
         if not isinstance(type_assertion_funcs, list):
