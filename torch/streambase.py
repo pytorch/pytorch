@@ -23,3 +23,23 @@ class StreamBase(ABC):
     @abstractmethod
     def synchronize(self):
         raise NotImplementedError()
+
+    @abstractmethod
+    def __eq__(self, stream):
+        raise NotImplementedError()
+
+
+class EventBase(ABC):
+    r"""Base Event class abstraction for multi backends Event to herit from"""
+
+    @abstractmethod
+    def wait(self, stream=None):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def query(self):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def synchronize(self):
+        raise NotImplementedError()

@@ -1,7 +1,7 @@
 import ctypes
 
 import torch
-from torch.streambase import StreamBase
+from torch.streambase import EventBase, StreamBase
 from ._utils import _dummy_type
 
 
@@ -136,7 +136,7 @@ class ExternalStream(Stream):
             return super().__new__(cls, stream_ptr=stream_ptr, **kwargs)
 
 
-class Event(torch._C._CudaEventBase):
+class Event(torch._C._CudaEventBase, EventBase):
     r"""Wrapper around a CUDA event.
 
     CUDA events are synchronization markers that can be used to monitor the

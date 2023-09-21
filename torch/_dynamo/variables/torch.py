@@ -24,7 +24,7 @@ from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
 from ..source import GeneratorStateSource
-from ..stream import StreamRuntimeInterfaceObject
+from ..stream import RuntimeInterfaceObject
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -350,13 +350,13 @@ class TorchVariable(VariableTracker):
             return TorchFunctionDisableVariable.create(tx, **options)
         elif any(
             self.value is method
-            for method in StreamRuntimeInterfaceObject.get_all_methods(
+            for method in RuntimeInterfaceObject.get_all_methods(
                 "create_stream_context"
             )
         ):
             log.warning(
                 str(
-                    StreamRuntimeInterfaceObject.get_method_by_device(
+                    RuntimeInterfaceObject.get_method_by_device(
                         "create_stream_context", args[0].device
                     )
                 ),

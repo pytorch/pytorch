@@ -9,7 +9,7 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..source import AttrSource, DummyGlobalSource
-from ..stream import StreamRuntimeInterfaceObject
+from ..stream import RuntimeInterfaceObject
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -373,7 +373,7 @@ class StreamContextVariable(ContextWrappingVariable):
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
-        current_stream_method = StreamRuntimeInterfaceObject.get_method_by_device(
+        current_stream_method = RuntimeInterfaceObject.get_method_by_device(
             "current_stream", target_value.device
         )
         current_stream = wrap_fx_proxy_cls(
@@ -398,7 +398,7 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_func = StreamRuntimeInterfaceObject.get_method_by_device(
+        self.set_stream_func = RuntimeInterfaceObject.get_method_by_device(
             "set_stream", self.device
         )
 
@@ -416,13 +416,13 @@ class StreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                StreamRuntimeInterfaceObject.get_method_by_device(
+                RuntimeInterfaceObject.get_method_by_device(
                     "set_stream_by_id", self.device
                 ),
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        StreamRuntimeInterfaceObject.get_method_by_device("set_stream", self.device)(
+        RuntimeInterfaceObject.get_method_by_device("set_stream", self.device)(
             self.target_values[0].value
         )
 
@@ -461,7 +461,85 @@ class StreamVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(self.device + " stream")
+        assert hasattr(self.value, name), f"no stream method found named {name}"
+        assert name in [
+            "wait_stream",
+            "synchronize",
+            "query",
+            "record_event",
+            "wait_event",
+        ], f" unsupported stream method {name}"
+
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        if name in ("wait_stream", "synchronize", "wait_event"):
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        elif name == "query":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=variables.ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
+        elif name == "record_event":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=EventVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
+        else:
+            unimplemented(self.device + " stream method " + name + " unsupported")
+
+    def as_proxy(self):
+        return self.proxy
+
+
+class EventVariable(VariableTracker):
+    def __init__(self, proxy, value, **kwargs):
+        if proxy is not None and "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from ..utils import proxy_args_kwargs
+        from .builder import wrap_fx_proxy_cls
+
+        if name in ("wait", "record", "synchronize"):
+            tx.output.create_proxy(
+                "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+            )
+            return variables.ConstantVariable(None)
+        elif name == "query":
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=variables.ConstantVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method", name, *proxy_args_kwargs([self] + args, kwargs)
+                ),
+                **options,
+            )
+        else:
+            unimplemented(f"event method {name} unsupported")
 
     def as_proxy(self):
         return self.proxy

@@ -28,7 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
     RelaxedUnspecConstraint,
 )
 from torch.fx.immutable_collections import immutable_list
-from torch.streambase import StreamBase
+from torch.streambase import EventBase, StreamBase
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -55,7 +55,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 
-from ..stream import StreamRuntimeInterfaceObject
+from ..stream import RuntimeInterfaceObject
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -79,7 +79,7 @@ from ..utils import (
 from .base import MutableLocal, typestr, VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
-from .ctx_manager import NullContextVariable, StreamVariable
+from .ctx_manager import EventVariable, NullContextVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DataClassVariable,
@@ -621,7 +621,14 @@ class VariableBuilder:
                 value,
                 value.device.type,
                 source=self.source,
-                guards=self.make_guards(GuardBuilder.ID_MATCH),
+                guards=make_guards(GuardBuilder.ID_MATCH),
+            )
+        elif isinstance(value, EventBase):
+            return EventVariable(
+                None,
+                value,
+                source=self.source,
+                guards=make_guards(GuardBuilder.ID_MATCH),
             )
         elif (
             isinstance(value, torch._C._TensorMeta)
@@ -1477,13 +1484,27 @@ def wrap_fx_proxy_cls(
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, StreamBase)
-    ) or proxy.node.target in StreamRuntimeInterfaceObject.get_all_methods(
-        "current_stream"
-    ):
+    ) or proxy.node.target in RuntimeInterfaceObject.get_all_methods("current_stream"):
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
             proxy, example_value, example_value.device.type, **options
         )
+    elif (
+        inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, EventBase)
+    ) or proxy.node.target in RuntimeInterfaceObject.get_all_methods("create_event"):
+        proxy.node.meta["example_value"] = example_value
+        return EventVariable(proxy, example_value, **options)
+    elif proxy.node.target == "query" and proxy.node.op == "call_method":
+        proxy.node.meta["example_value"] = example_value
+        return ConstantVariable(example_value, **options)
+    elif (
+        example_value is not None
+        and isinstance(example_value, EventBase)
+        and proxy.node.target == "record_event"
+        and proxy.node.op == "call_method"
+    ):
+        proxy.node.meta["example_value"] = example_value
+        return EventVariable(proxy, example_value, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
         torch.sym_int,
         getattr,
