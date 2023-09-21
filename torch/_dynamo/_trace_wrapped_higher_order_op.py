@@ -34,7 +34,7 @@ def self_invoke(*args, fn):
 def inner_trace(mode, *args, fn):
     import torch._functorch.aot_autograd
 
-    assert len(args) == 1, breakpoint()
+    assert len(args) == 1
     grad = args[0]
     assert isinstance(grad, torch.Tensor)
 
