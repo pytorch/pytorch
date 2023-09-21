@@ -1213,8 +1213,6 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
-            "float8_e5m2",
-            "float8_e4m3fn",
         ]
     ]
 
