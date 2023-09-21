@@ -1,3 +1,4 @@
+import builtins
 import copy
 import dataclasses
 import io
@@ -7,6 +8,7 @@ from enum import auto, Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
+import sys
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -435,6 +437,47 @@ def dynamic_dim(t: torch.Tensor, index: int):
     return dynamic_dim(t, index)
 
 
+class _Dim(type):
+    """
+    Metaclass for :func:`Dim` types.
+    """
+    pass
+
+
+def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    .. warning::
+        (Experimental new feature.)
+
+    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
+    It can be used to describe multiple possible values of a dynamic tensor dimension.
+    Note that different dynamic dimensions of the same tensor, or of different tensors,
+    can be described by the same type.
+
+    Args:
+        name (str): Human-readable name for debugging.
+        min (Optional[int]): Minimum possible value of given symbol (inclusive)
+        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+
+    Returns:
+        A type that can be used in dynamic shape specifications for tensors.
+    """
+    _min = 2 if min is None else builtins.max(min, 2)
+    _max = sys.maxsize if max is None else builtins.min(max, sys.maxsize)
+    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
+    return _Dim(name, (int,), {"min": _min, "max": _max})
+
+
+def dims(*names: str, min: Optional[int] = None, max: Optional[int] = None):
+    """
+    .. warning::
+        (Experimental new feature.)
+
+    Util to create multiple :func:`Dim` types.
+    """
+    return tuple(Dim(name, min=min, max=max) for name in names)
+
+
 def export(
     f: Callable,
     args: Tuple[Any, ...],
@@ -510,7 +553,17 @@ def export(
          how to use it.
 
          dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
-          (Documentation TODO.)
+          It is expected to be a dict from argument names of ``f`` to their dynamic shape
+          specifications, as follows:
+          - The dynamic shape of a tensor argument can be specified as:
+            - Either a dict from dynamic dimension indices to :func:`Dim` types. It is
+              not required to include static dimension indices in this dict, but when
+              they are, they should be mapped to None.
+            - Or a tuple / list of :func:`Dim` types or None. The :func:`Dim` types
+              correspond to dynamic dimensions, whereas static dimensions are denoted
+              by None.
+          - Arguments that are dicts or tuples / lists of tensors are recursively
+            specified by using mappings or sequences of contained specifications.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.

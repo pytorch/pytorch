@@ -1,11 +1,9 @@
-import builtins
 import copy
 import dataclasses
 import io
 import pathlib
 import re
 
-import sys
 import types
 import weakref
 import zipfile
@@ -34,7 +32,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.export import _create_constraint, Constraint
+from torch.export import _create_constraint, _Dim, Constraint
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -66,40 +64,6 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 from .wrappers import _wrap_submodules
 
 
-class _Dim(type):
-    """
-    Metaclass for Dim types.
-    """
-    pass
-
-
-def Dim(name, *, min=None, max=None):
-    """
-    Constructs a type analogous to a named symbolic integer with a range.
-    It can be used to describe multiple possible values of a tensor dimension.
-    Note that different dimensions of the same tensor, or of different tensors,
-    can be described by the same type.
-    """
-    _min = 2 if min is None else builtins.max(min, 2)
-    _max = sys.maxsize if max is None else builtins.min(max, sys.maxsize)
-    assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
-    return _Dim(name, (int,), {"min": _min, "max": _max})
-
-
-def dims(*names: str, min=None, max=None):
-    """
-    Util to create multiple Dim types.
-    """
-    return tuple(Dim(name, min=min, max=max) for name in names)
-
-
-class _(int):
-    """
-    A special type representing any fixed value of a tensor dimension.
-    """
-    pass
-
-
 def export__RC__(
     f: Callable,
     args: Tuple[Any, ...],
@@ -113,10 +77,12 @@ def export__RC__(
 
     Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
     argument names of `f` to dynamic shape specifications, as follows:
-    - The dynamic shape of a tensor argument can be specified as a dict from
-      dynamic dimension indices to Dim types. It is not required to include
-      static dimension indices in this dict, but when they are, they should
-      be mapped to _.
+    - The dynamic shape of a tensor argument can be specified as:
+      - Either a dict from dynamic dimension indices to Dim types. It is not
+        required to include static dimension indices in this dict, but when
+        they are, they should be mapped to None.
+      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
+        dimensions, whereas static dimensions are denoted by None.
     - Arguments that are dicts or tuples of tensors are recursively specified
       by using mappings or sequences of contained specifications.
 
@@ -133,12 +99,14 @@ def export__RC__(
     def assoc_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, (tuple, list)):
             assert isinstance(dynamic_shapes, Sequence)
-            for arg, shape in zip(combined_args, dynamic_shapes):
-                yield from assoc_zip(arg, shape)
+            assert len(combined_args) == len(dynamic_shapes)
+            for i, shape in enumerate(dynamic_shapes):
+                yield from assoc_zip(combined_args[i], shape)
         elif isinstance(combined_args, dict):
             assert isinstance(dynamic_shapes, Mapping)
-            for arg, shape in zip(combined_args.values(), dynamic_shapes.values()):
-                yield from assoc_zip(arg, shape)
+            assert len(combined_args) == len(dynamic_shapes)
+            for k, shape in dynamic_shapes.items():
+                yield from assoc_zip(combined_args[k], shape)
         elif dataclasses.is_dataclass(combined_args):
             assert type(dynamic_shapes) == type(combined_args)
             for f in dataclasses.fields(combined_args):
@@ -154,10 +122,16 @@ def export__RC__(
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+                else:
+                    assert dim is None
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
                     symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+                else:
+                    assert dim is None
+        else:
+            assert shape is None
 
     import inspect
     signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)

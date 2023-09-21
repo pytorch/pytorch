@@ -2054,7 +2054,7 @@ class DimConstraints:
                 if "eq" in c:
                     other = c["eq"]
                     if isinstance(other, int):
-                        others.append(f"{k} = _  # {other}")
+                        others.append(f"{k} = None  # {other}")
                     else:
                         others.append(f"{k} = {other}")
                 else:

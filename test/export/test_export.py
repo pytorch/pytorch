@@ -349,8 +349,8 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
-    def test_export_experimental_apis(self):
-        from torch._export import _, Dim, dims, export__RC__ as export
+    def test_export_api_with_dynamic_shapes(self):
+        from torch.export import Dim, dims, export
 
         # pass dynamic shapes of inputs [args]
         def foo(x, y):
@@ -386,10 +386,10 @@ class TestExport(TestCase):
                 "Constraints violated \\(batch\\)!(.*\n)*.*"
                 "batch was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "batch = _  # 10"
+                "batch = None  # 10"
             ),
         ):
-            export(foo, inputs, kwinputs, dynamic_shapes={"x": {0: batch}})
+            export(foo, inputs, kwinputs, dynamic_shapes={"x": {0: batch}, "y": None})
 
         # pass dynamic shapes of inputs [module]
         class Foo(torch.nn.Module):
@@ -550,13 +550,13 @@ class TestExport(TestCase):
                 "Constraints violated \\(K1\\)!(.*\n)*.*"
                 "K1 was inferred to be a constant(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
-                "K1 = _  # 3"
+                "K1 = None  # 3"
             ),
         ):
             export(
                 foo,
                 inputs,
-                dynamic_shapes={"x": (batch, M, K1), "y": (batch, _, N)},
+                dynamic_shapes={"x": (batch, M, K1), "y": (batch, None, N)},
             )
 
         # pass dynamic shapes of inputs [guards, error]
@@ -577,7 +577,7 @@ class TestExport(TestCase):
                 "K.*specialized.*because the guards generated for it are too complex(.*\n)*.*"
                 "Suggested fixes:(.*\n)*.*"
                 "batch = Dim\\('batch', max=15\\)(.*\n)*.*"
-                "K = _  # 3"
+                "K = None  # 3"
             ),
         ):
             export(
@@ -586,8 +586,8 @@ class TestExport(TestCase):
                 dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
             )
 
-    def test_dynamic_shapes_type(self):
-        from torch._export import Dim, export__RC__ as export
+    def test_dynamic_shapes_spec_with_pytree(self):
+        from torch.export import Dim, export
         from torch.utils._pytree import tree_map
 
         inputs = {
