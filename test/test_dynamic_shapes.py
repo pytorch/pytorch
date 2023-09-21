@@ -29,6 +29,7 @@ from torch.fx.experimental.symbolic_shapes import (
     sym_sqrt,
     SymNode,
     to_node,
+    is_symbolic,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -143,17 +144,29 @@ def create_symbolic_tensor(name, arg, shape_env):
         )
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, sym_storage_offset)
 
-def create_symint(shape_env, i: int):
+def create_symtype(cls, pytype, shape_env, val):
     from torch._dynamo.source import ConstantSource
-    return shape_env.create_symintnode(
-        shape_env.create_symbol(
-            i,
-            source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
-            dynamic_dim=DimDynamic.DUCK,
-            constraint_dim=None,
-        ),
-        hint=i
+    symbol = shape_env.create_symbol(
+        val,
+        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        dynamic_dim=DimDynamic.DUCK,
+        constraint_dim=None,
     )
+    return cls(SymNode(
+        symbol,
+        shape_env,
+        pytype,
+        hint=val,
+    ))
+
+def create_symint(shape_env, i: int):
+    return create_symtype(SymInt, int, shape_env, i)
+
+def create_symbool(shape_env, b: bool):
+    return create_symtype(SymBool, bool, shape_env, b)
+
+def create_symfloat(shape_env, f: float):
+    return create_symtype(SymFloat, float, shape_env, f)
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
@@ -643,6 +656,8 @@ class TestSymNumberMagicMethods(TestCase):
                 out = lambda_apply(sym_inp1)
             else:
                 out = lambda_apply(sym_inp1, inp2)
+            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -653,12 +668,16 @@ class TestSymNumberMagicMethods(TestCase):
         sym_inp2 = get_sym_inp(inp2)
         with maybe_xfail(inp1, sym_inp2):
             out = lambda_apply(inp1, sym_inp2)
+            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
         # Symified both args
         with maybe_xfail(sym_inp1, sym_inp2):
             out = lambda_apply(sym_inp1, sym_inp2)
+            if fn not in symbolic_shapes.alternate_impl_if_hinted_methods:
+                self.assertTrue(isinstance(out, (SymInt, SymFloat, SymBool)))
             out = guard_fn(out)
             self.assertEqual(out, ref_out)
 
@@ -713,6 +732,106 @@ class TestSymNumberMagicMethods(TestCase):
             shape_env = ShapeEnv()
 
             self._do_test(fn, inp1, inp2, shape_env, is_unary_fn)
+
+    def get_constant_bool(self, val):
+        return SymBool(torch._C._get_constant_bool_symnode(val))
+
+    def test_symnode_hashing(self):
+        shape_env = ShapeEnv()
+
+        # SymInt, SymBool, SymFloat are unhashable
+        unhashable = (
+            create_symint(shape_env, 3),
+            create_symbool(shape_env, True),
+            create_symfloat(shape_env, 4.2),
+        )
+
+        for x in unhashable:
+            with self.assertRaisesRegex(TypeError, "unhashable"):
+                hash(x)
+
+        # Singleton SymInt, constant SymBool, SymNode are hashable
+        j1 = torch._C._get_singleton_int(1)
+        j1_copy = torch._C._get_singleton_int(1)
+        j2 = torch._C._get_singleton_int(2)
+        t = self.get_constant_bool(True)
+        t_copy = self.get_constant_bool(True)
+        f = self.get_constant_bool(False)
+        n = create_symint(shape_env, 3).node
+        m = self.get_constant_bool(True).node
+
+        self.assertIs(j1 == j1_copy, True)
+        self.assertEqual(hash(j1), hash(j1_copy))
+        self.assertIs(j1 == j2, False)
+        self.assertNotEqual(hash(j1), hash(j2))
+        self.assertIs(t == t_copy, True)
+        self.assertEqual(hash(t), hash(t_copy))
+        self.assertIs(t == f, False)
+        self.assertNotEqual(hash(t), hash(f))
+
+        hash(n)
+        hash(m)
+
+    def test_non_symbolic_symnode(self):
+        j1 = torch._C._get_singleton_int(1)
+        j2 = torch._C._get_singleton_int(1)
+        j3 = torch._C._get_singleton_int(3)
+
+        self.assertIsInstance(j1, torch.SymInt)
+        self.assertNotIsInstance(j1, int)
+
+        with self.assertRaisesRegex(RuntimeError, "add not supported by SingletonSymNode"):
+            j1 + 3
+
+        self.assertFalse(j1 == 3)
+        self.assertFalse(3 >= j2)
+
+        self.assertIs(j1 == j1, True)
+        self.assertIs(j1 == j2, True)
+        self.assertIs(j1 == j3, False)
+        self.assertIs(j1 != j3, True)
+        self.assertIs(j1 != j2, False)
+
+        x = self.get_constant_bool(True)
+        #
+        # Unary
+        #
+        # op(constant SymBool)
+        self.assertIs(x.__sym_not__(), False)
+
+        #
+        # Binary
+        #
+        # op(constant SymBool, bool)
+        # op(constant SymBool, constant SymBool)
+        # op(bool, constant SymBool)
+        self.assertIs(operator.and_(x, True), True)
+        self.assertIs(operator.and_(x, x), True)
+        self.assertIs(operator.and_(True, x), True)
+
+        # op(symbolic SymBool, constant Symbool)
+        # op(constant SymBool, symbolic Symbool)
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 2)
+        b = create_symint(shape_env, 2)
+        c = a == b  # symbolic SymBool
+        d = self.get_constant_bool(True)
+        e = operator.and_(c, d)
+        f = operator.and_(d, c)
+        self.assertTrue(is_symbolic(e))
+        self.assertTrue(is_symbolic(f))
+        self.assertIs(e.node.guard_bool("", 0), True)
+        self.assertIs(f.node.guard_bool("", 0), True)
+
+        # Comparing sizes
+        sz1 = torch.Size([j1, j1, j1])
+        sz2 = torch.Size([j1, j1, j1])
+        self.assertIs(sz1 == sz2, True)
+
+        sz1 = torch.Size([3, j1, 4])
+        sz2 = torch.Size([3, j2, 4])
+        self.assertIs(sz1 == sz2, True)
+        self.assertIs(sz1 != sz2, False)
 
 instantiate_parametrized_tests(TestSymNumberMagicMethods)
 
