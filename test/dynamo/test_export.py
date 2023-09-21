@@ -19,11 +19,17 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
+from torch._dynamo.testing import normalize_gm
 from torch._export import dynamic_dim
 from torch._export.constraints import constrain_as_size, constrain_as_value
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._subclasses import fake_tensor
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ConstraintViolationError
+from torch.fx.experimental.symbolic_shapes import (
+    ConstraintViolationError,
+    DimDynamic,
+    ShapeEnv,
+)
 from torch.testing._internal import common_utils
 
 
@@ -2271,6 +2277,21 @@ def forward(self, x):
         ):
             torch._export.export(qux, (t,), constraints=constraints)
 
+    def test_untracked_inputs_in_constraints(self):
+        from copy import copy
+
+        def foo(x, y):
+            return y + 1
+
+        x = torch.randn(2)
+        y = torch.randn(5, 4)
+        constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
+
+        example_inputs = (copy(x), y)
+        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
+            ep(torch.randn(3), y)
+
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
 
@@ -3036,7 +3057,7 @@ def forward(self, x):
         example_inputs = (torch.randn(4), torch.randn(2))
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_branch_return_multiple_tensors,
@@ -3065,7 +3086,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected branch to return a single tensor",
+            "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3140,8 +3161,6 @@ def forward(self, x):
 
     def test_capture_symbolic_tracing_simple_within_fake_mode(self):
         from torch._dynamo.output_graph import config
-        from torch._subclasses import fake_tensor
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         def f(x):
             y = torch.randn(3)
@@ -3162,6 +3181,76 @@ def forward(self, x):
                     msg="test_capture_symbolic_tracing_simple_within_fake_mode_aten_graph_"
                     + str(aten_graph),
                 )
+
+    def test_export_with_symbool_inputs(self):
+        def f(pred: bool, x: torch.Tensor):
+            if pred:
+                return x.sin()
+            else:
+                return x.cos()
+
+        x = torch.randn([3, 4])
+
+        def test_symbool_guards(
+            f, size_tests, exp_graph, exp_guard_code, exp_shape_env_guards
+        ):
+            shape_env = ShapeEnv()
+            with fake_tensor.FakeTensorMode(
+                shape_env=shape_env,
+            ) as fake_mode:
+                fake_x = fake_mode.from_tensor(
+                    x, dynamic_dims=[DimDynamic.DYNAMIC for _ in range(x.dim())]
+                )
+                for i, size in enumerate(size_tests):
+                    pred = fake_x.size(0) == size
+                    gm, guards = torch._dynamo.export(f)(pred, x)
+                    actual = normalize_gm(gm.print_readable(print_output=False))
+                    self.assertExpectedInline(actual, exp_graph[i])
+                    dynamo_shape_env_guards = [
+                        guard
+                        for guard in guards
+                        if guard.guard_types is not None
+                        and "SHAPE_ENV" in guard.guard_types
+                    ]
+                    self.assertEqual(len(dynamo_shape_env_guards), 1)
+                    guard_code_on_predicate = [
+                        code
+                        for code in dynamo_shape_env_guards[0].code_list
+                        if "L['pred']" in code
+                    ]
+                    self.assertEqual(guard_code_on_predicate, exp_guard_code[i])
+                    outter_shape_env_guards = [
+                        str(guard.expr) for guard in shape_env.guards
+                    ]
+                    self.assertEqual(outter_shape_env_guards, exp_shape_env_guards[i])
+
+        true_graph = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, pred, x):
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        sin = arg1.sin();  arg1 = None
+        return pytree.tree_unflatten([sin], self._out_spec)
+"""
+        false_graph = """\
+class GraphModule(torch.nn.Module):
+    def forward(self, pred, x):
+        arg0, arg1: f32[s1, s2], = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
+        cos = arg1.cos();  arg1 = None
+        return pytree.tree_unflatten([cos], self._out_spec)
+"""
+        true_guard_code = ["cast_symbool_to_symint_guardless(L['pred']) == 1"]
+        false_guard_code = [
+            "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
+            "-9223372036854775808 <= cast_symbool_to_symint_guardless(L['pred'])",
+        ]
+        test_symbool_guards(
+            f,
+            [3, 3, 4, 5],
+            [true_graph, true_graph, false_graph, false_graph],
+            [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
+            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
+            [[], [], [], []],
+        )
 
     def test_invalid_input_global(self) -> None:
         global bulbous_bouffant
@@ -3507,13 +3596,13 @@ def forward(self, pred, x):
         self.assertExpectedInline(
             out_graph.cond_true_0.code.strip(),
             """\
-def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_branch, ones_false_branch):
+def forward(self, l_x_, a, b, d, c_false_branch, b_false_branch, a_false_branch):
     add = l_x_ + l_x_;  l_x_ = None
-    cos = ones.cos();  ones = None
+    cos = a.cos();  a = None
     add_1 = add + cos;  add = cos = None
-    cos_1 = ones_1.cos();  ones_1 = None
+    cos_1 = b.cos();  b = None
     add_2 = add_1 + cos_1;  add_1 = cos_1 = None
-    cos_2 = ones_3.cos();  ones_3 = None
+    cos_2 = d.cos();  d = None
     add_3 = add_2 + cos_2;  add_2 = cos_2 = None
     return add_3""",
         )
@@ -3521,13 +3610,13 @@ def forward(self, l_x_, ones, ones_1, ones_3, ones_2_false_branch, ones_1_false_
         self.assertExpectedInline(
             out_graph.cond_false_0.code.strip(),
             """\
-def forward(self, l_x_, ones_3_true_branch, ones_1_true_branch, ones_true_branch, ones, ones_1, ones_2):
+def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
     mul = l_x_ * l_x_;  l_x_ = None
-    sin = ones.sin();  ones = None
+    sin = a.sin();  a = None
     add = mul + sin;  mul = sin = None
-    sin_1 = ones_1.sin();  ones_1 = None
+    sin_1 = b.sin();  b = None
     add_1 = add + sin_1;  add = sin_1 = None
-    sin_2 = ones_2.sin();  ones_2 = None
+    sin_2 = c.sin();  c = None
     add_2 = add_1 + sin_2;  add_1 = sin_2 = None
     return add_2""",
         )

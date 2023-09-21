@@ -10,7 +10,6 @@ import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
 from torch._dynamo.testing import normalize_gm
-from torch._functorch.aot_autograd import to_fun
 from torch._higher_order_ops.wrap import wrap
 
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
@@ -232,6 +231,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
         self.assertTrue(torch._is_functional_tensor(backend.example_inputs[1][0]))
 
+        # Cannot re-use the version from AOTAutograd, since that uses python functional tensors.
+        def to_fun(x):
+            x_functional = torch._to_functional_tensor(x)
+            torch._mirror_autograd_meta_to(x, x_functional)
+            return x_functional
+
         def aot_f_wrapper(func):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
@@ -314,7 +319,8 @@ class GraphModule(torch.nn.Module):
         check_count_and_graph(2, 2, 2, expected_graph)
 
         try:
-            x = torch._to_functional_tensor(t_clone2, mirror_autograd_meta=True)
+            x = torch._to_functional_tensor(t_clone2)
+            torch._mirror_autograd_meta_to(t_clone2, x)
             torch._enable_functionalization(reapply_views=False)
             aot_f_out = f(x)
         finally:
@@ -435,6 +441,96 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
         self.assertEqual(lower_bound_str, expected_lower_bound)
         self.assertEqual(upper_bound_str, expected_upper_bound)
+
+    def test_recompile_with_symbool_inputs(self):
+        def f(pred: bool):
+            if pred:
+                return torch.ones([3, 4])
+            else:
+                return torch.ones([4, 3])
+
+        def test_recompilation(
+            f, x, sizes, exp_graphs, exp_frame_count, exp_shape_env_guards
+        ):
+            torch._dynamo.reset()
+            shape_env = ShapeEnv()
+            backend = torch._dynamo.testing.EagerAndRecordGraphs()
+            cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+            f_cond = torch.compile(f, backend=cnt, fullgraph=True)
+            with torch._subclasses.fake_tensor.FakeTensorMode(
+                shape_env=shape_env
+            ) as fake_mode:
+                fake_inp = fake_mode.from_tensor(
+                    x, dynamic_dims=[DimDynamic.DYNAMIC for i in range(x.dim())]
+                )
+                for i, size in enumerate(sizes):
+                    pred = fake_inp.size(0) == size
+                    f_cond(pred)
+                    actual = normalize_gm(
+                        backend.graphs[exp_frame_count[i] - 1].print_readable(
+                            print_output=False
+                        )
+                    )
+                    actual_guard_str = [str(guard.expr) for guard in shape_env.guards]
+                    self.assertExpectedInline(actual, exp_graphs[i])
+                    self.assertEqual(cnt.frame_count, exp_frame_count[i])
+                    self.assertEqual(actual_guard_str, exp_shape_env_guards[i])
+
+        true_graph = """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        ones = torch.ones([3, 4])
+        return (ones,)
+"""
+        false_graph = """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        ones = torch.ones([4, 3])
+        return (ones,)
+"""
+        test_recompilation(
+            f,
+            torch.randn([3, 4]),
+            [3, 3, 4, 5],
+            exp_graphs=[true_graph, true_graph, false_graph, false_graph],
+            exp_frame_count=[1, 1, 2, 2],
+            exp_shape_env_guards=[
+                [],
+                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
+                ["Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)"],
+                [
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                ],
+                [
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 4)), (0, True)), 1)",
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                ],
+            ],
+        )
+
+        test_recompilation(
+            f,
+            torch.randn([3, 4]),
+            [4, 5, 3, 3],
+            exp_graphs=[false_graph, false_graph, true_graph, true_graph],
+            exp_frame_count=[1, 1, 2, 2],
+            exp_shape_env_guards=[
+                [],
+                # s0 is specialized and guarded in outter shape_env when dynamo checks the guards
+                ["Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)"],
+                [
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                ],
+                [
+                    "Ne(Piecewise((1, Eq(s0, 5)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                    "Eq(Piecewise((1, Eq(s0, 3)), (0, True)), 1)",
+                ],
+            ],
+        )
 
 
 if __name__ == "__main__":

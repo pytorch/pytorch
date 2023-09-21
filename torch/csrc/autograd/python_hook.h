@@ -8,12 +8,12 @@ namespace torch {
 namespace autograd {
 
 struct PyFunctionTensorPreHook : public FunctionPreHook {
-  PyFunctionTensorPreHook(PyObject* dict, int value_idx);
+  PyFunctionTensorPreHook(PyObject* dict, size_t value_idx);
   ~PyFunctionTensorPreHook() override;
   variable_list operator()(const variable_list& values) override;
   void compiled_args(torch::dynamo::autograd::CompiledNodeArgs& args) override;
   PyObject* dict;
-  int value_idx;
+  size_t value_idx;
 };
 
 struct PyFunctionPreHook : public FunctionPreHook {

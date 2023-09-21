@@ -307,6 +307,12 @@ class IRNode:
     def get_read_names(self):
         return {dep.name for dep in self.get_reads()}
 
+    def get_layout(self):
+        raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
+
+    def get_size(self):
+        raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
     def get_numel(self):
         return sympy_product(self.get_size())
 
@@ -1449,6 +1455,9 @@ class BaseView(IRNode):
     def get_dtype(self):
         return self.data.get_dtype()
 
+    def get_layout(self):
+        return self.data.get_layout()
+
     def get_device(self):
         return self.data.get_device()
 
@@ -1710,9 +1719,7 @@ class View(GenericView):
 
             return cls(x, tuple(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
-        elif is_contiguous_storage_and_layout(x) and not isinstance(
-            x.data, ExternKernelAlloc
-        ):
+        elif is_contiguous_storage_and_layout(x):
             storage, old_layout = as_contiguous_storage_and_layout(x)
             new_layout = FixedLayout(
                 old_layout.device,
@@ -2428,6 +2435,13 @@ class Buffer(IRNode):
     def realize(self):
         pass
 
+    def get_workspace_size(self):
+        """
+        Gets extra global memory size needed by this buffer.
+        Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
+        """
+        return 0
+
 
 class InputBuffer(Buffer):
     pass
@@ -2760,6 +2774,26 @@ class TemplateBuffer(Buffer):
             ),
             None,
         )
+
+
+class TritonTemplateBuffer(TemplateBuffer):
+    pass
+
+
+class CUDATemplateBuffer(TemplateBuffer):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        workspace_size: int = 0,
+    ):
+        super().__init__(layout, inputs, make_kernel_render)
+        # Global memory (in bytes) needed for this template.
+        self.workspace_size = workspace_size
+
+    def get_workspace_size(self):
+        return self.workspace_size if self.workspace_size is not None else 0
 
 
 @dataclasses.dataclass
@@ -4430,16 +4464,15 @@ class LinearUnary(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, w, b, attr, scalars, algorithm):
-        x = cls.require_stride1(cls.realize_input(x))
-        w = cls.require_stride1(cls.realize_input(w))
+        x = cls.require_contiguous(cls.realize_input(x))
+        w = cls.require_contiguous(cls.realize_input(w))
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
-
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
         if b is not None:
-            b = cls.require_stride1(cls.realize_input(b))
+            b = cls.require_contiguous(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, None)
@@ -4498,9 +4531,9 @@ class LinearBinary(ExternKernelAlloc):
 
     @classmethod
     def create(cls, x, y, w, b, attr):
-        x = cls.require_stride1(cls.realize_input(x))
-        y = cls.require_stride1(cls.realize_input(y))
-        w = cls.require_stride1(cls.realize_input(w))
+        x = cls.require_contiguous(cls.realize_input(x))
+        y = cls.require_contiguous(cls.realize_input(y))
+        w = cls.require_contiguous(cls.realize_input(w))
 
         *m, ic = x.get_size()
         oc, ic = w.get_size()
@@ -4508,7 +4541,7 @@ class LinearBinary(ExternKernelAlloc):
         inputs = [x, y, w]
         constant_args = [attr]
         if b is not None:
-            b = cls.require_stride1(cls.realize_input(b))
+            b = cls.require_contiguous(cls.realize_input(b))
             inputs.append(b)
         else:
             constant_args.insert(0, b)
@@ -5153,6 +5186,12 @@ class MutableBox(IRNode):
     def layout(self):
         return self.data.layout
 
+    def get_layout(self):
+        return self.layout
+
+    def get_size(self):
+        return self.data.get_size()
+
     def __str__(self):
         if isinstance(self.data, MutableBox):
             line0 = f"{type(self).__name__}({type(self.data).__name__}("
@@ -5581,7 +5620,7 @@ class Wait(ExternKernelAlloc):
         # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
         collective_op.decide_layout()
         return Wait(
-            layout=collective_op.get_layout(),
+            layout=AliasedLayout(collective_op),
             inputs=[collective_op],
         )
 
@@ -5675,6 +5714,12 @@ class OutOfPlaceCollectiveKernel(CollectiveKernel):
         super().__init__(layout, inputs + outputs, constant_args)
         self.outputs = outputs
         self.original_inputs = inputs
+        # NOTE: As seen in issue #108780, output buffers of out-of-place collectives
+        # could be incorrectly reused. As a safety measure, here we just ban the reuse of them.
+        # TODO: A better fix is to figure out how to propagate the aliases properly,
+        # so that the buffer is only reused after all its users have consumed it.
+        for x in self.outputs:
+            V.graph.never_reuse_buffers.add(x.name)
 
     def should_allocate(self):
         return False
@@ -5785,6 +5830,9 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
     def should_allocate(self):
         return False
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
     @classmethod
     def create(
         cls,
@@ -5795,7 +5843,7 @@ class AllReduceCoalesced(InPlaceCollectiveKernel):
         group_size: int,
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace(inputs)
-        layout = MultiOutputLayout(inputs[0].get_device())
+        layout = MutationLayout(inplace_inputs[0])
 
         _ = AllReduceCoalesced(
             layout=layout,
@@ -5820,12 +5868,15 @@ class AllReduce(InPlaceCollectiveKernel):
         super().__init__(layout, inputs, constant_args)
         self.reduce_op = reduce_op
 
+    def get_mutation_names(self):
+        return [self.inputs[0].get_name()]
+
     @classmethod
     def create(
         cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
     ):
         inplace_inputs = cls.wrap_inputs_as_inplace([x])
-        layout = MultiOutputLayout(inplace_inputs[0].get_device())
+        layout = MutationLayout(inplace_inputs[0])
 
         _ = AllReduce(
             layout=layout,

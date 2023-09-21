@@ -86,7 +86,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
   // Massage a C++ variable_list into a Python arguments tuple
   auto num_inputs = inputs.size();
-  THPObjectPtr pyInputs(PyTuple_New(num_inputs));
+  THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
   if (!pyInputs)
     throw_python_error();
   auto& output_info = py_fn->output_info;
@@ -114,8 +114,8 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   ensure_tuple(r);
 
   auto& is_variable_input = py_fn->is_variable_input;
-  int num_outputs = PyTuple_GET_SIZE(r.get());
-  int num_forward_inputs = is_variable_input.size();
+  auto num_outputs = PyTuple_GET_SIZE(r.get());
+  auto num_forward_inputs = static_cast<Py_ssize_t>(is_variable_input.size());
   // Returning too many results is ok, but only as long as they're all None.
   // Truncate the result tuple in that case.
   if (num_outputs > num_forward_inputs) {
@@ -443,7 +443,7 @@ static void _wrap_outputs(
     // Massage a C++ variable_list into a Python arguments tuple
     // Making sure to introduce the proper None for non-Tensor inputs
     auto num_inputs = self->is_variable_input.size();
-    THPObjectPtr pyInputs(PyTuple_New(num_inputs));
+    THPObjectPtr pyInputs(PyTuple_New(static_cast<Py_ssize_t>(num_inputs)));
     if (!pyInputs)
       throw_python_error();
     int64_t variable_idx = 0;
@@ -508,7 +508,7 @@ static void _wrap_outputs(
       dirty_inputs,
       raw_output_vars,
       cdata_if_executable,
-      std::move(jvp_user_function),
+      jvp_user_function,
       to_save_if_setup_context);
 
   for (const auto i : c10::irange(num_outputs)) {
@@ -1021,7 +1021,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
   // save a local copy of seq_id before it gets incremented
-  int seq_id = at::sequence_number::peek();
+  auto seq_id = at::sequence_number::peek();
   auto info_pair = unpack_input<false>(inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
@@ -1241,8 +1241,8 @@ static PyObject* unpack_saved_variables(
   if (saved_variables.empty())
     return PyTuple_New(0);
 
-  int num_saved = saved_variables.size();
-  THPObjectPtr saved(PyTuple_New(num_saved));
+  auto num_saved = saved_variables.size();
+  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
   if (!saved)
     return nullptr;
   auto saved_for = self->cdata.lock();
@@ -1311,7 +1311,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
   HANDLE_TH_ERRORS
   auto self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
-  PyObject* result = PyTuple_New(size);
+  PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
   if (!result) {
     throw python_error();
   }
@@ -1333,7 +1333,7 @@ PyObject* THPFunction_raw_saved_tensors(THPFunction* self, void* _unused) {
   if (saved_variables.empty())
     return PyTuple_New(0);
   size_t num_saved = saved_variables.size();
-  THPObjectPtr saved(PyTuple_New(num_saved));
+  THPObjectPtr saved(PyTuple_New(static_cast<Py_ssize_t>(num_saved)));
   if (!saved) {
     return nullptr;
   }

@@ -86,7 +86,13 @@ constant_fold_functions = [
 
 
 if torch.distributed.is_available():
-    constant_fold_functions.append(torch.distributed.is_initialized)
+    constant_fold_functions.extend(
+        [
+            torch.distributed.is_initialized,
+            torch.distributed.get_rank,
+            torch.distributed.get_world_size,
+        ]
+    )
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.

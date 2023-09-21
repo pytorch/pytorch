@@ -568,6 +568,7 @@ exclusions = {
     "output_code",
     "schedule",
     "aot_graphs",
+    "compiled_autograd",
     "recompiles",
     "graph_breaks",
     "ddp_graphs",
