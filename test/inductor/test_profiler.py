@@ -11,7 +11,7 @@ from torch.profiler import ProfilerActivity
 
 from torch.testing._internal.common_utils import TemporaryFileName, TEST_WITH_ROCM
 
-HAS_TRITON = torch._inductor.utils.has_triton()
+HAS_TRITON = torch.utils.triton_.has_triton()
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):

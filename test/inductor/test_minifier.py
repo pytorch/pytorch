@@ -11,7 +11,7 @@ from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
 
-_HAS_TRITON = torch._inductor.utils.has_triton()
+_HAS_TRITON = torch.utils.triton_.has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
 
 

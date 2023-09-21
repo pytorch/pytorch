@@ -12,6 +12,7 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch.utils._triton import has_triton
 
 from . import config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
@@ -25,7 +26,6 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    has_triton,
     sympy_product,
 )
 from .virtualized import V
