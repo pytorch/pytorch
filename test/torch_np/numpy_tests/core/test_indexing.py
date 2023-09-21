@@ -608,7 +608,7 @@ class TestMultiIndexingAutomated(TestCase):
 
     """
 
-    def setup_method(self):
+    def setupUp(self):
         self.a = np.arange(np.prod([3, 1, 5, 6])).reshape(3, 1, 5, 6)
         self.b = np.empty((3, 0, 5, 6))
         self.complex_indices = [
