@@ -8,6 +8,7 @@ from typing import Optional
 import torch
 
 from torch.quantization._quantized_conversions import (
+    pack_int4_to_int8,
     quantized_weight_reorder_for_mixed_dtypes_linear_cutlass,
 )
 
@@ -287,13 +288,6 @@ class TestFP8MatmulCuda(TestCase):
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
-        def pack_int4s(weight):
-            assert weight.dim() == 2
-            assert weight.dtype == torch.int8
-
-            tmp = weight.view(torch.uint8)
-            return (((tmp[1::2,:] & 0xf) << 4) | (tmp[0::2,:] & 0xf)).view(torch.int8)
-
         def run_test(
             batch_shape, m, n, k, add_bias, activation, dtype, dtypeq, device, rtol, atol
         ):
@@ -319,9 +313,6 @@ class TestMixedDtypesLinearCuda(TestCase):
                 else None
             )
 
-            if dtypeq == torch.quint4x2: ### FIXME: remove this!
-                weight.fill_(1)
-
             input_ref = input.reshape(-1, input.shape[-1])
             weight_ref = weight.to(input.dtype) * scale.view(n, 1)
             bias_ref = bias.view(1, n) if add_bias else None
@@ -336,7 +327,8 @@ class TestMixedDtypesLinearCuda(TestCase):
                 output_ref = silu(output_ref)
 
             if dtypeq == torch.quint4x2:
-                weight = pack_int4s(weight)
+                weight = pack_int4_to_int8(weight)
+
             output = torch.ops.aten._mixed_dtypes_linear(
                 input,
                 quantized_weight_reorder_for_mixed_dtypes_linear_cutlass(weight, dtypeq),
@@ -347,7 +339,7 @@ class TestMixedDtypesLinearCuda(TestCase):
 
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
-        dtypesq = (torch.int8, torch.quint4x2)
+        dtypeqs = (torch.int8, torch.quint4x2)
         batch_shapes = [[], [2], [2, 1]]
         shapes = [
             [8, 64, 64],
@@ -365,7 +357,7 @@ class TestMixedDtypesLinearCuda(TestCase):
         if dtype == torch.bfloat16:
             rtol, atol = 1e-2, 1e-3
         for dtypeq, batch_shape, (m, n, k), add_bias, activation in \
-            product(dtypesq, batch_shapes, shapes, (False, True), activations):
+            product(dtypeqs, batch_shapes, shapes, (False, True), activations):
             run_test(batch_shape, m, n, k, add_bias, activation, dtype, dtypeq, device, rtol, atol)
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
