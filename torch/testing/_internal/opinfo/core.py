@@ -2623,7 +2623,6 @@ def sample_inputs_foreach(
     # mutually exclusive from same_size and zero_size, which are all or nothing
     intersperse_empty_tensors: bool = False,
 ):
-    print("intersperse_empty_tensors: ", intersperse_empty_tensors)
     if zero_size:
         return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
