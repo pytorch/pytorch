@@ -345,7 +345,9 @@ def _unshard(
     log.warning(
         "[Rank {}] Running all-gather for {} in {} ({})".format(
             handle.rank,
-            clean_tensor_name(handle._fqn).replace("._fsdp_wrapped_module", ""),
+            clean_tensor_name(handle._fqn)
+            .replace("._fsdp_wrapped_module", "")
+            .replace("_fsdp_wrapped_module"),
             handle._training_state,
             handle._fqn,
         )
