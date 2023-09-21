@@ -79,10 +79,8 @@ def _quant_node_constraint(n: Node) -> bool:
     e.g. get_attr(weight) -> transpose -> quantize -> dequantize*
     (Note: dequantize op is not going to be constant propagated)
 
-    Note: this filter does not handle the case when there are any additional ops after quantize:
-    e.g. get_attr(weight) -> transpose1 -> quantize -> transpose2 -> dequantize*
-    this filter will filter out the above example since the last op in the sequence and we'll not
-    do constant propagation for  the above case.
+    This filter is added because we don't want to constant fold the things that are not
+    related to quantization
     """
     return n.op == "call_function" and n.target in _QUANT_OPS
 
@@ -110,7 +108,7 @@ def convert_pt2e(
     pm = PassManager([PortNodeMetaForQDQ()])
     model = pm(model).graph_module
 
-    if fold_quantized_weight:
+    if fold_quantize:
         constant_fold(model, _quant_node_constraint)
 
     if use_reference_representation:

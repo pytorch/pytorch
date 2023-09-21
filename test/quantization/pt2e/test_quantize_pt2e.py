@@ -91,7 +91,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
     }
 
-    def _quantize(self, model, quantizer, example_inputs):
+    def _quantize(self, m, quantizer, example_inputs):
         m = capture_pre_autograd_graph(
             m,
             example_inputs,

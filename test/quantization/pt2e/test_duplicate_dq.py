@@ -9,7 +9,6 @@ from torch.ao.quantization.observer import (
     MinMaxObserver,
     PlaceholderObserver,
 )
-from torch.ao.quantization.pt2e.utils import _find_q_dq_node_for_user
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
@@ -87,6 +86,7 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
+
 class TestDuplicateDQPass(QuantizationTestCase):
     def _test_duplicate_dq(
         self,
@@ -113,7 +113,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
             annotation = n.meta.get("quantization_annotation", None)
             if annotation is not None:
                 for arg in n.args:
-                    if arg.target in _DEQUANTIZE_OPS:
+                    if isinstance(arg, torch.fx.Node) and arg.target in _DEQUANTIZE_OPS:
                         self.assertEqual(len(arg.users.keys()), 1)
 
     def test_no_need_for_duplicate_dq(self):
