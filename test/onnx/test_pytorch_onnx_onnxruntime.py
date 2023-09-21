@@ -13027,7 +13027,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
             def forward(self, x):
@@ -13058,7 +13058,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13091,7 +13091,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.conv = torch.nn.Conv2d(2, 4, 3, stride=2)
+                self.conv = torch.nn.Conv2d(4, 2, 3, stride=2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13125,7 +13125,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def __init__(self):
                 super().__init__()
                 self.quant = torch.ao.quantization.QuantStub()
-                self.linear = torch.nn.Linear(2, 4)
+                self.linear = torch.nn.Linear(4, 2)
                 self.relu = torch.nn.ReLU()
                 self.dequant = torch.ao.quantization.DeQuantStub()
 
@@ -13144,7 +13144,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model.linear.weight = torch.nn.Parameter(
             _construct_tensor_for_quantization_test((2, 4), max_val=2)
         )
-        model.linear.bias = torch.nn.Parameter(torch.arange(4, dtype=torch.float32))
+        model.linear.bias = torch.nn.Parameter(torch.tensor([0.0, 1.0]))
         model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
