@@ -107,8 +107,7 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
 }
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  uint64_t bits = elementSize(self->type) * 8;
+  uint64_t bits = elementSize(self->type) * CHAR_BIT;
   return THPUtils_packUInt64(bits);
 }
 
