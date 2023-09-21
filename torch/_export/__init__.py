@@ -122,6 +122,9 @@ def export__RC__(
 
     See `export` for documentation of `f`, `args`, `kwargs` and return.
     """
+    if dynamic_shapes is None:
+        return export(f, args, kwargs)
+
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
@@ -143,7 +146,6 @@ def export__RC__(
         elif isinstance(combined_args, torch.Tensor):
             yield (combined_args, dynamic_shapes)
 
-
     from collections import defaultdict
     symbols = defaultdict(list)
 
@@ -161,11 +163,6 @@ def export__RC__(
     signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
     combined_args = signature.bind(*args, **kwargs).arguments
 
-    if dynamic_shapes is None:
-        dynamic_shapes = {
-            k: parameter.annotation
-            for k, parameter in signature.parameters.items()
-        }
     for tensor, shape in assoc_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
@@ -669,7 +666,7 @@ def export(
         equality_constraints,
         [ModuleCallEntry("", ModuleCallSignature(inputs=[], outputs=[], in_spec=orig_in_spec, out_spec=orig_out_spec))] +
         [ModuleCallEntry(fqn, sig) for fqn, sig in module_call_signatures.items()],
-        (args, {}),
+        (args, kwargs),
     )
 
     if len(range_constraints) > 0 or len(equality_constraints) > 0:
