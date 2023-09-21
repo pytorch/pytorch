@@ -1182,14 +1182,33 @@ aot_inductor_launcher = """
     #include <torch/csrc/inductor/aot_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
-        AOTInductorModelContainerHandle container_handle;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
-            &container_handle,
-            1 /*num_models*/,
-            false /*is_cpu*/,
-            nullptr /*cubin_dir*/));
+    class RAIIModelContainer {
+    public:
+        RAIIModelContainer() {
+            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
+                &container_handle,
+                1 /*num_models*/,
+                false /*is_cpu*/,
+                nullptr /*cubin_dir*/));
+        }
 
+        ~RAIIModelContainer() {
+            AOTI_RUNTIME_ERROR_CODE_CHECK(
+                AOTInductorModelContainerDelete(container_handle));
+        }
+
+        AOTInductorModelContainerHandle get() const {
+            return container_handle;
+        }
+
+    private:
+        AOTInductorModelContainerHandle container_handle;
+    };
+
+    // Global instance
+    RAIIModelContainer model_container;
+
+    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
         auto input_handles =
             torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
 
@@ -1197,7 +1216,9 @@ aot_inductor_launcher = """
         // not allocating the actual output tensor storage here
         size_t num_outputs;
         AOTI_RUNTIME_ERROR_CODE_CHECK(
-            AOTInductorModelContainerGetNumOutputs(container_handle, &num_outputs));
+            AOTInductorModelContainerGetNumOutputs(
+                model_container.get(),
+                &num_outputs));
         std::vector<AtenTensorHandle> output_handles(num_outputs);
 
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
@@ -1208,16 +1229,13 @@ aot_inductor_launcher = """
         AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            container_handle,
+            model_container.get(),
             input_handles.data(),
             input_tensors.size(),
             output_handles.data(),
             output_handles.size(),
             stream_handle,
             proxy_executor_handle));
-
-        AOTI_RUNTIME_ERROR_CODE_CHECK(
-            AOTInductorModelContainerDelete(container_handle));
 
         return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
             output_handles.data(), output_handles.size());
