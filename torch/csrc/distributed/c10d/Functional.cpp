@@ -161,6 +161,11 @@ at::Tensor allocateReduceScatterOutput(
     const at::Tensor& input,
     int64_t groupSize) {
   auto outputSize = input.sizes().vec();
+  if (outputSize[0] % groupSize != 0) {
+    LOG(WARNING) << "The first dimension of the reduce_scatter input ("
+                 << outputSize[0] << ") is not divisible by the group size ("
+                 << groupSize << ").";
+  }
   outputSize[0] /= groupSize;
   return at::empty(
       outputSize,
@@ -234,7 +239,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce));
 
   m.def(
-      "all_reduce_(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+      "all_reduce_(Tensor self(a!), str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_));
 
@@ -244,7 +249,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_coalesced));
 
   m.def(
-      "all_reduce_coalesced_(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
+      "all_reduce_coalesced_(Tensor[](a!) self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           ::all_reduce_coalesced_));
@@ -274,7 +279,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
           ::reduce_scatter_tensor_coalesced));
 
   m.def(
-      "wait_tensor(Tensor self) -> Tensor",
+      "wait_tensor(Tensor(a!) self) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor));
 }
