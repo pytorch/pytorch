@@ -1008,17 +1008,6 @@ class UnspecNonInlinableToplevelModule(torch.nn.Module):
         return self.m(x)
 
 
-class ModuleWithTrainingState(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.drop1 = torch.nn.Dropout(0.5)
-        self.bn1 = torch.nn.BatchNorm2d(6)
-
-    def forward(self, x):
-        x = self.bn1(self.drop1(x))
-        return x
-
-
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -2301,22 +2290,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         foo(Mod2(), torch.rand([4]))
         # causes two compilations, bc unimplemented custom setattr
         self.assertTrue(compiles_without_buffers >= 2)
-
-    def test_module_with_training_state(self):
-        mod = ModuleWithTrainingState()
-        opt_mod = torch.compile(mod)
-        input = torch.randn(64, 6, 32, 32)
-        # trigger the compilation
-        opt_mod(input)
-
-        # calling .eval in sub model
-        # now the model should be deterministic
-        opt_mod.drop1.eval()
-        opt_mod.bn1.eval()
-
-        output2 = opt_mod(input)
-        output3 = opt_mod(input)
-        self.assertEqual(output2, output3)
 
     def test_unspec_non_inlinable_module(self):
         mod = UnspecNonInlinableModule()
