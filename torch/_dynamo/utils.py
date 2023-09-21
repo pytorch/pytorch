@@ -1849,7 +1849,7 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
+        from torch.utils._triton import has_triton
 
         compile_supported = has_triton()
     else:
