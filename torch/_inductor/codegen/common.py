@@ -16,7 +16,7 @@ import torch
 import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import metrics
+from .. import config, metrics
 from ..utils import (
     DeferredLineBase,
     do_bench,
@@ -691,7 +691,12 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
+        if config.aot_inductor.abi_compatible:
+            # In the abi_compatible model, we just return the buf here.
+            # We will form correct call args later in wrapper.generate_kernel_all.
+            return buf
+        else:
+            return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
 
     def wrap_size_arg(self, size):
         return f"{size}"
