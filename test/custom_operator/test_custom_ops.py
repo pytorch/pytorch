@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import importlib
 import os.path
 import sys
 import tempfile
@@ -27,7 +28,7 @@ class TestCustomOperators(TestCase):
         with self.assertRaises(torch._subclasses.fake_tensor.UnsupportedOperatorException):
             gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
 
-        torch.ops.import_module("my_custom_ops")
+        importlib.import_module("my_custom_ops")
         gm = make_fx(torch.ops.custom.nonzero.default, tracing_mode="symbolic")(x)
         self.assertExpectedInline("""\
 def forward(self, arg0_1):
@@ -40,7 +41,7 @@ def forward(self, arg0_1):
         self.assertNotIn("my_custom_ops2", sys.modules.keys())
         with self.assertRaisesRegex(NotImplementedError, r"import the 'my_custom_ops2'"):
             y = torch.ops.custom.sin.default(x)
-        torch.ops.import_module("my_custom_ops2")
+        importlib.import_module("my_custom_ops2")
         y = torch.ops.custom.sin.default(x)
 
     def test_calling_custom_op_string(self):
