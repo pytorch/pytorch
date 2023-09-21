@@ -63,9 +63,14 @@ class AOTInductorModelRunner:
             constraints=constraints,
         )
 
+        launcher = aot_inductor_launcher
+        is_cpu = any(x.device.type == "cpu" for x in example_inputs)
+        if is_cpu:
+            launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
+
         optimized = torch.utils.cpp_extension.load_inline(
             name="aot_inductor",
-            cpp_sources=[aot_inductor_launcher],
+            cpp_sources=[launcher],
             functions=["run"],
             extra_ldflags=[so_path],
             with_cuda=True,
@@ -78,7 +83,7 @@ class AOTInductorModelRunner:
         cls, optimized, exported, example_inputs, output_tensors, output_spec
     ):
         flat_example_inputs = fx_pytree.tree_flatten_spec(
-            example_inputs, exported.call_spec.in_spec
+            (example_inputs, {}), exported.call_spec.in_spec
         )
         optimized(flat_example_inputs, output_tensors)
         return pytree.tree_unflatten(output_tensors, output_spec)
@@ -175,6 +180,21 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    def test_simple_cpu(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device="cpu")
+
+            def forward(self, x, y):
+                return x + torch.nn.functional.linear(y, self.weight)
+
+        example_inputs = (
+            torch.randn(10, 10, device="cpu"),
+            torch.randn(10, 10, device="cpu"),
+        )
+        self.check_model(Repro(), example_inputs)
+
     def test_large(self):
         class Repro(torch.nn.Module):
             def __init__(self):
@@ -260,17 +280,14 @@ class AOTInductorTestsTemplate:
             torch.randn(10285, 96, device="cuda"),
             torch.randn(96, 1, device="cuda"),
         )
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(
+        self.check_model(
             model,
             example_inputs,
-            expected,
             options={
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "TRITON",
             },
         )
-        self.assertTrue(same(actual, expected))
 
     def test_addmm(self):
         class Model(torch.nn.Module):
@@ -289,9 +306,7 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device="cuda")
         example_inputs = (a,)
-        expected = model(*example_inputs)
-        actual = AOTInductorModelRunner.run(model, example_inputs, expected)
-        self.assertTrue(same(actual, expected))
+        self.check_model(model, example_inputs)
 
     def test_aliased_buffer_reuse(self):
         class Repro(torch.nn.Module):

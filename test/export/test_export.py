@@ -1145,5 +1145,16 @@ class TestExport(TestCase):
                     else:
                         self.assertIsInstance(s, int)
 
+    def test_export_with_wrong_inputs(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        exported_program = export(MyModule(), (torch.rand(2, 3),), {})
+        with self.assertRaisesRegex(
+            TypeError, "Trying to flatten user inputs with exported input tree spec"
+        ):
+            exported_program(torch.rand(2, 3), torch.rand(2, 3))
+
 if __name__ == '__main__':
     run_tests()
