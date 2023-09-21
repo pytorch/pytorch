@@ -582,6 +582,17 @@ def treespec_loads(data: str) -> TreeSpec:
         return _SUPPORTED_PROTOCOLS[protocol].json_to_treespec(json_schema)
     raise ValueError(f"Unknown protocol {protocol}. Available protocols: {list(_SUPPORTED_PROTOCOLS.keys())}")
 
+class _DummyLeaf:
+    def __repr__(self) -> str:
+        return "*"
+
+def treespec_pprint(treespec: TreeSpec) -> str:
+    dummy_tree = tree_unflatten(
+        [_DummyLeaf() for _ in range(treespec.num_leaves)],
+        treespec,
+    )
+    return repr(dummy_tree)
+
 # TODO(angelayi): remove this function after OSS/internal stabilize
 def pytree_to_str(spec: TreeSpec) -> str:
     warnings.warn("pytree_to_str is deprecated. Please use treespec_dumps")

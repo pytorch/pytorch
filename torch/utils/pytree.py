@@ -27,7 +27,7 @@ from typing import (
     Union,
 )
 
-from ._pytree import TreeSpec as PyTreeSpec  # type: ignore[no-redef]
+from ._pytree import TreeSpec as PyTreeSpec
 
 try:
     import optree

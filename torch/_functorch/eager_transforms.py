@@ -8,10 +8,16 @@ from typing import Callable, Union, Tuple, List, Any, Optional
 import torch
 from functools import partial, wraps
 import contextlib
-from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map, tree_map_only
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_unflatten,
+    tree_map,
+    tree_map_only,
+    tree_map_,
+    treespec_pprint,
+)
 from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
-from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
 from torch._subclasses.functional_tensor import FunctionalTensor
 

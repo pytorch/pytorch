@@ -8,8 +8,13 @@ import torch
 import functools
 from torch import Tensor
 from typing import Any, Callable, Optional, Tuple, Union, List
-from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_flatten, TreeSpec
-from .pytree_hacks import tree_map_
+from torch.utils._pytree import (
+    tree_flatten,
+    tree_unflatten,
+    tree_map_,
+    _broadcast_to_and_flatten,
+    TreeSpec,
+)
 from functools import partial
 import os
 import itertools
