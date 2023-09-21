@@ -371,6 +371,22 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
       AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND3(     \
           SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__))
 
+#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND4(    \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, ...) \
+  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)   \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                 \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)                 \
+  AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)                 \
+  AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)
+
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND4(                     \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                                    \
+      TYPE,                                                              \
+      NAME,                                                              \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND4(                  \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, __VA_ARGS__))
+
 #define AT_DISPATCH_CASE_INTEGRAL_TYPES(...)          \
   AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__) \
