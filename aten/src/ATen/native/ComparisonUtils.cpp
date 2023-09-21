@@ -25,9 +25,8 @@ static void _assert_equal(const std::string& name, const bool& condition) {
 
 static void _assert_match(const c10::SymIntArrayRef& original, const c10::OptionalArrayRef<long int>& compared, const std::string& name) {
     if (compared) {
-        auto sym_compared = c10::SymIntArrayRef(
-            reinterpret_cast<const c10::SymInt*>(compared.value().data()), compared.value().size());
-        _assert_equal(name, original == sym_compared);
+        auto originaAsIntArrayRef = c10::asIntArrayRefUnchecked(original);
+        _assert_equal(name, originaAsIntArrayRef == compared);
     }
 }
 
