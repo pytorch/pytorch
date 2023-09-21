@@ -19,8 +19,6 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
-aten::_unsafe_view
-aten::_unsafe_view.out
 aten::abs
 aten::abs.out
 aten::abs_
@@ -133,10 +131,6 @@ aten::clamp.Tensor_out
 aten::clamp.out
 aten::clamp_
 aten::clamp_.Tensor
-aten::clamp_max
-aten::clamp_max.Tensor
-aten::clamp_max.Tensor_out
-aten::clamp_max.out
 aten::clamp_max_
 aten::clamp_max_.Tensor
 aten::clamp_min_
@@ -482,8 +476,6 @@ aten::sqrt_
 aten::squeeze
 aten::squeeze.dim
 aten::squeeze.dims
-aten::std.correction_out
-aten::std_mean.correction
 aten::sub.Scalar
 aten::sub.Scalar_out
 aten::sub.Tensor
@@ -504,16 +496,12 @@ aten::tril_indices
 aten::tril_indices.out
 aten::triu_indices
 aten::triu_indices.out
-aten::trunc
-aten::trunc.out
 aten::trunc_
 aten::unbind.int
 aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
-aten::unsafe_split_with_sizes
-aten::unsafe_split_with_sizes.out
 aten::unsqueeze
 aten::upsample_bicubic2d
 aten::upsample_nearest1d
