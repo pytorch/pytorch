@@ -266,7 +266,7 @@ AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
 }
 
 RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
-  OperatorName op_name,
+  const OperatorName& op_name,
   const char* pymodule,
   const char* context
 ) {

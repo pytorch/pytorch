@@ -223,7 +223,7 @@ public:
    * Given an operator, tells the Dispatcher that we have implemented an abstract impl
    * for this op in the given Python module. Call this a "pystub".
    */
-  RegistrationHandleRAII registerAbstractImplPyStub(OperatorName op_name, const char* pymodule, const char* context);
+  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
 
   /**
    * Given an operator, throws if we have an abstract impl pystub.

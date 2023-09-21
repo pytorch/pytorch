@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -832,6 +833,9 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def load_module(self, module):
+        importlib.import_module(module)
 
     def load_library(self, path):
         """

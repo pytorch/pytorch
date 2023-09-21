@@ -18,7 +18,7 @@
 // This is a utility macro that can be used to throw an exception when a CoreML
 // API function produces a NSError. The exception will contain a message with
 // useful info extracted from the NSError.
-#define COREML_THROW_IF_ERROR(error, preamble, ...)     \
+#define COREML_THROW_IF_ERROR(error, preamble, inputShapesStr)                   \
   do {                                                                           \
     if C10_LIKELY(error) {                                                       \
       throw c10::Error(                                                          \
@@ -30,7 +30,7 @@
               " Domain: ", error.domain.UTF8String,                              \
               " Code: ", error.code,                                             \
               " User Info: ", error.userInfo.description.UTF8String,             \
-              ##__VA_ARGS__));                                                   \
+              " Input Shapes: ", inputShapesStr));                               \
     }                                                                            \
   } while (false)
 
@@ -155,11 +155,10 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       TORCH_CHECK(false, "Compiling MLModel failed");
     }
 
-    NSError *error = nil;
-    MLModel *cpuModel = [PTMCoreMLCompiler loadModel:modelID backend:"cpu" allowLowPrecision:NO error:&error];
+    MLModel *cpuModel = [PTMCoreMLCompiler loadModel:modelID backend:"cpu" allowLowPrecision:NO];
 
     if (!cpuModel) {
-      COREML_THROW_IF_ERROR(error, "Error loading MLModel", " Model spec: ", extra.c_str(), ", Model Hash: ", modelID.c_str());
+      TORCH_CHECK(false, "Loading MLModel failed");
     }
 
     NSMutableArray *orderedFeatures = [NSMutableArray array];
@@ -173,9 +172,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     [executor autorelease];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-      NSError *error = nil;
-      MLModel *configuredModel = [PTMCoreMLCompiler loadModel:modelID backend:config.backend allowLowPrecision:config.allow_low_precision error:&error];
-      // If we fail to configure the model, fall back to CPU
+      MLModel *configuredModel = [PTMCoreMLCompiler loadModel:modelID backend:config.backend allowLowPrecision:config.allow_low_precision];
       executor.model = configuredModel ?: cpuModel;
     });
 
@@ -197,10 +194,10 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       PTMCoreMLExecutor *executor = model_wrapper->executor;
       [executor setInputs:inputs];
 
-      NSError *error = nil;
+      NSError *error;
       id<MLFeatureProvider> outputsProvider = [executor forward:&error];
       if (!outputsProvider) {
-        COREML_THROW_IF_ERROR(error, "Error running CoreML inference", " Input Shape:", tensorListToShapesStr(inputs));
+        COREML_THROW_IF_ERROR(error, "Error running CoreML inference", tensorListToShapesStr(inputs));
       }
 
       return pack_outputs(model_wrapper->outputs, outputsProvider);
