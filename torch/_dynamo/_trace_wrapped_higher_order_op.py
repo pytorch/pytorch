@@ -11,17 +11,21 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
+__all__ = [
+    "trace_wrapped"
+]
+
 # Trace wrapped is a higher order op meant for both invoking a bound function,
 # and for registering it as a call_function in the backward graph.
 # This allows us to re-enter dynamo during compiled autograd to trace (or graph break)
 # the functions as needed. This, in turn, means we can support functions in backward with complex python
 # state mutation. If we were to not do this, the functions would get inlined into their composing aten ops,
 # and we would lose the python state mutation.
-def _trace_wrapped(*args, fn):
+def trace_wrapped(*args, fn):
     return _trace_wrapped_op(*args, fn=fn)
 
 
-_trace_wrapped_op = HigherOrderOperator("_trace_wrapped")
+_trace_wrapped_op = HigherOrderOperator("trace_wrapped")
 
 
 def _self_invoke(*args, fn):

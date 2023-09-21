@@ -10,7 +10,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd
-from torch._dynamo._trace_wrapped_higher_order_op import _trace_wrapped
+from torch._dynamo._trace_wrapped_higher_order_op import trace_wrapped
 from torch._dynamo.testing import normalize_gm
 from torch._dynamo.utils import counters
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -26,7 +26,7 @@ def _side_effect_stateful_fn2(x, obj):
 
 
 def _multiply_invoke(grad):
-    return _trace_wrapped(grad, fn=_multiply)
+    return trace_wrapped(grad, fn=_multiply)
 
 
 class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
@@ -150,7 +150,7 @@ class GraphModule(torch.nn.Module):
 
     def test_invoke_in_pt2_compiled_autograd_side_effect(self):
         def _side_effectful_invoke2(grad, fn):
-            return _trace_wrapped(grad, fn=fn)
+            return trace_wrapped(grad, fn=fn)
 
         graph = None
 
@@ -222,7 +222,7 @@ class GraphModule(torch.nn.Module):
             return _multiply(x)
 
         def _graph_break_invoke(grad):
-            return _trace_wrapped(grad, fn=_graph_breaking_fn)
+            return trace_wrapped(grad, fn=_graph_breaking_fn)
 
         def compiler_fn(gm):
             return torch.compile(gm, backend="inductor", fullgraph=True, dynamic=True)
