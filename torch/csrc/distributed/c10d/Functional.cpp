@@ -7,18 +7,18 @@
 
 // _c10d_functional ops and relevant runtime APIs.
 //
-// _c10d_functional is a native port of c10d_functional which currently resides
-// in python. _c10d_functional will replace c10d_functional once functionality
-// parity is verified.
+// _c10d_functional is a native port of the existing c10d_functional from
+// Python. _c10d_functional will supercede c10d_functional upon confirmation of
+// feature parity.
 //
-// Motivations for porting c10d_functional ops to c++:
-// - Support collective ops for aot inductor and native interpreters
-// - Support multi-threaded native runtimes
-// - Unify collective codegens between inductor python and aot inductor
+// Reasons for transitioning c10d_functional ops to C++:
+// - Enable collective ops for AOT Inductor and native interpreters.
+// - Enable collective ops for multi-threaded native runtimes.
+// - Unify collective codegens between Python Inductor and AOT Inductor.
 //
-// Changes compared to c10d_functional:
-// - The namespace now contains in-place variants for collective calls inductor
-// decides to de-functionalize (should we put them in a different namespace?).
+// Difference from the Python c10d_functional:
+// - The namespace now included in-place variation of collectives calls, which
+// will be used by Inductor wrapper for de-functionalized collective calls.
 // - Process group resolution now only relies on tag. Ranks are useful for the
 // compiler to determine whether two collectives using different process groups
 // are fuse-able. However, they are not required for process group resolution.
