@@ -27,7 +27,7 @@ std::vector<Tensor> foreach_tensor_list_op(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& alpha,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors1.size());
   for (const auto& t : tensors1) {
@@ -35,13 +35,13 @@ std::vector<Tensor> foreach_tensor_list_op(
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors1, tensors2, vec_res});
   } else {
     tensor_lists.reserve(3);
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
+    tensor_lists.emplace_back(vec_res);
   }
 
   using opmath_t = at::opmath_type<T>;
@@ -84,8 +84,8 @@ template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors1,
     TensorList tensors2,
-    const Scalar& alpha = 1,
-    bool has_empty_tensors = false) {
+    bool has_empty_tensor,
+    const Scalar& alpha = 1) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kBFloat16,
@@ -94,7 +94,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(
       "foreach_binary_op_list_cuda",
       [&]() {
         return foreach_tensor_list_op<scalar_t, Op>(
-            tensors1, tensors2, alpha, has_empty_tensors);
+            tensors1, tensors2, alpha, has_empty_tensor);
       });
 }
 
@@ -118,8 +118,8 @@ template <template <class> class Op>
 std::vector<Tensor> all_types_half_bfloat16(
     TensorList tensors1,
     TensorList tensors2,
-    const Scalar& alpha = 1,
-    bool has_empty_tensors = false) {
+    bool has_empty_tensor,
+    const Scalar& alpha = 1) {
   return AT_DISPATCH_ALL_TYPES_AND2(
       kBFloat16,
       kHalf,
@@ -127,7 +127,7 @@ std::vector<Tensor> all_types_half_bfloat16(
       "foreach_binary_op_list_cuda",
       [&]() {
         return foreach_tensor_list_op<scalar_t, Op>(
-            tensors1, tensors2, alpha, has_empty_tensors);
+            tensors1, tensors2, alpha, has_empty_tensor);
       });
 }
 
@@ -165,8 +165,8 @@ template <template <class> class Op>
 std::vector<Tensor> all_types_complex_half_bfloat16(
     TensorList tensors1,
     TensorList tensors2,
-    const Scalar& alpha = 1,
-    bool has_empty_tensors = false) {
+    bool has_empty_tensor,
+    const Scalar& alpha = 1) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kBFloat16,
       kHalf,
@@ -174,7 +174,7 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       "foreach_binary_op_list_cuda",
       [&]() {
         return foreach_tensor_list_op<scalar_t, Op>(
-            tensors1, tensors2, alpha, has_empty_tensors);
+            tensors1, tensors2, alpha, has_empty_tensor);
       });
 }
 
@@ -185,14 +185,14 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
     std::pair<bool, bool> p =                                       \
         can_use_fast_route(tensors1, tensors2, DIVISION_OP);        \
     bool can_use_fast_route = p.first;                              \
-    bool has_empty_tensors = p.second;                              \
+    bool has_empty_tensor = p.second;                               \
     if (!can_use_fast_route) {                                      \
       return at::native::foreach_tensor_##NAME##_list_kernel_slow_( \
           tensors1, tensors2);                                      \
     }                                                               \
                                                                     \
     std::vector<std::vector<at::Tensor>> tensorLists;               \
-    if (has_empty_tensors) {                                        \
+    if (has_empty_tensor) {                                         \
       tensorLists = filter_out_empty_tensors({tensors1, tensors2}); \
       tensors1 = tensorLists[0];                                    \
       tensors2 = tensorLists[1];                                    \
@@ -207,13 +207,13 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
     std::pair<bool, bool> p =                                       \
         can_use_fast_route(tensors1, tensors2, DIVISION_OP);        \
     bool can_use_fast_route = p.first;                              \
-    bool has_empty_tensors = p.second;                              \
+    bool has_empty_tensor = p.second;                               \
     if (!can_use_fast_route) {                                      \
       return at::native::foreach_tensor_##NAME##_list_kernel_slow(  \
           tensors1, tensors2);                                      \
     }                                                               \
                                                                     \
-    return FUNCTION<OP>(tensors1, tensors2, has_empty_tensors);     \
+    return FUNCTION<OP>(tensors1, tensors2, has_empty_tensor);      \
   }
 
 #define FOREACH_BINARY_OP_LIST_ALPHA(FUNCTION, NAME, OP)                       \
@@ -222,14 +222,14 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
     check_foreach_api_restrictions(tensors1, tensors2);                        \
     std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2}, alpha); \
     bool can_use_fast_route = p.first;                                         \
-    bool has_empty_tensors = p.second;                                         \
+    bool has_empty_tensor = p.second;                                          \
     if (!can_use_fast_route) {                                                 \
       return at::native::foreach_tensor_##NAME##_list_kernel_slow_(            \
           tensors1, tensors2, alpha);                                          \
     }                                                                          \
                                                                                \
     std::vector<std::vector<at::Tensor>> tensorLists;                          \
-    if (has_empty_tensors) {                                                   \
+    if (has_empty_tensor) {                                                    \
       tensorLists = filter_out_empty_tensors({tensors1, tensors2});            \
       tensors1 = tensorLists[0];                                               \
       tensors2 = tensorLists[1];                                               \
@@ -243,13 +243,13 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
     check_foreach_api_restrictions(tensors1, tensors2);                        \
     std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2}, alpha); \
     bool can_use_fast_route = p.first;                                         \
-    bool has_empty_tensors = p.second;                                         \
+    bool has_empty_tensor = p.second;                                          \
     if (!can_use_fast_route) {                                                 \
       return at::native::foreach_tensor_##NAME##_list_kernel_slow(             \
           tensors1, tensors2, alpha);                                          \
     }                                                                          \
                                                                                \
-    return FUNCTION<OP>(tensors1, tensors2, alpha, has_empty_tensors);         \
+    return FUNCTION<OP>(tensors1, tensors2, has_empty_tensor, alpha);          \
   }
 
 FOREACH_BINARY_OP_LIST_ALPHA(
@@ -305,14 +305,14 @@ void foreach_tensor_copy_list_kernel_cuda_(
   std::pair<bool, bool> p = can_use_fast_route(
       self, src, /* does_op_promote_integer_inputs_to_float */ false);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_tensor_copy_list_kernel_slow_(
         self, src, non_blocking);
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({self, src});
   } else {
     tensor_lists = {self.vec(), src.vec()};

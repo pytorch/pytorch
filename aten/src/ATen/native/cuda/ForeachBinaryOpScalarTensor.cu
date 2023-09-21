@@ -19,7 +19,7 @@ template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
     const Tensor& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   TORCH_CHECK(
       scalar.dim() == 0 && scalar.numel() == 1,
       "scalar tensor expected to be 0 dim but it has ",
@@ -40,11 +40,11 @@ std::vector<Tensor> foreach_binary_op(
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors, vec_res});
   } else {
     tensor_lists.emplace_back(tensors.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
+    tensor_lists.emplace_back(vec_res);
   }
 
   using opmath_t = at::opmath_type<T>;
@@ -100,7 +100,7 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
     std::pair<bool, bool> p =                                               \
         can_use_fast_route(ArrayRef<TensorList>{tensors}, {}, DIVISION_OP); \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
     if (!(can_use_fast_route &&                                             \
           tensors[0].scalar_type() == scalar.scalar_type())) {              \
       return at::native::foreach_tensor_##NAME##_tensor_kernel_slow_(       \
@@ -108,7 +108,7 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
     }                                                                       \
                                                                             \
     std::vector<Tensor> nonempty_tensors;                                   \
-    if (has_empty_tensors) {                                                \
+    if (has_empty_tensor) {                                                 \
       nonempty_tensors = filter_out_empty_tensors(tensors);                 \
     } else {                                                                \
       nonempty_tensors = tensors.vec();                                     \
@@ -123,21 +123,21 @@ void foreach_binary_op_(TensorList tensors, const Tensor& scalar) {
     std::pair<bool, bool> p =                                               \
         can_use_fast_route(ArrayRef<TensorList>{tensors}, {}, DIVISION_OP); \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
     if (!(can_use_fast_route &&                                             \
           tensors[0].scalar_type() == scalar.scalar_type())) {              \
       return at::native::foreach_tensor_##NAME##_tensor_kernel_slow(        \
           tensors, scalar);                                                 \
     }                                                                       \
                                                                             \
-    return FUNCTION<OP>(tensors, scalar, has_empty_tensors);                \
+    return FUNCTION<OP>(tensors, scalar, has_empty_tensor);                 \
   }
 
 template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors,
     const Tensor& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kHalf,
@@ -146,7 +146,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(
       "foreach_binary_op_scalar_cuda",
       [&]() {
         return foreach_binary_op<scalar_t, Op>(
-            tensors, scalar, has_empty_tensors);
+            tensors, scalar, has_empty_tensor);
       });
 }
 

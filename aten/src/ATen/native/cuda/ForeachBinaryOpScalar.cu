@@ -25,7 +25,7 @@ template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_binary_op(
     TensorList tensors,
     const Scalar& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
@@ -33,11 +33,11 @@ std::vector<Tensor> foreach_binary_op(
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors, vec_res});
   } else {
     tensor_lists.emplace_back(tensors.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
+    tensor_lists.emplace_back(vec_res);
   }
 
   using opmath_t = at::opmath_type<T>;
@@ -75,7 +75,7 @@ template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16(
     TensorList tensors,
     const Scalar& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kHalf,
@@ -84,7 +84,7 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16(
       "foreach_binary_op_scalar_cuda",
       [&]() {
         return foreach_binary_op<scalar_t, Op>(
-            tensors, scalar, has_empty_tensors);
+            tensors, scalar, has_empty_tensor);
       });
 }
 
@@ -105,7 +105,7 @@ template <template <class> class Op>
 std::vector<Tensor> all_types_half_bfloat16(
     TensorList tensors,
     const Scalar& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_ALL_TYPES_AND2(
       kHalf,
       kBFloat16,
@@ -113,7 +113,7 @@ std::vector<Tensor> all_types_half_bfloat16(
       "foreach_binary_op_scalar_cuda",
       [&]() {
         return foreach_binary_op<scalar_t, Op>(
-            tensors, scalar, has_empty_tensors);
+            tensors, scalar, has_empty_tensor);
       });
 }
 
@@ -131,7 +131,7 @@ template <template <class> class Op>
 std::vector<Tensor> all_types_complex_half_bfloat16(
     TensorList tensors,
     const Scalar& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
       kBFloat16,
@@ -139,7 +139,7 @@ std::vector<Tensor> all_types_complex_half_bfloat16(
       "foreach_binary_op_scalar_cuda",
       [&]() {
         return foreach_binary_op<scalar_t, Op>(
-            tensors, scalar, has_empty_tensors);
+            tensors, scalar, has_empty_tensor);
       });
 }
 
@@ -162,14 +162,14 @@ void all_types_complex_half_bfloat16_(
     std::pair<bool, bool> p =                                         \
         can_use_fast_route(tensors, scalar, DIVISION_OP);             \
     bool can_use_fast_route = p.first;                                \
-    bool has_empty_tensors = p.second;                                \
+    bool has_empty_tensor = p.second;                                 \
     if (!can_use_fast_route) {                                        \
       return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_( \
           tensors, scalar);                                           \
     }                                                                 \
                                                                       \
     std::vector<Tensor> nonempty_tensors;                             \
-    if (has_empty_tensors) {                                          \
+    if (has_empty_tensor) {                                           \
       nonempty_tensors = filter_out_empty_tensors(tensors);           \
     } else {                                                          \
       nonempty_tensors = tensors.vec();                               \
@@ -184,13 +184,13 @@ void all_types_complex_half_bfloat16_(
     std::pair<bool, bool> p =                                         \
         can_use_fast_route(tensors, scalar, DIVISION_OP);             \
     bool can_use_fast_route = p.first;                                \
-    bool has_empty_tensors = p.second;                                \
+    bool has_empty_tensor = p.second;                                 \
     if (!can_use_fast_route) {                                        \
       return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(  \
           tensors, scalar);                                           \
     }                                                                 \
                                                                       \
-    return FUNCTION<OP>(tensors, scalar, has_empty_tensors);          \
+    return FUNCTION<OP>(tensors, scalar, has_empty_tensor);           \
   }
 
 FOREACH_BINARY_OP_SCALAR(
@@ -215,13 +215,13 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(
   check_foreach_api_restrictions(exponent);
   std::pair<bool, bool> p = can_use_fast_route(exponent);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_scalar_pow_list_kernel_slow(scalar, exponent);
   }
 
   return all_types_complex_half_bfloat16<reverse_power_functor>(
-      exponent, scalar, has_empty_tensors);
+      exponent, scalar, has_empty_tensor);
 }
 
 // In the case of division, integer inputs will result in float.
@@ -243,13 +243,13 @@ void foreach_tensor_sub_scalar_kernel_cuda_(
 
   std::pair<bool, bool> p = can_use_fast_route(tensors, scalar);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_tensor_sub_scalar_kernel_slow_(tensors, scalar);
   }
 
   std::vector<Tensor> nonempty_tensors;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     nonempty_tensors = filter_out_empty_tensors(tensors);
   } else {
     nonempty_tensors = tensors.vec();
@@ -274,7 +274,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(
 
   std::pair<bool, bool> p = can_use_fast_route(tensors, scalar);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_tensor_sub_scalar_kernel_slow(tensors, scalar);
   }
@@ -287,7 +287,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(
       "foreach_binary_op_scalar_cuda",
       [&]() {
         return foreach_binary_op<scalar_t, std::minus>(
-            tensors, scalar, has_empty_tensors);
+            tensors, scalar, has_empty_tensor);
       });
 }
 

@@ -1,7 +1,3 @@
-#include <c10/core/Scalar.h>
-#include <c10/util/ArrayRef.h>
-#include <utility>
-#include <vector>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
@@ -31,7 +27,7 @@ std::vector<Tensor> foreach_pointwise_op(
     TensorList tensors1,
     TensorList tensors2,
     const Scalar& scalar,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(input.size());
   for (const auto& t : input) {
@@ -39,7 +35,7 @@ std::vector<Tensor> foreach_pointwise_op(
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists =
         filter_out_empty_tensors({input, tensors1, tensors2, vec_res});
   } else {
@@ -47,7 +43,7 @@ std::vector<Tensor> foreach_pointwise_op(
     tensor_lists.emplace_back(input.vec());
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
+    tensor_lists.emplace_back(vec_res);
   }
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -140,7 +136,7 @@ std::vector<Tensor> foreach_pointwise_op(
     TensorList tensors1,
     TensorList tensors2,
     at::ArrayRef<Scalar> scalars,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(input.size());
   for (const auto& t : input) {
@@ -150,7 +146,7 @@ std::vector<Tensor> foreach_pointwise_op(
   std::vector<std::vector<at::Tensor>> tensor_lists;
   std::vector<Scalar> nonempty_scalars;
   std::pair<std::vector<std::vector<Tensor>>, std::vector<Scalar>> res;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     res =
         filter_out_empty_tensors({input, tensors1, tensors2, vec_res}, scalars);
     tensor_lists = res.first;
@@ -160,7 +156,7 @@ std::vector<Tensor> foreach_pointwise_op(
     tensor_lists.emplace_back(input.vec());
     tensor_lists.emplace_back(tensors1.vec());
     tensor_lists.emplace_back(tensors2.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
+    tensor_lists.emplace_back(vec_res);
     nonempty_scalars = scalars.vec();
   }
 
@@ -196,7 +192,7 @@ std::vector<Tensor> foreach_pointwise_op(
     std::pair<bool, bool> p =                                      \
         can_use_fast_route({input, tensors1, tensors2}, scalar);   \
     bool can_use_fast_route = p.first;                             \
-    bool has_empty_tensors = p.second;                             \
+    bool has_empty_tensor = p.second;                              \
                                                                    \
     if (!can_use_fast_route ||                                     \
         has_integral_tensor(input, /* includeBool */ true)) {      \
@@ -205,7 +201,7 @@ std::vector<Tensor> foreach_pointwise_op(
     }                                                              \
                                                                    \
     return foreach_pointwise_op<OP>(                               \
-        input, tensors1, tensors2, scalar, has_empty_tensors);     \
+        input, tensors1, tensors2, scalar, has_empty_tensor);      \
   }                                                                \
                                                                    \
   void foreach_tensor_##NAME##_scalar_cuda_(                       \
@@ -218,7 +214,7 @@ std::vector<Tensor> foreach_pointwise_op(
     std::pair<bool, bool> p =                                      \
         can_use_fast_route({input, tensors1, tensors2}, scalar);   \
     bool can_use_fast_route = p.first;                             \
-    bool has_empty_tensors = p.second;                             \
+    bool has_empty_tensor = p.second;                              \
                                                                    \
     if (!can_use_fast_route ||                                     \
         has_integral_tensor(input, /* includeBool */ true)) {      \
@@ -227,7 +223,7 @@ std::vector<Tensor> foreach_pointwise_op(
     }                                                              \
                                                                    \
     std::vector<std::vector<Tensor>> res;                          \
-    if (has_empty_tensors) {                                       \
+    if (has_empty_tensor) {                                        \
       res = filter_out_empty_tensors({input, tensors1, tensors2}); \
       input = res[0];                                              \
       tensors1 = res[1];                                           \
@@ -248,7 +244,7 @@ std::vector<Tensor> foreach_pointwise_op(
     std::pair<bool, bool> p =                                               \
         can_use_fast_route({input, tensors1, tensors2}, scalars);           \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
                                                                             \
     if (!can_use_fast_route ||                                              \
         has_integral_tensor(input, /* includeBool */ true)) {               \
@@ -257,7 +253,7 @@ std::vector<Tensor> foreach_pointwise_op(
     }                                                                       \
                                                                             \
     return foreach_pointwise_op<OP>(                                        \
-        input, tensors1, tensors2, scalars, has_empty_tensors);             \
+        input, tensors1, tensors2, scalars, has_empty_tensor);              \
   }                                                                         \
                                                                             \
   void foreach_tensor_##NAME##_scalarlist_cuda_(                            \
@@ -270,7 +266,7 @@ std::vector<Tensor> foreach_pointwise_op(
     std::pair<bool, bool> p =                                               \
         can_use_fast_route({input, tensors1, tensors2}, scalars);           \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
                                                                             \
     if (!can_use_fast_route ||                                              \
         has_integral_tensor(input, /* includeBool */ true)) {               \
@@ -279,7 +275,7 @@ std::vector<Tensor> foreach_pointwise_op(
     }                                                                       \
                                                                             \
     std::pair<std::vector<std::vector<Tensor>>, std::vector<Scalar>> res;   \
-    if (has_empty_tensors) {                                                \
+    if (has_empty_tensor) {                                                 \
       res = filter_out_empty_tensors({input, tensors1, tensors2}, scalars); \
       input = res.first[0];                                                 \
       tensors1 = res.first[1];                                              \
@@ -301,7 +297,7 @@ std::vector<Tensor> foreach_pointwise_op(
     std::pair<bool, bool> p =                                               \
         can_use_fast_route({input, tensors1, tensors2}, scalars);           \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
                                                                             \
     if (!can_use_fast_route ||                                              \
         has_integral_tensor(input, /* includeBool */ true)) {               \
@@ -310,7 +306,7 @@ std::vector<Tensor> foreach_pointwise_op(
     }                                                                       \
                                                                             \
     return foreach_pointwise_op<OP>(                                        \
-        input, tensors1, tensors2, scalars, has_empty_tensors);             \
+        input, tensors1, tensors2, scalars, has_empty_tensor);              \
   }                                                                         \
                                                                             \
   void foreach_tensor_##NAME##_tensor_cuda_(                                \
@@ -323,7 +319,7 @@ std::vector<Tensor> foreach_pointwise_op(
     std::pair<bool, bool> p =                                               \
         can_use_fast_route({input, tensors1, tensors2}, scalars);           \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
                                                                             \
     if (!can_use_fast_route ||                                              \
         has_integral_tensor(input, /* includeBool */ true)) {               \
@@ -332,7 +328,7 @@ std::vector<Tensor> foreach_pointwise_op(
     }                                                                       \
                                                                             \
     std::pair<std::vector<std::vector<Tensor>>, std::vector<Scalar>> res;   \
-    if (has_empty_tensors) {                                                \
+    if (has_empty_tensor) {                                                 \
       res = filter_out_empty_tensors({input, tensors1, tensors2}, scalars); \
       input = res.first[0];                                                 \
       tensors1 = res.first[1];                                              \

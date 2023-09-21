@@ -198,6 +198,15 @@ std::pair<bool, bool>
 _check_tensors_share_sizes_and_strides_and_for_empty_tensors(
     ArrayRef<TensorList> tensorLists) {
   bool has_empty_tensor = false;
+
+  // we still have to check for empty tensors when there is one tensorList
+  if (tensorLists.size() == 1) {
+    for (const Tensor& t : tensorLists[0]) {
+      has_empty_tensor |= t.numel() == 0;
+    }
+    return std::pair(true, has_empty_tensor);
+  }
+
   for (const auto i : c10::irange(1, tensorLists.size())) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
       if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
@@ -209,7 +218,6 @@ _check_tensors_share_sizes_and_strides_and_for_empty_tensors(
   }
 
   return std::pair(true, has_empty_tensor);
-  ;
 }
 
 // Variant of check_fast_path_restrictions. Makes the checks and also returns
@@ -273,7 +281,7 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
   return scalarList;
 }
 
-// returns two bools: can_use_fast_route, has_empty_tensors
+// returns two bools: can_use_fast_route, has_empty_tensor
 std::pair<bool, bool> can_use_fast_route(
     ArrayRef<TensorList> tensorLists,
     ArrayRef<Scalar> scalarList = {},
@@ -282,7 +290,7 @@ std::pair<bool, bool> can_use_fast_route(
       tensorLists, scalarList, does_op_promote_integer_inputs_to_float);
 }
 
-// returns two bools: can_use_fast_route, has_empty_tensors
+// returns two bools: can_use_fast_route, has_empty_tensor
 std::pair<bool, bool> can_use_fast_route(
     TensorList tensors1,
     TensorList tensors2,
@@ -291,7 +299,8 @@ std::pair<bool, bool> can_use_fast_route(
       {tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
 }
 
-// This function takes in ArrayRefs and spits out std::vectors of tensors.
+// This function takes in ArrayRefs and spits out std::vectors of tensors
+// where the empty tensors (numel() == 0) have been filtered out.
 std::vector<Tensor> filter_out_empty_tensors(TensorList tensorList) {
   std::vector<Tensor> filtered_tensorList;
   filtered_tensorList.reserve(tensorList.size());
@@ -303,7 +312,8 @@ std::vector<Tensor> filter_out_empty_tensors(TensorList tensorList) {
   return filtered_tensorList;
 }
 
-// This function takes in ArrayRefs and spits out std::vectors of tensors.
+// This function takes in ArrayRefs and spits out a nested std::vector of
+// tensors where the empty tensors (numel() == 0) have been filtered out.
 std::vector<std::vector<Tensor>> filter_out_empty_tensors(
     ArrayRef<TensorList> tensorLists) {
   // allocate memory ahead of time
@@ -327,7 +337,9 @@ std::vector<std::vector<Tensor>> filter_out_empty_tensors(
 }
 
 // This function takes in ArrayRefs and spits out std::vectors of tensors and
-// scalars. We assume scalarList is matching in length with the tensor lists.
+// scalars. We assume scalarList is matching in length with each of the tensor
+// lists. The resulting tensors and scalars are filtered so that the empty
+// tensors and corresponding scalars are no longer there.
 std::pair<std::vector<std::vector<Tensor>>, std::vector<Scalar>>
 filter_out_empty_tensors(
     ArrayRef<TensorList> tensorLists,

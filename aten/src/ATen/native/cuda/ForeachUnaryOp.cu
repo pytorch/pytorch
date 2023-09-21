@@ -46,7 +46,7 @@ namespace at::native {
 template <typename scalar_t, template <class> class Op>
 std::vector<Tensor> foreach_unary_op(
     TensorList tensors,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   std::vector<at::Tensor> vec_res;
   vec_res.reserve(tensors.size());
   for (const auto& t : tensors) {
@@ -54,11 +54,11 @@ std::vector<Tensor> foreach_unary_op(
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors, vec_res});
   } else {
     tensor_lists.emplace_back(tensors.vec());
-    tensor_lists.emplace_back(std::move(vec_res));
+    tensor_lists.emplace_back(vec_res);
   }
 
   using opmath_t = typename at::opmath_type<scalar_t>;
@@ -93,13 +93,13 @@ void foreach_unary_op_(TensorList tensors) {
 template <template <class> class Op>
 std::vector<Tensor> floating_complex_half(
     TensorList tensors,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
       ScalarType::Half,
       tensors[0].scalar_type(),
       "foreach_unary_op_cuda",
       [&]() {
-        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensors);
+        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensor);
       });
 }
 
@@ -115,7 +115,7 @@ void floating_complex_half_(TensorList tensors) {
 template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bfloat16_half_bool(
     TensorList tensors,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
@@ -123,7 +123,7 @@ std::vector<Tensor> all_types_complex_bfloat16_half_bool(
       tensors[0].scalar_type(),
       "foreach_unary_op_cuda",
       [&]() {
-        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensors);
+        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensor);
       });
 }
 
@@ -141,14 +141,14 @@ void all_types_complex_bfloat16_half_bool_(TensorList tensors) {
 template <template <class> class Op>
 std::vector<Tensor> floating_complex_half_bfloat16(
     TensorList tensors,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
       tensors[0].scalar_type(),
       "foreach_unary_op_cuda",
       [&]() {
-        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensors);
+        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensor);
       });
 }
 
@@ -165,14 +165,14 @@ void floating_complex_half_bfloat16_(TensorList tensors) {
 template <template <class> class Op>
 std::vector<Tensor> all_types_half_complex_bfloat16(
     TensorList tensors,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half,
       at::ScalarType::BFloat16,
       tensors[0].scalar_type(),
       "foreach_unary_op_cuda",
       [&]() {
-        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensors);
+        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensor);
       });
 }
 
@@ -187,13 +187,13 @@ void all_types_half_complex_bfloat16_(TensorList tensors) {
 }
 
 template <template <class> class Op>
-std::vector<Tensor> floating_half(TensorList tensors, bool has_empty_tensors) {
+std::vector<Tensor> floating_half(TensorList tensors, bool has_empty_tensor) {
   return AT_DISPATCH_FLOATING_TYPES_AND(
       ScalarType::Half,
       tensors[0].scalar_type(),
       "foreach_unary_op_cuda",
       [&]() {
-        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensors);
+        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensor);
       });
 }
 
@@ -208,14 +208,14 @@ void floating_half_(TensorList tensors) {
 template <template <class> class Op>
 std::vector<Tensor> floating_half_bfloat16(
     TensorList tensors,
-    bool has_empty_tensors) {
+    bool has_empty_tensor) {
   return AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
       tensors[0].scalar_type(),
       "foreach_unary_op_cuda",
       [&]() {
-        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensors);
+        return foreach_unary_op<scalar_t, Op>(tensors, has_empty_tensor);
       });
 }
 
@@ -245,25 +245,25 @@ void floating_half_bfloat16_(TensorList tensors) {
     check_foreach_api_restrictions(tensors);                                \
     std::pair<bool, bool> p = can_use_fast_route(tensors);                  \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
     if (!can_use_fast_route ||                                              \
         has_integral_tensor(tensors, /* includeBool */ true)) {             \
       return at::native::foreach_tensor_##op_name##_slow(tensors);          \
     }                                                                       \
-    return function<functor_name>(tensors, has_empty_tensors);              \
+    return function<functor_name>(tensors, has_empty_tensor);               \
   }                                                                         \
   void foreach_tensor_##op_name##_cuda_(TensorList tensors) {               \
     check_foreach_api_restrictions(tensors);                                \
     std::pair<bool, bool> p = can_use_fast_route(tensors);                  \
     bool can_use_fast_route = p.first;                                      \
-    bool has_empty_tensors = p.second;                                      \
+    bool has_empty_tensor = p.second;                                       \
     if (!can_use_fast_route ||                                              \
         has_integral_tensor(tensors, /* includeBool */ true)) {             \
       return at::native::foreach_tensor_##op_name##_slow_(tensors);         \
     }                                                                       \
                                                                             \
     std::vector<Tensor> nonempty_tensors;                                   \
-    if (has_empty_tensors) {                                                \
+    if (has_empty_tensor) {                                                 \
       nonempty_tensors = filter_out_empty_tensors(tensors);                 \
     } else {                                                                \
       nonempty_tensors = tensors.vec();                                     \
@@ -359,7 +359,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
 
   std::pair<bool, bool> p = can_use_fast_route(tensors);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_tensor_neg_slow(tensors);
   }
@@ -369,7 +369,7 @@ std::vector<Tensor> foreach_tensor_neg_cuda(TensorList tensors) {
       "Negation, the `-` operator, on a bool tensor is not supported. "
       "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
   return all_types_half_complex_bfloat16<std::negate>(
-      tensors, has_empty_tensors);
+      tensors, has_empty_tensor);
 }
 
 void foreach_tensor_neg_cuda_(TensorList tensors) {
@@ -377,13 +377,13 @@ void foreach_tensor_neg_cuda_(TensorList tensors) {
 
   std::pair<bool, bool> p = can_use_fast_route(tensors);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_tensor_neg_slow_(tensors);
   }
 
   std::vector<Tensor> nonempty_tensors;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     nonempty_tensors = filter_out_empty_tensors(tensors);
   } else {
     nonempty_tensors = tensors.vec();
@@ -414,11 +414,11 @@ std::vector<Tensor> foreach_tensor_abs_cuda(TensorList tensors) {
       });
   std::pair<bool, bool> p = can_use_fast_route(tensors);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route || has_complex) {
     return at::native::foreach_tensor_abs_slow(tensors);
   }
-  return all_types_complex_bfloat16_half_bool<Abs>(tensors, has_empty_tensors);
+  return all_types_complex_bfloat16_half_bool<Abs>(tensors, has_empty_tensor);
 }
 
 void foreach_tensor_abs_cuda_(TensorList tensors) {
@@ -429,13 +429,13 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
       });
   std::pair<bool, bool> p = can_use_fast_route(tensors);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route || has_complex) {
     return at::native::foreach_tensor_abs_slow_(tensors);
   }
 
   std::vector<Tensor> nonempty_tensors;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     nonempty_tensors = filter_out_empty_tensors(tensors);
   } else {
     nonempty_tensors = tensors.vec();
@@ -449,13 +449,13 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
 
   std::pair<bool, bool> p = can_use_fast_route(tensors);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return at::native::foreach_tensor_zero_slow_(tensors);
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists.emplace_back(filter_out_empty_tensors(tensors));
   } else {
     tensor_lists.emplace_back(tensors.vec());

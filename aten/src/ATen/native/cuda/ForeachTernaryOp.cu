@@ -29,7 +29,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
   std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2, tensors3});
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return foreach_tensor_ternary_lerp_slow(tensors1, tensors2, tensors3);
   }
@@ -41,7 +41,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists =
         filter_out_empty_tensors({tensors1, tensors2, tensors3, vec_res});
   } else {
@@ -75,13 +75,13 @@ void foreach_tensor_lerp_ternary_cuda_(
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
   std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2, tensors3});
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return foreach_tensor_ternary_lerp_slow_(tensors1, tensors2, tensors3);
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors1, tensors2, tensors3});
   } else {
     tensor_lists = {tensors1.vec(), tensors2.vec(), tensors3.vec()};
@@ -113,7 +113,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
   check_foreach_api_restrictions(tensors1, tensors2);
   std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2});
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return foreach_tensor_lerp_list_kernel_slow(tensors1, tensors2, weight);
   }
@@ -124,7 +124,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
     vec_res.emplace_back(at::native::empty_like(t));
   }
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors1, tensors2, vec_res});
   } else {
     tensor_lists = {tensors1.vec(), tensors2.vec(), vec_res};
@@ -158,13 +158,13 @@ void foreach_tensor_lerp_list_cuda_(
   check_foreach_api_restrictions(tensors1, tensors2);
   std::pair<bool, bool> p = can_use_fast_route({tensors1, tensors2});
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
   if (!can_use_fast_route) {
     return foreach_tensor_lerp_list_kernel_slow_(tensors1, tensors2, weight);
   }
 
   std::vector<std::vector<at::Tensor>> tensor_lists;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     tensor_lists = filter_out_empty_tensors({tensors1, tensors2});
   } else {
     tensor_lists = {tensors1.vec(), tensors2.vec()};

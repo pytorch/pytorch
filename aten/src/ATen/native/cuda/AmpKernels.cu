@@ -106,7 +106,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
   std::vector<std::vector<at::Tensor>> tensor_lists;
   std::pair<bool, bool> p = can_use_fast_route(scaled_grads);
   bool can_use_fast_route = p.first;
-  bool has_empty_tensors = p.second;
+  bool has_empty_tensor = p.second;
 
   // is_non_overlapping_and_dense() is not available in Python.
   // GradScaler can't filter for it. We need to filter here.
@@ -118,9 +118,9 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
     //  - all scaled_grads are on the same device
     //  - all scaled_grads are of the same dtype
     TORCH_CHECK(scaled_grads[0].is_cuda(), "scaled_grads must be CUDA tensors.");
-    // Sets up MTA launch to use scaled_grads as-is, but with empty tensors filtered out.
+    // Sets up MTA launch to use scaled_grads with empty tensors filtered out.
     std::vector<Tensor> nonempty_scaled_grads;
-    if (has_empty_tensors) {
+    if (has_empty_tensor) {
           nonempty_scaled_grads = filter_out_empty_tensors(scaled_grads);
     } else {
           nonempty_scaled_grads = scaled_grads.vec();
@@ -148,6 +148,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
                                                 found_inf,
                                                 inv_scale);
       } else if (t.numel() != 0) {
+        // only add non-empty tensors to the list
         tensor_lists[0].push_back(t);
       }
     }

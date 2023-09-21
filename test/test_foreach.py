@@ -635,7 +635,9 @@ class TestForeach(TestCase):
             # making sure the reference L2 norm values are in the range of FP16.
             self.assertFalse(any(torch.isinf(e) for e in expect))
         else:
-            self.assertTrue(all(torch.isinf(e) for e in expect))
+            self.assertTrue(all(
+                inputs[0][i].numel() == 0 or torch.isinf(e)
+                for i, e in enumerate(expect)))
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
@@ -936,7 +938,7 @@ def check_autodiff_sample(op, sample, dtype, is_inplace):
         return (
             False,
             "Trying to set a forward gradient that has a different size than that of the original Tensor, "
-            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1, 1]."
+            "this is not supported. Tensor is of size [] while the given forward gradient is of size [1]."
         )
     rhs_arg_has_complex_number = sample.args and ((
         isinstance(sample.args[0], list)

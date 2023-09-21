@@ -137,7 +137,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
       });
   std::pair<bool, bool> pair = can_use_fast_route(tensors);
   bool can_use_fast_route = pair.first;
-  bool has_empty_tensors = pair.second;
+  bool has_empty_tensor = pair.second;
 
   if (!can_use_fast_route || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2))) {
@@ -145,7 +145,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   }
 
   std::vector<Tensor> nonempty_tensors;
-  if (has_empty_tensors) {
+  if (has_empty_tensor) {
     nonempty_tensors = filter_out_empty_tensors(tensors);
   } else {
     nonempty_tensors = tensors.vec();
@@ -227,12 +227,12 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   std::vector<Tensor> result;
   result.reserve(ntensors);
   int i = 0;
-  for (const auto& j : c10::irange(ntensors)) {
-    if (tensors[j].numel() != 0) {
+  for (const auto& t : tensors) {
+    if (t.numel() != 0) {
       result.emplace_back(ret_per_non_empty_tensor[i]);
       i++;
     } else {
-      result.emplace_back(at::empty({0}, options));
+      result.emplace_back(at::zeros({}, options));
     }
   }
   return result;

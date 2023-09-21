@@ -2620,7 +2620,10 @@ def sample_inputs_foreach(
     high=None,
     zero_size: bool,
     requires_grad: bool,
+    # mutually exclusive from same_size and zero_size, which are all or nothing
+    intersperse_empty_tensors: bool = False,
 ):
+    print("intersperse_empty_tensors: ", intersperse_empty_tensors)
     if zero_size:
         return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
@@ -2637,10 +2640,10 @@ def sample_inputs_foreach(
             for _ in range(N)
         ]
     else:
-        # if N > 4, interweave some empty tensors + have the last tensor be 0-sized to fully fix #100701
+        # interweave some empty tensors + have the last 2 tensors be empty (see #100701)
         return [
             torch.empty(0, dtype=dtype, device=device, requires_grad=requires_grad)
-            if N > 4 and (i % 3 != 0 or i == N - 1)
+            if (i % 3 == 0 or i >= N - 2) and intersperse_empty_tensors
             else make_tensor(
                 (N - i, N - i),
                 dtype=dtype,

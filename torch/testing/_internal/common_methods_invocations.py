@@ -8583,7 +8583,13 @@ class foreach_inputs_sample_func:
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _foreach_inputs_kwargs["zero_size"] = False
 
-        for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
+        # add empty tensor interspersion to test fully fixing #100701
+        for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
+                num_input_tensors, self._rightmost_arg_types, (True, False)):
+            if intersperse_empty_tensors and (num_tensors != max(num_input_tensors) or str(device) == 'cpu'):
+                # generate interspersed empty tensors for only 1 N on non-cpu device to lessen redundancy
+                continue
+            _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
             input = sample_inputs_foreach(
                 None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
             args = []
