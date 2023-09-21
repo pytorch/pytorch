@@ -124,37 +124,14 @@ class CudaInterface(DeviceInterface):
 
             return caching_worker_device_properties["cuda"][device]
 
-    @staticmethod
-    def current_device() -> int:
-        return torch.cuda.current_device()
-
-    @staticmethod
-    def set_device(device: _device_t):
-        torch.cuda.set_device(device)
-
-    @staticmethod
-    def device_count() -> int:
-        return torch.cuda.device_count()
-
-    @staticmethod
-    def current_stream():
-        return torch.cuda.current_stream()
-
-    @staticmethod
-    def set_stream(stream: torch.Stream):
-        torch.cuda.set_stream(stream)
-
-    @staticmethod
-    def synchronize(device: _device_t = None):
-        return torch.cuda.synchronize(device)
-
-    @staticmethod
-    def get_device_properties(device: _device_t = None):
-        return torch.cuda.get_device_properties(device)
-
-    @staticmethod
-    def get_raw_stream(device: int):
-        return get_cuda_stream(device)
+    current_device = staticmethod(torch.cuda.current_device)
+    set_device = staticmethod(torch.cuda.set_device)
+    device_count = staticmethod(torch.cuda.device_count)
+    current_stream = staticmethod(torch.cuda.current_stream)
+    set_stream = staticmethod(torch.cuda.set_stream)
+    synchronize = staticmethod(torch.cuda.synchronize)
+    get_device_properties = staticmethod(torch.cuda.get_device_properties)
+    get_raw_stream = staticmethod(get_cuda_stream)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
