@@ -3,12 +3,12 @@ import copy
 import dataclasses
 import io
 import pathlib
+import sys
 import typing
 from enum import auto, Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import sympy
-import sys
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -443,6 +443,7 @@ class _Dim(type):
     """
     Metaclass for :func:`Dim` types.
     """
+
     pass
 
 
@@ -554,18 +555,15 @@ def export(
          range of shapes. See :func:`dynamic_dim` docstring for examples on
          how to use it.
 
-         dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
-          It is expected to be a dict from argument names of ``f`` to their dynamic shape
-          specifications, as follows:
-          - The dynamic shape of a tensor argument can be specified as:
-            - Either a dict from dynamic dimension indices to :func:`Dim` types. It is
-              not required to include static dimension indices in this dict, but when
-              they are, they should be mapped to None.
-            - Or a tuple / list of :func:`Dim` types or None. The :func:`Dim` types
-              correspond to dynamic dimensions, whereas static dimensions are denoted
-              by None.
-          - Arguments that are dicts or tuples / lists of tensors are recursively
-            specified by using mappings or sequences of contained specifications.
+        dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
+         Should be a dict from argument names of ``f`` to their dynamic shape specifications,
+         as follows. The dynamic shape of a tensor argument can be specified as either
+         (1) a dict from dynamic dimension indices to :func:`Dim` types, where it is
+         not required to include static dimension indices in this dict, but when they are,
+         they should be mapped to None; or (2) a tuple / list of :func:`Dim` types or None,
+         where the :func:`Dim` types correspond to dynamic dimensions, and static dimensions
+         are denoted by None. Arguments that are dicts or tuples / lists of tensors are
+         recursively specified by using mappings or sequences of contained specifications.
 
     Returns:
         An :class:`ExportedProgram` containing the traced callable.
