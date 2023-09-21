@@ -319,6 +319,7 @@ def guard_scalar(a):
 
 @record_shapeenv_event()
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
+    log.debug("_constrain_symbol_range %s [%s, %s] [%s, %s]", s, compiler_min, compiler_max, runtime_min, runtime_max)
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
             builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
@@ -1018,6 +1019,18 @@ class SymNode:
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
         return self.shape_env.defer_runtime_assert(self.expr, f"{file}:{line}", fx_node=self.fx_node)
+
+    def expect_size(self, file, line):
+        b = self.ge(self.wrap_int(0))
+        # Generate a deferred runtime assert
+        r = b.expect_true(file, line)
+        # Refine compile time range, but only if it's unbacked.
+        # If you refine range for hinted variables, you can end up making
+        # improper deductions since compile time reasoning may be
+        # incompatible with runtime reasoning.
+        if r and not self.has_hint():
+            _advise_is_size(SymInt(self))
+        return r
 
     def bool_(self):
         return self.guard_bool("", 0)
@@ -2839,8 +2852,6 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
-            self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
-            self.counter["create_symbol"] += 1
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
@@ -2871,7 +2882,14 @@ class ShapeEnv:
             if val not in vr:
                 raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
+            # Initialize default runtime range to match compile time range,
+            # for backed SymInts (this is allowed to diverge for unbacked)
+            self.runtime_var_to_range[sympy_expr] = vr
+
             r = sympy_expr
+
+            self.log.info("create_symbol %s = %s for %s [%s, %s]", sympy_expr, val, source.name(), vr.lower, vr.upper)
+            self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
