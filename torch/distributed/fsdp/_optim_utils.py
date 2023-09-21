@@ -1278,6 +1278,7 @@ def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
 
 @dataclass
 class StateInfo:
+    # The key of these dictionaries are the state name, e.g., `exp_avg`.
     tensors: Dict[str, _PosDimTensorInfo]
     scalar_tensors: Dict[str, torch.Tensor]
     non_tensors: Dict[str, Any]
@@ -1328,9 +1329,9 @@ def _convert_all_state_info(
 ) -> Tuple[torch.dtype, Dict[str, List[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
-    the StateInfos into the original state if the state is not a non-scalar
-    tensor For a multi-dimensional tensor, the local state will be stored in
-    ``state_buffer`` in a correct ordert for later allgather purpose.
+    the StateInfo into the original state if the state is not a non-scalar
+    tensor. For a multi-dimensional tensor, the local state will be stored in
+    ``state_buffer`` in a correct order for later allgather purpose.
     """
 
     state_buffers: Dict[str, List[Optional[torch.Tensor]]] = {}
@@ -1436,10 +1437,6 @@ def _unflatten_orig_param_states(
             value = value.cpu()
         gathered_state[state_name] = value
 
-    logger.warning(
-        "The total elements of FSDP managed optimizer state %s is %d", state_name, numel
-    )
-
 
 def _allgather_orig_param_states(
     fsdp_param_info: FSDPParamInfo,
@@ -1452,10 +1449,12 @@ def _allgather_orig_param_states(
     Given the ``gathered_state_info`` and ``input_states``, the API allgathers
     all tensor states and restore non-tensor states from ``gathered_state_info``.
     """
-    logger.warning(
-        "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
-        torch.cuda.memory_summary(),
-    )
+    fsdp_state = fsdp_param_info.state
+    if fsdp_state.rank == 0:
+        logger.warning(
+            "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
+            torch.cuda.memory_summary(),
+        )
 
     output_states: Dict[str, Dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
 
@@ -1471,7 +1470,6 @@ def _allgather_orig_param_states(
     # the order of of flat_param._fqns.
     # The final step is to split the flat_param state into original param states
     # and return the result.
-    fsdp_state = fsdp_param_info.state
     flat_param = fsdp_param_info.handle.flat_param
     empty_func = functools.partial(
         torch.empty, dtype=dtype, device=fsdp_state.compute_device
@@ -1484,43 +1482,49 @@ def _allgather_orig_param_states(
         begin = fsdp_state.rank * flat_param._sharded_size.numel()
         # End is inclusive.
         end = begin + flat_param._sharded_size.numel() - 1
-        pos, buffer_idx = 0, 0
+        # buffer_idx corresponds to the parameter index in the FlatParameter.
+        mem_offset, buffer_idx = 0, 0
         for numel, is_padding in zip(
             flat_param._numels_with_padding, flat_param._is_padding_mask
         ):
             if is_padding:
-                padding_begin, padding_end = pos, pos + numel - 1
+                # This memory range is a padding.
+
+                padding_begin, padding_end = mem_offset, mem_offset + numel - 1
                 if padding_begin <= begin <= padding_end:
-                    # This is an align padding right before the first non-None
-                    # buffer in the shard. The shard includes parts of the
-                    # align padding.
+                    # The range is an align padding before the first parameter in
+                    # the shard. The shard includes parts of this align padding.
                     padding_len = (
                         padding_end - begin + 1
                         if end >= padding_end
                         else end - begin + 1
                     )
                 elif padding_begin <= end <= padding_end:
-                    # This is an align padding right after the last non-None
-                    # buffer in the shard. The shard includes parts of the
-                    # align padding.
+                    # The range is an align padding after the last parameter in
+                    # the shard. The shard includes parts of this align padding.
                     padding_len = (
                         end - padding_begin + 1
                         if begin <= padding_begin
                         else end - begin + 1
                     )
                 elif begin < padding_begin <= padding_end < end:
-                    # This is an align padding that is completely in the shard.
+                    # The range is an align padding that is completely in the
+                    # shard.
                     padding_len = numel
                 else:
                     padding_len = 0
                 if padding_len:
                     local_buffers.append(empty_func(padding_len))
             else:
+                # This memory range is a parameter in FlatParameter. As for the
+                # optimizer state_dict, this memory range is a state.
+
+                # We need to check if this rank owns the buffer. If this is None,
+                # the rank does not have any part of the corresponding parameter.
                 if buffers[buffer_idx] is not None:
-                    assert buffers[buffer_idx] is not None  # typing purpose
-                    local_buffers.append(buffers[buffer_idx])
+                    local_buffers.append(cast(torch.Tensor, buffers[buffer_idx]))
                 buffer_idx += 1
-            pos += numel
+            mem_offset += numel
 
         shard_numel_padded = flat_param._sharded_size.numel() - (
             sum(t.numel() for t in local_buffers)
@@ -1538,7 +1542,12 @@ def _allgather_orig_param_states(
             # Add right-handed padding.
             local_buffers.append(empty_func(shard_numel_padded))
         local_shard = torch.cat(local_buffers)
-        assert local_shard.numel() * fsdp_state.world_size == gathered_tensor.numel()
+        assert local_shard.numel() * fsdp_state.world_size == gathered_tensor.numel(), (
+            "The size of local shard times the world size should equal to the "
+            "gathered tensor size. The inconsistency may be from a bug of "
+            "FlatParameter's metadata or the reconstruction logic in optimizer "
+            "state dict."
+        )
         torch.cuda.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
             dist.all_gather_into_tensor(
@@ -1550,7 +1559,11 @@ def _allgather_orig_param_states(
         unpadded_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         flat_param_handle = fsdp_param_info.handle
         orig_states = flat_param_handle._get_unflat_views_aligned(unpadded_tensor)
-        assert len(orig_states) == len(fsdp_param_info.param_indices)
+        assert len(orig_states) == len(fsdp_param_info.param_indices), (
+            "The number of parameters from FlatParameter is not consistent to "
+            "the number of states used by optimizer state dict reconstruction "
+            "logic."
+        )
         for fqn, idx in fsdp_param_info.param_indices.items():
             output_states[fqn][state_name] = orig_states[idx]
 
@@ -1576,7 +1589,7 @@ def _gather_all_orig_param_state(
     Given a optimizer state dict, ``input_states``, which the keys are FQNs to the
     original parameters (not FlatParameters nor parmeter ID), gather all the
     states and unflatten them to the original dimensions. Note that all the
-    params refered by the ``input_states`` must be manageded by FSDP.
+    params referred by the ``input_states`` must be managed by FSDP.
     """
     fsdp_state = fsdp_param_info.state
     if (
@@ -1607,6 +1620,10 @@ def _convert_state_with_orig_params(
     shard_state: bool,
 ) -> Dict[str, Any]:
     fsdp_osd_state: Dict[str, Any] = {}
+    # This variable is used to deduplicate the FSDPParamInfo as one FSDPParamInfo
+    # usually corresponds to multiple parameters. We could not use FSDPParamInfo
+    # as the key because FSDPParamInfo is not hashable. As a result, we fall back
+    # to `id(FSDPParamInfo)`, which the type is an integer.
     all_states: Dict[int, Dict[str, Any]] = {}
     # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
     # across ranks

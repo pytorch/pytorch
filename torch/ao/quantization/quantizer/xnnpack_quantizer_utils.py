@@ -52,6 +52,23 @@ OperatorPatternType.__module__ = (
     "torch.ao.quantization.quantizer.xnnpack_quantizer_utils"
 )
 
+AnnotatorType = Callable[
+    [
+        torch.fx.GraphModule,
+        Optional[QuantizationConfig],
+        Optional[Callable[[Node], bool]],
+    ],
+    Optional[List[List[Node]]],
+]
+OP_TO_ANNOTATOR: Dict[str, AnnotatorType] = {}
+
+
+def register_annotator(op: str):
+    def decorator(annotator: AnnotatorType):
+        OP_TO_ANNOTATOR[op] = annotator
+
+    return decorator
+
 
 class OperatorConfig(NamedTuple):
     # fix List[str] with List[List[Union[nn.Module, FunctionType, BuiltinFunctionType]]]
@@ -145,6 +162,7 @@ def get_bias_qspec(quantization_config: Optional[QuantizationConfig]):
     return quantization_spec
 
 
+@register_annotator("linear")
 def _annotate_linear(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -230,6 +248,7 @@ def _annotate_linear(
     return annotated_partitions
 
 
+@register_annotator("conv2d")
 def _annotate_conv2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -275,6 +294,7 @@ def _annotate_conv2d(
     return annotated_partitions
 
 
+@register_annotator("conv2d_relu")
 def _annotate_conv2d_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -333,6 +353,7 @@ def _annotate_conv2d_relu(
     return annotated_partitions
 
 
+@register_annotator("conv2d_bn")
 def _annotate_conv2d_bn(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -391,6 +412,7 @@ def _annotate_conv2d_bn(
     return annotated_partitions
 
 
+@register_annotator("conv2d_bn_relu")
 def _annotate_conv2d_bn_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -455,6 +477,7 @@ def _annotate_conv2d_bn_relu(
     return annotated_partitions
 
 
+@register_annotator("gru_io_only")
 def _annotate_gru_io_only(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -506,6 +529,7 @@ def _annotate_gru_io_only(
     return annotated_partitions
 
 
+@register_annotator("max_pool2d")
 def _annotate_max_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -556,6 +580,7 @@ def _annotate_max_pool2d(
     return annotated_partitions
 
 
+@register_annotator("adaptive_avg_pool2d")
 def _annotate_adaptive_avg_pool2d(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -605,6 +630,7 @@ def _annotate_adaptive_avg_pool2d(
     return annotated_partitions
 
 
+@register_annotator("add_relu")
 def _annotate_add_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -650,6 +676,7 @@ def _annotate_add_relu(
     return annotated_partitions
 
 
+@register_annotator("add")
 def _annotate_add(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -686,6 +713,7 @@ def _annotate_add(
     return annotated_partitions
 
 
+@register_annotator("mul_relu")
 def _annotate_mul_relu(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -731,6 +759,7 @@ def _annotate_mul_relu(
     return annotated_partitions
 
 
+@register_annotator("mul")
 def _annotate_mul(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -768,6 +797,7 @@ def _annotate_mul(
 
 
 # TODO: remove Optional in return type, fix annotated_partitions logic
+@register_annotator("cat")
 def _annotate_cat(
     gm: torch.fx.GraphModule,
     quantization_config: Optional[QuantizationConfig],
@@ -810,24 +840,6 @@ def _annotate_cat(
             _annotated=True,
         )
     return annotated_partitions
-
-
-OP_TO_ANNOTATOR = {
-    "linear": _annotate_linear,
-    "conv2d": _annotate_conv2d,
-    "conv2d_relu": _annotate_conv2d_relu,
-    "conv2d_bn": _annotate_conv2d_bn,
-    "conv2d_bn_relu": _annotate_conv2d_bn_relu,
-    "max_pool2d": _annotate_max_pool2d,
-    "add": _annotate_add,
-    "add_relu": _annotate_add_relu,
-    "mul": _annotate_mul,
-    "mul_relu": _annotate_mul_relu,
-    "adaptive_avg_pool2d": _annotate_adaptive_avg_pool2d,
-    # input output only gru
-    "gru_io_only": _annotate_gru_io_only,
-    "cat": _annotate_cat,
-}
 
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
