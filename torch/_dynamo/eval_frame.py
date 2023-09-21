@@ -1410,7 +1410,6 @@ class TorchPatcher:
 
         disabled_multi_tensor_opt_modules = {
             adamax,
-            nadam,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
@@ -1464,10 +1463,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
-        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
-        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):
