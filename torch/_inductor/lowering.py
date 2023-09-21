@@ -1031,11 +1031,7 @@ def take(x, index):
     index_loader = index.make_loader()
 
     def fn(idx):
-        idx = list(idx)
-        idx = index_loader(idx)
-        # deal with negative indices
-        idx = ops.where(ops.lt(idx, 0), idx + ops.constant(size[0], torch.int64), idx)
-        idx = [ops.indirect_indexing(idx, size[0])]
+        idx = [ops.indirect_indexing(index_loader(idx), size[0])]
         return flat_loader(idx)
 
     return Pointwise.create(

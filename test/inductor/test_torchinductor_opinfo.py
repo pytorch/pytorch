@@ -219,6 +219,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "randint": {f16, f32, f64, i32, i64},
     "randint_like": {f16, f32, f64, i32, i64},
     "randn_like": {f16, f32, f64},
+    "take": {b8, f16, f32, f64, i32, i64},  # pending negative index handling
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
