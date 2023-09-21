@@ -633,7 +633,7 @@ def cached_autotune(
     filename=None,
 ):
     log.debug(
-        "Inside cached_autotune. filename={}, heuristic_type={}, size_hints={}, meta={}, configs={}",
+        "Inside cached_autotune. filename=%s, heuristic_type=%s, size_hints=%s, meta=%s, configs=%s",
         filename,
         heuristic_type,
         size_hints,
@@ -892,6 +892,7 @@ def triton_config_reduction(
         assert (
             x * r <= _MAX_TENSOR_NUMEL
         ), f"block sizes are too large for a reduction kernel with fp8 conversions. {x=}, {r=}"
+        pass
     else:
         r = min(math.floor(_MAX_TENSOR_NUMEL / x), r)
     cfg = {"XBLOCK": x, "RBLOCK": r}

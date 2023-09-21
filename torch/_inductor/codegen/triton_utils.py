@@ -20,14 +20,12 @@ def signature_of(arg: Union[TensorArg, SizeArg], *, size_dtype: str) -> str:
             tye = "*fp8e5"
         else:
             tye = JITFunction._type_of(arg.dtype)
-        print(f"{arg=}, {tye=}", flush=True)
         if V.graph.is_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
             new_tye = tye.lstrip("*")
             if new_tye in ["fp16", "bf16"]:
                 return "fp32"
             else:
-                print(f"{arg=}, {new_tye=}", flush=True)
                 return new_tye
         else:
             return tye

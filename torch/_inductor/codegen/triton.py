@@ -860,7 +860,7 @@ class TritonKernel(Kernel):
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
         threshold = {
-            ReductionHint.INNER: 256,
+            ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
         last_numel = self.numels[-1]
         if not isinstance(last_numel, (int, sympy.Integer)):

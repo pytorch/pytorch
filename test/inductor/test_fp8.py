@@ -17,8 +17,6 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 torch.set_float32_matmul_precision("high")
 
 
-# Utility functions are copied from
-# https://github.com/pytorch-labs/float8_playground/blob/main/float8_playground/float8_utils.py.
 # define the e4m3/e5m2 constants
 E4M3_MAX_POS = 448.0
 E5M2_MAX_POS = 57344.0
@@ -35,8 +33,6 @@ def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
         x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
     else:
         x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
-    # return x
-    # return x, x.to(float8_dtype)
     return x.to(float8_dtype)
 
 
