@@ -1041,6 +1041,7 @@ def take(x, index):
         ranges=index.get_size(),
     )
 
+
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
     idx = View.handle_negative_index(idx, x.get_size()[dim])
@@ -1140,6 +1141,7 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
+
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
