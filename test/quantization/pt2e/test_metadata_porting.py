@@ -57,6 +57,7 @@ _QUANT_OPS = {
 }
 
 
+# TODO: rename to TestPortMetadataPass to align with the util name?
 class TestMetaDataPorting(QuantizationTestCase):
     def _test_metadata_porting(
         self,
