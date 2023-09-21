@@ -13148,7 +13148,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
-        input = _construct_tensor_for_quantization_test((3, 2), offset=-384, max_val=12)
+        input = _construct_tensor_for_quantization_test((3, 4), offset=-384, max_val=12)
         self.run_test(model, input)
 
     @skipIfUnsupportedMinOpsetVersion(10)
