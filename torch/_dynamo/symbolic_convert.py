@@ -2243,7 +2243,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         except NotImplementedError:
             pass  # closures
 
-        result = skipfiles.check(func.get_filename(), allow_torch=True)
+        result = skipfiles.check_verbose(func.get_filename(), allow_torch=True)
         if result.skipped:
             from torch._dynamo.variables.misc import (
                 produce_trampoline_autograd_apply,

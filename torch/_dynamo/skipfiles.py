@@ -53,19 +53,27 @@ frame-by-frame boundary as dynamo traces, but apply to all functions in that fil
 @skip is a helper decorator that can be applied to your function to cause it to be
 included here.
 
-Dynamo skip/inline rules are defined as follows:
+Dynamo skip/inline rules & priorities are defined as follows:
 * Inline is the default behavior and will be used unless explicitly skipped.
 * Dynamo has two SKIPLIST: BUILTIN_SKIPLIST and THIRDPARTY_SKIPLIST.
     * BUILTIN_SKIPLIST contains builtin python modules, such as abc, collections, etc.
     * THIRDPARTY_SKIPLIST contains common third party libraries, such as numpy, pandas, etc.
 * Functions in these two SKIPLISTs are always skipped, except when they are explicitly
-    put into the two ALLOWLIST: FILENAME_ALLOWLIST and SUBMODULE_ALLOWLIST.
+    put into the two INLINELIST: FILENAME_INLINELIST and SUBMODULE_INLINELIST.
 * PyTorch(torch) is in the BUILTIN_SKIPLIST by default, but there are many cases
     where we want inline the functions under torch namespace. We should add them
-    into FILENAME_ALLOWLIST or SUBMODULE_ALLOWLIST to make dynamo inline those functions.
+    into FILENAME_INLINELIST or SUBMODULE_INLINELIST to make dynamo inline those functions.
 * If you call functions under skipped modules/files, Dynamo will wrap these functions
     as SkipFilesVariable. There are a few functions(e.g, collections.OrderedDict) that
     we have special handling at SkipFilesVariable.call_function.
+
+Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT (inline)
+
+To figure out what the behavior is, check the following list in order:
+* FILENAME_INLINELIST (Inline if YES)
+* SUBMODULE_INLINELIST (Inline if YES)
+* BUILTIN_SKIPLIST & SUBMODULE_INLINELIST (Skip if YES)
+* Inline by default
 
 """
 
@@ -94,7 +102,7 @@ BUILTIN_SKIPLIST = (
     tempfile,
     threading,
     tokenize,
-    torch,  # torch/* is skipped by default unless specified in FILENAME_ALLOWLIST or SUBMODULE_ALLOWLIST
+    torch,  # torch/* is skipped by default unless specified in FILENAME_INLINELIST or SUBMODULE_INLINELIST
     traceback,
     types,
     typing,
@@ -138,7 +146,7 @@ def _module_dir(m: types.ModuleType):
 
 
 # Force inline functions in these files, even the files is in *_SKIPLIST.
-FILENAME_ALLOWLIST = {
+FILENAME_INLINELIST = {
     torch.nn.Sequential.__init__.__code__.co_filename,
     torch.set_rng_state.__code__.co_filename,
     torch._inductor.test_operators.__file__,
@@ -175,19 +183,19 @@ if torch.distributed.is_available():
     # Inline the checkpoint code from distributed
     import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
 
-    FILENAME_ALLOWLIST |= {
+    FILENAME_INLINELIST |= {
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
     }
 
 # Include optimizer code for tracing
-FILENAME_ALLOWLIST |= {
+FILENAME_INLINELIST |= {
     inspect.getfile(obj)
     for obj in torch.optim.__dict__.values()
     if inspect.isclass(obj)
 }
 
 # TODO (zhxchen17) Make exportdb importable here.
-FILENAME_ALLOWLIST |= set(
+FILENAME_INLINELIST |= set(
     glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
 ) | {
     _module_dir(torch) + "_export/wrappers.py",
@@ -195,7 +203,7 @@ FILENAME_ALLOWLIST |= set(
 
 
 # Force inline functions under these modules, even the modules is in *_SKIPLIST.
-SUBMODULE_ALLOWLIST = {
+SUBMODULE_INLINELIST = {
     torch.nn,
     torch.distributions,
     torch.testing,
@@ -212,7 +220,7 @@ SUBMODULE_ALLOWLIST = {
 if torch.distributed.is_available():
     from torch.distributed import _functional_collectives
 
-    SUBMODULE_ALLOWLIST.add(_functional_collectives)
+    SUBMODULE_INLINELIST.add(_functional_collectives)
 
 
 # skip some standard python builtin libs
@@ -333,29 +341,29 @@ class SkipResult:
     reason: Optional[str]
 
 
-def check(filename, allow_torch=False):
+def check_verbose(filename, allow_torch=False):
     """Should skip this file?"""
     if filename is None:
         return SkipResult(True, "filename is None")
-    if filename in FILENAME_ALLOWLIST:
+    if filename in FILENAME_INLINELIST:
         return SkipResult(
             False,
-            "allowlisted in skipfiles.FILENAME_ALLOWLIST",
+            "inlined according skipfiles.FILENAME_INLINELIST",
         )
     if allow_torch and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
-            "allowlisted in skipfiles.SUBMODULE_ALLOWLIST",
+            "inlined according skipfiles.SUBMODULE_INLINELIST",
         )
     if is_fbcode and bool(FBCODE_SKIP_DIRS_RE.match(filename)):
         return SkipResult(
             True,
-            "should be skipped according skipfiles.FBCODE_SKIP_DIRS",
+            "skipped according skipfiles.FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
-        return SkipResult(True, "should be skipped according skipfiles.SKIP_DIRS")
+        return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
     else:
-        return SkipResult(False, "inlining by default")
+        return SkipResult(False, "inlined by default")
 
 
 # skip common third party libs
@@ -366,7 +374,7 @@ _recompile_re()
 
 
 def is_torch_inline_allowed(filename):
-    return any(filename.startswith(_module_dir(mod)) for mod in SUBMODULE_ALLOWLIST)
+    return any(filename.startswith(_module_dir(mod)) for mod in SUBMODULE_INLINELIST)
 
 
 @functools.lru_cache(None)

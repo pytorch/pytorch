@@ -32,7 +32,7 @@ class ExcTests(LoggingTestCase):
                 torch.randn(1)
             ),
             """\
-'call_function graph_break in skip_files _dynamo/decorators.py, skip reason: should be skipped according skipfiles.SKIP_DIRS'
+'call_function graph_break in skip_files _dynamo/decorators.py, skip reason: skipped according skipfiles.SKIP_DIRS'
 
 from user code:
    File "test_exc.py", line N, in fn001
@@ -165,7 +165,7 @@ from user code:
         self.assertExpectedInline(
             munge_exc(record.getMessage()),
             """\
-Graph break: 'call_function graph_break in skip_files _dynamo/decorators.py, skip reason: should be skipped according skipfiles.SKIP_DIRS' from user code at:
+Graph break: 'call_function graph_break in skip_files _dynamo/decorators.py, skip reason: skipped according skipfiles.SKIP_DIRS' from user code at:
   File "test_exc.py", line N, in fn001
     return fn002(x)
   File "test_exc.py", line N, in fn002
