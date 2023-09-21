@@ -42,22 +42,21 @@ class EnvVarMetric:
 
     def value(self) -> Any:
         value = os.environ.get(self.env_var)
-        if value is None and self.required:
+
+        # Github CI will set some env vars to an empty string
+        DEFAULT_ENVVAR_VALUES = [None, ""]
+        if value in DEFAULT_ENVVAR_VALUES:
+            if not self.required:
+                return None
+
             raise ValueError(
                 f"Missing {self.name}. Please set the {self.env_var} "
                 "environment variable to pass in this value."
             )
-        try:
-            if self.type_conversion_fn:
-                return self.type_conversion_fn(value)
-            return value
-        except TypeError:
-            # For optional inputs that don't natively convert from None types,
-            # we want to return None instead of raising an error.
-            if value is None:
-                return None
-            else:
-                raise
+
+        if self.type_conversion_fn:
+            return self.type_conversion_fn(value)
+        return value
 
 
 def emit_metric(
