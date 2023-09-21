@@ -281,21 +281,6 @@ elseif(INTERN_USE_EIGEN_BLAS)
   list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
 endif()
 
-# ---[ FFTW
-set(AT_FFTW_ENABLED 0)
-set(USE_FFTW OFF)
-if(USE_FFTW OR NOT MKL_FOUND)
-  find_library(LIBFFTW3 fftw3)
-  if(LIBFFTW3)
-    find_path(FFTW3_INCLUDE_DIR NAMES fftw3.h ONLY_CMAKE_FIND_ROOT_PATH)
-    if(FFTW3_INCLUDE_DIR)
-      SET(AT_FFTW_ENABLED 1)
-      SET(USE_FFTW ON)
-      include_directories(${FFTW3_INCLUDE_DIR})
-    endif()
-  endif()
-endif()
-
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT AT_MKL_ENABLED)
@@ -1813,18 +1798,6 @@ if(NOT INTERN_BUILD_MOBILE)
 
   add_definitions(-DUSE_EXTERNAL_MZCRC)
   add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
-
-  # Is __thread supported?
-  if(NOT MSVC)
-    CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
-  else(NOT MSVC)
-    CHECK_C_SOURCE_COMPILES("static __declspec( thread ) int x = 1; int main() { return x; }" C_HAS_THREAD)
-  endif(NOT MSVC)
-  if(NOT C_HAS_THREAD)
-    message(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
-  else(NOT C_HAS_THREAD)
-    add_compile_options(-DTH_HAVE_THREAD)
-  endif(NOT C_HAS_THREAD)
 
   find_package(ZVECTOR) # s390x simd support
 endif()
