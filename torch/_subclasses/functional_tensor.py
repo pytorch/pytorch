@@ -43,19 +43,19 @@ class FunctionalTensor(torch.Tensor):
     # These are all aten ops that correspond to metadata queries.
     # We want FunctionalTensor to be able to handle them directly.
     metadata_fns = [
-        torch.ops.aten.is_contiguous.default,
-        torch.ops.aten.is_contiguous.memory_format,
-        torch.ops.aten.is_strides_like_format.default,
-        torch.ops.aten.is_non_overlapping_and_dense.default,
-        torch.ops.aten.size.default,
-        torch.ops.aten.sym_size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.sym_stride.default,
-        torch.ops.aten.storage_offset.default,
-        torch.ops.aten.sym_storage_offset.default,
-        torch.ops.aten.numel.default,
-        torch.ops.aten.sym_numel.default,
-        torch.ops.aten.dim.default,
+        torch.ops.aten.is_contiguous.default,  # type: ignore[has-type]
+        torch.ops.aten.is_contiguous.memory_format,  # type: ignore[has-type]
+        torch.ops.aten.is_strides_like_format.default,  # type: ignore[has-type]
+        torch.ops.aten.is_non_overlapping_and_dense.default,  # type: ignore[has-type]
+        torch.ops.aten.size.default,  # type: ignore[has-type]
+        torch.ops.aten.sym_size.default,  # type: ignore[has-type]
+        torch.ops.aten.stride.default,  # type: ignore[has-type]
+        torch.ops.aten.sym_stride.default,  # type: ignore[has-type]
+        torch.ops.aten.storage_offset.default,  # type: ignore[has-type]
+        torch.ops.aten.sym_storage_offset.default,  # type: ignore[has-type]
+        torch.ops.aten.numel.default,  # type: ignore[has-type]
+        torch.ops.aten.sym_numel.default,  # type: ignore[has-type]
+        torch.ops.aten.dim.default,  # type: ignore[has-type]
     ]
 
     def __new__(cls, elem):
