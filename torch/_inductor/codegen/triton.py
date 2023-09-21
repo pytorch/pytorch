@@ -187,10 +187,16 @@ class TritonOverrides(OpOverrides):
             # Both dtype and src_dtype are set. This is used by torch to(dtype=dtype).
             # It takes the maximum min_elem_per_thread if there are multiple fp8 conversions
             # in the same kernel.
-            V.kernel.min_elem_per_thread = max(
-                _get_min_elements_per_thread(src_dtype, dtype),
-                V.kernel.min_elem_per_thread,
-            )
+            min_elem_per_thread = _get_min_elements_per_thread(src_dtype, dtype)
+            if V.kernel.inside_reduction:
+                V.kernel.min_elem_per_thread_reduction_block = max(
+                    min_elem_per_thread, V.kernel.min_elem_per_thread_reduction_block
+                )
+            else:
+                V.kernel.min_elem_per_thread_non_reduction_block = max(
+                    min_elem_per_thread,
+                    V.kernel.min_elem_per_thread_non_reduction_block,
+                )
 
         if dtype == torch.bool:
             return f"({x} != 0)"
@@ -800,7 +806,6 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        min_elem_per_thread=0,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -818,19 +823,20 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
-        self.min_elem_per_thread = min_elem_per_thread
+        self.min_elem_per_thread_reduction_block = 0
+        self.min_elem_per_thread_non_reduction_block = 0
         # Upper bounds for indirect_indexing and their str representation
         self.indirect_max_sizes: Dict[Tuple[str, str], [sympy.Expr, str]] = {}
         self.last_usage = set()
 
         self.persistent_reduction = self.should_use_persistent_reduction()
-        print(f"{self.persistent_reduction=}", flush=True)
-        self.no_x_dim = (
-            self.reduction_hint == ReductionHint.INNER
-            and self.persistent_reduction
-            and len(self.numels) == 2
-            and self.numels[-1] >= 256
-        )
+        # self.no_x_dim = (
+        #     self.reduction_hint == ReductionHint.INNER
+        #     and self.persistent_reduction
+        #     and len(self.numels) == 2
+        #     and self.numels[-1] >= 256
+        # )
+        self.no_x_dim = False
         self.initialize_range_tree(pid_cache)
 
         # A set of autotuning hints to pass as part of triton_meta
@@ -854,7 +860,7 @@ class TritonKernel(Kernel):
         if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
         threshold = {
-            ReductionHint.INNER: 1024,
+            ReductionHint.INNER: 256,
         }.get(self.reduction_hint, 64)
         last_numel = self.numels[-1]
         if not isinstance(last_numel, (int, sympy.Integer)):
@@ -887,7 +893,6 @@ class TritonKernel(Kernel):
                     names[i], self.numels[i], names[i][0], pid_idx, self, pid_cache
                 )
             )
-        print(f"{self.range_trees=}", flush=True)
         for tree in self.range_trees:
             # reduction indexing goes inside a loop
             if not tree.is_loop():
@@ -1858,8 +1863,6 @@ class TritonKernel(Kernel):
 
         code = IndentedBuffer()
 
-        print(f"{self.numels=}, {self=}", flush=True)
-
         size_hints = [
             next_power_of_2(V.graph.sizevars.size_hint(numel)) for numel in self.numels
         ]
@@ -1962,7 +1965,8 @@ class TritonKernel(Kernel):
                     reduction_hint={reduction_hint},
                     filename=__file__,
                     meta={triton_meta!r},
-                    min_elem_per_thread={self.min_elem_per_thread}
+                    min_elem_per_thread_reduction_block={self.min_elem_per_thread_reduction_block},
+                    min_elem_per_thread_non_reduction_block={self.min_elem_per_thread_non_reduction_block}
                 )
                 @triton.jit
             """
@@ -1978,7 +1982,8 @@ class TritonKernel(Kernel):
                     size_hints={size_hints!r}, {tile_hint}
                     filename=__file__,
                     meta={triton_meta!r},
-                    min_elem_per_thread={self.min_elem_per_thread}
+                    min_elem_per_thread_reduction_block={self.min_elem_per_thread_reduction_block},
+                    min_elem_per_thread_non_reduction_block={self.min_elem_per_thread_non_reduction_block}
                 )
                 @triton.jit
             """
@@ -2242,7 +2247,6 @@ class TritonScheduling(BaseScheduling):
     can_fuse_horizontal = can_fuse
 
     def generate_node_schedule(self, nodes, numel, rnumel):
-        print(f"{[n.group for n in nodes]=}, {numel=}, {rnumel=}", flush=True)
         node_schedule = []
         current_loop_writes = set()
         is_current_reductions = set()

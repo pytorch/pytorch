@@ -252,16 +252,7 @@ class CachingAutotuner(KernelInterface):
         # Setting device_type="hip" required on ROCm to pass down to triton
         compile_meta["device_type"] = "cuda" if torch.version.hip is None else "hip"
 
-        print(f"{type(self.fn)=}")
-        print(f"{self.fn=}")
-        # import inspect
-        # lines = inspect.getsource(self.fn)
-        # print("==== code start ====")
-        # print(lines)
-        # print("==== code end ====")
-
         if warm_cache_only_with_cc:
-            print("before compile 1", flush=True)
             return (
                 triton.compile(
                     self.fn,
@@ -276,12 +267,10 @@ class CachingAutotuner(KernelInterface):
         with torch.cuda.device(compile_meta["device"]):
             # need to initialize context
             torch.cuda.synchronize(torch.cuda.current_device())
-            print("before compile 2", flush=True)
             binary = triton.compile(
                 self.fn,
                 **compile_meta,
             )
-            print("after compile 2", flush=True)
             binary._init_handles()
 
         call_args = [
@@ -643,7 +632,14 @@ def cached_autotune(
     heuristic_type,
     filename=None,
 ):
-    print(f"{filename=}, {heuristic_type=}, {size_hints=}, {meta=}, {[config.kwargs for config in configs]=}", flush=True)
+    log.debug(
+        "Inside cached_autotune. filename={}, heuristic_type={}, size_hints={}, meta={}, configs={}",
+        filename,
+        heuristic_type,
+        size_hints,
+        meta,
+        [config.kwargs for config in configs],
+    )
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
     has additional debugging, error handling, and on-disk caching.
@@ -840,14 +836,25 @@ def triton_config(
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None, min_elem_per_thread=0) -> Config:
+def triton_config_reduction(
+    size_hints,
+    x,
+    r,
+    is_persistent_reduction,
+    num_stages=1,
+    num_warps=None,
+    min_elem_per_thread_reduction_block=0,
+    min_elem_per_thread_non_reduction_block=0,
+) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
     based on size_hints. Size_hints is a tuple of numels in each tile
     dimension and will be rounded up to the nearest power of 2.
 
-    min_elem_per_thread controls the minimum number of elements
-    processed by each thread. It's always enforced.
+    min_elem_per_thread_reduction_block controls the minimum number of elements
+    processed by each thread in a reduction block. It's always enforced.
+    min_elem_per_thread_non_reduction_block controls the minimum number of elements
+    processed by each thread outside of a reduction block. It's always enforced.
     """
 
     target = conditional_product(x, r)
@@ -869,12 +876,26 @@ def triton_config_reduction(size_hints, x, r, num_stages=1, num_warps=None, min_
     num_warps = next_power_of_2(min(max(num_warps, 2), 8))
 
     # Increase x to satisfy min_elem_per_thread requirements.
-    # x = max(x, min_elem_per_thread)
-    x = max(x, min_elem_per_thread * _NUM_THREADS_PER_WARP * num_warps)
-    r = min(math.floor(_MAX_TENSOR_NUMEL / x), r)
+    block_size = max(
+        conditional_product(x, r),
+        min_elem_per_thread_reduction_block * _NUM_THREADS_PER_WARP * num_warps,
+    )
+    multiplier = math.ceil(block_size / conditional_product(x, r))
+    if is_persistent_reduction:
+        x *= multiplier
+    else:
+        r *= multiplier
+    x = max(
+        x, min_elem_per_thread_non_reduction_block * _NUM_THREADS_PER_WARP * num_warps
+    )
+    if is_persistent_reduction:
+        assert (
+            x * r <= _MAX_TENSOR_NUMEL
+        ), f"block sizes are too large for a reduction kernel with fp8 conversions. {x=}, {r=}"
+    else:
+        r = min(math.floor(_MAX_TENSOR_NUMEL / x), r)
     cfg = {"XBLOCK": x, "RBLOCK": r}
 
-    print(f"{cfg=}, {size_hints=}, {min_elem_per_thread=}")
     check_config(cfg, xnumel=size_hints[0])
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
@@ -909,7 +930,14 @@ def triton_config_tiled_reduction(size_hints, x, y, r, num_stages=1):
     return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
-def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thread=0):
+def pointwise(
+    size_hints,
+    meta,
+    tile_hint=None,
+    filename=None,
+    min_elem_per_thread_reduction_block=0,
+    min_elem_per_thread_non_reduction_block=0,
+):
     """
     Construct @triton.heuristics() based on size_hints.
     """
@@ -920,8 +948,11 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
         meta.get("autotune_hints", set()), size_hints, bs
     )
 
+    assert (
+        min_elem_per_thread_reduction_block == 0
+    ), f"Pointwise shouldn't have a reduction block! {min_elem_per_thread_reduction_block=}"
     triton_config_with_settings = functools.partial(
-        triton_config, min_elem_per_thread=min_elem_per_thread
+        triton_config, min_elem_per_thread=min_elem_per_thread_non_reduction_block
     )
 
     if len(size_hints) == 1:
@@ -1005,17 +1036,30 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None, min_elem_per_thre
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elem_per_thread=0):
+def reduction(
+    size_hints,
+    reduction_hint=False,
+    meta=None,
+    filename=None,
+    min_elem_per_thread_reduction_block=0,
+    min_elem_per_thread_non_reduction_block=0,
+):
     """args to @triton.heuristics()"""
     assert meta is not None
     rnumel = size_hints[-1]
+    triton_config_reduction_with_settings = functools.partial(
+        triton_config_reduction,
+        min_elem_per_thread_reduction_block=min_elem_per_thread_reduction_block,
+        min_elem_per_thread_non_reduction_block=min_elem_per_thread_non_reduction_block,
+        is_persistent_reduction=False,
+    )
     if len(size_hints) == 2:
-        contiguous_config = triton_config_reduction(
-            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048), min_elem_per_thread=min_elem_per_thread
+        contiguous_config = triton_config_reduction_with_settings(
+            size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
         )
-        outer_config = triton_config_reduction(size_hints, 128, 8, min_elem_per_thread=min_elem_per_thread)
-        tiny_config = triton_config_reduction(
-            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048), min_elem_per_thread=min_elem_per_thread
+        outer_config = triton_config_reduction_with_settings(size_hints, 128, 8)
+        tiny_config = triton_config_reduction_with_settings(
+            size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
@@ -1046,7 +1090,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_el
         if disable_pointwise_autotuning():
             return cached_autotune(
                 size_hints,
-                [triton_config_reduction(size_hints, 32, 128, min_elem_per_thread=min_elem_per_thread)],
+                [triton_config_reduction_with_settings(size_hints, 32, 128)],
                 meta=meta,
                 heuristic_type=HeuristicType.REDUCTION,
                 filename=filename,
@@ -1057,12 +1101,12 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_el
                 contiguous_config,
                 outer_config,
                 tiny_config,
-                triton_config_reduction(size_hints, 64, 64, min_elem_per_thread=min_elem_per_thread),
-                triton_config_reduction(size_hints, 8, 512, min_elem_per_thread=min_elem_per_thread),
+                triton_config_reduction_with_settings(size_hints, 64, 64),
+                triton_config_reduction_with_settings(size_hints, 8, 512),
                 # halve the XBLOCK/RBLOCK compared to outer_config
                 # TODO: this may only be beneficial when each iteration of the reduciton
                 # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-                triton_config_reduction(size_hints, 64, 4, num_warps=8, min_elem_per_thread=min_elem_per_thread),
+                triton_config_reduction_with_settings(size_hints, 64, 4, num_warps=8),
             ],
             meta=meta,
             filename=filename,
@@ -1071,11 +1115,24 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_el
     raise NotImplementedError(f"size_hints: {size_hints}")
 
 
-def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=None, min_elem_per_thread=0):
+def persistent_reduction(
+    size_hints,
+    reduction_hint=False,
+    meta=None,
+    filename=None,
+    min_elem_per_thread_reduction_block=0,
+    min_elem_per_thread_non_reduction_block=0,
+):
     xnumel, rnumel = size_hints
+    triton_config_reduction_with_settings = functools.partial(
+        triton_config_reduction,
+        min_elem_per_thread_reduction_block=min_elem_per_thread_reduction_block,
+        min_elem_per_thread_non_reduction_block=min_elem_per_thread_non_reduction_block,
+        is_persistent_reduction=True,
+    )
 
     configs = [
-        triton_config_reduction(size_hints, xblock, rnumel, min_elem_per_thread=min_elem_per_thread)
+        triton_config_reduction_with_settings(size_hints, xblock, rnumel)
         for xblock in (1, 8, 32, 128)
         if rnumel * xblock <= 4096 and xblock <= xnumel
     ]
@@ -1087,8 +1144,8 @@ def persistent_reduction(size_hints, reduction_hint=False, meta=None, filename=N
         configs = configs[-1:]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         configs = [
-            triton_config_reduction(
-                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel, min_elem_per_thread=min_elem_per_thread
+            triton_config_reduction_with_settings(
+                size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, rnumel
             )
         ]
     for c in configs:
