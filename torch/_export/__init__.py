@@ -12,7 +12,7 @@ import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, Sequence, Mapping, TypedDict
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -125,7 +125,7 @@ def export__RC__(
     kwargs = kwargs if kwargs is not None else {}
 
     from collections.abc import Mapping, Sequence
-    from typing import get_origin, get_args, _TypedDictMeta  # type: ignore[attr-defined]
+    from typing import get_origin, get_args
 
     def assoc_zip(combined_args, dynamic_shapes):
         if isinstance(combined_args, (tuple, list)):
