@@ -40,6 +40,7 @@ if HAS_CUDA:
 
 _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
 
+
 def _get_path_without_sccache() -> str:
     """
     Get the PATH environment variable without sccache.
