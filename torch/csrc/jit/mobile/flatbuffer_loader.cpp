@@ -295,8 +295,7 @@ mobile::Module FlatbufferLoader::parseModule(
       ivalues && module->object_types(),
       "Parsing flatbuffer module: Corrupted ivalues/object_types field");
   TORCH_CHECK(
-      reinterpret_cast<const char*>(ivalues) < end,
-      "Corrupted ivalues field");
+      reinterpret_cast<const char*>(ivalues) < end, "Corrupted ivalues field");
   all_ivalues_.resize(ivalues->size());
   all_types_.resize(module->object_types()->size());
   storages_.resize(module->storage_data_size());
