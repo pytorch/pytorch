@@ -380,6 +380,7 @@ inductor_all_samples = {
     "unfold",
     "unsqueeze",
     "sum",
+    "take",
     "amax",
     "amin",
     "all",

@@ -1119,6 +1119,30 @@ def glu(x, dim=-1):
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
 
+@register_lowering(aten.take, type_promotion_kind=None)
+def take(x, index):
+    assert isinstance(x, TensorBox)
+    assert index.get_dtype() == torch.int64
+
+    flat = view(x, [sympy_product(x.get_size())])
+    size = flat.get_size()
+    flat_loader = flat.make_loader()
+    index_loader = index.make_loader()
+
+    def fn(idx):
+        idx = list(idx)
+        idx = index_loader(idx)
+        # deal with negative indices
+        idx = ops.where(ops.lt(idx, 0), idx + ops.constant(size[0], torch.int64), idx)
+        idx = [ops.indirect_indexing(idx, size[0])]
+        return flat_loader(idx)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=index.get_size(),
+    )
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
@@ -1988,7 +2012,6 @@ make_fallback(aten.special_scaled_modified_bessel_k0)
 make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
-make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)

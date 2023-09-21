@@ -486,6 +486,7 @@ aten::sum
 aten::sum.IntList_out
 aten::sum.dim_IntList
 aten::sum.out
+aten::take
 aten::tan
 aten::tan.out
 aten::tan_
