@@ -4038,6 +4038,38 @@ def trunc(self: Tensor, **kwargs) -> Tensor:
     return torch.where(self > 0, torch.floor(self), torch.ceil(self))
 
 
+@register_decomposition(aten.hann_window.periodic)
+def hann_window_periodic(
+    window_length: int,
+    periodic: bool,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: Optional[bool] = None,
+) -> Tensor:
+    # aten::hann_window.periodic(int window_length, bool periodic, ...) -> Tensor
+    if window_length == 1:
+        return torch.ones(
+            size=(1,),
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+        )
+    else:
+        X = torch.arange(
+            start=0,
+            end=window_length,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+        )
+        N = window_length + (1 if periodic else 0)
+        return torch.pow(torch.sin((X * torch.pi) / (N - 1)), 2)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

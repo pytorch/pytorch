@@ -8391,6 +8391,18 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
         yield SampleInput(q, args=sample_args, kwargs=sample_kwargs)
 
 
+def sample_inputs_hann_window(op_info, device, dtype, requires_grad, **kwargs):
+    for window_length in [1, 2, 5, 10]:
+        for periodic in [True, False]:
+            yield SampleInput(
+                window_length,
+                periodic,
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+            )
+
+
 # Includes some values such that N * N won't be a multiple of 4,
 # which should ensure we test the vectorized and non-vectorized
 # kernel code paths.
@@ -18676,6 +18688,12 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ),
+    ),
+    OpInfo(
+        'hann_window',
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_hann_window,
     ),
 ]
 op_db += opinfo.definitions.op_db
