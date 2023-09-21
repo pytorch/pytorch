@@ -1040,7 +1040,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 """
                 #include <ATen/ATen.h>
                 #include <ATen/native/BinaryOps.h>
-                #include <>
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
                 #define reinterpret_tensor torch::inductor::_reinterpret_tensor
@@ -1126,7 +1125,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                     self.prefix.splice(
                         """
-                            auto inputs = alloc_tensors_by_stealing_from_handles(input_handles);
+                            auto inputs = alloc_tensors_by_stealing_from_handles(input_handles, num_inputs());
                         """
                     )
 

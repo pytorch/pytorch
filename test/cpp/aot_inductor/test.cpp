@@ -60,9 +60,13 @@ TEST(AotInductorTest, BasicTest) {
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerGetMaxOutputShape(
       container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
-  std::vector<AtenTensorHandle> input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  AtenTensorHandle* output_handles;
+  auto input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(
+          input_tensors.data(), input_tensors.size());
+  size_t num_outputs;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      AOTInductorModelContainerGetNumOutputs(container_handle, &num_outputs));
+  std::vector<AtenTensorHandle> output_handles(num_outputs);
 
   const auto& cuda_stream = at::cuda::getCurrentCUDAStream(0 /*device_index*/);
   const auto stream_id = cuda_stream.stream();
@@ -75,14 +79,14 @@ TEST(AotInductorTest, BasicTest) {
       container_handle,
       input_handles.data(),
       input_tensors.size(),
+      output_handles.data(),
+      output_handles.size(),
       stream_handle,
-      proxy_executor_handle,
-      &output_handles));
+      proxy_executor_handle));
 
-  ASSERT_EQ(output_sizes.size(), 1);
-  ASSERT_EQ(output_ndims[0], 2);
-  ASSERT_EQ(output_sizes[0][0], 32);
-  ASSERT_EQ(output_sizes[0][1], 10);
+  outputs = torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+      output_handles.data(), output_handles.size());
+
   ASSERT_TRUE(torch::allclose(results_ref, outputs[0]));
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       AOTInductorModelContainerDelete(container_handle));
