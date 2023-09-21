@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import copy
 from collections.abc import Sequence
 from functools import partial
 import warnings
@@ -71,6 +72,7 @@ from torch._subclasses.fake_utils import outputs_alias_inputs
 
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
+from torch._prims_common.wrappers import _maybe_remove_out_wrapper
 
 from torch.testing._internal import opinfo
 from torch.testing._internal import composite_compliance
@@ -660,6 +662,13 @@ class TestCommon(TestCase):
             else list(supported_dtypes)[0]
         )
 
+        # Ops from python_ref_db point to python decomps that are potentially
+        # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
+        # ops before testing to avoid clashing with OpInfo.supports_out
+        if not op.supports_out:
+            op = copy.copy(op)
+            op.op = _maybe_remove_out_wrapper(op.op)
+
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
             # calls it normally to get the expected result
@@ -781,6 +790,14 @@ class TestCommon(TestCase):
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
+
+        # Ops from python_ref_db point to python decomps that are potentially
+        # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
+        # ops before testing to avoid clashing with OpInfo.supports_out
+        if not op.supports_out:
+            op = copy.copy(op)
+            op.op = _maybe_remove_out_wrapper(op.op)
+
         for sample in samples:
             # calls it normally to get the expected result
             expected = op(sample.input, *sample.args, **sample.kwargs)
