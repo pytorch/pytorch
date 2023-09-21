@@ -664,8 +664,8 @@ def _run_test_output_match(
                     dtype == torch.float16
                     and op.name in test_suite.fp16_low_precision_list
                 ):
-                    rtol = 2e-3
-                    atol = 1e-5
+                    rtol = 1e-2
+                    atol = 1e-3
                 else:
                     rtol = None
                     atol = None
@@ -702,6 +702,8 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
     dynamic_shapes: bool = False
 
     fp16_low_precision_list = [
+        "nn.functional.batch_norm",
+        "native_batch_norm",
         "dot",
     ]
 

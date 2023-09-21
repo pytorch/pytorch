@@ -426,19 +426,12 @@ inline c10::FunctionSchema&& schema(c10::FunctionSchema&& s) {
 
 namespace detail {
 
-inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
-    c10::FunctionSchema&& s) {
-  return c10::make_right<c10::OperatorName, c10::FunctionSchema>(std::move(s));
-}
-inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
-    c10::OperatorName&& n) {
-  return c10::make_left<c10::OperatorName, c10::FunctionSchema>(std::move(n));
-}
-inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(
-    const char* str) {
+inline std::variant<c10::OperatorName, c10::FunctionSchema>
+constructSchemaOrName(const char* str) {
   auto s = torch::jit::parseSchemaOrName(str);
-  if (s.is_right()) {
-    s.right().setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
+  if (std::holds_alternative<c10::FunctionSchema>(s)) {
+    std::get<c10::FunctionSchema>(s).setAliasAnalysis(
+        c10::AliasAnalysisKind::FROM_SCHEMA);
   }
   return s;
 }
@@ -627,9 +620,17 @@ class TORCH_API Library final {
   template <typename NameOrSchema, typename Func>
   Library& def(NameOrSchema&& raw_name_or_schema, Func&& raw_f) & {
     CppFunction f(std::forward<Func>(raw_f));
-    auto name_or_schema = detail::constructSchemaOrName(
-        std::forward<NameOrSchema>(raw_name_or_schema));
-    return _def(std::move(name_or_schema), std::move(f));
+    if constexpr (
+        std::is_same_v<NameOrSchema, c10::OperatorName> ||
+        std::is_same_v<NameOrSchema, c10::FunctionSchema>) {
+      return _def(
+          ::std::forward<NameOrSchema>(raw_name_or_schema), ::std::move(f));
+    } else {
+      return _def(
+          detail::constructSchemaOrName(
+              ::std::forward<NameOrSchema>(raw_name_or_schema)),
+          ::std::move(f));
+    }
   }
 
   /// Register an implementation for an operator.  You may register multiple
@@ -834,7 +835,7 @@ class TORCH_API Library final {
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _def(
-      c10::either<c10::OperatorName, c10::FunctionSchema>&&,
+      std::variant<c10::OperatorName, c10::FunctionSchema>&&,
       CppFunction&& f) &;
   Library& _impl(
       const char* name,
