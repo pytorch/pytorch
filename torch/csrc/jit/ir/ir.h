@@ -23,7 +23,7 @@
 #include <c10/util/Optional.h>
 
 #include <functional>
-#include <iostream>
+#include <iosfwd>
 #include <unordered_set>
 #include <vector>
 

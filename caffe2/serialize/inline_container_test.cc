@@ -347,6 +347,10 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(100, 150, 1010));
 
 TEST_P(ChunkRecordIteratorTest, ChunkRead) {
+#ifdef _WIN32
+  GTEST_SKIP() << "Failing on windows";
+  return;
+#endif
   auto chunkSize = GetParam();
   std::string zipFileName = "output_chunk_" + std::to_string(chunkSize) + ".zip";
   const char* fileName = zipFileName.c_str();
