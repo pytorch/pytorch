@@ -502,6 +502,7 @@ lazy_tensor_core_python_sources = [
 
 inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/shim_common.cpp",
+    "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 
@@ -1141,6 +1142,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/NativeMultiheadAttnKernel.cpp",
     "aten/src/ATen/native/cpu/PaddingKernel.cpp",
     "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
