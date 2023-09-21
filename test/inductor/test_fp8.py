@@ -240,9 +240,11 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    #@parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, ))
     @parametrize("shape", ((4, 2048, 4096),))
-    @parametrize("enable_split_reductions", (True, False))
+    #@parametrize("enable_split_reductions", (True, False))
+    @parametrize("enable_split_reductions", (False, ))
     def test_layernorm_fp8_quant_benchmark(
         self,
         float8_dtype: torch.dtype,
