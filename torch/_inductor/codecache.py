@@ -779,7 +779,7 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode and config.is_fbcode():
+    if aot_mode:
         # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
         cuda = True
 
