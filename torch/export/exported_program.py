@@ -364,12 +364,11 @@ class ExportedProgram:
         )
         self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
-        with torch.no_grad():
-            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
-            # See: torch/_functorch/aot_autograd.py#L1034
-            res = torch.fx.Interpreter(self.graph_module).run(
-                *ordered_params, *ordered_buffers, *args, enable_io_processing=False
-            )
+        # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+        # See: torch/_functorch/aot_autograd.py#L1034
+        res = torch.fx.Interpreter(self.graph_module).run(
+            *ordered_params, *ordered_buffers, *args, enable_io_processing=False
+        )
 
         if self.call_spec.out_spec is not None:
             mutation = self.graph_signature.buffers_to_mutate
