@@ -1419,8 +1419,8 @@ Tensor mish_backward_mps(const Tensor& grad_output, const Tensor& self) {
       MPSGraphTensor* tanhSPSquaredTensor = [mpsGraph multiplicationWithPrimaryTensor:tanhSPTensor
                                                                       secondaryTensor:tanhSPTensor
                                                                                  name:nil];
-      MPSGraphTensor* unitTesor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
-      MPSGraphTensor* oneMinusTanhSPSquaredTensor = [mpsGraph subtractionWithPrimaryTensor:unitTesor
+      MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
+      MPSGraphTensor* oneMinusTanhSPSquaredTensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
                                                                            secondaryTensor:tanhSPSquaredTensor
                                                                                       name:nil];
       MPSGraphTensor* xSigmoidTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
