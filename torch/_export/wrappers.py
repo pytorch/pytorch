@@ -2,8 +2,7 @@ from contextlib import contextmanager
 
 import torch
 import torch._custom_ops
-from torch._C import _ExcludeDispatchKeyGuard, DispatchKey, DispatchKeySet
-from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
+from torch._C import DispatchKey
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
@@ -38,17 +37,14 @@ def export_tracepoint_fake_tensor_mode(mode, *args, **kwargs):
         return args
 
 
-@_export_tracepoint.py_impl(DispatchKey.Functionalize)
-def export_tracepoint_functionalize(*args, **kwargs):
-    reapply_views = torch._C._functionalization_reapply_views_tls()
-    unwrapped_args = _unwrap_all_tensors_from_functional(
-        args, reapply_views=reapply_views
-    )
-    unwrapped_kwargs = _unwrap_all_tensors_from_functional(
-        kwargs, reapply_views=reapply_views
-    )
-    with _ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.Functionalize)):
-        return _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
+@_export_tracepoint.py_functionalize_impl
+def export_tracepoint_functional(ctx, *args, **kwargs):
+    unwrapped_args = ctx.unwrap_tensors(args)
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+
+    with ctx.redispatch_to_next():
+        out = _export_tracepoint(*unwrapped_args, **unwrapped_kwargs)
+        return ctx.wrap_tensors(out)
 
 
 @_export_tracepoint.py_impl(DispatchKey.CPU)

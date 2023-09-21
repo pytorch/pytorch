@@ -26,6 +26,9 @@ static bool directory_exists(const char* path) {
 TEST(TempFileTest, MatchesExpectedPattern) {
   c10::TempFile file = c10::make_tempfile("test-pattern-");
 
+#if defined(_WIN32)
+  ASSERT_TRUE(file.open());
+#endif
   ASSERT_TRUE(file_exists(file.name.c_str()));
 #if !defined(_WIN32)
   ASSERT_NE(file.name.find("test-pattern-"), std::string::npos);
