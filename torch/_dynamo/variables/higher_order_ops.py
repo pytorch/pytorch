@@ -1180,7 +1180,12 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self, tx, args: List[VariableTracker], kwargs: Dict[str, VariableTracker]
     ) -> VariableTracker:
         from torch._higher_order_ops.wrap import TagActivationCheckpoint
+        from torch.utils.checkpoint import noop_context_fn
         from .builder import wrap_fx_proxy
+
+        if "context_fn" in kwargs and kwargs["context_fn"] != noop_context_fn:
+            context_fn = kwargs.pop("context_fn")
+            self.value.context_fn = context_fn.fn
 
         checkpoint_kwargs, gmod_kwargs = TagActivationCheckpoint.divide_kwargs(kwargs)
 

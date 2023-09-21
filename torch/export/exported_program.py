@@ -363,10 +363,12 @@ class DynamoExportedProgram(ExportedProgram):
         if self.call_spec.in_spec is not None:
             try:
                 user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
+                args = fx_pytree.tree_flatten_spec(
+                    user_args, self.call_spec.in_spec, exact_structural_match=True
+                )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise error.InternalError(
+                raise TypeError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -381,12 +383,11 @@ class DynamoExportedProgram(ExportedProgram):
         )
         self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
-        with torch.no_grad():
-            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
-            # See: torch/_functorch/aot_autograd.py#L1034
-            res = torch.fx.Interpreter(self.graph_module).run(
-                *ordered_params, *ordered_buffers, *args, enable_io_processing=False
-            )
+        # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+        # See: torch/_functorch/aot_autograd.py#L1034
+        res = torch.fx.Interpreter(self.graph_module).run(
+            *ordered_params, *ordered_buffers, *args, enable_io_processing=False
+        )
 
         if self.call_spec.out_spec is not None:
             mutation = self.graph_signature.buffers_to_mutate

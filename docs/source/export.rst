@@ -604,3 +604,4 @@ API Reference
 .. autoclass:: ArgumentSpec
 .. autoclass:: ModuleCallSignature
 .. autoclass:: ModuleCallEntry
+.. autoclass:: InvalidTorchExportBackend
