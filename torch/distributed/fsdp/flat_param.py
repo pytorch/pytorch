@@ -505,6 +505,7 @@ class FlatParamHandle:
         self._training_state = HandleTrainingState.IDLE
         self._debug_level = dist.get_debug_level()
         self._fully_sharded_module = fully_sharded_module
+        self._fqn: Optional[str] = None
         # For strategies that do not free after forward, we skip using sharded
         # views after forward since the unsharded data exists. We still switch
         # `self.flat_param` to point to the sharded flat parameter since what

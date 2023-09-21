@@ -171,6 +171,16 @@ def _lazy_init(
     _cast_buffers_to_dtype_and_device(buffers, buffer_dtypes, state.compute_device)
     state._exec_order_data.init(state, root_module, state.process_group)
     _share_state_and_init_handle_attrs(state, root_module)
+
+    # HACK: For debugging:
+    module_to_module_name = {
+        module: module_name for module_name, module in root_module.named_modules()
+    }
+    for state in state._all_fsdp_states:
+        if not state._handle:
+            continue
+        fully_sharded_module = state._handle._fully_sharded_module
+        state._handle._fqn = module_to_module_name.get(fully_sharded_module, None)
     return state
 
 
@@ -332,6 +342,14 @@ def _unshard(
     """
     if not handle:
         return
+    log.warning(
+        "[Rank {}] Running all-gather for {} in {} ({})".format(
+            handle.rank,
+            clean_tensor_name(handle._fqn).replace("._fsdp_wrapped_module", ""),
+            handle._training_state,
+            handle._fqn,
+        )
+    )
     with state._device_handle.stream(pre_unshard_stream):
         ran_pre_unshard = handle.pre_unshard()
     if ran_pre_unshard:
