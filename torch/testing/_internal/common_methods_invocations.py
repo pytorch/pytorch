@@ -8764,10 +8764,11 @@ foreach_unary_op_db: List[OpInfo] = [
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
         decorators=(
+            # due to https://github.com/pytorch/pytorch/pull/102427 enabling jiterator for complex
             DecorateInfo(
                 toleranceOverride(
                     {
-                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                        torch.complex64: tol(atol=3e-04, rtol=2e-05)
                     }
                 ),
                 'TestForeach',
