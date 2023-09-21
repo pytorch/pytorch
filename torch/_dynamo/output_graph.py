@@ -50,6 +50,7 @@ from .bytecode_transformation import (
     Instruction,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .current_scope_id import enter_new_scope
 from .exc import (
@@ -1215,6 +1216,11 @@ class SubgraphTracer(fx.Tracer):
         self.lifted_freevars = collections.OrderedDict()
         self.prev_inst = None
 
+        self._cur_code = None
+        self._orig_gm_meta = None
+        self._orig_gm_lineno_map = None
+        self._orig_gm_firstlineno = None
+
     def create_proxy(
         self,
         kind,
@@ -1292,31 +1298,72 @@ class SubgraphTracer(fx.Tracer):
                 trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
                 self.prev_inst = cur_inst
 
-        nn_module_stack = tx.nn_module_stack
-        if nn_module_stack:
-            rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
-
-        if kind in {"call_function", "call_method"}:
-            rv.node.meta["source_fn"] = (rv.node.name, target)
-        elif kind == "call_module":
-            if self.parent is not None:
-                unimplemented("Invoking an nn.Module inside HigherOrderOperator")
-            # For modules we store the class
-            rv.node.meta["source_fn"] = (
-                rv.node.name,
-                rv.node.meta["nn_module_stack"][target][1],
+        # update reference to original meta if we're tracing a new code object
+        if tx.f_code is not self._cur_code:
+            orig_graphmodule_maybe = code_context.get_context(tx.f_code).get(
+                "orig_graphmodule", None
             )
+            if isinstance(orig_graphmodule_maybe, torch.fx.GraphModule):
+                self._orig_gm_meta = [
+                    nd.meta for nd in orig_graphmodule_maybe.graph.nodes
+                ]
+                self._orig_gm_lineno_map = orig_graphmodule_maybe._lineno_map
+                self._orig_gm_firstlineno = (
+                    orig_graphmodule_maybe.forward.__code__.co_firstlineno
+                )
+            else:
+                self._orig_gm_meta = None
+                self._orig_gm_lineno_map = None
+                self._orig_gm_firstlineno = None
 
-        frame_summaries: List[traceback.FrameSummary] = []
-        while tx:
-            frame_summaries.append(tx.frame_summary())
-            tx = getattr(tx, "parent", None)
-        # Reverse the frame_summaries, such that the innermost frame is at the last
-        frame_summaries.reverse()
+        # preserve original meta if it is available
+        if (
+            self._orig_gm_meta
+            and self._orig_gm_lineno_map
+            and self._orig_gm_firstlineno
+        ):
+            lineno = tx.current_instruction.starts_line
+            node_idx = None
+            if lineno is not None:
+                node_idx = self._orig_gm_lineno_map.get(
+                    lineno - self._orig_gm_firstlineno, None
+                )
+            if node_idx is not None:
+                meta = self._orig_gm_meta[node_idx]
+                if "stack_trace" in meta:
+                    rv.node.meta["stack_trace"] = meta["stack_trace"]
+                if "nn_module_stack" in meta and "source_fn" in meta:
+                    rv.node.meta["nn_module_stack"] = meta["nn_module_stack"]
+                    rv.node.meta["source_fn"] = meta["source_fn"]
 
-        # official from_list stub doesn't have new-style type
-        msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = "".join(msgs)
+        if "nn_module_stack" not in rv.node.meta:
+            nn_module_stack = tx.nn_module_stack
+            if nn_module_stack:
+                rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
+
+        if "source_fn" not in rv.node.meta:
+            if kind in {"call_function", "call_method"}:
+                rv.node.meta["source_fn"] = (rv.node.name, target)
+            elif kind == "call_module":
+                if self.parent is not None:
+                    unimplemented("Invoking an nn.Module inside HigherOrderOperator")
+                # For modules we store the class
+                rv.node.meta["source_fn"] = (
+                    rv.node.name,
+                    rv.node.meta["nn_module_stack"][target][1],
+                )
+
+        if "stack_trace" not in rv.node.meta:
+            frame_summaries: List[traceback.FrameSummary] = []
+            while tx:
+                frame_summaries.append(tx.frame_summary())
+                tx = getattr(tx, "parent", None)
+            # Reverse the frame_summaries, such that the innermost frame is at the last
+            frame_summaries.reverse()
+
+            # official from_list stub doesn't have new-style type
+            msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
+            rv.node.stack_trace = "".join(msgs)
 
         return rv
 

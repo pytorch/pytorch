@@ -620,6 +620,27 @@ class TestFX(JitTestCase):
             self.assertTrue(node.stack_trace is not None)
             assert 'test_fx.py' in node.stack_trace
 
+    def test_lineno_map(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                a = torch.sin(a)
+                b = torch.cos(b)
+                return a + b
+
+        tracer = torch.fx.Tracer()
+        graph = tracer.trace(M())
+        gm = GraphModule(tracer.root, graph)
+        expected = {1: 2, 2: 3, 3: 4, 4: 5}
+        self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+
+        # test custom codegen
+        def transform_code(code):
+            return ["print('hello!')\n", *code]
+        gm.graph.on_generate_code(lambda _: transform_code)
+        gm.recompile()
+        expected = {2: 2, 3: 3, 4: 4, 5: 5}
+        self.assertTrue(set(expected.items()).issubset(set(gm._lineno_map.items())))
+
     def test_graph_unique_names_manual(self):
         graph : torch.fx.Graph = torch.fx.Graph()
         a : torch.fx.Node = graph.create_node('placeholder', 'x')
@@ -3772,6 +3793,26 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         m.meta['hello'] = m  # circular reference
         copy_m = copy.deepcopy(m)  # finishes
         self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
+
+    def test_enum(self):
+        from enum import Enum
+
+        class Foo(Enum):
+            A = 1
+            B = 2
+
+        def leaf_fn(arr, enum_val):
+            # Use the raw enum.
+            arr.append(enum_val)
+            return arr[-1].value
+
+        def foo(x):
+            # Pass the enum as argument.
+            return leaf_fn(x, Foo.A)
+
+        traced = torch.fx.symbolic_trace(foo)
+        self.assertEqual(foo([]), traced([]))
+
 
 
 def run_getitem_target():
