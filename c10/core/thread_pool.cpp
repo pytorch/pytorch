@@ -1,15 +1,20 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Logging.h>
+#if !defined(__s390x__)
 #include <cpuinfo.h>
+#endif
 
 namespace c10 {
 
 size_t TaskThreadPoolBase::defaultNumThreads() {
+  size_t num_threads = 0;
+#if !defined(__s390x__)
   cpuinfo_initialize();
-  size_t num_threads = cpuinfo_get_processors_count();
+  num_threads = cpuinfo_get_processors_count();
   if (num_threads > 0) {
     return num_threads;
   }
+#endif
   num_threads = std::thread::hardware_concurrency();
   if (num_threads == 0) {
     num_threads = 1;
