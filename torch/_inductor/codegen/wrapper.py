@@ -22,8 +22,8 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     LineContext,
-    sympy_dot,
     sympy_product,
+    sympy_str,
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
@@ -33,15 +33,13 @@ pexpr = PythonPrinter().doprint
 
 
 def buffer_reuse_key(node: ir.Buffer):
-    size = node.get_size()
-    stride = node.get_stride()
-    last_element = sympy_dot([s - 1 for s in size], stride)
     return (
         node.get_device(),
         node.get_dtype(),
-        V.graph.sizevars.simplify(sympy_product(size)),
-        # Detect gaps in tensor storage caused by strides
-        V.graph.sizevars.size_hint(last_element),
+        # NB: this is symbolic so that we don't try to reuse a buffer
+        # for s0 for s1, just because they happen to share the same
+        # size hint
+        sympy_str(V.graph.sizevars.simplify(node.layout.storage_size())),
     )
 
 
@@ -968,6 +966,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.int_array_id = count()  # for int array local variable declarations
         self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
+        self.arg_var_id = count()
 
         from .cpp import cexpr, CppPrinter
 
@@ -986,6 +985,46 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 return f"({x}/{div})"
 
         self.grid_expr_printer = GridExprCppPrinter().doprint
+
+    def generate_kernel_call(
+        self,
+        name,
+        call_args,
+        grid=None,
+        device_index=None,
+        cuda=True,
+        triton=True,
+    ):
+        """
+        Generates kernel call code.
+
+        cuda: Defines whether the backend is GPU. Otherwise the backend is CPU.
+
+        triton: Defines whether the GPU backend uses Triton for codegen.
+                Otherwise it uses the CUDA language for codegen.
+                Only valid when cuda == True.
+        """
+        if cuda:
+            return super().generate_kernel_call(
+                name, call_args, grid, device_index, cuda, triton
+            )
+        else:
+            if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+                from .cpp import DTYPE_TO_CPP
+
+                new_args = []
+                for arg in call_args:
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"void *{var_name}{self.ending}")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CHECK(aoti_torch_get_data_ptr(&{var_name}, {arg}.get()));"
+                    )
+                    dtype = V.graph.get_dtype(arg)
+                    cpp_dtype = DTYPE_TO_CPP[dtype]
+                    new_args.append(f"({cpp_dtype}*)({var_name})")
+                self.writeline(self.wrap_kernel_call(name, new_args))
+            else:
+                self.writeline(self.wrap_kernel_call(name, call_args))
 
     def write_constant(self, name, hashed):
         # include a hash so our code cache gives different constants different files
@@ -1825,7 +1864,6 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
 
     def __init__(self):
         super().__init__()
-        self.arg_var_id = count()
         self.grid_id = count()
         self.cuda = True
 
