@@ -14,12 +14,12 @@ AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
 }
 
 std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
-    at::Tensor* tensors,
-    size_t length) {
-  std::vector<AtenTensorHandle> result(length);
-  for (size_t i = 0; i < length; i++) {
-    auto allocated = new at::Tensor(std::move(tensors[i]));
-    result[i] = tensor_pointer_to_tensor_handle(allocated);
+    std::vector<at::Tensor>& tensors) {
+  std::vector<AtenTensorHandle> result;
+  result.reserve(tensors.size());
+  for (auto tensor : tensors) {
+    auto allocated = new at::Tensor(std::move(tensor));
+    result.push_back(tensor_pointer_to_tensor_handle(allocated));
   }
   return result;
 }

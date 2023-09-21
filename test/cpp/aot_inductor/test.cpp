@@ -61,8 +61,10 @@ TEST(AotInductorTest, BasicTest) {
       container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
   auto input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(
-          input_tensors.data(), input_tensors.size());
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
+
+  // For outputs, we only allocate a vector to hold returned tensor handles,
+  // not allocating the actual output tensor storage here
   size_t num_outputs;
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       AOTInductorModelContainerGetNumOutputs(container_handle, &num_outputs));

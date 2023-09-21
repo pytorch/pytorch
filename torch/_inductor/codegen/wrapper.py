@@ -1329,7 +1329,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     )
 
                 else:
-                    self.wrapper_call.writeline(f"output_handles[{idx}] = {output};")
+                    self.wrapper_call.writeline(
+                        f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
+                        + f"new at::Tensor({output}));"
+                    )
         else:
             self.wrapper_call.writeline(f"return {{{', '.join(output_refs)}}};\n}}")
 
