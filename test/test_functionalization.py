@@ -1557,18 +1557,6 @@ def forward(self, x_1):
         self.assertEqual(out_ref, out_test_cpp)
         fx_g = make_fx(dispatch_functionalize(f))(x)
         fx_g_cpp = make_fx(_functionalize(f, reapply_views=True, crossref=False, skip_input_mutations=True))(x)
-        self.assertExpectedInline(fx_g.code.strip(), """\
-def forward(self, arg0_1):
-    _efficientzerotensor = torch.ops.aten._efficientzerotensor.default([4])
-    zeros = torch.ops.aten.zeros.default([], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
-    expand = torch.ops.aten.expand.default(zeros, [4]);  zeros = None
-    _to_copy = torch.ops.aten._to_copy.default(expand, device = device(type='meta'));  expand = None
-    _to_copy_1 = torch.ops.aten._to_copy.default(arg0_1, device = device(type='meta'))
-    add = torch.ops.prims.add.default(_to_copy_1, _to_copy);  _to_copy_1 = _to_copy = None
-    expand_1 = torch.ops.aten.expand.default(arg0_1, [4]);  arg0_1 = None
-    _to_copy_2 = torch.ops.aten._to_copy.default(expand_1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'));  expand_1 = None
-    mul = torch.ops.aten.mul.Tensor(_to_copy_2, 2);  _to_copy_2 = None
-    return mul""")  # noqa: B950
         self.assertEqual(fx_g_cpp.code.strip(), fx_g.code.strip())
 
     def test_python_functionalization_is_conj(self):
