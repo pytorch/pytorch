@@ -1471,7 +1471,14 @@ def _get_module_attributes(module):
     annotations = typing.get_type_hints(type(module))
     base_m_annotations = typing.get_type_hints(torch.nn.Module)
     [annotations.pop(k, None) for k in base_m_annotations]
-    return {k: getattr(module, k) for k in annotations}
+    attrs = {}
+    for k in annotations:
+        try:
+            v = getattr(module, k)
+            attrs[k] = v
+        except:
+            continue
+    return attrs
 
 
 @_beartype.beartype
