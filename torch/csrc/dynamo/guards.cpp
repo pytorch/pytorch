@@ -693,10 +693,9 @@ class GuardManager;
  */
 class GuardAccessor {
  public:
-  GuardAccessor(py::object accessor_key) {
-    _accessor_key = accessor_key;
-    _guard_manager = std::make_unique<GuardManager>();
-  }
+  GuardAccessor(py::object accessor_key)
+      : _guard_manager(std::make_unique<GuardManager>()),
+        _accessor_key(accessor_key) {}
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -725,9 +724,8 @@ class GuardAccessor {
  */
 class GetAttrGuardAccessor : public GuardAccessor {
  public:
-  GetAttrGuardAccessor(py::str name) : GuardAccessor(name) {
-    _attr_name = name.ptr();
-  }
+  GetAttrGuardAccessor(py::str name)
+      : GuardAccessor(name), _attr_name(name.ptr()) {}
 
   PyObject* access(PyObject* obj) const override { // borrowed ref
     return PyObject_GetAttr(obj, _attr_name);
@@ -744,9 +742,8 @@ class GetAttrGuardAccessor : public GuardAccessor {
  */
 class GetDictItemGuardAccessor : public GuardAccessor {
  public:
-  GetDictItemGuardAccessor(py::str name) : GuardAccessor(name) {
-    _attr_name = name.ptr();
-  }
+  GetDictItemGuardAccessor(py::str name)
+      : GuardAccessor(name), _attr_name(name.ptr()) {}
 
   PyObject* access(PyObject* obj) const override { // borrowed ref
     return PyDict_GetItem(obj, _attr_name);
@@ -761,9 +758,8 @@ class GetDictItemGuardAccessor : public GuardAccessor {
  */
 class GetItemGuardAccessor : public GuardAccessor {
  public:
-  GetItemGuardAccessor(py::str name) : GuardAccessor(name) {
-    _attr_name = name.ptr();
-  }
+  GetItemGuardAccessor(py::str name)
+      : GuardAccessor(name), _attr_name(name.ptr()) {}
 
   PyObject* access(PyObject* obj) const override { // borrowed ref
     return PyObject_GetItem(obj, _attr_name);
@@ -1105,9 +1101,9 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
       .def(
-             "dict_get_item_manager",
+          "dict_get_item_manager",
           &GuardManager::get_child_manager<GetDictItemGuardAccessor>,
-          py::return_value_policy::referenc
+          py::return_value_policy::reference);
 
-  
   return m;
+}
