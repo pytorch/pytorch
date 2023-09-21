@@ -46,14 +46,6 @@
 #endif // _WIN32
 #endif // __GNUC__
 
-#ifdef __GNUC__
-#define AOTI_TORCH_NOINLINE __attribute__((noinline))
-#elif _MSC_VER
-#define AOTI_TORCH_NOINLINE __declspec(noinline)
-#else
-#define AOTI_TORCH_NOINLINE
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -75,6 +67,9 @@ extern "C" {
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
 
+struct AOTIProxyExecutorOpaque;
+using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
+
 using AOTITorchError = int32_t;
 #define AOTI_TORCH_SUCCESS 0
 #define AOTI_TORCH_FAILURE 1
@@ -85,33 +80,33 @@ using AOTITorchError = int32_t;
 // ABI contract.  (In practice, aten/c10 is pretty good about not renumbering
 // these, so we probably could later switch to having these in the ABI, if
 // desired for perf reasons.)
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_device_type_cpu();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_bfloat16();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_float16();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_float32();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_float64();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_uint8();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int8();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int16();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int32();
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE int32_t aoti_torch_dtype_int64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bfloat16();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float16();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float64();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_uint8();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int8();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int16();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int32();
+AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_int64();
 
 // Free the tensor object
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
 // Get a pointer to the underlying storage data
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_data_ptr(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret, // returns borrowed reference
     AtenTensorHandle tensor);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_sizes(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
     int64_t** ret, // returns borrowed reference
     AtenTensorHandle tensor);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_strides(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
     int64_t** ret, // returns borrowed reference
     AtenTensorHandle tensor);
 
@@ -119,8 +114,7 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_get_strides(
 // through *out. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch__reinterpret_tensor(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__reinterpret_tensor(
     AtenTensorHandle* ret, // returns new reference
     AtenTensorHandle self,
     int64_t ndim,
@@ -132,7 +126,7 @@ aoti_torch__reinterpret_tensor(
 // through *out. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
     AtenTensorHandle* ret, // returns new reference
     int64_t ndim,
     const int64_t* sizes_ptr,
@@ -141,10 +135,21 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_empty_strided(
     int32_t device_type,
     int32_t device_index);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
+    AtenTensorHandle* ret, // returns new reference
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_addmm_out(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat1,
@@ -152,12 +157,12 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_addmm_out(
     float beta,
     float alpha);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_bmm_out(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_bmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_mm_out(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
@@ -167,15 +172,23 @@ AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError aoti_torch_mm_out(
 struct CUDAStreamGuardOpaque;
 using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
-aoti_torch_create_cuda_stream_guard(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
     CUDAStreamGuardHandle* ret_guard, // returns new reference
     void* stream,
     int32_t device_index);
 
-AOTI_TORCH_EXPORT AOTI_TORCH_NOINLINE AOTITorchError
+AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 #endif
+
+// See `ProxyExecutor Design Note` in ir.py for more details
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
+    AOTIProxyExecutorHandle proxy_executor,
+    int extern_node_index,
+    int num_ints,
+    int64_t* flatten_int_args,
+    int num_tensors,
+    void** flatten_tensor_args);
 
 #ifdef __cplusplus
 } // extern "C"
