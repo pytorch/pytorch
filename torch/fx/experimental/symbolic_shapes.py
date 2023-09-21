@@ -1024,8 +1024,11 @@ class SymNode:
         b = self.ge(self.wrap_int(0))
         # Generate a deferred runtime assert
         r = b.expect_true(file, line)
-        # Refine compile time range, if possible
-        if r:
+        # Refine compile time range, but only if it's unbacked.
+        # If you refine range for hinted variables, you can end up making
+        # improper deductions since compile time reasoning may be
+        # incompatible with runtime reasoning.
+        if r and not self.has_hint():
             _advise_is_size(SymInt(self))
         return r
 
