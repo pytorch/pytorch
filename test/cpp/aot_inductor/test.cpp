@@ -44,10 +44,9 @@ TEST(AotInductorTest, BasicTest) {
   torch::Tensor y =
       at::randn({32, 64}, at::dtype(at::kFloat).device(at::kCUDA));
   torch::Tensor results_ref = net.forward(x, y);
-
-  std::vector<torch::Tensor> inputs;
-  inputs.push_back(x);
-  inputs.push_back(y);
+  std::vector<torch::Tensor> input_tensors;
+  input_tensors.push_back(x);
+  input_tensors.push_back(y);
 
   AOTInductorModelContainerHandle container_handle;
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
@@ -55,46 +54,36 @@ TEST(AotInductorTest, BasicTest) {
       1 /*num_models*/,
       false /*is_cpu*/,
       nullptr /*cubin_dir*/));
-  const int64_t* max_output_sizes;
-  int64_t max_output_dim;
-  AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerGetMaxOutputShape(
-      container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
-  c10::IntArrayRef array_size(max_output_sizes, max_output_dim);
-  torch::Tensor output_tensor =
-      at::zeros(array_size, at::dtype(at::kFloat).device(at::kCUDA));
-  std::vector<torch::Tensor> outputs;
-  outputs.push_back(output_tensor);
+  auto input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
+
+  // For outputs, we only allocate a vector to hold returned tensor handles,
+  // not allocating the actual output tensor storage here
+  size_t num_outputs;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      AOTInductorModelContainerGetNumOutputs(container_handle, &num_outputs));
+  std::vector<AtenTensorHandle> output_handles(num_outputs);
 
   const auto& cuda_stream = at::cuda::getCurrentCUDAStream(0 /*device_index*/);
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  std::vector<AtenTensorHandle> input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  std::vector<AtenTensorHandle> output_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(outputs);
-
-  std::vector<const int64_t*> output_sizes(outputs.size());
-  std::vector<int64_t> output_ndims(outputs.size());
 
   AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,
       input_handles.data(),
-      inputs.size(),
+      input_tensors.size(),
       output_handles.data(),
-      outputs.size(),
+      output_handles.size(),
       stream_handle,
-      proxy_executor_handle,
-      output_sizes.data(),
-      output_ndims.data()));
+      proxy_executor_handle));
 
-  ASSERT_EQ(output_sizes.size(), 1);
-  ASSERT_EQ(output_ndims[0], 2);
-  ASSERT_EQ(output_sizes[0][0], 32);
-  ASSERT_EQ(output_sizes[0][1], 10);
+  auto outputs = torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+      output_handles.data(), output_handles.size());
+
   ASSERT_TRUE(torch::allclose(results_ref, outputs[0]));
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       AOTInductorModelContainerDelete(container_handle));
