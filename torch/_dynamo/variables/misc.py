@@ -668,7 +668,7 @@ class GetSetDescriptorVariable(VariableTracker):
         self.desc = desc
 
     def var_getattr(self, tx, name):
-        if name == "__get__":
+        if name == "__get__" and self.source:
             from .builder import VariableBuilder
 
             return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
