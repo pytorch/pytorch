@@ -239,7 +239,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce));
 
   m.def(
-      "all_reduce_(Tensor self(a!), str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
+      "all_reduce_(Tensor(a!) self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_reduce_));
 
