@@ -27,6 +27,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/hip/HIPContext.h>
+#include <ATen/hip/HIPGeneratorImpl.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/hip/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
