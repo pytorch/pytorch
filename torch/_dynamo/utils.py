@@ -17,6 +17,7 @@ import math
 import operator
 import os
 import pstats
+import random
 import sys
 import textwrap
 import threading
@@ -2126,3 +2127,13 @@ def get_static_address_type(t):
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
+
+
+def reset_rng_state(use_xla=False):
+    torch.manual_seed(1337)
+    random.seed(1337)
+    np.random.seed(1337)
+    if use_xla:
+        import torch_xla.core.xla_model as xm
+
+        xm.set_rng_state(1337, str(xm.xla_device()))
