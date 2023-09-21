@@ -18,10 +18,10 @@ class KernelFunction;
 template <typename T>
 using has_symint =
   guts::disjunction<
-    std::is_same<c10::SymInt, std::decay_t<T>>,
-    std::is_same<c10::SymIntArrayRef, std::decay_t<T>>,
-    std::is_same<at::OptionalSymIntArrayRef, std::decay_t<T>>,
-    std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
+    std::is_same<c10::SymInt, T>,
+    std::is_same<c10::SymIntArrayRef, T>,
+    std::is_same<at::OptionalSymIntArrayRef, T>,
+    std::is_same<c10::optional<c10::SymInt>, T>
   >;
 
 template <typename T>
