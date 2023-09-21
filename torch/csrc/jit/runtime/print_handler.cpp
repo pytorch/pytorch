@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/print_handler.h>
 
+#include <atomic>
 #include <iostream>
 #include <string>
 

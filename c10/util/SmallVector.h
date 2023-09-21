@@ -1022,9 +1022,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
 
   SmallVectorImpl& operator=(const SmallVectorImpl& RHS);
 
-  SmallVectorImpl& operator=(SmallVectorImpl&& RHS) noexcept(
-      std::is_nothrow_move_constructible_v<T>&&
-          std::is_nothrow_destructible_v<T>);
+  SmallVectorImpl& operator=(SmallVectorImpl&& RHS);
 
   bool operator==(const SmallVectorImpl& RHS) const {
     if (this->size() != RHS.size())
@@ -1129,9 +1127,7 @@ SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
 }
 
 template <typename T>
-SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(
-    SmallVectorImpl<T>&& RHS) noexcept(std::is_nothrow_move_constructible_v<T>&&
-                                           std::is_nothrow_destructible_v<T>) {
+SmallVectorImpl<T>& SmallVectorImpl<T>::operator=(SmallVectorImpl<T>&& RHS) {
   // Avoid self-assignment.
   if (this == &RHS)
     return *this;
@@ -1343,9 +1339,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
     return *this;
   }
 
-  SmallVector(SmallVector&& RHS) noexcept(
-      std::is_nothrow_move_assignable_v<SmallVectorImpl<T>>)
-      : SmallVectorImpl<T>(N) {
+  SmallVector(SmallVector&& RHS) : SmallVectorImpl<T>(N) {
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
@@ -1366,26 +1360,22 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                                    .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
-  SmallVector& operator=(const Container& RHS) {
+  const SmallVector& operator=(const Container& RHS) {
     this->assign(RHS.begin(), RHS.end());
     return *this;
   }
 
-  SmallVector(SmallVectorImpl<T>&& RHS) noexcept(
-      std::is_nothrow_move_assignable_v<SmallVectorImpl<T>>)
-      : SmallVectorImpl<T>(N) {
+  SmallVector(SmallVectorImpl<T>&& RHS) : SmallVectorImpl<T>(N) {
     if (!RHS.empty())
       SmallVectorImpl<T>::operator=(::std::move(RHS));
   }
 
-  SmallVector& operator=(SmallVector&& RHS) noexcept(
-      std::is_nothrow_move_assignable_v<SmallVectorImpl<T>>) {
+  SmallVector& operator=(SmallVector&& RHS) {
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
 
-  SmallVector& operator=(SmallVectorImpl<T>&& RHS) noexcept(
-      std::is_nothrow_move_constructible_v<SmallVectorImpl<T>>) {
+  SmallVector& operator=(SmallVectorImpl<T>&& RHS) {
     SmallVectorImpl<T>::operator=(::std::move(RHS));
     return *this;
   }
@@ -1406,7 +1396,7 @@ class /* LLVM_GSL_OWNER */ SmallVector : public SmallVectorImpl<T>,
                                    .end())>::iterator_category,
                   std::input_iterator_tag>::value,
           int> = 0>
-  SmallVector& operator=(Container&& C) {
+  const SmallVector& operator=(Container&& C) {
     this->assign(C.begin(), C.end());
     return *this;
   }
