@@ -12,7 +12,7 @@ aspects of contributing to PyTorch.
 
 - [Developing PyTorch](#developing-pytorch)
   - [Tips and Debugging](#tips-and-debugging)
-- [Nightly Checkout \& Pull](#nightly-checkout--pull)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
@@ -53,7 +53,7 @@ aspects of contributing to PyTorch.
 - [Building PyTorch with ASAN](#building-pytorch-with-asan)
   - [Getting `ccache` to work](#getting-ccache-to-work)
   - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-  - [Why LD\_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
+  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
   - [Why no leak detection?](#why-no-leak-detection)
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
