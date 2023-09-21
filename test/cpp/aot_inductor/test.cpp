@@ -55,10 +55,6 @@ TEST(AotInductorTest, BasicTest) {
       1 /*num_models*/,
       false /*is_cpu*/,
       nullptr /*cubin_dir*/));
-  const int64_t* max_output_sizes;
-  int64_t max_output_dim;
-  AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerGetMaxOutputShape(
-      container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
   auto input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
