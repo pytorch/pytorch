@@ -125,12 +125,12 @@ class CudaInterface(DeviceInterface):
             return caching_worker_device_properties["cuda"][device]
 
     @staticmethod
-    def current_stream():
-        return torch.cuda.current_stream()
+    def current_device() -> int:
+        return torch.cuda.current_device()
 
     @staticmethod
-    def set_stream(stream: torch.Stream):
-        torch.cuda.set_stream(stream)
+    def set_device(device: _device_t):
+        torch.cuda.set_device(device)
 
     @staticmethod
     def device_count() -> int:
