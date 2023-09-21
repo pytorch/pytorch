@@ -13144,7 +13144,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model.linear.weight = torch.nn.Parameter(
             _construct_tensor_for_quantization_test((2, 4), max_val=2)
         )
-        model.linear.bias = torch.nn.Parameter(torch.arange(4))
+        model.linear.bias = torch.nn.Parameter(torch.arange(4, dtype=torch.float32))
         model = torch.ao.quantization.convert(model)
 
         # Set fixed input to avoid flaky test.
