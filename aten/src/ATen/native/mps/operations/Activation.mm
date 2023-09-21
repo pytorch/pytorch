@@ -26,8 +26,8 @@
 #include <ATen/ops/leaky_relu_native.h>
 #include <ATen/ops/log_sigmoid_backward_native.h>
 #include <ATen/ops/log_sigmoid_forward_native.h>
-#include <ATen/ops/mish_native.h>
 #include <ATen/ops/mish_backward_native.h>
+#include <ATen/ops/mish_native.h>
 #include <ATen/ops/relu_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
 #include <ATen/ops/silu_backward_native.h>
@@ -1392,7 +1392,6 @@ Tensor mish_backward_mps(const Tensor& grad_output, const Tensor& self) {
   if (grad_input.numel() == 0)
     return grad_input;
 
-
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* gradOutputTensor_ = nil;
@@ -1418,21 +1417,21 @@ Tensor mish_backward_mps(const Tensor& grad_output, const Tensor& self) {
       MPSGraphTensor* tanhSPTensor = [mpsGraph tanhWithTensor:softplusTensor name:nil];
 
       MPSGraphTensor* tanhSPSquaredTensor = [mpsGraph multiplicationWithPrimaryTensor:tanhSPTensor
-                                                                   secondaryTensor:tanhSPTensor
-                                                                              name:nil];
+                                                                      secondaryTensor:tanhSPTensor
+                                                                                 name:nil];
       MPSGraphTensor* unitTesor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:getMPSDataType(self)];
       MPSGraphTensor* oneMinusTanhSPSquaredTensor = [mpsGraph subtractionWithPrimaryTensor:unitTesor
-                                                                          secondaryTensor:tanhSPSquaredTensor
-                                                                                     name:nil];
+                                                                           secondaryTensor:tanhSPSquaredTensor
+                                                                                      name:nil];
       MPSGraphTensor* xSigmoidTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
-                                                                  secondaryTensor:sigmoidTensor
-                                                                             name:nil];
+                                                                 secondaryTensor:sigmoidTensor
+                                                                            name:nil];
       MPSGraphTensor* partialResultTensor = [mpsGraph multiplicationWithPrimaryTensor:xSigmoidTensor
                                                                       secondaryTensor:oneMinusTanhSPSquaredTensor
                                                                                  name:nil];
       MPSGraphTensor* mishGradTensor = [mpsGraph additionWithPrimaryTensor:partialResultTensor
-                                                            secondaryTensor:tanhSPTensor
-                                                                       name:nil];
+                                                           secondaryTensor:tanhSPTensor
+                                                                      name:nil];
       MPSGraphTensor* gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:gradOutputTensor
                                                                   secondaryTensor:mishGradTensor
                                                                              name:nil];
