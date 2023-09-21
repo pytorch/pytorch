@@ -347,10 +347,6 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(100, 150, 1010));
 
 TEST_P(ChunkRecordIteratorTest, ChunkRead) {
-#ifdef _WIN32
-  GTEST_SKIP() << "Failing on windows";
-  return;
-#endif
   auto chunkSize = GetParam();
   std::string zipFileName = "output_chunk_" + std::to_string(chunkSize) + ".zip";
   const char* fileName = zipFileName.c_str();
@@ -358,7 +354,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   const size_t tensorDataSizeInBytes = 1000;
 
   // write records through writers
-  std::ostringstream oss;
+  std::ostringstream oss(std::ios::binary);
   PyTorchStreamWriter writer([&](const void* b, size_t n) -> size_t {
     oss.write(static_cast<const char*>(b), n);
     return oss ? n : 0;
@@ -375,7 +371,7 @@ TEST_P(ChunkRecordIteratorTest, ChunkRead) {
   ASSERT_EQ(written_records.count(kSerializationIdRecordName), 1);
 
   std::string the_file = oss.str();
-  std::ofstream foo(fileName);
+  std::ofstream foo(fileName, std::ios::binary);
   foo.write(the_file.c_str(), the_file.size());
   foo.close();
   LOG(INFO) << "Finished saving tensor into zip file " << fileName;
