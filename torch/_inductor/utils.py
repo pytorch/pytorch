@@ -1182,15 +1182,36 @@ aot_inductor_launcher = """
     #include <torch/csrc/inductor/aot_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-    void run(
-            std::vector<at::Tensor>& input_tensors,
-            std::vector<at::Tensor>& output_tensors) {
+    class RAIIModelContainer {
+    public:
+        RAIIModelContainer() {
+            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
+                &container_handle,
+                1 /*num_models*/,
+                false /*is_cpu*/,
+                nullptr /*cubin_dir*/));
+        }
+
+        ~RAIIModelContainer() {
+            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerDelete(container_handle));
+        }
+
+        AOTInductorModelContainerHandle get() const {
+            return container_handle;
+        }
+
+    private:
         AOTInductorModelContainerHandle container_handle;
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
-            &container_handle,
-            1 /*num_models*/,
-            false /*is_cpu*/,
-            nullptr /*cubin_dir*/));
+    };
+
+    // Global instance
+    RAIIModelContainer model_container;
+
+    void run(
+        std::vector<at::Tensor>& input_tensors,
+        std::vector<at::Tensor>& output_tensors
+    ) {
+
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
@@ -1206,7 +1227,7 @@ aot_inductor_launcher = """
         AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
-            container_handle,
+            model_container.get(),
             input_handles.data(),
             input_tensors.size(),
             output_handles.data(),
@@ -1216,7 +1237,5 @@ aot_inductor_launcher = """
             output_sizes.data(),
             output_ndims.data()
         ));
-
-        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerDelete(container_handle));
     }
 """
