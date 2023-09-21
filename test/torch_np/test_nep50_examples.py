@@ -3,6 +3,7 @@
 """Test examples for NEP 50."""
 
 import itertools
+from unittest import SkipTest, skipIf as skipif
 
 try:
     import numpy as _np
@@ -86,7 +87,8 @@ examples = {
 }
 
 
-@pytest.mark.skipif(not HAVE_NUMPY, reason="NumPy not found")
+@skipif(not HAVE_NUMPY, reason="NumPy not found")
+@instantiate_parametrized_tests
 class TestNEP50Table(TestCase):
     @parametrize("example", examples)
     def test_nep50_exceptions(self, example):
@@ -150,7 +152,8 @@ corners = {
 }
 
 
-@pytest.mark.skipif(not HAVE_NUMPY, reason="NumPy not found")
+@skipif(not HAVE_NUMPY, reason="NumPy not found")
+@instantiate_parametrized_tests
 class TestCompareToNumpy(TestCase):
     @parametrize("scalar, array, dtype", itertools.product(weaks, non_weaks, dtypes))
     def test_direct_compare(self, scalar, array, dtype):
@@ -183,7 +186,7 @@ class TestCompareToNumpy(TestCase):
             array.dtype.name in corners[name]
             or tnp.asarray(scalar).dtype.name in corners[name]
         ):
-            return pytest.skip(f"{name}(..., dtype=array.dtype)")
+            raise SkipTest(f"{name}(..., dtype=array.dtype)")
 
         try:
             state = _np._get_promotion_state()
@@ -212,9 +215,6 @@ class TestCompareToNumpy(TestCase):
         finally:
             _np._set_promotion_state(state)
 
-
-instantiate_parametrized_tests(TestNEP50Table)
-instantiate_parametrized_tests(TestCompareToNumpy)
 
 if __name__ == "__main__":
     run_tests()

@@ -170,7 +170,8 @@ class TestNonzero(TestCase):
         assert_equal(m.nonzero(), tgt)
 
 
-class TestArgmaxArgminCommon:  # (TestCase): FIXME
+@instantiate_parametrized_tests
+class TestArgmaxArgminCommon(TestCase):
     sizes = [
         (),
         (3,),
@@ -190,12 +191,12 @@ class TestArgmaxArgminCommon:  # (TestCase): FIXME
 
     @parametrize(
         "size, axis",
-        itertools.chain(
+        list(itertools.chain(
             *[
                 [(size, axis) for axis in list(range(-len(size), len(size))) + [None]]
                 for size in sizes
             ]
-        ),
+        )),
     )
     @parametrize("method", [np.argmax, np.argmin])
     def test_np_argmin_argmax_keepdims(self, size, axis, method):
@@ -330,7 +331,7 @@ class TestArgmaxArgminCommon:  # (TestCase): FIXME
         assert_equal(arg_method(out=out1, axis=0), np_method(a, out=out2, axis=0))
         assert_equal(out1, out2)
 
-    @pytest.mark.parametrize(
+    @parametrize(
         "arr_method, np_method", [("argmax", np.argmax), ("argmin", np.argmin)]
     )
     def test_np_vs_ndarray_positional(self, arr_method, np_method):
@@ -344,6 +345,7 @@ class TestArgmaxArgminCommon:  # (TestCase): FIXME
         assert_equal(out1, out2)
 
 
+@instantiate_parametrized_tests
 class TestArgmax(TestCase):
     usg_data = [
         ([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], 0),
@@ -422,8 +424,8 @@ class TestArgmax(TestCase):
         #      with suppress_warnings() as sup:
         #          sup.filter(RuntimeWarning,
         #                      "invalid value encountered in reduce")
-        if np.asarray(arr).dtype.kind in "c":
-            pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
+#        if np.asarray(arr).dtype.kind in "c":
+#            pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
 
         val = np.max(arr)
 
@@ -456,6 +458,7 @@ class TestArgmax(TestCase):
         assert_equal(np.argmax(a), 1)
 
 
+@instantiate_parametrized_tests
 class TestArgmin(TestCase):
     usg_data = [
         ([1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0], 8),
@@ -599,6 +602,7 @@ class TestContains(TestCase):
         assert 42 not in a
 
 
+@instantiate_parametrized_tests
 class TestNoExtraMethods(TestCase):
     # make sure ndarray does not carry extra methods/attributes
     # >>> set(dir(a)) - set(dir(a.tensor.numpy()))
@@ -608,11 +612,6 @@ class TestNoExtraMethods(TestCase):
         with pytest.raises(AttributeError):
             getattr(a, name)
 
-
-# instantiate_parametrized_tests(TestArgmaxArgminCommon)
-instantiate_parametrized_tests(TestArgmax)
-instantiate_parametrized_tests(TestArgmin)
-instantiate_parametrized_tests(TestNoExtraMethods)
 
 
 if __name__ == "__main__":
