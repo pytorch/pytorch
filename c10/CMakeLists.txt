@@ -89,7 +89,9 @@ if(${USE_GLOG})
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
-target_link_libraries(c10 PRIVATE cpuinfo)
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+    target_link_libraries(c10 PRIVATE cpuinfo)
+endif()
 
 find_package(Backtrace)
 if(Backtrace_FOUND)
