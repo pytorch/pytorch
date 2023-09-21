@@ -40,6 +40,12 @@ if HAS_CUDA:
 
 _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlass/")
 
+def _get_path_without_sccache() -> str:
+    """
+    Get the PATH environment variable without sccache.
+    """
+    return os.environ.get("PATH", "").replace("/opt/cache/bin/", "")
+
 
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
@@ -214,7 +220,7 @@ class TestDoBench(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_regular_mm(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -251,7 +257,7 @@ class TestDoBench(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_mm_bias(
         self, dynamic: bool, max_autotune_gemm_backends: str
     ):
@@ -322,7 +328,7 @@ class TestDoBench(TestCase):
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
     @parametrize("max_autotune_gemm_backends", ("CUTLASS", "ATen, Triton, CUTLASS"))
-    @unittest.skip("See https://github.com/pytorch/pytorch/issues/109213")
+    @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_addmm(
         self, dynamic, max_autotune_gemm_backends
     ):
