@@ -1019,6 +1019,32 @@ def diagonal_scatter(input, src, offset: int = 0, dim1: int = 0, dim2: int = 1):
     return output
 
 
+@register_lowering(aten.take, type_promotion_kind=None)
+def take(x, index):
+    assert isinstance(x, TensorBox)
+    assert isinstance(index, TensorBox)
+    assert "int" in str(index.get_dtype())
+
+    flat = view(x, [sympy_product(x.get_size())])
+    size = flat.get_size()
+    flat_loader = flat.make_loader()
+    index_loader = index.make_loader()
+
+    def fn(idx):
+        idx = list(idx)
+        idx = index_loader(idx)
+        # deal with negative indices
+        idx = ops.where(ops.lt(idx, 0), idx + ops.constant(size[0], torch.int64), idx)
+        idx = [ops.indirect_indexing(idx, size[0])]
+        return flat_loader(idx)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=fn,
+        ranges=index.get_size(),
+    )
+
 @register_lowering(aten.select, type_promotion_kind=None)
 def select(x, dim, idx):
     idx = View.handle_negative_index(idx, x.get_size()[dim])
@@ -1118,31 +1144,6 @@ def glu(x, dim=-1):
     a = slice_(x, dim, 0, new_len)
     b = slice_(x, dim, new_len, new_len * 2)
     return mul(a, sigmoid(b))
-
-@register_lowering(aten.take, type_promotion_kind=None)
-def take(x, index):
-    assert isinstance(x, TensorBox)
-    assert index.get_dtype() == torch.int64
-
-    flat = view(x, [sympy_product(x.get_size())])
-    size = flat.get_size()
-    flat_loader = flat.make_loader()
-    index_loader = index.make_loader()
-
-    def fn(idx):
-        idx = list(idx)
-        idx = index_loader(idx)
-        # deal with negative indices
-        idx = ops.where(ops.lt(idx, 0), idx + ops.constant(size[0], torch.int64), idx)
-        idx = [ops.indirect_indexing(idx, size[0])]
-        return flat_loader(idx)
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=fn,
-        ranges=index.get_size(),
-    )
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
