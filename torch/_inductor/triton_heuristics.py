@@ -188,7 +188,7 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_interface = get_interface_for_device(self.meta["device_type"])
+            device_interface = get_interface_for_device("cuda")
             device_prop = device_interface.Worker.get_device_properties(
                 self.meta["device"]
             )
