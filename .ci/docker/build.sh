@@ -71,6 +71,9 @@ if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
+elif [[ "$image" == *cuda*linter* ]]; then
+  # Use a separate Dockerfile for linter to keep a small image size
+  DOCKERFILE="linter-cuda/Dockerfile"
 elif [[ "$image" == *linter* ]]; then
   # Use a separate Dockerfile for linter to keep a small image size
   DOCKERFILE="linter/Dockerfile"
@@ -264,6 +267,11 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CONDA_CMAKE=yes
     ;;
+  pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter)
+    ANACONDA_PYTHON_VERSION=3.9
+    CUDA_VERSION=11.8
+    CONDA_CMAKE=yes
+    ;;
   *)
     # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
@@ -281,6 +289,9 @@ case "$image" in
       extract_version_from_image_name rocm ROCM_VERSION
       NINJA_VERSION=1.9.0
       TRITON=yes
+      # To ensure that any ROCm config will build using conda cmake
+      # and thus have LAPACK/MKL enabled
+      CONDA_CMAKE=yes
     fi
     if [[ "$image" == *centos7* ]]; then
       NINJA_VERSION=1.10.2

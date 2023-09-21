@@ -270,7 +270,7 @@ static void autogradNotImplementedFallbackImpl(
     }
   }
 
-  int aliased_input_idx = -1;
+  int64_t aliased_input_idx = -1;
   for (const auto i : c10::irange(num_arguments)) {
     if (schema.is_aliasing({c10::SchemaArgType::input, i}) &&
         !schema.is_mutable({c10::SchemaArgType::input, i})) {
@@ -279,7 +279,7 @@ static void autogradNotImplementedFallbackImpl(
           "Expected only a single input in the operator schema to have a non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple inputs are aliased with outputs aren't supported. "
           "Please rewrite your function as a composite function.");
-      aliased_input_idx = i;
+      aliased_input_idx = static_cast<int64_t>(i);
     }
   }
 
@@ -479,7 +479,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           "non-write alias annotation (i.e., 'Tensor(a)'). "
           "Non-composite functions where multiple outputs are aliased with inputs aren't supported."
           "Please rewrite your function as a composite function.");
-      aliased_output_idx = i;
+      aliased_output_idx = static_cast<int64_t>(i);
     }
   }
 

@@ -342,6 +342,14 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " backend.");
   }
 
+  virtual void enableCollectivesTiming() {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of enableCollectivesTiming.");
+  }
+
   bool hasHooks() const {
     return onCompletionHook_ != nullptr;
   }
