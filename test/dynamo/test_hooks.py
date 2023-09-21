@@ -451,11 +451,11 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
             def write_grad_as_str_and_do_stuff(self, grad):
                 self.grad_as_str = str(grad)
-                print("Break!")
                 if self.count % 2 == 0:
                     r = grad * grad
                 else:
                     r = grad + grad
+                print("Break!")
                 self.count += 1
                 return r
 

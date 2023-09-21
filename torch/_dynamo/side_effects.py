@@ -535,6 +535,7 @@ class SideEffects:
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.tensor_hooks
             or self.save_for_backward
+            or self.tensor_hooks
         )
 
     def clear(self):
