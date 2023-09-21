@@ -12410,17 +12410,17 @@ Example::
 add_docstr(
     torch.empty_permuted,
     r"""
-empty_permuted(size, physical_layout, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+empty_permuted(size, dim_order, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Creates an uninitialized, non-overlapping and dense tensor with the
-specified :attr:`size`, with :attr:`physical_layout` specifying how the
+specified :attr:`size`, with :attr:`dim_order` specifying how the
 dimensions are physically laid out in memory (each logical dimension is listed
-from outermost to innermost).  :attr:`physical_layout` is a generalization
+from outermost to innermost).  :attr:`dim_order` is a generalization
 of NCHW/NHWC notation: if each dimension is assigned a number according to
 what order they occur in size (N=0, C=1, H=2, W=3), then NCHW is ``(0, 1, 2, 3)``
 while NHWC is ``(0, 2, 3, 1)``.  Equivalently, the strides of the output
-tensor ``t`` are such that ``t.stride(physical_layout[i]) == contiguous_strides[i]``
-(notably, this function is *not* equivalent to ``torch.empty(size).permute(physical_layout)``).
+tensor ``t`` are such that ``t.stride(dim_order[i]) == contiguous_strides[i]``
+(notably, this function is *not* equivalent to ``torch.empty(size).permute(dim_order)``).
 
 Unlike :func:`torch.empty_strided`, this is guaranteed to produce a dense
 tensor with no overlaps.  If possible, prefer using this function over
@@ -12435,7 +12435,7 @@ tensor with no overlaps.  If possible, prefer using this function over
 
 Args:
     size (tuple of int): the shape of the output tensor
-    physical_layout (tuple of int): the ordering of dimensions physically in memory
+    dim_order (tuple of int): the ordering of dimensions physically in memory
 
 Keyword args:
     {dtype}

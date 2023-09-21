@@ -1823,7 +1823,7 @@ def error_inputs_empty_permuted(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput((2,), args=((0, 1),)),
         error_type=RuntimeError,
-        error_regex="Number of dimensions in size does not match the length of the physical_layout"
+        error_regex="Number of dimensions in size does not match the length of the dim_order"
     )
     yield ErrorInput(
         SampleInput((2,), args=((3,),)),

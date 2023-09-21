@@ -131,11 +131,11 @@ def floordiv(a, b):
 # to decompose to empty_strided (but inductor is OK with it, because we are
 # cool with strides and everything goes to empty_strided)
 @register_decomposition([aten.empty_permuted.default])
-def empty_permuted(size, physical_layout, **kwargs):
+def empty_permuted(size, dim_order, **kwargs):
     perm = [0] * len(size)
-    for p, l in enumerate(physical_layout):
+    for p, l in enumerate(dim_order):
         perm[l] = p
-    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+    return torch.empty([size[l] for l in dim_order], **kwargs).permute(perm)
 
 
 @register_decomposition([aten.convolution_backward])

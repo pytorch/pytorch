@@ -2513,25 +2513,25 @@ empty_strided = _make_prim(
 
 def _empty_permuted_meta(
     shape: ShapeType,
-    physical_layout: DimsSequenceType,
+    dim_order: DimsSequenceType,
     *,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
 ) -> TensorLikeType:
-    p_strides = utils.make_contiguous_strides_for([shape[l] for l in physical_layout])
+    p_strides = utils.make_contiguous_strides_for([shape[l] for l in dim_order])
     dim = len(shape)
     torch._check(
-        len(physical_layout) == dim,
+        len(dim_order) == dim,
         lambda: (
             "Number of dimensions in the tensor input does not match the "
-            f"length of the physical layout; i.e. len(size) = {dim} "
-            f"is not equal to len(physical_layout) = {len(physical_layout)}"
+            f"length of the dim order; i.e. len(size) = {dim} "
+            f"is not equal to len(dim_order) = {len(dim_order)}"
         ),
     )
     strides = [0] * len(shape)
     seen_dims = set()
-    for p, l in enumerate(physical_layout):
+    for p, l in enumerate(dim_order):
         torch._check(
             0 <= l < dim,
             lambda: (
@@ -2552,13 +2552,13 @@ def _empty_permuted_meta(
 
 
 _empty_permuted_doc = """
-    Creates a tensor with uninitialized values according to some physical layout,
+    Creates a tensor with uninitialized values according to some dim order,
     that is guaranteed to be non-overlapping and dense.
 """
 
 # TODO: add layout, pin_memory
 empty_permuted = _make_prim(
-    schema="empty_permuted(SymInt[] shape, int[] physical_layout, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
+    schema="empty_permuted(SymInt[] shape, int[] dim_order, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",  # noqa: B950
     return_type=RETURN_TYPE.NEW,
     meta=_empty_permuted_meta,
     impl_aten=torch.empty_permuted,

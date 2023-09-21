@@ -284,32 +284,32 @@ Tensor empty_names(
   return result;
 }
 
-Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c10::optional<ScalarType> dtype_opt,
+Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef dim_order, c10::optional<ScalarType> dtype_opt,
   c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt
 ) {
   // size is logical; aka, the output size you'll get from the operation overall
   //
-  // physical_layout follows NCHW/NHWC convention:
+  // dim_order follows NCHW/NHWC convention:
   // contiguous is [0,1,2,3], channels last is [0,2,3,1]
   //
-  // this means if i is physical index, physical_layout[i] is logical index;
+  // this means if i is physical index, dim_order[i] is logical index;
   // e.g., to find what is innermost physical dim (3), query NHWC[3] == 1
   // (aka it is channels)
   int64_t dim = static_cast<int64_t>(size.size());
   SymDimVector phys_size(dim);
-  TORCH_CHECK(static_cast<int64_t>(physical_layout.size()) == dim,
+  TORCH_CHECK(static_cast<int64_t>(dim_order.size()) == dim,
     "Number of dimensions in size does not match the "
-    "length of the physical_layout; i.e. len(size) = ", dim,
-    " is not equal to len(physical_layout) = ", physical_layout.size());
+    "length of the dim_order; i.e. len(size) = ", dim,
+    " is not equal to len(dim_order) = ", dim_order.size());
   std::vector<bool> seen_dims(dim);
   for (const auto i : c10::irange(dim)) {
-    TORCH_CHECK(physical_layout[i] >= 0 && physical_layout[i] < dim,
+    TORCH_CHECK(dim_order[i] >= 0 && dim_order[i] < dim,
       "Dimension out of range (expected to be between 0 and ", dim - 1, ", but got ",
-      physical_layout[i], " at index ", i, ").  NB: negative dims "
+      dim_order[i], " at index ", i, ").  NB: negative dims "
       "not currently supported; file an issue if you want it.");
-    TORCH_CHECK(!seen_dims[physical_layout[i]], "Duplicate dim not allowed");
-    phys_size[i] = size[physical_layout[i]];
-    seen_dims[physical_layout[i]] = true;
+    TORCH_CHECK(!seen_dims[dim_order[i]], "Duplicate dim not allowed");
+    phys_size[i] = size[dim_order[i]];
+    seen_dims[dim_order[i]] = true;
   }
   // do a contiguous allocation
   Tensor phys_tensor = at::empty_symint(phys_size, dtype_opt, layout_opt, device_opt, pin_memory_opt, c10::nullopt);
@@ -318,7 +318,7 @@ Tensor empty_permuted_symint(SymIntArrayRef size, IntArrayRef physical_layout, c
   // empty_permute*d*, not empty_permute; it's not an empty + permute)
   SymDimVector strides(dim);
   for (const auto i : c10::irange(dim)) {
-    strides[physical_layout[i]] = phys_strides[i];
+    strides[dim_order[i]] = phys_strides[i];
   }
   return phys_tensor.as_strided_symint(size, strides);
 }
