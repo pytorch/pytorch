@@ -91,6 +91,16 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
     }
 
+    def _quantize(self, model, quantizer, example_inputs):
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        return m
+
     def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
         class M(torch.nn.Module):
             def __init__(self):
@@ -105,15 +115,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m)
-        return m
+        return self._quantize(m, quantizer, example_inputs)
 
     def _test_quantizer(
         self,
@@ -961,14 +963,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_module_type(torch.nn.Linear, operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, quantizer, example_inputs)
         node_occurrence = {
             # quantize op for weight node is folded
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
@@ -1001,14 +996,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         quantizer.set_global(operator_config)
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, quantizer, example_inputs)
         node_occurrence = {
             # quantize op for weight node is folded
             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
@@ -1017,12 +1005,42 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
     def test_constant_prop_preserve_metadata(self):
-        """Test to make sure the quantized model gets quantized weight (quantize op is folded)
+        """Test to make sure the get_attr node for const propagated weight Tensor gets the correct
+        metadata (from original get_attr node from weight)
         """
-        m = self._get_pt2e_quantized_linear()
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config()
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        weight_meta = None
+        for n in m.graph.nodes:
+            if n.op == "get_attr" and list(n.users)[0].target == torch.ops.aten.linear.default:
+                weight_meta = n.meta
+                break
+        assert weight_meta is not None, "Expect to find metadata for weight node"
+
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+
         for n in m.graph.nodes:
             if n.op == "get_attr" and "frozen_param" in n.target:
                 self.assertIn("stack_trace", n.meta)
+                for key in n.meta:
+                    self.assertEqual(n.meta[key], weight_meta[key])
 
     def test_add_and_inplace_add(self):
         quantizer = XNNPACKQuantizer()

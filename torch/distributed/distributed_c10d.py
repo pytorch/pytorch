@@ -4277,6 +4277,8 @@ def _get_group_tag(pg: ProcessGroup) -> str:
 def _get_process_group_name(pg: ProcessGroup) -> str:
     return _world.pg_names.get(pg, "None")
 
+def _get_process_group_store(pg: ProcessGroup) -> Store:
+    return _world.pg_map[pg][1]
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.

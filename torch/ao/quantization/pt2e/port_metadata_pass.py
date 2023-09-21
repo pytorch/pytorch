@@ -110,7 +110,7 @@ def _port_metadata_for_input_quant_nodes(
             q_node_input = q_node_input.args[0]
         if isinstance(q_node_input, torch.fx.Node) and q_node_input.op == "get_attr":
             for n in q_to_get_attr_nodes:
-                _add_metadata(n, node)
+                _add_metadata(n, q_node_input)
         _add_metadata(dq_node, node)
 
 
