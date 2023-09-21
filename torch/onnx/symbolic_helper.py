@@ -23,21 +23,26 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _type_utils, errors
+from torch.onnx import _constants, _deprecation, _type_utils, errors
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
 from torch.types import Number
 
 __all__ = [
     "args_have_same_dtype",
+    "cast_pytorch_to_onnx",
     "check_training_mode",
     "dequantize_helper",
     "is_caffe2_aten_fallback",
     "is_complex_value",
     "parse_args",
+    "pytorch_name_to_type",
     "quantize_helper",
     "quantized_args",
     "requantize_bias_helper",
+    "scalar_name_to_pytorch",
+    "scalar_type_to_onnx",
+    "scalar_type_to_pytorch_type",
 ]
 
 # ---------------------------------------------------------------------------------
@@ -1706,6 +1711,140 @@ def args_have_same_dtype(args):
     )
     return has_same_dtype
 
+
+# TODO(justinchuby): Delete these setters, users should set the vars directly.
+@_deprecation.deprecated(
+    "1.13",
+    "2.0",
+    "remove its usage and avoid setting internal variables directly",
+)
+def _set_opset_version(opset_version: int):
+    GLOBALS.export_onnx_opset_version = opset_version
+
+
+@_deprecation.deprecated(
+    "1.13",
+    "2.0",
+    "remove its usage and avoid setting internal variables directly",
+)
+def _set_operator_export_type(operator_export_type):
+    GLOBALS.operator_export_type = operator_export_type
+
+
+# This function is for debug use only.
+# onnx_shape_inference = True by default.
+@_deprecation.deprecated(
+    "1.13",
+    "2.0",
+    "remove its usage and avoid setting internal variables directly",
+)
+def _set_onnx_shape_inference(onnx_shape_inference: bool):
+    GLOBALS.onnx_shape_inference = onnx_shape_inference
+
+
+# Deprecated. Internally use _type_utils.ScalarType
+# TODO: remove these once we support Type's in the JIT IR and we can once again
+# use the unified toType operator
+cast_pytorch_to_onnx = {
+    "Byte": _C_onnx.TensorProtoDataType.UINT8,
+    "Char": _C_onnx.TensorProtoDataType.INT8,
+    "Double": _C_onnx.TensorProtoDataType.DOUBLE,
+    "Float": _C_onnx.TensorProtoDataType.FLOAT,
+    "Half": _C_onnx.TensorProtoDataType.FLOAT16,
+    "Int": _C_onnx.TensorProtoDataType.INT32,
+    "Long": _C_onnx.TensorProtoDataType.INT64,
+    "Short": _C_onnx.TensorProtoDataType.INT16,
+    "Bool": _C_onnx.TensorProtoDataType.BOOL,
+    "ComplexFloat": _C_onnx.TensorProtoDataType.COMPLEX64,
+    "ComplexDouble": _C_onnx.TensorProtoDataType.COMPLEX128,
+    "BFloat16": _C_onnx.TensorProtoDataType.BFLOAT16,
+    "Undefined": _C_onnx.TensorProtoDataType.UNDEFINED,
+}
+
+# Deprecated. Internally use _type_utils.ScalarType
+scalar_name_to_pytorch = {
+    "uint8_t": "Byte",
+    "int8_t": "Char",
+    "double": "Double",
+    "float": "Float",
+    "half": "Half",
+    "int": "Int",
+    "int64_t": "Long",
+    "int16_t": "Short",
+    "bool": "Bool",
+    "complex64": "ComplexFloat",
+    "complex128": "ComplexDouble",
+    "qint8": "QInt8",
+    "quint8": "QUInt8",
+    "qint32": "QInt32",
+    "bfloat16": "BFloat16",
+}
+
+
+# Deprecated. Internally use _type_utils.ScalarType
+# This indicates each scalar type's corresponding
+# torch type. Related source:
+# https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
+scalar_type_to_pytorch_type = [
+    torch.uint8,  # 0
+    torch.int8,  # 1
+    torch.short,  # 2
+    torch.int,  # 3
+    torch.int64,  # 4
+    torch.half,  # 5
+    torch.float,  # 6
+    torch.double,  # 7
+    torch.complex32,  # 8
+    torch.complex64,  # 9
+    torch.complex128,  # 10
+    torch.bool,  # 11
+    torch.qint8,  # 12
+    torch.quint8,  # 13
+    torch.qint32,  # 14
+    torch.bfloat16,  # 15
+]
+
+# Deprecated. Internally use _type_utils.ScalarType
+# source of truth is
+# https://github.com/pytorch/pytorch/blob/master/torch/csrc/utils/tensor_dtypes.cpp
+pytorch_name_to_type = {
+    "Byte": torch.uint8,
+    "Char": torch.int8,
+    "Double": torch.double,
+    "Float": torch.float,
+    "Half": torch.half,
+    "Int": torch.int,
+    "Long": torch.int64,
+    "Short": torch.short,
+    "Bool": torch.bool,
+    "ComplexFloat": torch.complex64,
+    "ComplexDouble": torch.complex128,
+    "QInt8": torch.qint8,
+    "QUInt8": torch.quint8,
+    "QInt32": torch.qint32,
+    "BFloat16": torch.bfloat16,
+}
+
+
+# Deprecated. Internally use _type_utils.ScalarType
+scalar_type_to_onnx = [
+    cast_pytorch_to_onnx["Byte"],  # 0
+    cast_pytorch_to_onnx["Char"],  # 1
+    cast_pytorch_to_onnx["Short"],  # 2
+    cast_pytorch_to_onnx["Int"],  # 3
+    cast_pytorch_to_onnx["Long"],  # 4
+    cast_pytorch_to_onnx["Half"],  # 5
+    cast_pytorch_to_onnx["Float"],  # 6
+    cast_pytorch_to_onnx["Double"],  # 7
+    cast_pytorch_to_onnx["Undefined"],  # 8
+    cast_pytorch_to_onnx["ComplexFloat"],  # 9
+    cast_pytorch_to_onnx["ComplexDouble"],  # 10
+    cast_pytorch_to_onnx["Bool"],  # 11
+    cast_pytorch_to_onnx["Char"],  # 12
+    cast_pytorch_to_onnx["Byte"],  # 13
+    cast_pytorch_to_onnx["Int"],  # 14
+    cast_pytorch_to_onnx["BFloat16"],  # 15
+]
 
 # Global set to store the list of quantized operators in the network.
 # This is currently only used in the conversion of quantized ops from PT -> C2 via ONNX.

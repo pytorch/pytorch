@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 
-_HAS_TRITON = torch._inductor.utils.has_triton()
+_HAS_TRITON = torch.utils.triton_.has_triton()
 requires_cuda = functools.partial(unittest.skipIf, not _HAS_TRITON, "requires cuda")
 
 
