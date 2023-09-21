@@ -1,7 +1,10 @@
 import contextlib
+from abc import ABC, abstractmethod
+from typing import Any, Callable, ContextManager, Tuple
 
 import torch
 import torch.utils._pytree as pytree
+from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch.utils._python_dispatch import return_and_correct_aliasing, TorchDispatchMode
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -254,3 +257,134 @@ def unset_functional_temporarily():
     finally:
         if old is not None:
             torch._C._set_dispatch_mode(old)
+
+
+# This is similar to torch.func.functionalize, but:
+# - It uses FunctionalTensorMode, and FunctionalTensor (a python subclass).
+#   One important advantage to using this mode is that it will let us
+#   run functionalization underneath __torch_dispatch__,
+#   which we need in AOTAutograd.
+# - Doing so means that it does not automatically compose with other
+#   functorch transforms, since these transforms always run above __torch_dispatch__.
+#   That's why this util lives here, and not in functorch.
+def dispatch_functionalize(func):
+    # TODO: pull these from aot autograd
+    def to_fun(t):
+        if isinstance(t, torch.Tensor):
+            return FunctionalTensor.to_functional(t)
+        return t
+
+    def from_fun(t):
+        if not isinstance(t, FunctionalTensor):
+            # quick sanity assert
+            if isinstance(t, torch.Tensor):
+                assert not torch._is_functional_tensor(t)
+            return t
+        torch._sync(t)
+        return torch._from_functional_tensor(t.elem)
+
+    def inner(*args, **kwargs):
+        func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
+        func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+
+        flattened_wrapped_args, _ = pytree.tree_flatten(func_args)
+        flattened_wrapped_kwargs, _ = pytree.tree_flatten(func_kwargs)
+
+        disable_above = torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+        with disable_above, FunctionalTensorMode():
+            func_outputs = func(*func_args, **func_kwargs)
+            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+
+            return outputs
+
+    return inner
+
+
+class BaseFunctionalizeAPI(ABC):
+    @abstractmethod
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        pass
+
+    @abstractmethod
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        pass
+
+    @abstractmethod
+    def functionalize(self, inner_f: Callable) -> Callable:
+        pass
+
+    @abstractmethod
+    def redispatch_to_next(self) -> ContextManager:
+        pass
+
+
+class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        return torch.utils._pytree.tree_map_only(
+            FunctionalTensor, FunctionalTensor.to_functional, args
+        )
+
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        return torch.utils._pytree.tree_map_only(
+            FunctionalTensor, FunctionalTensor.from_functional, args
+        )
+
+    def functionalize(self, inner_f: Callable) -> Callable:
+        return dispatch_functionalize(inner_f)
+
+    def redispatch_to_next(self) -> ContextManager:
+        return unset_functional_temporarily()
+
+
+class CppFunctionalizeAPI(BaseFunctionalizeAPI):
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
+
+        return _wrap_all_tensors_to_functional(args, level=0)
+
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        from torch._functorch.eager_transforms import (
+            _unwrap_all_tensors_from_functional,
+        )
+
+        return _unwrap_all_tensors_from_functional(args, reapply_views=_reapply_views())
+
+    def functionalize(self, inner_f: Callable) -> Callable:
+        return torch.func.functionalize(inner_f)
+
+    def redispatch_to_next(self) -> ContextManager:
+        return torch._C._ExcludeDispatchKeyGuard(
+            torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
+        )
+
+
+class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
+    def __init__(self, interpreter):
+        self.interpreter = interpreter
+
+    def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
+
+        return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
+
+    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+        from torch._functorch.eager_transforms import (
+            _unwrap_all_tensors_from_functional,
+        )
+
+        return _unwrap_all_tensors_from_functional(
+            args, reapply_views=self.interpreter.functionalize_add_back_views()
+        )
+
+    def functionalize(self, inner_f: Callable) -> Callable:
+        return torch.func.functionalize(
+            inner_f,
+            remove="mutations_and_views"
+            if self.interpreter.functionalize_add_back_views()
+            else "mutations",
+        )
+
+    def redispatch_to_next(self) -> ContextManager:
+        return self.interpreter.lower()
