@@ -60,36 +60,24 @@ TEST(AotInductorTest, BasicTest) {
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerGetMaxOutputShape(
       container_handle, 0 /*output_idx*/, &max_output_sizes, &max_output_dim));
 
-  c10::IntArrayRef array_size(max_output_sizes, max_output_dim);
-  torch::Tensor output_tensor =
-      at::zeros(array_size, at::dtype(at::kFloat).device(at::kCUDA));
-  std::vector<torch::Tensor> outputs;
-  outputs.push_back(output_tensor);
+  std::vector<AtenTensorHandle> input_handles =
+      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
+  AtenTensorHandle* output_handles;
 
   const auto& cuda_stream = at::cuda::getCurrentCUDAStream(0 /*device_index*/);
   const auto stream_id = cuda_stream.stream();
   AOTInductorStreamHandle stream_handle =
       reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-  std::vector<AtenTensorHandle> input_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  std::vector<AtenTensorHandle> output_handles =
-      torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(outputs);
-
-  std::vector<const int64_t*> output_sizes(outputs.size());
-  std::vector<int64_t> output_ndims(outputs.size());
 
   AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
   AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
       container_handle,
       input_handles.data(),
-      inputs.size(),
-      output_handles.data(),
-      outputs.size(),
+      input_tensors.size(),
       stream_handle,
       proxy_executor_handle,
-      output_sizes.data(),
-      output_ndims.data()));
+      &output_handles));
 
   ASSERT_EQ(output_sizes.size(), 1);
   ASSERT_EQ(output_ndims[0], 2);

@@ -1182,27 +1182,25 @@ aot_inductor_launcher = """
     #include <torch/csrc/inductor/aot_runtime/interface.h>
     #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-    void run(
-            std::vector<at::Tensor>& input_tensors,
-            std::vector<at::Tensor>& output_tensors) {
+    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
         AOTInductorModelContainerHandle container_handle;
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
             &container_handle,
             1 /*num_models*/,
             false /*is_cpu*/,
             nullptr /*cubin_dir*/));
+
+        auto input_handles = torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(
+            input_tensors.data(), input_tensors.size());
+        size_t num_outputs;
+        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerGetNumOutputs(container_handle, &num_outputs));
+        std::vector<AtenTensorHandle> output_handles(num_outputs);
+
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
 
-        std::vector<AtenTensorHandle> input_handles =
-            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
-        std::vector<AtenTensorHandle> output_handles =
-            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(output_tensors);
-
-        std::vector<const int64_t*> output_sizes(output_tensors.size());
-        std::vector<int64_t> output_ndims(output_tensors.size());
         AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
 
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
@@ -1210,13 +1208,14 @@ aot_inductor_launcher = """
             input_handles.data(),
             input_tensors.size(),
             output_handles.data(),
-            output_tensors.size(),
+            output_handles.size(),
             stream_handle,
-            proxy_executor_handle,
-            output_sizes.data(),
-            output_ndims.data()
+            proxy_executor_handle
         ));
 
         AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerDelete(container_handle));
+
+        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+            output_handles.data(), output_handles.size());
     }
 """
