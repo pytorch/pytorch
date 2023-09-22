@@ -120,7 +120,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-    def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=1):
+    def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=2):
         # Given a `func` that has a single call to `wrap`,
         # we check that:
         # - there are no graph breaks
@@ -135,6 +135,9 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, expected)
 
         self.assertEqual(cnt.frame_count, 1)
+        # wrap + getitem
+        # wrap always returns a tuple. In order to generate a proxy for each
+        # element, we need that many getitem calls.
         self.assertEqual(cnt.op_count, expected_opcount)
 
         self.assertEqual(len(backend.graphs), 1)
@@ -224,7 +227,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(3, 1)
         self._test_wrap_simple(
-            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
+            f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(2, 3)
         )
 
     def test_capture_constants(self):
@@ -264,14 +267,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, x + global_var)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
 
         self.assertEqual(len(backend.graphs), 1)
         wrap_node = find_first_node(backend.graphs[0], wrap)
         self.assertTrue(len(wrap_node.args), 3)
 
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 1)
+        self.assertEqual(op_count(body_function), 2)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
@@ -353,7 +356,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, x + y + x)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(len(backend.graphs), 1)
 
         # No changes to args of outer wrap
@@ -363,14 +366,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # z was lifted to arg of inner wrap
         body_function = getattr(gm, wrap_node.args[0].name)
-        # addition + wrap
-        self.assertEqual(op_count(body_function), 2)
+        # addition + wrap + getitem
+        self.assertEqual(op_count(body_function), 3)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
         # Innermost body function: z was also lifted to arg
         body_function = getattr(body_function, inner_wrap_node.args[0].name)
-        self.assertEqual(op_count(body_function), 1)
+        self.assertEqual(op_count(body_function), 2)
         inner_wrap_node = find_first_node(body_function, wrap)
         self.assertTrue(len(inner_wrap_node.args), 3)
 
@@ -867,14 +870,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         counters.clear()
         opt = torch.compile(f, backend="eager", fullgraph=True)
         opt(x, y)
-        self.assertEqual(counters["stats"]["calls_captured"], 1)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
 
         # verify that we `don't` recompile
         opt(x, y)
-        self.assertEqual(counters["stats"]["calls_captured"], 1)
+        self.assertEqual(counters["stats"]["calls_captured"], 2)
 
         output = opt(x, y, 8)
-        self.assertEqual(counters["stats"]["calls_captured"], 2)
+        self.assertEqual(counters["stats"]["calls_captured"], 4)
         self.assertEqual(output, 2 * x)
 
     def test_wrap_kwarg_default_else_branch(self):
@@ -1498,7 +1501,7 @@ def forward(self):
 
         @torch.compile(backend=cnt)
         def f(x):
-            a, b = wrap(lambda x: ((x.sin(), x.cos()),), x)
+            ((a, b),) = wrap(lambda x: ((x.sin(), x.cos()),), x)
             return a + b
 
         x = torch.randn(2, 3)
@@ -1523,7 +1526,7 @@ def forward(self):
 
         x = torch.randn(3)
         result = f(x)
-        self.assertEqual(result, -x)
+        self.assertEqual(result[0]["a"], -x)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(len(counters["graph_break"]), 0)
 
@@ -1624,7 +1627,7 @@ def forward(self):
             return wrap(lambda x: x + y, x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(f, (x,), 3, expected_opcount=2)
+        self._test_wrap_simple(f, (x,), 3, expected_opcount=3)
 
     def test_nested_wrap(self):
         class MockModule(torch.nn.Module):
@@ -1644,14 +1647,14 @@ def forward(self):
         def fn(x):
             return wrap(gn, x)
 
-        self._test_wrap_simple(fn, (torch.randn(10, 10),), 4, expected_opcount=1)
+        self._test_wrap_simple(fn, (torch.randn(10, 10),), 4)
 
     def test_fn_with_kwargs_in_torch_ops(self):
         def fn(x):
             return wrap(lambda z: torch.cos(input=z), x)
 
         x = torch.randn(3)
-        self._test_wrap_simple(fn, (x,), 2, expected_opcount=1)
+        self._test_wrap_simple(fn, (x,), 2)
 
     def test_hooks(self):
         class ToyModel(torch.nn.Module):

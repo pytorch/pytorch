@@ -257,13 +257,6 @@ def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     return result, TreeSpec(node_type, context, children_specs)
 
 
-def _maybe_unwrap_tree_flatten(pytree: PyTree) -> Any:
-    """Flattens a pytree into a list of values. If the resulting list contains
-    only 1 element, unwrap it out of the list."""
-    flattened, _ = tree_flatten(pytree)
-    return flattened[0] if len(flattened) == 1 else flattened
-
-
 def tree_unflatten(values: List[Any], spec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.

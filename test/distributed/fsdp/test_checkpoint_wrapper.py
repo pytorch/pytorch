@@ -76,8 +76,7 @@ class CheckpointWrapperTest(TestCase):
                 # Verify kwargs can be passed in
                 inp = torch.ones(4, 10, requires_grad=True)
                 out = model(inp, inp, c=inp, d=inp, e=inp, f=inp)
-                out_type = tuple if wrapper == offload_wrapper else list
-                self.assertTrue(isinstance(out, out_type))
+                self.assertTrue(isinstance(out, tuple))
                 self.assertEqual(4, len(out))
                 # Without kwargs should have equivalent gradient requirements.
                 out_no_kwarg = model(inp, inp, inp, inp)
