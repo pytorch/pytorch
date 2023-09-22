@@ -6,7 +6,6 @@ import logging
 from typing import Dict, List, Optional
 
 import torch._C
-from torch._dynamo.variables.constant import ConstantVariable
 import torch.fx
 import torch.nn
 import torch.onnx.operators
@@ -15,7 +14,7 @@ from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_rea
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
-from torch._dynamo.variables.tensor import SymNodeVariable, TensorVariable
+from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
 from torch.utils import _pytree as pytree
 
