@@ -1474,9 +1474,9 @@ def _get_module_attributes(module):
     attrs = {}
     for k in annotations:
         try:
-            v = getattr(module, k)
-            attrs[k] = v
-        except:
+            attrs[k] = getattr(module, k)
+        except AttributeError:
+            torch.onnx.log(f"Skipping module attribute '{k}'")
             continue
     return attrs
 
