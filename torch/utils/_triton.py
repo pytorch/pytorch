@@ -2,6 +2,8 @@ import functools
 
 import torch
 
+from torch._inductor.cuda_properties import get_device_capability
+
 
 @functools.lru_cache(None)
 def has_triton() -> bool:
@@ -10,6 +12,6 @@ def has_triton() -> bool:
     try:
         import triton
 
-        return triton is not None and torch.cuda.get_device_capability() >= (7, 0)
+        return triton is not None and get_device_capability() >= (7, 0)
     except ImportError:
         return False
