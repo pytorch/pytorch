@@ -3129,7 +3129,7 @@ class LoopNestWithSplit:
     both inner-most and outer levels.
     """
 
-    root: List[LoopLevel] = []
+    root: Optional[List[LoopLevel]] = None
     kernel: Optional[CppKernel] = None
 
     @staticmethod
@@ -3161,7 +3161,8 @@ class LoopNestWithSplit:
 
     def get_loops_at(self, depth) -> List[LoopLevel]:
         """Get all the loop levels at the given `depth` (most outer loop has depth 0)"""
-        loops = []
+        loops: List[LoopLevel] = []
+        assert self.root is not None
         for loop in self.root:
             loops += loop.get_loops_at(depth)
         return loops
@@ -3175,6 +3176,7 @@ class LoopNestWithSplit:
         When the loop is split at the top level, the max depth is 1.
         """
         max_depth = 0
+        assert self.root is not None
         loops = self.root
         if len(loops) > 1:
             return 1
@@ -3189,12 +3191,14 @@ class LoopNestWithSplit:
         Whether all the loops are for reduction. Reduction loops
         are always the inner most ones.
         """
+        assert self.root is not None
         return len(self.root) > 0 and self.root[0].is_reduction()
 
     def mark_parallel(self, par_depth):
         assert (
             par_depth <= self.max_parallel_depth()
         ), "Parallel depth cannot exceed the maximal allowed parallel depth"
+        assert self.root is not None
         loops = self.root
         for loop in loops:
             loop.parallel = par_depth
