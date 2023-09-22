@@ -97,7 +97,6 @@ class _ReplicateState(_State):
     def forward_pre_hook(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
-        self.init_helper()
         args, kwargs = self._ddp._pre_forward(*args, **kwargs)
         return args, kwargs
 
@@ -134,6 +133,7 @@ def replicate(
             )
 
     replicate.state(module).mark_module(module, ignored_modules, **kwargs)
+    replicate.state(module).init_helper()
     return module
 
 
