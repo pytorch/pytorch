@@ -987,7 +987,7 @@ void Unpickler::rebuildTensor(bool quantized) {
         result.nbytes(),
         ", but unpickled sizes and strides requires ",
         expected_size,
-        "bytes");
+        " bytes");
 
     // Handle if math_bits were pickled.
     // See `args` of _reduce_ex_internal
