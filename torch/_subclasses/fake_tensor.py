@@ -27,10 +27,10 @@ from torch._prims_common import (
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     free_symbols,
-    _constrain_range_for_size,
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
