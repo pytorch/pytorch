@@ -821,8 +821,8 @@ class GuardManager {
   GuardManager& operator=(const GuardManager&) = delete;
 
   // GuardManager is the owner of the leaf_guards
-  void add_leaf_guard(std::unique_ptr<LeafGuard> leaf_guard) {
-    _leaf_guards.push_back(std::move(leaf_guard));
+  void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
+    _leaf_guards.push_back(leaf_guard);
   }
 
   /**
@@ -969,7 +969,7 @@ class GuardManager {
  private:
   // Leaf guards are the terminal guards on this object, e.g, type check on a
   // list. These guards have to be run before any children are run
-  std::vector<std::unique_ptr<LeafGuard>> _leaf_guards;
+  std::vector<std::shared_ptr<LeafGuard>> _leaf_guards;
 
   // GuardAccessors nodes to access the child guards.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
@@ -1037,8 +1037,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("__repr__", &GuardDebugInfo::repr);
 
   // Leaf Guards
-  py::class_<LeafGuard, std::unique_ptr<LeafGuard>>(py_m, "LeafGuard");
-  py::class_<PythonLambdaGuard, LeafGuard, std::unique_ptr<PythonLambdaGuard>>(
+  py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard");
+  py::class_<PythonLambdaGuard, LeafGuard, std::shared_ptr<PythonLambdaGuard>>(
       py_m, "PythonLambdaGuard")
       .def(py::init<py::function, py::function>())
       .def("__call__", &PythonLambdaGuard::check);
@@ -1083,8 +1083,8 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object lambda1,
              py::object lambda2) -> void {
-            self.add_leaf_guard(
-                std::make_unique<PythonLambdaGuard>(lambda1, lambda2));
+            self.add_leaf_guard(std::move(
+                std::make_shared<PythonLambdaGuard>(lambda1, lambda2)));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
