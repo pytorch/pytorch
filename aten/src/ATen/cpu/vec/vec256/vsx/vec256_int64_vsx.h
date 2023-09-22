@@ -245,6 +245,8 @@ Vectorized<int64_t> inline minimum(
   return a.minimum(b);
 }
 
+DEFINE_SHIFT_FUNCS(int64_t)
+
 } // namespace
 } // namespace vec
 } // namespace at

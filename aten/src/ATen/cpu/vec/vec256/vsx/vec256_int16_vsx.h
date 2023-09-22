@@ -362,6 +362,7 @@ Vectorized<int16_t> inline minimum(
   return a.minimum(b);
 }
 
+DEFINE_SHIFT_FUNCS(int16_t)
 
 } // namespace
 } // namespace vec

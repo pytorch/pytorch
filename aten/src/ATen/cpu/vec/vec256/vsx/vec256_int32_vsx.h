@@ -293,6 +293,8 @@ Vectorized<int32_t> inline minimum(
   return a.minimum(b);
 }
 
+DEFINE_SHIFT_FUNCS(int32_t)
+
 } // namespace
 } // namespace vec
 } // namespace at
