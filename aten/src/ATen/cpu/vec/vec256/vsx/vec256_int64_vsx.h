@@ -232,26 +232,6 @@ class Vectorized<int64_t> {
 };
 
 template <>
-Vectorized<int64_t> inline operator<<(
-    const Vectorized<int64_t>& a,
-    const Vectorized<int64_t>& b) {
-  vuint64 shift_vec0 = reinterpret_cast<vuint64>(b.vec0());
-  vuint64 shift_vec1 = reinterpret_cast<vuint64>(b.vec1());
-  return Vectorized<int64_t>{
-      vec_sl(a.vec0(), shift_vec0), vec_sl(a.vec1(), shift_vec1)};
-}
-
-template <>
-Vectorized<int64_t> inline operator>>(
-    const Vectorized<int64_t>& a,
-    const Vectorized<int64_t>& b) {
-  vuint64 shift_vec0 = reinterpret_cast<vuint64>(b.vec0());
-  vuint64 shift_vec1 = reinterpret_cast<vuint64>(b.vec1());
-  return Vectorized<int64_t>{
-      vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
-}
-
-template <>
 Vectorized<int64_t> inline maximum(
     const Vectorized<int64_t>& a,
     const Vectorized<int64_t>& b) {
@@ -264,6 +244,8 @@ Vectorized<int64_t> inline minimum(
     const Vectorized<int64_t>& b) {
   return a.minimum(b);
 }
+
+DEFINE_SHIFT_FUNCS(int64_t)
 
 template <>
 Vectorized<int64_t> C10_ALWAYS_INLINE
