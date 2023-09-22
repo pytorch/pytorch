@@ -2969,7 +2969,7 @@ def parse_args(args=None):
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
-        args.multiprocess,
+        args.init_distributed,
         rank=rank,
         world_size=args.world_size,
         port=args.distributed_master_port,
@@ -3001,7 +3001,8 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    if args.multiprocess:
+    args.init_distributed = args.only and args.multiprocess
+    if args.init_distributed:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
         # https://github.com/pytorch/pytorch/issues/107300
@@ -3124,13 +3125,16 @@ def run(runner, args, original_dir=None):
         patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus
-        if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
             args.device_index = "0"
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
 
     if args.device_index is not None:
+        if args.multiprocess:
+            print("Cannot specify both --device_index and --multiprocess")
+            return sys.exit(-1)
         os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
     elif args.performance:
