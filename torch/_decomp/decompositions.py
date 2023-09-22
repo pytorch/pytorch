@@ -4064,16 +4064,17 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
-# Decompositions of _assert_async and _assert_async.msg to no-op for use when exporting
+# Decompositions of _assert ops to no-op for use when exporting
+
 
 @register_decomposition(aten._assert_async)
-def _assert_async_noop(self: Tensor):
+def _assert_async_noop(self: Tensor, assert_msg: Optional[str]):
     return
 
 
-@register_decomposition(aten._assert_async.msg)
-def _assert_async_noop(self: Tensor, assert_msg: str):
-    return msg
+@register_decomposition(aten._functional_assert_async.msg)
+def _functional_assert_async_noop(self: Tensor, assert_msg: str, dep_token: Tensor):
+    return
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

@@ -82,19 +82,6 @@ def register_decomposition(ops):
     return decomp.register_decomposition(ops, decompositions)
 
 
-# TODO: for now, inductor doesn't handle asserts
-# because the condition is symbool -> tensor in the graph.
-@register_decomposition([aten._assert_async.msg])
-def assert_async_msg_decomp(tensor, msg):
-    return
-
-
-# Following `assert_async_msg_decomp` and implement as non-op.
-@register_decomposition([aten._functional_assert_async.msg])
-def functional_assert_async_msg_decomp(tensor, msg):
-    return
-
-
 @register_decomposition([aten.sym_constrain_range_for_size.default])
 def sym_constrain_range_for_size(symbol, *, min=None, max=None):
     return
