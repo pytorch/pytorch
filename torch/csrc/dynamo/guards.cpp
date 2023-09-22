@@ -679,9 +679,7 @@ class PythonLambdaGuard : public LeafGuard {
  */
 class NoTensorAliasingGuard : public LeafGuard {
  public:
-  NoTensorAliasingGuard() {
-    _is_first_call = true;
-  }
+  NoTensorAliasingGuard() : _is_first_call(true) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (_is_first_call) {
@@ -734,6 +732,7 @@ class GuardAccessor {
   }
 
   virtual ~GuardAccessor() = default;
+  // Returns a new reference
   virtual PyObject* access(PyObject* obj) const = 0;
 
  private:
@@ -754,7 +753,9 @@ class GetAttrGuardAccessor : public GuardAccessor {
   GetAttrGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
+  // Returns a new reference
   PyObject* access(PyObject* obj) const override { // borrowed ref
+    // PyObject_GetAttr returns a new reference. No need of manual incref.
     return PyObject_GetAttr(obj, _attr_name);
   }
 
@@ -772,8 +773,12 @@ class GetDictItemGuardAccessor : public GuardAccessor {
   GetDictItemGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
+  // Returns a new reference
   PyObject* access(PyObject* obj) const override { // borrowed ref
-    return PyDict_GetItem(obj, _attr_name);
+    PyObject* item = PyDict_GetItem(obj, _attr_name);
+    // manually incref because PyDict_GetItem returns a borrowed ref.
+    Py_INCREF(item);
+    return item;
   }
 
  private:
@@ -788,7 +793,9 @@ class GetItemGuardAccessor : public GuardAccessor {
   GetItemGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
+  // Returns a new reference
   PyObject* access(PyObject* obj) const override { // borrowed ref
+    // PyObject_GetItem returns a new reference. No need of manual incref.
     return PyObject_GetItem(obj, _attr_name);
   }
 
@@ -899,13 +906,18 @@ class GuardManager {
 
     // Iterate over accessors.
     bool failed_on_first = true;
-    for (const auto& accessor : _accessors) {
-      auto& manager = accessor->get_guard_manager();
-      result = result && manager->check_nopybind(accessor->access(value));
-      if (!result) {
-        break;
+    if (result) {
+      for (const auto& accessor : _accessors) {
+        auto& manager = accessor->get_guard_manager();
+        PyObject* accessed_value = accessor->access(value); // owning ref
+        result = result && manager->check_nopybind(accessed_value);
+        // accessed_value was a new reference. Decref it.
+        Py_DECREF(accessed_value);
+        if (!result) {
+          break;
+        }
+        failed_on_first = false;
       }
-      failed_on_first = false;
     }
 
     // failed_on_first is just an optimization to avoid sorting if we are
