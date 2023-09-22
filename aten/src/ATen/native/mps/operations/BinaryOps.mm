@@ -18,6 +18,7 @@
 #include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
+#include <ATen/ops/heaviside_native.h>
 #include <ATen/ops/hypot_native.h>
 #include <ATen/ops/le_native.h>
 #include <ATen/ops/lerp_native.h>
@@ -411,6 +412,32 @@ TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Te
       self, other, Scalar(1.0), output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
         MPSGraph* mpsGraph = cachedGraph->graph();
         return [mpsGraph atan2WithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryCastTensor name:nil];
+      });
+}
+
+TORCH_IMPL_FUNC(heaviside_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  mps::binaryOpTensor(
+      self, other, Scalar(1.0), output, "heaviside", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+        MPSGraph* mpsGraph = cachedGraph->graph();
+
+        MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+        MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+        MPSGraphTensor* negativePredicate = [mpsGraph lessThanWithPrimaryTensor:primaryCastTensor
+                                                secondaryTensor:zeroTensor
+                                                           name:nil];
+        MPSGraphTensor* positivePredicate = [mpsGraph greaterThanWithPrimaryTensor:primaryCastTensor
+                                                   secondaryTensor:zeroTensor
+                                                              name:nil];
+        MPSGraphTensor* negativeOutputTensor = [mpsGraph selectWithPredicateTensor:negativePredicate
+                                               truePredicateTensor:zeroTensor
+                                              falsePredicateTensor:secondaryCastTensor
+                                                              name:nil];
+        MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:positivePredicate
+                                      truePredicateTensor:oneTensor
+                                      falsePredicateTensor:negativeOutputTensor
+                                                      name:nil];
+
+        return outputTensor;
       });
 }
 

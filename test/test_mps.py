@@ -85,6 +85,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'aminmax': [torch.float32],
         'polar': [torch.float32],
+        'heaviside': [torch.float16, torch.float32],
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -507,7 +508,6 @@ def mps_ops_modifier(ops):
         'gcd': None,
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
-        'heaviside': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
