@@ -872,7 +872,8 @@ void PythonTracer::recordCCall(
     ThreadLocalResults& tls,
     PyFrameObject* frame,
     PyObject* arg) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(Py_TYPE(arg) == &PyCFunction_Type);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(Py_TYPE(arg) == &PyCFunction_Type ||
+                                   Py_TYPE(arg) == &PyCMethod_Type);
   auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
