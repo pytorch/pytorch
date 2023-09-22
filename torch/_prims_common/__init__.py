@@ -500,7 +500,7 @@ def validate_dim_length(length: int):
     dimension length.
     """
 
-    assert length >= 0
+    torch._check_is_size(length)
 
 
 def validate_shape(shape: ShapeType):
