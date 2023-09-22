@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-from typing import Any, Optional, Tuple
 import unittest
+from typing import Any, Optional, Tuple
 
 import torch
 from torch._export import capture_pre_autograd_graph
@@ -311,16 +311,18 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         self._verify_symmetric_xnnpack_qat_numerics(M(has_relu=True), example_inputs)
 
     def test_qat_conv_bn_fusion(self):
-        example_inputs = (torch.randn(1, 3, 5, 5),)
         m = TestHelperModules.ConvWithBNRelu(relu=False)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
         self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False)
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_qat_conv_bn_fusion_cuda(self):
-        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
         m = TestHelperModules.ConvWithBNRelu(relu=False).cuda()
-        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=False, is_cuda=True)
+        example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m, example_inputs, has_relu=False, is_cuda=True,
+        )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_fusion_literal_args(self):
@@ -387,7 +389,9 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
     def test_qat_conv_bn_relu_fusion_cuda(self):
         m = TestHelperModules.ConvWithBNRelu(relu=True).cuda()
         example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
-        self._verify_symmetric_xnnpack_qat_graph(m, example_inputs, has_relu=True, is_cuda=True)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m, example_inputs, has_relu=True, is_cuda=True,
+        )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
     def test_qat_conv_bn_relu_fusion_no_conv_bias(self):
