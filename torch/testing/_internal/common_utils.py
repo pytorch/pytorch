@@ -4704,3 +4704,12 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         s = re.sub(r"Cannot export model.+\n\n", "", s)
     s = re.sub(r" +$", "", s, flags=re.M)
     return s
+
+def reset_rng_state(use_xla=False):
+    torch.manual_seed(1337)
+    random.seed(1337)
+    np.random.seed(1337)
+    if use_xla:
+        import torch_xla.core.xla_model as xm
+
+        xm.set_rng_state(1337, str(xm.xla_device()))

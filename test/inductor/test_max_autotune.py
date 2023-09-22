@@ -7,7 +7,6 @@ from typing import List, Optional
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import reset_rng_state
 from torch._inductor import config
 from torch._inductor.autotune_process import BenchmarkRequest, TuningProcessPool
 from torch._inductor.graph import GraphLowering
@@ -26,6 +25,7 @@ from torch.testing._internal.common_cuda import SM75OrLater, SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    reset_rng_state,
     skipIfRocm,
 )
 
