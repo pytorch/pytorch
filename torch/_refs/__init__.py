@@ -4914,6 +4914,7 @@ def linspace(
     layout: torch.layout = torch.strided,
     pin_memory: bool = False,
     requires_grad: bool = False,
+    endpoint: bool = True,
 ) -> TensorLikeType:
     if isinstance(start, TensorLikeType):
         torch._check(
@@ -4982,11 +4983,12 @@ def linspace(
 
     # We implement torch.lerp without performing rg / (steps - 1) explicitly
     # With this we get out[0] == start, out[-1] == end
-    step = (end - start) / (steps - 1)
+    div = steps - 1 if endpoint else steps
+    step = (end - start) / div
     out = torch.where(
-        rg < steps / 2,
+        rg < steps // 2,
         start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
-        end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
+        end - step * cast_rg(div - rg),  # type: ignore[arg-type,operator]
     )
     return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
 

@@ -5937,10 +5937,10 @@ Example::
 add_docstr(
     torch.linspace,
     r"""
-linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, endpoint=True) -> Tensor
 
 Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
-spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
+spaced from :attr:`start` to :attr:`end`, inclusive of :attr:`end` if `endpoint` is ``True``. That is, the values are:
 
 .. math::
     (\text{start},
@@ -5948,6 +5948,14 @@ spaced from :attr:`start` to :attr:`end`, inclusive. That is, the value are:
     \ldots,
     \text{start} + (\text{steps} - 2) * \frac{\text{end} - \text{start}}{\text{steps} - 1},
     \text{end})
+
+The values are exclusive of :attr:`end` if `endpoint` is ``False``:
+
+.. math::
+    (\text{start},
+    \text{start} + \frac{\text{end} - \text{start}}{\text{steps}},
+    \ldots,
+    \text{start} + (\text{steps} - 1) * \frac{\text{end} - \text{start}}{\text{steps}})
 """
     + """
 
