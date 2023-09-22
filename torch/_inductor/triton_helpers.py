@@ -145,7 +145,9 @@ def _any_combine(a, b):
 
 @triton.jit
 def any(a, dim):
-    return tl.reduce(a, dim, _any_combine)
+    # Workaround for https://github.com/openai/triton/issues/2351
+    # We do the reduction in int8 as int1 isn't supported
+    return tl.reduce(a.to(tl.int8), dim, _any_combine).to(tl.int1)
 
 
 @triton.jit

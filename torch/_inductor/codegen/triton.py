@@ -1334,8 +1334,13 @@ class TritonKernel(Kernel):
                 append_broadcast = expand_str
             else:
                 line = f"tl.load({var} + ({index}), {mask}{ep}{other})"
-            if V.graph.get_dtype(name) in (torch.float16, torch.bfloat16):
+            dtype = V.graph.get_dtype(name)
+            if dtype in (torch.float16, torch.bfloat16):
                 line += ".to(tl.float32)"
+            if dtype == torch.bool:
+                # Workaround for https://github.com/openai/triton/issues/2151
+                # tl.load returns int8 when loading from pointer to int1
+                line += ".to(tl.int1)"
 
         if "tmp" in mask:
             # Masked loads must come after the mask is computed
@@ -1502,8 +1507,13 @@ class TritonKernel(Kernel):
             default = self._map_tuple_or_scalar(triton_constant, default)
 
             def _mask_value(value, default):
+                ttype = triton_compute_type(src_dtype)
+                other = self.cse.generate(
+                    self.compute,
+                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {ttype})"
+                )
                 return self.cse.generate(
-                    self.compute, f"tl.where({cond}, {value}, {default})"
+                    self.compute, f"tl.where({cond}, {value}, {other})"
                 )
 
             if isinstance(value, tuple):
@@ -1637,23 +1647,7 @@ class TritonKernel(Kernel):
                 self.compute.writeline(
                     f"{accumulator} = tl.where({cond}, {updated}, {accumulator})"
                 )
-
-                if src_dtype == torch.bool:
-                    # This is only really used for aten.any. It changes the
-                    # final reduction of a non-persistent reduction from
-                    #     tmp5 = triton_helpers.max(_tmp5, 1)[:, None]
-                    # to
-                    #     tmp5 = triton_helpers.max(_tmp5.to(tl.int8), 1)[:, None].to(tl.int1)
-                    # which is needed because tl.reduce doesn't support tl.int1
-                    accumulator = f"{accumulator}.to(tl.int8)"
-                    result_type = triton_compute_type(dtype)
-                    self.suffix.writeline(
-                        f"{result_var} = {final_reduction(accumulator)}.to({result_type})"
-                    )
-                else:
-                    self.suffix.writeline(
-                        f"{result_var} = {final_reduction(accumulator)}"
-                    )
+                self.suffix.writeline(f"{result_var} = {final_reduction(accumulator)}")
 
         self.cse.reduction_cache[cache_key] = result_var
 
