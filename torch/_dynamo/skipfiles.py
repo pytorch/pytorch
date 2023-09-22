@@ -72,7 +72,7 @@ Overall: *_INLINELIST has precedence over *_SKIPLIST has precedence over DEFAULT
 To figure out what the behavior is, check the following list in order:
 * FILENAME_INLINELIST (Inline if YES)
 * SUBMODULE_INLINELIST (Inline if YES)
-* BUILTIN_SKIPLIST & SUBMODULE_INLINELIST (Skip if YES)
+* BUILTIN_SKIPLIST & THIRDPARTY_SKIPLIST (Skip if YES)
 * Inline by default
 
 """
@@ -364,6 +364,10 @@ def check_verbose(filename, allow_torch=False):
         return SkipResult(True, "skipped according skipfiles.SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
+
+
+def check(filename, allow_torch=False):
+    return check_verbose(filename, allow_torch).skipped
 
 
 # skip common third party libs
