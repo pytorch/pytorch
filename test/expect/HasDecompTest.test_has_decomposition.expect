@@ -627,8 +627,6 @@ aten::avg_pool3d
 aten::avg_pool3d.out
 aten::avg_pool3d_backward
 aten::avg_pool3d_backward.grad_input
-aten::baddbmm
-aten::baddbmm.out
 aten::bartlett_window
 aten::bartlett_window.out
 aten::bartlett_window.periodic
@@ -1267,7 +1265,6 @@ aten::squeeze_copy.dims
 aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
-aten::std_mean.correction_out
 aten::t_
 aten::t_copy
 aten::t_copy.out
@@ -1293,6 +1290,7 @@ aten::unique_dim.out
 aten::unique_dim_consecutive
 aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
+aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
 aten::unsqueeze_copy
 aten::unsqueeze_copy.out

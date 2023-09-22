@@ -344,6 +344,10 @@ _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
 
+# support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
+# WARNING: this is an experimental flag and is subject to change.
+_experimental_support_context_fn_in_torch_utils_checkpoint = False
+
 
 from .config_utils import install_config_module
 
