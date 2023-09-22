@@ -1308,9 +1308,19 @@ def method_to_operator(method):
         op = getattr(operator, method_attr)
     return op
 
-def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
-    int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
-    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
+def cast_symbool_to_symint_guardless(maybe_symbool: torch.SymBool) -> torch.SymInt:
+    from torch.fx.experimental.proxy_tensor import thunkify, set_proxy_slot, ProxyTorchDispatchMode
+
+    if isinstance(maybe_symbool, bool):
+        return int(maybe_symbool)
+    int_sym = sympy.Piecewise((1, maybe_symbool.node.expr), (0, True))
+    out = maybe_symbool.node.shape_env.create_symintnode(int_sym, hint=int(maybe_symbool.node.require_hint()))
+    if current_mode := torch.utils._python_dispatch._get_current_dispatch_mode():
+        if isinstance(current_mode, ProxyTorchDispatchMode):
+            sym_mode = current_mode.sym_mode
+            out_thunk = thunkify(sym_mode._compute_proxy, func=cast_symbool_to_symint_guardless, args=(maybe_symbool, ), out=out)
+            set_proxy_slot(out.node, sym_mode.tracer, out_thunk)
+    return out
 
 SYMPY_INTERP = {
     'Eq': operator.eq,

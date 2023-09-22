@@ -1,14 +1,15 @@
-import torch
 import collections
 import dataclasses
 import enum
 from typing import Any, Optional, Union
 
+import torch
+
 from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
+from .bytecode_transformation import create_call_function, create_instruction
 from .decorators import disable
-from .bytecode_transformation import create_call_function, create_instruction, unique_id
 from .utils import enum_repr
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
@@ -268,7 +269,9 @@ class ConvertIntSource(ChainedSource):
     def reconstruct(self, codegen):
         cast_fn_name = "__cast_symbool_to_symint_guardless"
         if cast_fn_name not in codegen.tx.output.global_scope:
-            disabled_cast_fn = disable(torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless)
+            disabled_cast_fn = disable(
+                torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless
+            )
             codegen.tx.output.install_global(cast_fn_name, disabled_cast_fn)
 
         def _create_cast_instructions():
@@ -278,6 +281,7 @@ class ConvertIntSource(ChainedSource):
                 *create_call_function(1, False),
             ]
             return instructions
+
         return _create_cast_instructions()
 
     def guard_source(self):
