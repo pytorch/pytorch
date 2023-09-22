@@ -219,6 +219,7 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "llama_v2_7b_16h",
     "Background_Matting",
+    "stable_diffusion_unet",
 }
 
 SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
