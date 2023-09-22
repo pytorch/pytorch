@@ -731,9 +731,15 @@ class GuardAccessor {
     return _accessor_key.equal(key);
   }
 
-  virtual ~GuardAccessor() = default;
-  // Returns a new reference
-  virtual PyObject* access(PyObject* obj) const = 0;
+  virtual ~GuardAccessor() {
+    // _accessed_value is owned by the GuardAccessor. method access returns an
+    // owning reference.
+    Py_DECREF(_accessed_value);
+  }
+
+  // Returns a borrowed reference. The accessed_value is owned by the
+  // GuardAccessor itself and is decref'd on destruction.
+  virtual PyObject* access(PyObject* obj) = 0;
 
  private:
   // Guard manager corresponding to the retrieved value from the GuardAccessor.
@@ -743,6 +749,8 @@ class GuardAccessor {
   // accessor key could be py::str for getattr, getitem or py::function for
   // lambda accessor.
   py::object _accessor_key;
+  // Keeps the pointer to the accessed value to implement RAII mechanism.
+  PyObject* _accessed_value;
 };
 
 /**
@@ -753,10 +761,12 @@ class GetAttrGuardAccessor : public GuardAccessor {
   GetAttrGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
-  // Returns a new reference
-  PyObject* access(PyObject* obj) const override { // borrowed ref
-    // PyObject_GetAttr returns a new reference. No need of manual incref.
-    return PyObject_GetAttr(obj, _attr_name);
+  PyObject* access(PyObject* obj) override { // borrowed ref
+    PyObject* ret = PyObject_GetAttr(obj, _attr_name);
+    // Store the owning reference to _accessed_value to be decref'd on
+    // destruction.
+    _accessed_value = ret;
+    return ret;
   }
 
  private:
@@ -773,11 +783,13 @@ class GetDictItemGuardAccessor : public GuardAccessor {
   GetDictItemGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
-  // Returns a new reference
-  PyObject* access(PyObject* obj) const override { // borrowed ref
+  PyObject* access(PyObject* obj) override { // borrowed ref
     PyObject* item = PyDict_GetItem(obj, _attr_name);
-    // manually incref because PyDict_GetItem returns a borrowed ref.
+    // GetItem returns a borrowed reference, incref to own it.
     Py_INCREF(item);
+    // Store the owning reference to _accessed_value to be decref'd on
+    // destruction.
+    _accessed_value = item;
     return item;
   }
 
@@ -793,10 +805,12 @@ class GetItemGuardAccessor : public GuardAccessor {
   GetItemGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
-  // Returns a new reference
-  PyObject* access(PyObject* obj) const override { // borrowed ref
-    // PyObject_GetItem returns a new reference. No need of manual incref.
-    return PyObject_GetItem(obj, _attr_name);
+  PyObject* access(PyObject* obj) override { // borrowed ref
+    PyObject* ret = PyObject_GetItem(obj, _attr_name);
+    // Store the owning reference to _accessed_value to be decref'd on
+    // destruction.
+    _accessed_value = ret;
+    return ret;
   }
 
  private:
@@ -906,18 +920,13 @@ class GuardManager {
 
     // Iterate over accessors.
     bool failed_on_first = true;
-    if (result) {
-      for (const auto& accessor : _accessors) {
-        auto& manager = accessor->get_guard_manager();
-        PyObject* accessed_value = accessor->access(value); // owning ref
-        result = result && manager->check_nopybind(accessed_value);
-        // accessed_value was a new reference. Decref it.
-        Py_DECREF(accessed_value);
-        if (!result) {
-          break;
-        }
-        failed_on_first = false;
+    for (const auto& accessor : _accessors) {
+      auto& manager = accessor->get_guard_manager();
+      result = result && manager->check_nopybind(accessor->access(value));
+      if (!result) {
+        break;
       }
+      failed_on_first = false;
     }
 
     // failed_on_first is just an optimization to avoid sorting if we are
