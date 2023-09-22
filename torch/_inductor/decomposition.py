@@ -1,7 +1,6 @@
 import functools
 import logging
 import math
-import numbers
 import typing
 
 import torch
@@ -54,13 +53,10 @@ inductor_decompositions = get_decompositions(
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
-        aten.std,
-        aten.std_mean,
         out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
-        aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
     ]
 )
@@ -194,18 +190,6 @@ def all(input):
 @register_decomposition([aten.all.dim])
 def all_dim(input, dim, keepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
-
-
-@register_decomposition([aten.baddbmm])
-def baddbmm(self, batch1, batch2, beta=1, alpha=1):
-    result = torch.bmm(batch1, batch2)
-    if not isinstance(alpha, numbers.Number) or alpha != 1:
-        result = result * alpha
-    if beta == 0:
-        return result
-    if not isinstance(beta, numbers.Number) or beta != 1:
-        self = self * beta
-    return self + result
 
 
 @register_decomposition([aten.bmm])
