@@ -535,7 +535,7 @@ def sample_inputs_linalg_pinv_singular(
     size = [0, 3, 50]
 
     for batch, m, n in product(batches, size, size):
-        for k in range(min(3, min(m, n))):
+        for k in range(min(3, m, n)):
             # Note that by making the columns of `a` and `b` orthonormal we make sure that
             # the product matrix `a @ b.t()` has condition number 1 when restricted to its image
             a = (

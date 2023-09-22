@@ -16,10 +16,10 @@ import torch
 import torch.fx
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .. import metrics
+from .. import config, metrics
 from ..utils import (
     DeferredLineBase,
-    do_bench_using_profiling,
+    do_bench,
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
@@ -691,7 +691,12 @@ class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
         from .cpp import DTYPE_TO_CPP
 
-        return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
+        if config.aot_inductor.abi_compatible:
+            # In the abi_compatible model, we just return the buf here.
+            # We will form correct call args later in wrapper.generate_kernel_all.
+            return buf
+        else:
+            return f"({DTYPE_TO_CPP[dtype]}*)({buf}.data_ptr())"
 
     def wrap_size_arg(self, size):
         return f"{size}"
@@ -878,9 +883,6 @@ class Kernel(CodeGen):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError()
 
-    def scan(self, dtype, scan_type, value):
-        raise NotImplementedError()
-
     def bucketize(
         self,
         values,
@@ -963,10 +965,6 @@ class Kernel(CodeGen):
             @staticmethod
             def reduction(dtype, src_dtype, reduction_type, value):
                 return self.reduction(dtype, src_dtype, reduction_type, value)
-
-            @staticmethod
-            def scan(dtype, scan_op, value):
-                return self.scan(dtype, scan_op, value)
 
             @staticmethod
             def bucketize(
@@ -1072,7 +1070,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench_using_profiling(lambda: algo(*args, out=out))
+        return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
         raise NotImplementedError()

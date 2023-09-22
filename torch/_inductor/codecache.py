@@ -234,7 +234,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         name: str,
         inputs: str,
-        benchmark: Callable[[Any], float],
+        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -278,11 +278,13 @@ class PersistentCache(CacheBase):
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
-                    for choice in choices:
-                        timings[choice] = benchmark(choice)
-                        local_cache.setdefault(name, {})
-                        local_cache[name].setdefault(inputs, {})
-                        local_cache[name][inputs][choice.hash_key()] = timings[choice]
+                    timings = benchmark(choices)
+                    assert all(choice in timings for choice in choices)
+
+                    local_cache.setdefault(name, {})
+                    local_cache[name].setdefault(inputs, {})
+                    for choice, timing in timings.items():
+                        local_cache[name][inputs][choice.hash_key()] = timing
                 except RuntimeError as e:
                     # catch and log autotuning failures
                     log_errors(e)
@@ -290,11 +292,10 @@ class PersistentCache(CacheBase):
 
                 self.update_local_cache(local_cache)
 
-                if use_global_cache():
-                    timings_to_log = {
-                        choice.hash_key(): timings[choice] for choice in choices
-                    }
-                    log_vals(timings_to_log)
+                timings_to_log = {
+                    choice.hash_key(): timings[choice] for choice in choices
+                }
+                log_vals(timings_to_log)
         elif use_global_cache():
             # only check global cache, not local one
             check_cache(self.get_global_cache(), callback=log_stats)
@@ -777,7 +778,7 @@ def get_include_and_linking_paths(
         os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
     from torch.utils import cpp_extension
 
-    if aot_mode and config.is_fbcode():
+    if aot_mode:
         # Hack.  The AOT inductor libs reference CUDA, so let's just include it for now.
         cuda = True
 
@@ -832,6 +833,12 @@ def get_include_and_linking_paths(
                 )
             else:
                 macros = f"-D{macros}"
+
+        if aot_mode and cuda:
+            if macros is None:
+                macros = ""
+            macros += " -D USE_CUDA"
+
         if cuda:
             if config.is_fbcode():
                 libs += ["cuda"]
@@ -1408,7 +1415,7 @@ class TritonCodeCache:
         return getattr(mod, kernel_name)
 
 
-def _cuda_compiler() -> str:
+def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):

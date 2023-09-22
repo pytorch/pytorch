@@ -21,7 +21,13 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    is_constant_source,
+    SuperSource,
+    TypeSource,
+)
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
@@ -467,6 +473,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
@@ -587,6 +594,10 @@ class BuiltinVariable(VariableTracker):
                 **options,
             )
             return out
+
+        # Handle `str` on a user defined function
+        if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
+            return variables.ConstantVariable(value=str(args[0].fn))
 
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
@@ -1055,7 +1066,7 @@ class BuiltinVariable(VariableTracker):
             TorchVariable,
             UserFunctionVariable,
         )
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
@@ -1083,6 +1094,27 @@ class BuiltinVariable(VariableTracker):
             options["source"] = source
         else:
             source = None
+
+        if name == "__bases__":
+            try:
+                value = obj.as_python_constant()
+                if isinstance(value, type):
+                    bases = value.__bases__
+                    if source is not None:
+                        tuple_args = [
+                            VariableBuilder(tx, GetItemSource(source, i))(b)
+                            for i, b in enumerate(bases)
+                        ]
+                    elif len(bases) == 1 and (
+                        bases[0] is object or bases[0] is torch._C._TensorBase
+                    ):
+                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
+                    else:
+                        unimplemented(f"unexpected sourceless type bases: {bases}")
+
+                    return variables.TupleVariable(tuple_args, **options)
+            except NotImplementedError:
+                pass
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
@@ -1152,7 +1184,14 @@ class BuiltinVariable(VariableTracker):
     ):
         from .distributed import PlacementVariable
 
-        if isinstance(obj, (variables.DataClassVariable, PlacementVariable)):
+        if isinstance(
+            obj,
+            (
+                variables.DataClassVariable,
+                variables.CustomizedDictVariable,
+                PlacementVariable,
+            ),
+        ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
@@ -1217,9 +1256,12 @@ class BuiltinVariable(VariableTracker):
                 self, obj
             )
 
+        if py_type is not None:
+            return ConstantVariable(py_type)
+
         raise UserError(
             UserErrorType.ANTI_PATTERN,
-            "Can't call type() on generated custom object. "
+            f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
         )
 
