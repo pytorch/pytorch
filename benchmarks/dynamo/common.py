@@ -1133,18 +1133,6 @@ class AOTInductorModelCache:
                 model, example_args, example_kwargs
             )
 
-            output_node = list(exported.graph.nodes)[-1]
-            output_tensors = [
-                torch.empty_strided(
-                    node.meta["val"].size(),
-                    node.meta["val"].stride(),
-                    dtype=node.meta["val"].dtype,
-                    layout=node.meta["val"].layout,
-                    device=node.meta["val"].device,
-                )
-                for node in output_node.args[0]
-            ]
-
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher],
@@ -1156,7 +1144,6 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_tensors": output_tensors,
                 "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
@@ -1164,13 +1151,12 @@ class AOTInductorModelCache:
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_tensors"],
             cls.cache[key]["output_spec"],
         )
 
 
 def export_aot_inductor(model, example_inputs, eager_forward):
-    module, exported, output_tensors, output_spec = AOTInductorModelCache.load(
+    module, exported, output_spec = AOTInductorModelCache.load(
         model, example_inputs, eager_forward
     )
 
@@ -1179,7 +1165,7 @@ def export_aot_inductor(model, example_inputs, eager_forward):
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
-        module.run(flat_example_inputs, output_tensors)
+        output_tensors = module.run(flat_example_inputs)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
     return opt_aot_inductor
