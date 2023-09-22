@@ -202,7 +202,6 @@ exclude_patterns = [
     'torch/_inductor/scheduler.py',
     'torch/_inductor/sizevars.py',
     'torch/_inductor/pattern_matcher.py',
-    'torch/_inductor/codegen/triton_foreach.py',
     'torch/_inductor/codegen/cpp.py',
     'torch/_inductor/fx_passes/split_cat.py',
     'torch/_inductor/fx_passes/joint_graph.py',
