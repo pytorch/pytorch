@@ -1510,7 +1510,7 @@ class TritonKernel(Kernel):
                 ttype = triton_compute_type(src_dtype)
                 other = self.cse.generate(
                     self.compute,
-                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {ttype})"
+                    f"tl.full({[1] * self.triton_tensor_ndim()}, {default}, {ttype})",
                 )
                 return self.cse.generate(
                     self.compute, f"tl.where({cond}, {value}, {other})"
