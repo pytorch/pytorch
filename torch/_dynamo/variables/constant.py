@@ -30,6 +30,7 @@ class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs):
         source = kwargs.get("source", None)
+        guards = kwargs.get("source", None)
         if not ConstantVariable.is_literal(value):
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
@@ -37,12 +38,14 @@ class ConstantVariable(VariableTracker):
         if isinstance(value, (list, tuple)):
             items = [
                 ConstantVariable.create(
-                    x, source=GetItemSource(source, i) if source else None
+                    x,
+                    source=GetItemSource(source, i) if source else None,
+                    guards=guards,
                 )
                 for i, x in enumerate(value)
             ]
             return variables.BaseListVariable.cls_for(type(value))(
-                items, const=True, **kwargs
+                items, regen_guards=True, **kwargs
             )
 
         return ConstantVariable(value, **kwargs)
@@ -55,7 +58,7 @@ class ConstantVariable(VariableTracker):
 
         assert not isinstance(
             value, (list, tuple)
-        ), "ConstantVariable(list) is banned - please create a ListVariable(items, const=True)"
+        ), "ConstantVariable(list) is banned - please create a ListVariable(items)"
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:

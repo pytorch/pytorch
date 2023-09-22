@@ -60,7 +60,6 @@ class BaseListVariable(VariableTracker):
         items: List[VariableTracker],
         recursively_contains=None,
         regen_guards=True,
-        const=False,
         **kwargs,
     ):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
@@ -71,7 +70,6 @@ class BaseListVariable(VariableTracker):
             self.guards.update(VariableTracker.propagate(items)["guards"])
 
         self.items: List[VariableTracker] = items
-        self.const = const
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
