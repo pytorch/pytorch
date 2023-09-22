@@ -30,6 +30,7 @@ def define_targets(rules):
             ":base",
             "//c10/util:base",
         ],
+        linkopts = ["-lrt"],
     )
 
     rules.cc_library(

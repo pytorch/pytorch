@@ -379,30 +379,28 @@ MapAllocator::MapAllocator(
     if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (flags_ & ALLOCATOR_MAPPED_SHARED) {
-        if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
-          TORCH_CHECK(
-              false,
-              "unable to open file <",
-              filename_,
-              "> in read-write mode: ",
-              strerror(errno),
-              " (",
-              errno,
-              ")");
-        }
+        fd = open(filename_.c_str(), flags, (mode_t)0600);
+        TORCH_CHECK(
+            fd != -1,
+            "unable to open file <",
+            filename_,
+            "> in read-write mode: ",
+            strerror(errno),
+            " (",
+            errno,
+            ")");
       } else if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
-        if ((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
-          TORCH_CHECK(
-              false,
-              "unable to open shared memory object <",
-              filename_,
-              "> in read-write mode: ",
-              strerror(errno),
-              " (",
-              errno,
-              ")");
-        }
+        fd = shm_open(filename_.c_str(), flags, (mode_t)0600);
+        TORCH_CHECK(
+            fd != -1,
+            "unable to open shared memory object <",
+            filename_,
+            "> in read-write mode: ",
+            strerror(errno),
+            " (",
+            errno,
+            ")");
 #else
         TORCH_CHECK(
             false,
@@ -411,17 +409,16 @@ MapAllocator::MapAllocator(
             "> in sharedmem mode, shm_open unavailable on this platform");
 #endif
       } else {
-        if ((fd = open(filename_.c_str(), O_RDONLY)) == -1) {
-          TORCH_CHECK(
-              false,
-              "unable to open file <",
-              filename_,
-              "> in read-only mode: ",
-              strerror(errno),
-              " (",
-              errno,
-              ")");
-        }
+        fd = open(filename_.c_str(), O_RDONLY);
+        TORCH_CHECK(
+            fd != -1,
+            "unable to open file <",
+            filename_,
+            "> in read-only mode: ",
+            strerror(errno),
+            " (",
+            errno,
+            ")");
       }
     } else {
       fd = fd_;
