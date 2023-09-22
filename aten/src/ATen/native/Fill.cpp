@@ -57,7 +57,9 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
   // Check if value is a view of self and if it is we clone
   // it to avoid overwriting self prematurely
-  if(self._base().is_same(value._base())){
+  const at::TensorBase self_base = self.is_view() ? self._base() : self;
+  const at::TensorBase value_base = value.is_view() ? value._base() : value;
+  if(self_base.is_same(value_base)){
     self.copy_(value.clone());
   } else{
     self.copy_(value);
