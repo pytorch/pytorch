@@ -2510,7 +2510,7 @@ def mean(
     return result
 
 
-@register_decomposition(aten.std_mean.correction)
+@register_decomposition(aten.std_mean)
 def std_mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -5543,6 +5543,7 @@ def norm(
 
 
 @register_decomposition(aten.trace)
+@out_wrapper()
 def trace(self: TensorLikeType) -> TensorLikeType:
     torch._check(
         self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
