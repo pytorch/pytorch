@@ -85,10 +85,7 @@ class TestMetaDataPorting(QuantizationTestCase):
         for n in m.graph.nodes:
             if "quantization_tag" not in n.meta:
                 continue
-            if (
-                n.op == "call_function"
-                and n.target in _QUANT_OPS
-            ):
+            if n.op == "call_function" and n.target in _QUANT_OPS:
                 key = n.target
             elif n.op == "get_attr":
                 key = "get_attr"
@@ -98,9 +95,13 @@ class TestMetaDataPorting(QuantizationTestCase):
             if key not in recorded_node_tags:
                 recorded_node_tags[key] = set()
 
-            if n.op == "call_function" and n.meta["quantization_tag"] in recorded_node_tags[key]:
+            if (
+                n.op == "call_function"
+                and n.meta["quantization_tag"] in recorded_node_tags[key]
+            ):
                 raise ValueError(
-                    f"{key} {n.format_node()} has tag {n.meta['quantization_tag']} that is associated with another node of the same type"
+                    f"{key} {n.format_node()} has tag {n.meta['quantization_tag']} that "
+                    "is associated with another node of the same type"
                 )
             recorded_node_tags[key].add(n.meta["quantization_tag"])
 
