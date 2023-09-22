@@ -1474,7 +1474,7 @@ def _get_module_attributes(module):
     # Check whether module attributes can be accessed. Some classes
     # define attributes but don't provide access to them in their
     # constructor.
-    # 
+    #
     # For example, torch.nn.Embedding has the `freeze` variable and its
     # type specified in the class but the attribute is not created in the
     # constructor. In other words, there is no `self.freeze = <True | False>`
