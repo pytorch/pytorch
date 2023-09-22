@@ -18,6 +18,7 @@ import torch
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import cuda_properties
+from torch.utils._triton import has_triton
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -30,7 +31,6 @@ from .utils import (
     create_bandwidth_info_str,
     do_bench,
     get_num_bytes,
-    has_triton,
     next_power_of_2,
     triton_config_to_hashable,
 )
