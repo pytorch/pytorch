@@ -2898,8 +2898,6 @@ aot_autograd_failures = {
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
 
-    # Worked with real but not with fake
-    xfail('_segment_reduce', 'lengths'),
     skip('nn.functional.nll_loss', ''),  # UBSAN failure!
 
     # Misc
