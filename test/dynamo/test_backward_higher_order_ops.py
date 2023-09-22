@@ -134,7 +134,9 @@ class GraphModule(torch.nn.Module):
 
         copy_ = torch.ops.aten.copy_.default(new_empty_strided, getitem);  new_empty_strided = None
 
-        call_hook = getitem * getitem;  getitem = None
+        mul = getitem * getitem;  getitem = None
+
+        call_hook = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(mul, (2,), (1,), torch.float32);  mul = None
 
         new_empty_strided_1 = torch.ops.aten.new_empty_strided.default(call_hook, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
 
@@ -200,7 +202,9 @@ class GraphModule(torch.nn.Module):
 
         copy_ = torch.ops.aten.copy_.default(new_empty_strided, getitem);  new_empty_strided = None
 
-        call_hook = getitem * getitem;  getitem = None
+        mul = getitem * getitem;  getitem = None
+
+        call_hook = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(mul, (2,), (1,), torch.float32);  mul = None
 
         new_empty_strided_1 = torch.ops.aten.new_empty_strided.default(call_hook, [2], [1], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
 
@@ -249,3 +253,61 @@ class GraphModule(torch.nn.Module):
                     out.backward(grad_out)
 
             graph = None
+
+    def test_invoke_in_pt2_compiled_autograd_mutates_tensors(self):
+        def _tensor_mutating_stride(x):
+            return torch.as_strided(x, size=x.shape, stride=(1, 3))
+
+        def _tensor_mutating_size(x):
+            return torch.randn([9, 1])
+
+        def _tensor_mutating_dtype(x):
+            return x.to(dtype=torch.float64)
+
+        def _tensor_mutating_dtype(x):
+            return x.to(dtype=torch.float64)
+
+        def _returning_not_tensor(x):
+            return [x, x]
+
+        for problem, mut_fn in [
+            ("non-tensor", _returning_not_tensor),
+            ("stride", _tensor_mutating_stride),
+            ("size", _tensor_mutating_size),
+            ("dtype", _tensor_mutating_dtype),
+        ]:
+
+            def _graph_break_invoke(grad):
+                return trace_wrapped(grad, fn=mut_fn)
+
+            def compiler_fn(gm):
+                return torch.compile(
+                    gm, backend="inductor", fullgraph=True, dynamic=True
+                )
+
+            for backend in ["eager", "aot_eager", "inductor"]:
+                torch._dynamo.reset()
+                x = torch.tensor(
+                    [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+                    requires_grad=True,
+                )
+                y = torch.tensor(
+                    [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]],
+                    requires_grad=True,
+                )
+
+                x.register_hook(_graph_break_invoke)
+
+                def fn(x, y):
+                    return x * y
+
+                out = fn(x, y)
+                grad_out = torch.randn(x.size())
+                with self.assertRaisesRegex(
+                    Exception,  # This catches 2 kinds
+                    problem,
+                ):
+                    with compiled_autograd.enable(compiler_fn):
+                        out.backward(grad_out)
+
+                graph = None
