@@ -1219,13 +1219,14 @@ def prod(x: List[int]):
 
 @register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
-    self: Tensor, split_sizes: List[int], dim: int = 0
+    self: Tensor, split_sizes: List[int], dim: int = 0, drop_remainder: bool = False
 ) -> List[Tensor]:
-    torch._check_with(
-        ValueError,
-        sum(split_sizes) == self.shape[dim],
-        lambda: "Split sizes don't add up to the tensor's size in the given dimension",
-    )
+    if not drop_remainder:
+        torch._check_with(
+            ValueError,
+            sum(split_sizes) == self.shape[dim],
+            lambda: "Split sizes don't add up to the tensor's size in the given dimension",
+        )
     num_splits = len(split_sizes)
     splits = []
     start_idx = 0
@@ -1260,21 +1261,22 @@ def unsafe_split_with_sizes(
 
 
 @register_decomposition(aten.split.Tensor)
-def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
+def split(self: Tensor, split_size: int, dim: int = 0, drop_remainder: bool = False) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
     if split_size == 0:
         assert dim_size == 0
         return (self,)
-    chunks = (dim_size + split_size - 1) // split_size
+    chunks = (dim_size + (split_size - 1 if not drop_remainder else 0)) // split_size
 
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import guard_int
 
     chunks = guard_int(chunks)
     split_sizes = [split_size for i in range(chunks)]
-    split_sizes[-1] = split_size - (split_size * chunks - dim_size)
-    return torch.split(self, split_sizes, dim)
+    if not drop_remainder:
+        split_sizes[-1] = split_size - (split_size * chunks - dim_size)
+    return torch.split(self, split_sizes, dim, drop_remainder)
 
 
 @aten.tensor_split.tensor_indices_or_sections.py_impl(
