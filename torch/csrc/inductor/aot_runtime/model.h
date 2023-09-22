@@ -410,7 +410,7 @@ class AOTICudaStreamGuard {
   AOTICudaStreamGuard(cudaStream_t stream, int32_t device_index) {
     CUDAStreamGuardHandle ptr;
     AOTI_TORCH_ERROR_CODE_CHECK(
-        aoti_torch_create_cuda_stream_guard(&ptr, stream, device_index));
+        aoti_torch_create_cuda_stream_guard(stream, device_index, &ptr));
     guard_ =
         std::unique_ptr<void, std::function<void(void*)>>(ptr, [](void* ptr) {
           AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_cuda_stream_guard(
