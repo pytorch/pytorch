@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TestCase,
+    TEST_WITH_TORCHDYNAMO
 )
 
 skip = functools.partial(skipif, True)
@@ -2125,6 +2126,7 @@ class TestCreationFuncs(TestCase):
         self.check_function(np.full, 0)
         self.check_function(np.full, 1)
 
+    @skipif(TEST_WITH_TORCHDYNAMO, reason='fails with dynamo')
     @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_for_reference_leak(self):
         # Make sure we have an object for reference
