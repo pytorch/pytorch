@@ -44,6 +44,8 @@ class TORCH_API Context {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
     } else if (device_type == at::kMPS) {
       return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
           device.index());
@@ -60,8 +62,6 @@ class TORCH_API Context {
       return at::detail::getCUDAHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else {
       AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
