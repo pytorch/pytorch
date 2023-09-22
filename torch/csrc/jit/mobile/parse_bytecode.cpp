@@ -24,7 +24,7 @@ IValue expect_field(
       expected_name,
       " found ",
       row->elements().at(0).toStringRef());
-  return std::move(row->elements().at(1));
+  return std::move(row)->elements().at(1);
 }
 
 namespace mobile {
