@@ -30,18 +30,20 @@ normalization_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass = PatternMatcherPass(prevent_match_across_mutations=True)
+efficient_conv_bn_eval_pass = PatternMatcherPass(prevent_match_across_mutations=True)
 
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
     merge_splits_pass,
     split_cat_pass,
     unbind_stack_pass,
+    efficient_conv_bn_eval_pass,
 ]
 
 
 @init_once_fakemode
 def lazy_init():
-    from . import split_cat  # noqa: F401
+    from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
 
     if config.is_fbcode():
         from .fb import split_cat as split_cat_fb  # noqa: F401
@@ -89,12 +91,11 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
-    if torch.is_grad_enabled():
+    if torch.is_grad_enabled() or not is_cpu:
         return gm
-    if not is_cpu:
-        return gm
-    gm = remove_identity(gm)
-    gm = fuse_conv_bn(gm)
+    if config.freezing:
+        gm = remove_identity(gm)
+        gm = fuse_conv_bn(gm)
     return gm
 
 

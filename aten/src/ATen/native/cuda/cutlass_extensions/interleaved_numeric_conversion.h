@@ -35,10 +35,10 @@
 
 #pragma once
 
-#include "cutlass/arch/arch.h"
-#include "cutlass/array.h"
-#include "cutlass/half.h"
-#include "cutlass/numeric_types.h"
+#include <cutlass/arch/arch.h>
+#include <cutlass/array.h>
+#include <cutlass/half.h>
+#include <cutlass/numeric_types.h>
 
 namespace cutlass {
 

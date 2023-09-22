@@ -1,7 +1,7 @@
 #pragma once
 
-#include "cutlass_extensions/arch/mma.h"
-#include "cutlass_extensions/interleaved_numeric_conversion.h"
+#include <cutlass_extensions/arch/mma.h>
+#include <cutlass_extensions/interleaved_numeric_conversion.h>
 
 namespace cutlass {
 namespace gemm {

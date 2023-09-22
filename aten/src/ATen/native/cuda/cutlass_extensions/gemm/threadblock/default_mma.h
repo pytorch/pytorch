@@ -1,8 +1,8 @@
 #pragma once
 
-#include "cutlass_extensions/gemm/threadblock/default_dq_mma_multistage.h"
-#include "cutlass_extensions/gemm/threadblock/default_dq_mma_pipelined.h"
-#include "cutlass_extensions/gemm/threadblock/default_mma_bf16.h"
+#include <cutlass_extensions/gemm/threadblock/default_dq_mma_multistage.h>
+#include <cutlass_extensions/gemm/threadblock/default_dq_mma_pipelined.h>
+#include <cutlass_extensions/gemm/threadblock/default_mma_bf16.h>
 
 namespace cutlass {
 namespace gemm {
