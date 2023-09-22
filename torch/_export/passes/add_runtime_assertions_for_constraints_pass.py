@@ -11,17 +11,13 @@ import sympy
 import torch
 import torch.fx
 from torch.fx.experimental.symbolic_shapes import SymInt
+from torch.export import InputDim
 from torch._export.pass_base import _ExportPassBase, ProxyValue, PassResult
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
-__all__ = ["_AddRuntimeAssertionsForConstraintsPass", "InputDim"]
-
-
-class InputDim(NamedTuple):
-    input_name: str
-    dim: int
+__all__ = ["_AddRuntimeAssertionsForConstraintsPass"]
 
 
 def _convert_to_int(val):

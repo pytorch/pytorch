@@ -15,10 +15,6 @@ from torch.fx.experimental.symbolic_shapes import SymInt
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-    InputDim,
-)
-
 
 # TODO(ycao): This is added to avoid breaking existing code temporarily.
 # Remove when migration is done.
@@ -28,6 +24,7 @@ from torch.export import (
     ExportBackwardSignature,
     ExportGraphSignature,
     ExportedProgram,
+    InputDim,
     ModuleCallEntry,
     ModuleCallSignature,
 )

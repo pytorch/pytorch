@@ -4,7 +4,7 @@ import io
 import pathlib
 import typing
 from enum import auto, Enum
-from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union, NamedTuple
 
 import sympy
 
@@ -33,6 +33,7 @@ __all__ = [
     "ExportBackwardSignature",
     "ExportGraphSignature",
     "ExportedProgram",
+    "InputDim",
     "ModuleCallEntry",
     "ModuleCallSignature",
     "constrain_as_size",
@@ -57,6 +58,11 @@ from .exported_program import (
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+
+
+class InputDim(NamedTuple):
+    input_name: str
+    dim: int
 
 
 @dataclasses.dataclass
