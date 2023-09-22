@@ -420,22 +420,24 @@ TORCH_IMPL_FUNC(heaviside_out_mps)(const Tensor& self, const Tensor& other, cons
       self, other, Scalar(1.0), output, "heaviside", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
         MPSGraph* mpsGraph = cachedGraph->graph();
 
-        MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
+        MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                            shape:@[ @1 ]
+                                                         dataType:primaryCastTensor.dataType];
         MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
         MPSGraphTensor* negativePredicate = [mpsGraph lessThanWithPrimaryTensor:primaryCastTensor
-                                                secondaryTensor:zeroTensor
-                                                           name:nil];
+                                                                secondaryTensor:zeroTensor
+                                                                           name:nil];
         MPSGraphTensor* positivePredicate = [mpsGraph greaterThanWithPrimaryTensor:primaryCastTensor
-                                                   secondaryTensor:zeroTensor
-                                                              name:nil];
+                                                                   secondaryTensor:zeroTensor
+                                                                              name:nil];
         MPSGraphTensor* negativeOutputTensor = [mpsGraph selectWithPredicateTensor:negativePredicate
-                                               truePredicateTensor:zeroTensor
-                                              falsePredicateTensor:secondaryCastTensor
-                                                              name:nil];
+                                                               truePredicateTensor:zeroTensor
+                                                              falsePredicateTensor:secondaryCastTensor
+                                                                              name:nil];
         MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:positivePredicate
-                                      truePredicateTensor:oneTensor
-                                      falsePredicateTensor:negativeOutputTensor
-                                                      name:nil];
+                                                       truePredicateTensor:oneTensor
+                                                      falsePredicateTensor:negativeOutputTensor
+                                                                      name:nil];
 
         return outputTensor;
       });
