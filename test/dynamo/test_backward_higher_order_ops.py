@@ -20,11 +20,6 @@ def _multiply(x):
     return x * x
 
 
-def _side_effect_stateful_fn2(x, obj):
-    obj.counter = obj.counter + 1
-    return _multiply(x)
-
-
 def _multiply_invoke(grad):
     return trace_wrapped(grad, fn=_multiply)
 
@@ -39,8 +34,9 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
             return x * y
 
         out = fn(x, y)
-        out.backward(torch.tensor([2.0, 2.0]))
-        self.assertEqual(x.grad, 2 * x)
+        grad_out = torch.tensor([2.0, 2.0])
+        out.backward(grad_out)
+        self.assertEqual(x.grad, y * grad_out)
 
     def test_invoke_in_pt2(self):
         for backend in ["eager", "aot_eager", "inductor"]:
@@ -124,10 +120,11 @@ class _multiply_invoke(torch.nn.Module):
 
             fn = torch._dynamo.optimize(backend)(fn)
             out = fn(x, y)
+            grad_out = torch.tensor([2.0, 2.0])
             with compiled_autograd.enable(compiler_fn):
-                out.backward(torch.tensor([2.0, 2.0]))
+                out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
-            self.assertEqual(x.grad, torch.tensor([4.0, 4.0]))
+            self.assertEqual(x.grad, grad_out * grad_out)
             expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_0_ : torch.Tensor):
@@ -149,6 +146,10 @@ class GraphModule(torch.nn.Module):
             graph = None
 
     def test_invoke_in_pt2_compiled_autograd_side_effect(self):
+        def _side_effect_stateful_fn2(x, obj):
+            obj.counter = obj.counter + 1
+            return _multiply(x)
+
         def _side_effectful_invoke2(grad, fn):
             return trace_wrapped(grad, fn=fn)
 
@@ -184,11 +185,12 @@ class GraphModule(torch.nn.Module):
 
             fn = torch._dynamo.optimize(backend, nopython=True)(fn)
             out = fn(x, y)
+            grad_out = torch.tensor([2.0, 2.0])
             with compiled_autograd.enable(compiler_fn):
-                out.backward(torch.tensor([2.0, 2.0]))
+                out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
-            self.assertEqual(x.grad, torch.tensor([4.0, 4.0]))
+            self.assertEqual(x.grad, grad_out + grad_out)
             expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_0_ : torch.Tensor):
@@ -208,11 +210,11 @@ class GraphModule(torch.nn.Module):
             self.assertExpectedInline(actual, expected)
 
             out = fn(x, y)
-            out.backward(torch.tensor([2.0, 2.0]))
+            out.backward(grad_out)
             self.assertEqual(obj.counter, 2)
 
             out = fn(x, y)
-            out.backward(torch.tensor([2.0, 2.0]))
+            out.backward(grad_out)
             self.assertEqual(obj.counter, 3)
             graph = None
 
@@ -238,11 +240,12 @@ class GraphModule(torch.nn.Module):
 
             fn = torch._dynamo.optimize(backend, nopython=True)(fn)
             out = fn(x, y)
+            grad_out = torch.tensor([2.0, 2.0])
             with self.assertRaisesRegex(
                 torch._dynamo.exc.Unsupported,
                 "print",
             ):
                 with compiled_autograd.enable(compiler_fn):
-                    out.backward(torch.tensor([2.0, 2.0]))
+                    out.backward(grad_out)
 
             graph = None

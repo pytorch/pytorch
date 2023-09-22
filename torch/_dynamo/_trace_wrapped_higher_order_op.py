@@ -11,9 +11,8 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
-__all__ = [
-    "trace_wrapped"
-]
+__all__ = ["trace_wrapped"]
+
 
 # Trace wrapped is a higher order op meant for both invoking a bound function,
 # and for registering it as a call_function in the backward graph.
