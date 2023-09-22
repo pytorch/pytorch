@@ -98,7 +98,7 @@ struct C10_API RefcountedMapAllocatorArgCheck {
 };
 
 class C10_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
-                                         public MapAllocator {
+                                       public MapAllocator {
  public:
   RefcountedMapAllocator(const char* filename, int flags, size_t size);
   RefcountedMapAllocator(
