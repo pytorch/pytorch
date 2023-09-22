@@ -51,6 +51,11 @@ __all__ = [
     "list_backends",
 ]
 
+if torch.manual_seed is torch.random.manual_seed:
+    # Wrap manual_seed with the disable decorator.
+    # Can't do it at its implementation due to dependency issues.
+    torch.manual_seed = disable(torch.manual_seed)
+
 
 def reset() -> None:
     """Clear all compile caches and restore initial state"""

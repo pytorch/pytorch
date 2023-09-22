@@ -850,7 +850,3 @@ def _get_device_module(device_type: str):
             f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
         )
     return device_module
-
-
-def false():
-    return False

@@ -2332,7 +2332,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x, -2), 8)
 
     def test_torch_seed(self):
+        from torch._dynamo.utils import counters
+
         cnts = torch._dynamo.testing.CompileCounter()
+        counters.clear()
 
         def fn(x):
             attention_seed = int(torch.seed() % sys.maxsize)
@@ -2348,15 +2351,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
 
         self.assertTrue(same(ref, res))
-
-        # Two problems:
-        #   - manual_seed graph breaks
-        #   - dynamo traces through manual_seed calls
-        # That gives us 3 frames and 3 ops + 1 (torch.seed()).
-        # If assume_static_by_default is False, there is +1 op for the symint call.
-        has_symint_call = not torch._dynamo.config.assume_static_by_default
-        self.assertEqual(cnts.op_count, 4 + int(has_symint_call))
-        self.assertEqual(cnts.frame_count, 3)
+        # Only the torch.seed call is turned into an FX graph.
+        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.frame_count, 1)
+        # Graph breaks at manual_seed.
+        self.assertEqual(len(counters["graph_break"]), 1)
 
     def test_is_tensor_like(self):
         cnts = torch._dynamo.testing.CompileCounter()
