@@ -321,7 +321,10 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=False).cuda()
         example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
         self._verify_symmetric_xnnpack_qat_graph(
-            m, example_inputs, has_relu=False, is_cuda=True,
+            m,
+            example_inputs,
+            has_relu=False,
+            is_cuda=True,
         )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
@@ -390,7 +393,10 @@ class TestQuantizePT2EQAT(PT2EQATTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=True).cuda()
         example_inputs = (torch.randn(1, 3, 5, 5).cuda(),)
         self._verify_symmetric_xnnpack_qat_graph(
-            m, example_inputs, has_relu=True, is_cuda=True,
+            m,
+            example_inputs,
+            has_relu=True,
+            is_cuda=True,
         )
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
