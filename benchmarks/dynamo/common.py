@@ -694,7 +694,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model_iter_fn)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, model_iter_fn
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1131,18 +1133,6 @@ class AOTInductorModelCache:
                 model, example_args, example_kwargs
             )
 
-            output_node = list(exported.graph.nodes)[-1]
-            output_tensors = [
-                torch.empty_strided(
-                    node.meta["val"].size(),
-                    node.meta["val"].stride(),
-                    dtype=node.meta["val"].dtype,
-                    layout=node.meta["val"].layout,
-                    device=node.meta["val"].device,
-                )
-                for node in output_node.args[0]
-            ]
-
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher],
@@ -1154,7 +1144,6 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_tensors": output_tensors,
                 "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
@@ -1162,25 +1151,21 @@ class AOTInductorModelCache:
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_tensors"],
             cls.cache[key]["output_spec"],
         )
 
 
-def export_aot_inductor(forward: Callable):
-    eager_forward = forward
+def export_aot_inductor(model, example_inputs, eager_forward):
+    module, exported, output_spec = AOTInductorModelCache.load(
+        model, example_inputs, eager_forward
+    )
 
-    def opt_aot_inductor(model, example_inputs, collect_outputs=False):
-        module, exported, output_tensors, output_spec = AOTInductorModelCache.load(
-            model, example_inputs, eager_forward
-        )
-        param_buffer_values = list(exported.state_dict.values())
+    def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        module.run(all_args, output_tensors)
+        output_tensors = module.run(flat_example_inputs)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
     return opt_aot_inductor
@@ -2400,6 +2385,9 @@ class BenchmarkRunner:
         print(msg, flush=True)
 
         start_stats = get_dynamo_stats()
+
+        if self.args.export_aot_inductor:
+            optimize_ctx = functools.partial(optimize_ctx, model, example_inputs)
 
         if self.args.accuracy:
             status = self.check_accuracy(

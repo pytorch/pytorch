@@ -523,7 +523,7 @@ at::Tensor preprocess_mask(
   }
   // Check and make the tensor contiguous if needed
   if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0) {
+      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
     return attn_mask.contiguous();
   }
 

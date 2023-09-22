@@ -155,24 +155,23 @@ class AOTInductorModelContainer {
   }
 
   void run(
-      std::vector<RAIIAtenTensorHandle>& inputs,
-      std::vector<RAIIAtenTensorHandle>& outputs,
-      std::vector<std::vector<int64_t>>** output_shapes,
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
       cudaStream_t stream,
       AOTIProxyExecutorHandle proxy_executor) {
     auto* model = get_available_model();
     try {
-      model->run(inputs, outputs, stream, proxy_executor);
+      model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
       std::lock_guard lk(models_mutex_);
       available_models_.push_back(model);
       throw;
     }
-
-    for (size_t i = 0; i < num_outputs(); i++) {
-      output_shapes_[i] = model->output_shape(i);
-    }
-    *output_shapes = &output_shapes_;
 
     {
       std::lock_guard lk(models_mutex_);

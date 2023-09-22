@@ -1311,7 +1311,7 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
-@register_decomposition(aten.native_group_norm_backward)
+@register_decomposition(aten.native_group_norm_backward.default)
 @pw_cast_for_opmath
 def native_group_norm_backward(
     grad_output: Tensor,
@@ -1399,6 +1399,36 @@ def native_group_norm_backward(
     return (d_input, d_gamma, d_bias)
 
 
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_group_norm_backward.out)
+def native_group_norm_backward_out(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: List[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    result = native_group_norm_backward(
+        grad_output, input, mean, rstd, gamma, N, C, HxW, group, output_mask
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
@@ -1406,7 +1436,7 @@ def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
 
 
 # TODO: Take a closer look at the type promotion semantics
-@register_decomposition(aten.native_layer_norm_backward)
+@register_decomposition(aten.native_layer_norm_backward.default)
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -1445,7 +1475,8 @@ def native_layer_norm_backward(
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
             input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
         )
-
+    mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
+    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
     x_hat = (input_cast - mean) * rstd
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
@@ -1481,6 +1512,34 @@ def native_layer_norm_backward(
         _maybe_cast(d_weight, input.dtype),
         _maybe_cast(d_bias, input.dtype),
     )
+
+
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_layer_norm_backward.out)
+def native_layer_norm_backward_out(
+    grad_out: Tensor,
+    input: Tensor,
+    normalized_shape: List[int],
+    mean: Tensor,
+    rstd: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    output_mask: List[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    result = native_layer_norm_backward(
+        grad_out, input, normalized_shape, mean, rstd, weight, bias, output_mask
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
 
 
 def native_batch_norm_helper(
@@ -1834,7 +1893,7 @@ def _broadcast_batch_norm_backward(x, broadcast_mask):
     return x
 
 
-@register_decomposition(aten.native_batch_norm_backward)
+@register_decomposition(aten.native_batch_norm_backward.default)
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -1932,6 +1991,45 @@ def native_batch_norm_backward(
         _maybe_cast(grad_weight, weight_dtype),
         _maybe_cast(grad_bias, weight_dtype),
     )
+
+
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_batch_norm_backward.out)
+def native_batch_norm_backward_out(
+    grad_out: Tensor,
+    input: Tensor,
+    weight: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_invstd: Optional[Tensor],
+    train: bool,
+    eps: float,
+    output_mask: List[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    result = native_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_invstd,
+        train,
+        eps,
+        output_mask,
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
