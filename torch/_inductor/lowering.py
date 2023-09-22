@@ -2280,7 +2280,7 @@ def _local_scalar_dense(data):
     # solely responsible for generating this .item().  The buffer is
     # not used for anything (notice we discard it); at codegen time,
     # the "buffer" just gets assigned None.
-    sym = V.graph.current_node.meta['val'].node.expr
+    sym = V.graph.current_node.meta["val"].node.expr
     buffer = ir.DynamicScalar(sym, data)
     buffer.name = V.graph.register_buffer(buffer)
     return sym

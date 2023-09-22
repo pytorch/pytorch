@@ -155,6 +155,29 @@ class TestInductorDynamic(TestCase):
         ref = fn(x, x.size(0))
         self.assertEqual(res, ref)
 
+    # not supported yet on cpu, https://github.com/pytorch/pytorch/issues/109897
+    @onlyCUDA
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_nobreak(self, device):
+        def f(x, b):
+            return (x[b] * 2).sum()
+
+        opt_f = torch.compile(f, fullgraph=True)
+        x = torch.randn(5, device=device)
+        b = torch.tensor([True, True, False, False, True], device=device)
+        r = f(x, b)
+        opt_r = opt_f(x, b)
+        self.assertEqual(r, opt_r)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_item_nobreak(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = x.item()
+            return torch.empty(y)
+
+        f(torch.tensor([3], device=device))
+
     @torch._inductor.config.patch(disable_cpp_codegen=True)
     def test_floor(self):
         # `int(n * 0.2)` will be generated as `floor(0.2*s0)` of torch.SymInt type.

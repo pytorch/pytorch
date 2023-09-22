@@ -3614,6 +3614,7 @@ class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
     """
+
     def get_reads(self):
         return ()
 

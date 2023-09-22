@@ -6739,31 +6739,6 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
-    @torch._dynamo.config.patch(
-        capture_dynamic_output_shape_ops=True
-    )
-    def test_nonzero_nobreak(self):
-        def f(x, b):
-            return (x[b] * 2).sum()
-
-        opt_f = torch.compile(f, fullgraph=True)
-        x = torch.randn(5, device='cuda')
-        b = torch.tensor([True, True, False, False, True], device='cuda')
-        r = f(x, b)
-        opt_r = opt_f(x, b)
-        self.assertEqual(r, opt_r)
-
-    @torch._dynamo.config.patch(
-        capture_scalar_outputs=True
-    )
-    def test_item_nobreak(self):
-        @torch.compile(fullgraph=True)
-        def f(x):
-            y = x.item()
-            return torch.empty(y)
-
-        f(torch.tensor([3]))
-
     def test_simple_set_usage(self):
         def foo(x, y):
             setty = {x, y}
