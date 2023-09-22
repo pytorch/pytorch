@@ -103,10 +103,8 @@ def has_unbacked_symint(gm, example_inputs):
             for x in torch.fx.experimental.symbolic_shapes.free_symbols(
                 node.meta["example_value"]
             ):
-                if fake_mode.shape_env.is_unbacked_symint_or_symbool(x):
-                    for i in fake_mode.shape_env.runtime_var_to_range.keys():
-                        if str(i) == str(x):
-                            return True
+                if fake_mode.shape_env.is_unbacked_symint(x):
+                    return True
 
     return False
 
@@ -525,7 +523,7 @@ _pointwise_ops = [
             Arg(),
         ),
     ),
-    pass_dict=split_cat_pass,
+    pass_dict=dyn_rewritten_pass,
 )
 def boolean_mask_rewritten(match: Match, tensor1, index1, tensor2, index2, const_value):
     if (
@@ -547,7 +545,7 @@ def boolean_mask_rewritten(match: Match, tensor1, index1, tensor2, index2, const
             where = graph.call_function(
                 torch.where,
                 args=(index1, true_output, tensor1),
-                kwargs={"out": tensor1},
+                kwargs={},
             )
         node.replace_all_uses_with(where)
         where.meta.update(node.meta)

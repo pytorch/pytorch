@@ -271,7 +271,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             "co_firstlineno": f_code.co_firstlineno,
         }
 
-
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
@@ -303,7 +302,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
             # the program execution.
             tracked_fakes=self.tracked_fakes,
             allow_scalar_outputs=config.capture_scalar_outputs,
-            allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            allow_dynamic_output_shape_ops=torch._guards.CompileContext.get_capture_dynamic_output_shape_ops(),
             co_fields=self.co_fields,
         )
 
