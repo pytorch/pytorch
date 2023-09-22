@@ -9,11 +9,11 @@
 
 #pragma once
 
-#include "cutlass/epilogue/thread/linear_combination.h"
-#include "cutlass/epilogue/thread/linear_combination_generic.h"
-#include "cutlass/epilogue/thread/linear_combination_relu.h"
-#include "cutlass/epilogue/thread/linear_combination_silu.h"
-#include "cutlass_extensions/epilogue/thread/ft_fused_activations.h"
+#include <cutlass/epilogue/thread/linear_combination.h>
+#include <cutlass/epilogue/thread/linear_combination_generic.h>
+#include <cutlass/epilogue/thread/linear_combination_relu.h>
+#include <cutlass/epilogue/thread/linear_combination_silu.h>
+#include <cutlass_extensions/epilogue/thread/ft_fused_activations.h>
 
 namespace fastertransformer {
 

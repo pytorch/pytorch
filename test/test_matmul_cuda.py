@@ -32,6 +32,10 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+_IS_SM8X = False
+if torch.cuda.is_available():
+    _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
 
@@ -284,7 +288,7 @@ class TestFP8MatmulCuda(TestCase):
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-@unittest.skipIf(not torch.cuda.is_available() or torch.cuda.get_device_capability(0)[0] != 8, "mixed dtypes MM only supported on SM 8.x")
+@unittest.skipIf(not _IS_SM8X, "mixed dtypes MM only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
@@ -357,7 +361,7 @@ class TestMixedDtypesLinearCuda(TestCase):
         if dtype == torch.bfloat16:
             rtol, atol = 1e-2, 1e-3
         for dtypeq, batch_shape, (m, n, k), add_bias, activation in \
-            product(dtypeqs, batch_shapes, shapes, (False, True), activations):
+                product(dtypeqs, batch_shapes, shapes, (False, True), activations):
             run_test(batch_shape, m, n, k, add_bias, activation, dtype, dtypeq, device, rtol, atol)
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
