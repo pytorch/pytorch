@@ -106,6 +106,14 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
   }
 }
 
+bool SymInt::expect_size(const char* file, int64_t line) const {
+  if (auto ma = maybe_as_int()) {
+    return *ma >= 0;
+  } else {
+    return toSymNodeImplUnowned()->expect_size(file, line);
+  }
+}
+
 SymInt operator-(const SymInt& s) {
   if (auto ma = s.maybe_as_int()) {
     return SymInt(-*ma);
