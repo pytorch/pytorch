@@ -5006,6 +5006,7 @@ def logspace(
     layout: torch.layout = torch.strided,
     pin_memory: bool = False,
     requires_grad: bool = False,
+    endpoint: bool = True,
 ) -> TensorLikeType:
     if dtype is None:
         dtype = torch.get_default_dtype()
@@ -5050,6 +5051,7 @@ def logspace(
         device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
+        endpoint=endpoint,
     )
     return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)  # type: ignore[arg-type,return-value]
 
