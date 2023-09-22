@@ -80,12 +80,13 @@ def is_fx_tracing_test() -> bool:
 
 
 def has_detectron2():
-    try:
-        from detectron2.layers.mask_ops import _paste_masks_tensor_shape
+    return False
+    # try:
+    #     from detectron2.layers.mask_ops import _paste_masks_tensor_shape
 
-        return _paste_masks_tensor_shape is not None
-    except ImportError:
-        return False
+    #     return _paste_masks_tensor_shape is not None
+    # except ImportError:
+    #     return False
 
 
 def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True):

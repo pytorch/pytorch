@@ -6,6 +6,7 @@ from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
+from ..guards import GuardBuilder
 from ..utils import np
 from .base import typestr, VariableTracker
 
@@ -30,20 +31,28 @@ class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs):
         source = kwargs.get("source", None)
-        guards = kwargs.get("source", None)
-        if not ConstantVariable.is_literal(value):
+        is_literal = ConstantVariable.is_literal(value)
+        if not is_literal:
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
 
-        if isinstance(value, (list, tuple)):
-            items = [
-                ConstantVariable.create(
-                    x,
-                    source=GetItemSource(source, i) if source else None,
-                    guards=guards,
+        # Routing for list and tuple literals.
+        if is_literal and isinstance(value, (list, tuple)):
+            items = []
+            for i, x in enumerate(value):
+                item_source = GetItemSource(source, i) if source else None
+                guards = (
+                    {item_source.make_guard(GuardBuilder.CONSTANT_MATCH)}
+                    if item_source
+                    else None
                 )
-                for i, x in enumerate(value)
-            ]
+                items.append(
+                    ConstantVariable.create(
+                        x,
+                        source=item_source,
+                        guards=guards,
+                    )
+                )
             return variables.BaseListVariable.cls_for(type(value))(
                 items, regen_guards=True, **kwargs
             )
@@ -93,7 +102,7 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (int, float, bool, type(None), str):
+        if type(obj) in (int, float, bool, type(None), str, Ellipsis.__class__):
             return True
         if type(obj) in (list, tuple, set, frozenset):
             return all(ConstantVariable.is_literal(x) for x in obj)

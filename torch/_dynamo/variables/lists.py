@@ -74,6 +74,10 @@ class BaseListVariable(VariableTracker):
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
 
+    @property
+    def value(self):
+        return self.as_python_constant()
+
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
 
