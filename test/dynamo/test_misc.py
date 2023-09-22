@@ -2775,9 +2775,9 @@ def fn():
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": ConstantVariable(10), "b": ConstantVariable(20)}
+        d1 = {"a": ConstantVariable.create(10), "b": ConstantVariable.create(20)}
         d2 = collections.OrderedDict(
-            [("x", ConstantVariable(12)), ("y", ConstantVariable(22))]
+            [("x", ConstantVariable.create(12)), ("y", ConstantVariable.create(22))]
         )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
