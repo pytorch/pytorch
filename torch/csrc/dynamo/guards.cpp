@@ -588,12 +588,6 @@ struct GuardDebugInfo {
     this->failure_reason = failure_reason;
   }
 
-  std::string repr() {
-    return "GuardDebugInfo(num_guards_executed=" +
-        std::to_string(num_guards_executed) +
-        ", failure_reason=" + failure_reason + ")";
-  }
-
   // Whether the guard passed or failed.
   bool result;
 
@@ -1087,8 +1081,8 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<bool, std::string, int>())
       .def_readonly("result", &GuardDebugInfo::result)
       .def_readonly("failure_reason", &GuardDebugInfo::failure_reason)
-      .def_readonly("num_guards_executed", &GuardDebugInfo::num_guards_executed)
-      .def("__repr__", &GuardDebugInfo::repr);
+      .def_readonly(
+          "num_guards_executed", &GuardDebugInfo::num_guards_executed);
 
   // Leaf Guards
   py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard");
@@ -1139,8 +1133,8 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self,
              py::object lambda1,
              py::object lambda2) -> void {
-            self.add_leaf_guard(std::move(
-                std::make_shared<PythonLambdaGuard>(lambda1, lambda2)));
+            self.add_leaf_guard(
+                std::make_shared<PythonLambdaGuard>(lambda1, lambda2));
           })
       // return by reference because GuardManager has the ownership of accessors
       // and guard managers
