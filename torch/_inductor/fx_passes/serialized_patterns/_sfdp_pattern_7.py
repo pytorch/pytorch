@@ -16,8 +16,6 @@ from torch._inductor.pattern_matcher import (
    CallFunctionVarArgs,
    CallMethod,
    CallMethodVarArgs,
-   CallModule,
-   CallModuleVarArgs,
    ExclusiveKeywordArg,
    Ignored,
    KeywordArg,
@@ -47,7 +45,7 @@ amax_default = CallFunction(aten.amax.default, div_Tensor, Ignored(), True)
 sub_Tensor = CallFunction(aten.sub.Tensor, div_Tensor, amax_default)
 exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
 sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
-div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=2)
+div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=3)
 mul_Tensor = CallFunction(aten.mul.Tensor, gt_Scalar, div_Tensor_1)
 mul_Tensor_1 = CallFunction(aten.mul.Tensor, mul_Tensor, Ignored())
 convert_element_type_default = CallFunction(prims.convert_element_type.default, mul_Tensor_1, Ignored())
@@ -69,11 +67,9 @@ convert_element_type_default_3 = CallFunction(prims.convert_element_type.default
 mul_Tensor_2 = CallFunction(aten.mul.Tensor, convert_element_type_default_3, Ignored())
 mul_Tensor_3 = CallFunction(aten.mul.Tensor, convert_element_type_default_2, mul_Tensor_2)
 clone_default_3 = CallFunction(aten.clone.default, mul_Tensor_3, memory_format=torch.contiguous_format)
-alias_default = CallFunction(aten.alias.default, div_Tensor_1)
-alias_default_1 = CallFunction(aten.alias.default, alias_default, _users=2)
-mul_Tensor_4 = CallFunction(aten.mul.Tensor, clone_default_3, alias_default_1, _users=2)
+mul_Tensor_4 = CallFunction(aten.mul.Tensor, clone_default_3, div_Tensor_1, _users=2)
 sum_dim_IntList_1 = CallFunction(aten.sum.dim_IntList, mul_Tensor_4, Ignored(), True)
-mul_Tensor_5 = CallFunction(aten.mul.Tensor, alias_default_1, sum_dim_IntList_1)
+mul_Tensor_5 = CallFunction(aten.mul.Tensor, div_Tensor_1, sum_dim_IntList_1)
 sub_Tensor_1 = CallFunction(aten.sub.Tensor, mul_Tensor_4, mul_Tensor_5)
 div_Tensor_2 = CallFunction(aten.div.Tensor, sub_Tensor_1, Ignored())
 view_default_8 = CallFunction(aten.view.default, div_Tensor_2, Ignored(), _users=2)
@@ -146,7 +142,7 @@ amax_default = CallFunction(aten.amax.default, convert_element_type_default, Ign
 sub_Tensor = CallFunction(aten.sub.Tensor, convert_element_type_default, amax_default)
 exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
 sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
-div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=2)
+div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=3)
 mul_Tensor = CallFunction(aten.mul.Tensor, gt_Scalar, div_Tensor_1)
 mul_Tensor_1 = CallFunction(aten.mul.Tensor, mul_Tensor, Ignored())
 convert_element_type_default_1 = CallFunction(prims.convert_element_type.default, mul_Tensor_1, Ignored())
@@ -167,11 +163,9 @@ convert_element_type_default_3 = CallFunction(prims.convert_element_type.default
 mul_Tensor_2 = CallFunction(aten.mul.Tensor, convert_element_type_default_3, Ignored())
 mul_Tensor_3 = CallFunction(aten.mul.Tensor, convert_element_type_default_2, mul_Tensor_2)
 clone_default_3 = CallFunction(aten.clone.default, mul_Tensor_3, memory_format=torch.contiguous_format)
-alias_default = CallFunction(aten.alias.default, div_Tensor_1)
-alias_default_1 = CallFunction(aten.alias.default, alias_default, _users=2)
-mul_Tensor_4 = CallFunction(aten.mul.Tensor, clone_default_3, alias_default_1, _users=2)
+mul_Tensor_4 = CallFunction(aten.mul.Tensor, clone_default_3, div_Tensor_1, _users=2)
 sum_dim_IntList_1 = CallFunction(aten.sum.dim_IntList, mul_Tensor_4, Ignored(), True)
-mul_Tensor_5 = CallFunction(aten.mul.Tensor, alias_default_1, sum_dim_IntList_1)
+mul_Tensor_5 = CallFunction(aten.mul.Tensor, div_Tensor_1, sum_dim_IntList_1)
 sub_Tensor_1 = CallFunction(aten.sub.Tensor, mul_Tensor_4, mul_Tensor_5)
 convert_element_type_default_4 = CallFunction(prims.convert_element_type.default, sub_Tensor_1, Ignored())
 div_Tensor_2 = CallFunction(aten.div.Tensor, convert_element_type_default_4, Ignored())
