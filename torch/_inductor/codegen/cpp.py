@@ -3191,8 +3191,9 @@ class LoopNestWithSplit:
         Whether all the loops are for reduction. Reduction loops
         are always the inner most ones.
         """
-        assert self.root is not None
-        return len(self.root) > 0 and self.root[0].is_reduction()
+        return (
+            self.root is not None and len(self.root) > 0 and self.root[0].is_reduction()
+        )
 
     def mark_parallel(self, par_depth):
         assert (
