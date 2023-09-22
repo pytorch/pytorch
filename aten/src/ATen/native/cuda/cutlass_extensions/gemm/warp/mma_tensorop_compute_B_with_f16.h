@@ -35,25 +35,25 @@
 
 #pragma once
 
-#include "cutlass/array.h"
-#include "cutlass/cutlass.h"
-#include "cutlass/platform/platform.h"
+#include <cutlass/array.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/platform/platform.h>
 
-#include "cutlass/matrix_shape.h"
-#include "cutlass/numeric_conversion.h"
-#include "cutlass/numeric_types.h"
+#include <cutlass/matrix_shape.h>
+#include <cutlass/numeric_conversion.h>
+#include <cutlass/numeric_types.h>
 
-#include "cutlass/arch/memory_sm75.h"
-#include "cutlass/arch/mma_sm75.h"
-#include "cutlass/arch/mma_sm80.h"
+#include <cutlass/arch/memory_sm75.h>
+#include <cutlass/arch/mma_sm75.h>
+#include <cutlass/arch/mma_sm80.h>
 
-#include "cutlass/gemm/gemm.h"
-#include "cutlass/gemm/warp/mma.h"
+#include <cutlass/gemm/gemm.h>
+#include <cutlass/gemm/warp/mma.h>
 
-#include "cutlass/gemm/warp/mma_tensor_op_policy.h"
+#include <cutlass/gemm/warp/mma_tensor_op_policy.h>
 
-#include "cutlass/gemm/warp/mma_tensor_op_tile_iterator.h"
-#include "cutlass/gemm/warp/mma_tensor_op_tile_iterator_sm80.h"
+#include <cutlass/gemm/warp/mma_tensor_op_tile_iterator.h>
+#include <cutlass/gemm/warp/mma_tensor_op_tile_iterator_sm80.h>
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 

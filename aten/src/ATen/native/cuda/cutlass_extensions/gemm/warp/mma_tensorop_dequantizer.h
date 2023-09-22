@@ -34,25 +34,25 @@
 
 #pragma once
 
-#include "cutlass/cutlass.h"
+#include <cutlass/cutlass.h>
 
-#include "cutlass/array.h"
-#include "cutlass/matrix_shape.h"
-#include "cutlass/numeric_types.h"
-#include "cutlass/tensor_ref.h"
+#include <cutlass/array.h>
+#include <cutlass/matrix_shape.h>
+#include <cutlass/numeric_types.h>
+#include <cutlass/tensor_ref.h>
 
-#include "cutlass/arch/arch.h"
-#include "cutlass/arch/memory_sm75.h"
-#include "cutlass/gemm/gemm.h"
+#include <cutlass/arch/arch.h>
+#include <cutlass/arch/memory_sm75.h>
+#include <cutlass/gemm/gemm.h>
 
-#include "cutlass/layout/matrix.h"
-#include "cutlass/layout/pitch_linear.h"
-#include "cutlass/layout/tensor.h"
+#include <cutlass/layout/matrix.h>
+#include <cutlass/layout/pitch_linear.h>
+#include <cutlass/layout/tensor.h>
 
-#include "cutlass/functional.h"
-#include "cutlass/platform/platform.h"
+#include <cutlass/functional.h>
+#include <cutlass/platform/platform.h>
 
-//#include "src/fastertransformer/utils/cuda_bf16_wrapper.h"
+//#include <src/fastertransformer/utils/cuda_bf16_wrapper.h>
 //#ifdef ENABLE_BF16
 #include <cuda_bf16.h>
 //#endif

@@ -35,12 +35,12 @@
 
 #pragma once
 
-#include "cutlass/cutlass.h"
+#include <cutlass/cutlass.h>
 
-#include "cutlass/arch/arch.h"
-#include "cutlass/gemm/gemm.h"
-#include "cutlass/matrix_coord.h"
-#include "cutlass/semaphore.h"
+#include <cutlass/arch/arch.h>
+#include <cutlass/gemm/gemm.h>
+#include <cutlass/matrix_coord.h>
+#include <cutlass/semaphore.h>
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 

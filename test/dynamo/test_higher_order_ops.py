@@ -2277,14 +2277,14 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
@@ -2313,14 +2313,14 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
@@ -2350,15 +2350,15 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
         l_y_ = L_y_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        call = vmap_proxy.__call__(child, l_y_);  vmap_proxy = child = l_y_ = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
@@ -2389,16 +2389,16 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_x_
+        child_1 = L_y_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
-        select_1 = l_y_.select(1, 0)
+        select = child.select(0, 0)
+        select_1 = child_1.select(1, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
@@ -2431,16 +2431,16 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_x_
+        child_1 = L_y_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
-        select_1 = l_y_.select(1, 0)
+        select = child.select(0, 0)
+        select_1 = child_1.select(1, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0, 1), 0, 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
@@ -2469,26 +2469,29 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
-        l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_x_
+        child_1 = L_y_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
         _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
-        select_1 = l_y_.select(0, 0)
+        select = child.select(0, 0)
+        select_1 = child_1.select(0, 0)
         vmap_body_1 = self.vmap_body_1
         vmap_proxy = torch.func.vmap(vmap_body_1, (0, 0), 0, 'error');  vmap_body_1 = None
-        call = vmap_proxy.__call__(l_x_, l_y_);  vmap_proxy = l_x_ = l_y_ = None
+        call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, select, select_1):
-            select_2 = select.select(1, 0)
-            select_3 = select_1.select(1, 0)
+            child = select
+            child_1 = select_1
+
+            select_2 = child.select(1, 0)
+            select_3 = child_1.select(1, 0)
             vmap_body_0 = self.vmap_body_0
             vmap_proxy = torch.func.vmap(vmap_body_0, (1, 1), 0, 'error');  vmap_body_0 = None
-            call = vmap_proxy.__call__(select, select_1);  vmap_proxy = select = select_1 = None
+            call = vmap_proxy.__call__(child, child_1);  vmap_proxy = child = child_1 = None
             return call
 
         class GraphModule(torch.nn.Module):
@@ -2516,23 +2519,25 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         l_x_ = L_x_
-        l_y_ = L_y_
+        child = L_y_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
         _check_randomness_arg_1 = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_y_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_1 = self.vmap_body_1
         vmap_proxy = torch.func.vmap(vmap_body_1, (0, None), 0, 'error');  vmap_body_1 = None
-        call = vmap_proxy.__call__(l_y_, l_x_);  vmap_proxy = l_y_ = l_x_ = None
+        call = vmap_proxy.__call__(child, l_x_);  vmap_proxy = child = l_x_ = None
         return (call,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, select, l_x_):
-            select_1 = select.select(0, 0)
+            child = select
+
+            select_1 = child.select(0, 0)
             vmap_body_0 = self.vmap_body_0
             vmap_proxy = torch.func.vmap(vmap_body_0, (0, None), 0, 'error');  vmap_body_0 = None
-            call = vmap_proxy.__call__(select, l_x_);  vmap_proxy = select = l_x_ = None
+            call = vmap_proxy.__call__(child, l_x_);  vmap_proxy = child = l_x_ = None
             return call
 
         class GraphModule(torch.nn.Module):
@@ -2558,14 +2563,14 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), 0, 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         getitem = call[0]
         getitem_1 = call[1];  call = None
         return (getitem, getitem_1)
@@ -2594,14 +2599,14 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         getitem = call[0]
         getitem_1 = call[1];  call = None
         return (getitem, getitem_1)
@@ -2631,14 +2636,14 @@ class GraphModule(torch.nn.Module):
         expected = """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_ : torch.Tensor):
-        l_x_ = L_x_
+        child = L_x_
 
         _check_randomness_arg = torch._functorch.vmap._check_randomness_arg('error')
 
-        select = l_x_.select(0, 0)
+        select = child.select(0, 0)
         vmap_body_0 = self.vmap_body_0
         vmap_proxy = torch.func.vmap(vmap_body_0, (0,), (1, 0), 'error');  vmap_body_0 = None
-        call = vmap_proxy.__call__(l_x_);  vmap_proxy = l_x_ = None
+        call = vmap_proxy.__call__(child);  vmap_proxy = child = None
         getitem = call[0]
         getitem_1 = call[1];  call = None
         return (getitem, getitem_1)
@@ -2669,7 +2674,6 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
-    @unittest.expectedFailure
     def test_vmap_pytree_inputs(self):
         counters.clear()
         x = torch.ones(2, 3)

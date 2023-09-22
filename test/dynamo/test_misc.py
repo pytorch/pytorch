@@ -1396,6 +1396,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_numpy_force(self):
+        def fn(x):
+            return x.numpy(force=False)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        def fn(x):
+            return x.numpy(force=True)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3, requires_grad=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_recompilation_scalar(self):
         def fn(x, a):
             return np.where(x < 0.5, a, x)
@@ -7254,6 +7273,9 @@ ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {}
+==> runtime_var_to_range: values don't match.
+  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}

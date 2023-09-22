@@ -96,6 +96,8 @@ def _convert_out_params(f):
         for o in out_params:
             _fn.__annotations__[o.name] = o.annotation
 
+        # Propagate that this function is wrapped by `out_wrapper`
+        _fn._torch_decompositions_out_wrapper = f._torch_decompositions_out_wrapper  # type: ignore[attr-defined]
         fn = _fn
 
     return fn
@@ -222,6 +224,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.arange.default,
             aten.arange.start,
             aten.avg_pool2d_backward,
+            aten.baddbmm,
             aten.binary_cross_entropy,
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
@@ -358,7 +361,8 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,
-            aten.std.correction,
+            aten.std,
+            aten.std_mean,
             aten.stack,
             aten.t,
             aten.tanh_backward,
@@ -376,6 +380,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.unfold_copy,
             aten._unsafe_index,
             aten.unsafe_split.Tensor,
+            aten.unsafe_split_with_sizes,
             aten._unsafe_view,
             aten.upsample_bilinear2d,
             aten.upsample_nearest2d_backward,
