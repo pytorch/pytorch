@@ -122,9 +122,9 @@ class FunctionalTensor(torch.Tensor):
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
         #   this is handled by FunctionalTensor.to_functional
         x_functional = torch._to_functional_tensor(x)
-        torch._mirror_autograd_meta_to(x, x_functional)
+        torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
         out = FunctionalTensor(x_functional)
-        torch._mirror_autograd_meta_to(x_functional, out)
+        torch._mirror_autograd_meta_to(x_functional, out)  # type: ignore[attr-defined]
         return out
 
     def from_functional(self):
@@ -212,13 +212,13 @@ class FunctionalTensorMode(TorchDispatchMode):
         ), torch._C._IncludeDispatchKeyGuard(torch._C.DispatchKey.Functionalize):
             try:
                 # By default for python functionalization (for AOTAutograd), we reapply views.
-                old_apply_views = torch._functionalize_enable_reapply_views(True)
+                old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
                 outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
                 outs_wrapped = pytree.tree_map_only(torch.Tensor, wrap, outs_unwrapped)
 
             finally:
                 torch._disable_functionalization()
-                torch._functionalize_enable_reapply_views(old_apply_views)
+                torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
 
         is_included = torch._C._dispatch_tls_is_dispatch_key_included(
             torch._C.DispatchKey.Functionalize

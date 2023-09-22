@@ -23,7 +23,7 @@ import torch.random
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_scalar, SymTypes
 
 from .. import config, variables
-from .._trace_wrapped_higher_order_op import _trace_wrapped
+from .._trace_wrapped_higher_order_op import trace_wrapped
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -706,7 +706,7 @@ class TensorVariable(VariableTracker):
 
                 # This wraps our user provided fn with a function that intercedes and
                 # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-                fn = functools.partial(_trace_wrapped, fn=fn)
+                fn = functools.partial(trace_wrapped, fn=fn)
 
                 # This little piece of logic ensures we only ever lift a given hook up once
                 # this important, because a dynamo->aot_autograd invariant is no duplicate sources in inputs.

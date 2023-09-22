@@ -1398,6 +1398,22 @@ class BuiltinVariable(VariableTracker):
             return BaseListVariable.list_compare(tx, op, left, right)
 
         if isinstance(left, BaseListVariable):
+            # TODO(voz): Are we tired of ConstantVariable literals yet
+            # TODO(voz): DO NOT LAND THIS SHITE - THIS SHOULD BE REPLACED BY BETTER INVARIANTS
+            # LITERALS TO THEIR PROPER PLACE
+            def _maybe_repack(x):
+                if isinstance(x, (ConstantVariable)) and isinstance(
+                    x.value, (list, tuple)
+                ):
+                    cls = BaseListVariable.cls_for(type(x.value))
+                    return cls([ConstantVariable(item) for item in x.value])
+                if isinstance(x, (SizeVariable)):
+                    # DISGUSTING HACK DONT LAND ME
+                    return TupleVariable(x.items)
+                return x
+
+            left = _maybe_repack(left)
+            right = _maybe_repack(right)
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
             return BaseListVariable.list_compare(tx, op, left, right)
