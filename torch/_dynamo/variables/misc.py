@@ -80,9 +80,11 @@ class SuperVariable(VariableTracker):
             ):
                 tx.output.guards.update(options.get("guards", set()))
                 tx.output.side_effects.store_attr(
-                    objvar, "__call_nn_module_init", variables.ConstantVariable(True)
+                    objvar,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
-                return variables.ConstantVariable(None)
+                return variables.ConstantVariable.create(None)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):
@@ -200,7 +202,7 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.ConstantVariable(None)
+        return variables.ConstantVariable.create(None)
 
 
 class ClosureVariable(UnknownVariable):
@@ -491,7 +493,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if isinstance(arg.as_proxy(), torch.fx.Proxy):
                 arg.as_proxy().node.meta["saved_tensor_marked"] = True
             self._saved_tensors.append(arg)
-        return variables.ConstantVariable(None, **options)
+        return variables.ConstantVariable.create(None, **options)
 
     def var_getattr(self, tx, name):
         if name == "save_for_backward":
@@ -628,7 +630,7 @@ class GetAttrVariable(VariableTracker):
             and isinstance(self.obj, InspectSignatureVariable)
             and self.name == "parameters"
         ):
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
@@ -847,7 +849,7 @@ class TypingVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "__getitem__" and len(args) == 1:
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.value[args[0].as_python_constant()],
                 **VariableTracker.propagate(self, args),
             )
