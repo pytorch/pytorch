@@ -16,8 +16,6 @@ from torch._inductor.pattern_matcher import (
    CallFunctionVarArgs,
    CallMethod,
    CallMethodVarArgs,
-   CallModule,
-   CallModuleVarArgs,
    ExclusiveKeywordArg,
    Ignored,
    KeywordArg,
@@ -45,7 +43,7 @@ amax_default = CallFunction(aten.amax.default, view_default_2, Ignored(), True)
 sub_Tensor = CallFunction(aten.sub.Tensor, view_default_2, amax_default)
 exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
 sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
-div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=2)
+div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=3)
 convert_element_type_default = CallFunction(prims.convert_element_type.default, div_Tensor_1, Ignored())
 expand_default_2 = CallFunction(aten.expand.default, convert_element_type_default, Ignored())
 view_default_3 = CallFunction(aten.view.default, expand_default_2, Ignored(), _users=2)
@@ -61,11 +59,9 @@ bmm_default_2 = CallFunction(aten.bmm.default, view_default_6, permute_default_4
 convert_element_type_default_1 = CallFunction(prims.convert_element_type.default, bmm_default_2, Ignored())
 view_default_7 = CallFunction(aten.view.default, convert_element_type_default_1, Ignored())
 convert_element_type_default_2 = CallFunction(prims.convert_element_type.default, view_default_7, Ignored())
-alias_default = CallFunction(aten.alias.default, div_Tensor_1)
-alias_default_1 = CallFunction(aten.alias.default, alias_default, _users=2)
-mul_Tensor = CallFunction(aten.mul.Tensor, convert_element_type_default_2, alias_default_1, _users=2)
+mul_Tensor = CallFunction(aten.mul.Tensor, convert_element_type_default_2, div_Tensor_1, _users=2)
 sum_dim_IntList_1 = CallFunction(aten.sum.dim_IntList, mul_Tensor, Ignored(), True)
-mul_Tensor_1 = CallFunction(aten.mul.Tensor, alias_default_1, sum_dim_IntList_1)
+mul_Tensor_1 = CallFunction(aten.mul.Tensor, div_Tensor_1, sum_dim_IntList_1)
 sub_Tensor_1 = CallFunction(aten.sub.Tensor, mul_Tensor, mul_Tensor_1)
 view_default_8 = CallFunction(aten.view.default, sub_Tensor_1, Ignored(), _users=2)
 permute_default_5 = CallFunction(aten.permute.default, view_default_1, Ignored())
@@ -134,7 +130,7 @@ amax_default = CallFunction(aten.amax.default, convert_element_type_default, Ign
 sub_Tensor = CallFunction(aten.sub.Tensor, convert_element_type_default, amax_default)
 exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
 sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
-div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=2)
+div_Tensor_1 = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList, _users=3)
 convert_element_type_default_1 = CallFunction(prims.convert_element_type.default, div_Tensor_1, Ignored())
 expand_default_2 = CallFunction(aten.expand.default, convert_element_type_default_1, Ignored())
 view_default_3 = CallFunction(aten.view.default, expand_default_2, Ignored(), _users=2)
@@ -149,11 +145,9 @@ permute_default_4 = CallFunction(aten.permute.default, view_default_4, Ignored()
 bmm_default_2 = CallFunction(aten.bmm.default, view_default_6, permute_default_4)
 view_default_7 = CallFunction(aten.view.default, bmm_default_2, Ignored())
 convert_element_type_default_2 = CallFunction(prims.convert_element_type.default, view_default_7, Ignored())
-alias_default = CallFunction(aten.alias.default, div_Tensor_1)
-alias_default_1 = CallFunction(aten.alias.default, alias_default, _users=2)
-mul_Tensor = CallFunction(aten.mul.Tensor, convert_element_type_default_2, alias_default_1, _users=2)
+mul_Tensor = CallFunction(aten.mul.Tensor, convert_element_type_default_2, div_Tensor_1, _users=2)
 sum_dim_IntList_1 = CallFunction(aten.sum.dim_IntList, mul_Tensor, Ignored(), True)
-mul_Tensor_1 = CallFunction(aten.mul.Tensor, alias_default_1, sum_dim_IntList_1)
+mul_Tensor_1 = CallFunction(aten.mul.Tensor, div_Tensor_1, sum_dim_IntList_1)
 sub_Tensor_1 = CallFunction(aten.sub.Tensor, mul_Tensor, mul_Tensor_1)
 convert_element_type_default_3 = CallFunction(prims.convert_element_type.default, sub_Tensor_1, Ignored())
 view_default_8 = CallFunction(aten.view.default, convert_element_type_default_3, Ignored(), _users=2)
