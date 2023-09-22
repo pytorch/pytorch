@@ -1,18 +1,7 @@
 import math
-
 import torch
-from torch._inductor.cuda_properties import get_device_capability
 
-
-def _has_triton():
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
-
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
+from torch.utils._triton import has_triton
 
 
 def check(cond, msg):
@@ -220,7 +209,7 @@ def tile_to_blocksize(t, blocksize):
     return t.view(new_shape).transpose(-3, -2)
 
 
-if _has_triton():
+if has_triton():
     import triton
     import triton.language as tl
     from typing import Optional, Tuple

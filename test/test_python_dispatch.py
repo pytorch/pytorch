@@ -2259,6 +2259,12 @@ class TestWrapperSubclassAliasing(TestCase):
         with torch.inference_mode():
             self._test_wrapper_subclass_aliasing(torch.ops.aten.conv2d.default, args, kwargs)
 
+    def test_wrapper_subclass_aliasing_out_op(self, device):
+        # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
+        args = (torch.ones(4), torch.ones(4))
+        kwargs = {'out': torch.empty(4)}
+        self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
+
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 
 if __name__ == '__main__':
