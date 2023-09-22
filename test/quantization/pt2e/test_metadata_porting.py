@@ -78,7 +78,7 @@ class TestMetaDataPorting(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         pt2_quant_output = m(*example_inputs)
         recorded_node_tags = {}
@@ -95,6 +95,7 @@ class TestMetaDataPorting(QuantizationTestCase):
                         f"{n} has tag {n.meta['quantization_tag']} that is associated with another node of the same type"
                     )
                 recorded_node_tags[n.target].add(n.meta["quantization_tag"])
+
         self.assertEqual(set(recorded_node_tags.keys()), set(node_tags.keys()))
         for k, v in recorded_node_tags.items():
             self.assertEqual(v, node_tags[k])
