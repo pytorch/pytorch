@@ -34,9 +34,9 @@ def _self_invoke(*args, fn):
 
 
 def _assert_meta(grad, size, stride, dtype):
-    assert grad.size() == size
-    assert grad.stride() == stride
-    assert grad.dtype == dtype
+    assert grad.size() == size, "size mismatch"
+    assert grad.stride() == stride, "stride mismatch"
+    assert grad.dtype == dtype, "dtype mismatch"
     return grad
 
 
@@ -50,7 +50,6 @@ def inner_trace(mode, *args, fn):
 
     if isinstance(fn, functools.partial):
         fn.__name__ = fn.func.__name__  # type: ignore[attr-defined]
-    original_fn = fn
     # We've implemented a higher-order operator that remains consistent in proxy tensor tracing.
     # However, Dynamo is aware and traces this into its genuine functionality.
     # The operator's purpose is to facilitate invoking non-traceable functions

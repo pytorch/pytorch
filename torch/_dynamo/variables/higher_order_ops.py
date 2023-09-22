@@ -1236,7 +1236,33 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import TensorVariable
+        from .builder import wrap_fx_proxy
+
         assert "fn" in kwargs
         fn = kwargs["fn"]
-        # just inline into the function, Dynamo doesn't do anything special with the higher order operator
-        return fn.call_function(tx, args, {})
+        assert len(args) == 1
+        grad = args[0]
+        assert isinstance(grad, TensorVariable)
+
+        grad_proxy = grad.as_proxy()
+        fake_tensor = grad_proxy.node.meta["example_value"]
+
+        # checkpoint = tx.copy_graphstate()
+        # graph_checkpoint = tx.output.graph
+        size = tuple(int(x) for x in fake_tensor.size())
+        stride = tuple(int(x) for x in fake_tensor.stride())
+        dtype = fake_tensor.dtype
+        result = fn.call_function(tx, args, {})
+        if not isinstance(result, TensorVariable):
+            unimplemented("NYI - non-tensor return")
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                torch._dynamo._trace_wrapped_higher_order_op._assert_meta,
+                args=(result.as_proxy(), size, stride, dtype),
+                kwargs={},
+            ),
+            example_value=fake_tensor,
+        )
