@@ -275,9 +275,6 @@ translation_validation_timeout = int(
 translation_validation_no_bisect = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
 )
-# Disables ShapeEnv event recording.
-# See: [Note: Recording ShapeEnv Events]
-dont_record_shape_env_events = False
 # Checks whether replaying ShapeEnv events on a freshly constructed one yields
 # the a ShapeEnv with the same state. This should be used only in testing.
 check_shape_env_recorded_events = False
