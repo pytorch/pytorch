@@ -9,7 +9,7 @@ import sys
 import types
 from typing import Any, Type
 
-from unittest import skipIf as skipif
+from unittest import skipIf as skipif, SkipTest
 
 import pytest
 
@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
 )
 
 skip = functools.partial(skipif, True)
-slow = skip  # FIXME: slow tests never ran (= broken)
 
 
 @skip(reason="XXX: scalar.as_integer_ratio not implemented")
@@ -125,7 +124,7 @@ class TestAsIntegerRatio(TestCase):
                 df = np.longdouble(d)
             except (OverflowError, RuntimeWarning):
                 # the values may not fit in any float type
-                pytest.skip("longdouble too small on this platform")
+                raise SkipTest("longdouble too small on this platform")
 
             assert_equal(nf / df, f, f"{n}/{d}")
 

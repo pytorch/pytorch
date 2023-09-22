@@ -14,7 +14,6 @@ from torch._numpy.testing import assert_
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 skip = functools.partial(skipif, True)
-slow = skip  # FIXME: slow tests never ran (= broken)
 
 
 class A:

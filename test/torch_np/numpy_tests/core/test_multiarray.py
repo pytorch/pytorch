@@ -42,12 +42,12 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    slowTest as slow,
     subtest,
     TestCase,
 )
 
 skip = functools.partial(skipif, True)
-slow = skip  # FIXME: slow tests never ran (= broken)
 
 IS_PYPY = False
 IS_PYSTON = False
@@ -131,6 +131,7 @@ def _aligned_zeros(shape, dtype=float, order="C", align=None):
 
 
 @xfail  # (reason="TODO: flags")
+@instantiate_parametrized_tests
 class TestFlag(TestCase):
     def setUp(self):
         self.a = np.arange(10)
@@ -205,7 +206,7 @@ class TestFlag(TestCase):
         vals.setflags(write=True)
         assert_(vals.flags.writeable)
 
-    @pytest.mark.skipif(IS_PYPY, reason="PyPy always copies")
+    @skipif(IS_PYPY, reason="PyPy always copies")
     def test_writeable_pickle(self):
         import pickle
 
@@ -915,6 +916,7 @@ class TestScalarIndexing(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestCreation(TestCase):
     """
     Test the np.array constructor
@@ -956,7 +958,9 @@ class TestCreation(TestCase):
             np.array([b"1234", b"12345"], dtype="O").astype("V")
 
     @parametrize(
-        "idx", [pytest.param(Ellipsis, id="arr"), pytest.param((), id="scalar")]
+        #  "idx", [pytest.param(Ellipsis, id="arr"), pytest.param((), id="scalar")]
+        "idx",
+        [subtest(Ellipsis, name="arr"), subtest((), name="scalar")],
     )
     def test_structured_void_promotion(self, idx):
         arr = np.array(
@@ -985,7 +989,7 @@ class TestCreation(TestCase):
         assert_raises(ValueError, np.zeros, shape, dtype=np.int8)
         assert_raises(ValueError, np.ones, shape, dtype=np.int8)
 
-    @pytest.mark.skipif(
+    @skipif(
         np.dtype(np.intp).itemsize != 8, reason="malloc may not fail on 32 bit systems"
     )
     def test_malloc_fails(self):
@@ -3550,6 +3554,7 @@ class TestCompress(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestPutmask(TestCase):
     def tst_basic(self, x, T, mask, val):
         np.putmask(x, mask, val)
@@ -3684,6 +3689,7 @@ class TestTake(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestLexsort(TestCase):
     @parametrize(
         "dtype",
@@ -4006,7 +4012,7 @@ class TestIO(TestCase):
                 offset=1,
             )
 
-    @pytest.mark.skipif(IS_PYPY, reason="bug in PyPy's PyNumber_AsSsize_t")
+    @skipif(IS_PYPY, reason="bug in PyPy's PyNumber_AsSsize_t")
     def test_fromfile_bad_dup(self, x, tmp_filename):
         def dup_str(fd):
             return "abc"
@@ -4243,6 +4249,7 @@ class TestIO(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestFromBuffer(TestCase):
     @parametrize("byteorder", ["<", ">"])
     @parametrize("dtype", [float, int, complex])
@@ -4263,7 +4270,7 @@ class TestFromBuffer(TestCase):
     def test_empty(self):
         assert_array_equal(np.frombuffer(b""), np.array([]))
 
-    @pytest.mark.skipif(
+    @skipif(
         IS_PYPY,
         reason="PyPy's memoryview currently does not track exports. See: "
         "https://foss.heptapod.net/pypy/pypy/-/issues/3724",
@@ -4328,7 +4335,7 @@ class TestFlat(TestCase):
         assert_(e.flags.writebackifcopy is False)
         assert_(f.flags.writebackifcopy is False)
 
-    @pytest.mark.skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
+    @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_refcount(self):
         # includes regression test for reference count error gh-13165
         inds = [np.intp(0), np.array([True] * self.a.size), np.array([0]), None]
@@ -4868,6 +4875,7 @@ class TestVdot(TestCase):
             assert_equal(np.vdot(a, b.copy("F")), np.vdot(a.flatten(), b.flatten()))
 
 
+@instantiate_parametrized_tests
 class TestDot(TestCase):
     def setUp(self):
         np.random.seed(128)
@@ -5916,6 +5924,7 @@ class TestPEP3118Dtype(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestArrayCreationCopyArgument(TestCase):
     class RaiseOnBool:
         def __bool__(self):
@@ -6175,6 +6184,7 @@ class TestArrayAttributeDeletion(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestArrayInterface(TestCase):
     class Foo:
         def __init__(self, value):
@@ -6308,7 +6318,7 @@ class TestConversion(TestCase):
         assert_raises(NotImplementedError, bool, np.array(NotConvertible()))
         assert_raises(NotImplementedError, bool, np.array([NotConvertible()]))
         if IS_PYSTON:
-            pytest.skip("Pyston disables recursion checking")
+            raise SkipTest("Pyston disables recursion checking")
 
         self_containing = np.array([None])
         self_containing[0] = self_containing

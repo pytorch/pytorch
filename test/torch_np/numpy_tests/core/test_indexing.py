@@ -1157,7 +1157,6 @@ class TestNonIntegerArrayLike(TestCase):
             "__index__ behaviour, no bother raising here"
         )
     )
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_basic(self):
         a = np.arange(10)
 

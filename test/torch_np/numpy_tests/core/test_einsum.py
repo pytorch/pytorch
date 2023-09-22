@@ -1012,8 +1012,7 @@ class TestEinsum(TestCase):
         # contig + contig + contig -> scalar
 
         if dtype in ["e", "B", "b"]:
-            # FIXME
-            # pytest.xfail(reason="overflow differs in pytorch and numpy")
+            # FIXME make xfail
             raise SkipTest("overflow differs in pytorch and numpy")
 
         arr = np.array([0.5, 0.5, 0.25, 4.5, 3.0], dtype=dtype)

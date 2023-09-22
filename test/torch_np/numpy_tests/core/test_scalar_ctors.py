@@ -20,7 +20,6 @@ from torch.testing._internal.common_utils import (
 )
 
 skip = functools.partial(skipif, True)
-slow = skip  # FIXME: slow tests never ran (= broken)
 
 
 class TestFromString(TestCase):

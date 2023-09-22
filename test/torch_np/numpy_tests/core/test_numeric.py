@@ -33,14 +33,15 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    subtest,
+    TEST_WITH_TORCHDYNAMO,
     TestCase,
-    TEST_WITH_TORCHDYNAMO
 )
 
 skip = functools.partial(skipif, True)
-slow = skip  # FIXME: slow tests never ran (= broken)
 
 
+@instantiate_parametrized_tests
 class TestResize(TestCase):
     def test_copies(self):
         A = np.array([[1, 2], [3, 4]])
@@ -90,6 +91,7 @@ class TestResize(TestCase):
             np.resize(A, new_shape=new_shape)
 
 
+@instantiate_parametrized_tests
 class TestNonarrayArgs(TestCase):
     # check that non-array arguments to functions wrap them in arrays
     def test_choose(self):
@@ -208,9 +210,10 @@ class TestNonarrayArgs(TestCase):
     @parametrize(
         "val, ndigits",
         [
-            pytest.param(
-                2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
-            ),
+            # pytest.param(
+            #    2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
+            # ),
+            subtest((2**31 - 1, -1), decorators=[xfail]),
             (2**31 - 1, 1 - math.ceil(math.log10(2**31 - 1))),
             (2**31 - 1, -math.ceil(math.log10(2**31 - 1))),
         ],
@@ -232,8 +235,7 @@ class TestNonarrayArgs(TestCase):
         assert_(isinstance(round(i, ndigits=-2), np.int64))
         assert_array_max_ulp(round(i, ndigits=-2), 500)
 
-    # @xfail  #(raises=AssertionError, reason="gh-15896")
-    @xfail
+    @xfail  # (raises=AssertionError, reason="gh-15896")
     def test_round_py_consistency(self):
         f = 5.1 * 10**73
         assert_equal(round(np.float64(f), -73), round(f, -73))
@@ -614,6 +616,7 @@ class TestSeterr(TestCase):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestFloatExceptions(TestCase):
     def assert_raises_fpe(self, fpeerr, flop, x, y):
         ftype = type(x)
@@ -891,6 +894,7 @@ class NIterError(Exception):
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestFromiter(TestCase):
     def makegen(self):
         return (x**2 for x in range(24))
@@ -1782,7 +1786,6 @@ class TestClip(TestCase):
             ),
         ],
     )
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_clip_scalar_nan_propagation(self, arr, amin, amax):
         # enforcement of scalar nan propagation for comparisons
         # called through clip()
@@ -2126,7 +2129,7 @@ class TestCreationFuncs(TestCase):
         self.check_function(np.full, 0)
         self.check_function(np.full, 1)
 
-    @skipif(TEST_WITH_TORCHDYNAMO, reason='fails with dynamo')
+    @skipif(TEST_WITH_TORCHDYNAMO, reason="fails with dynamo")
     @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_for_reference_leak(self):
         # Make sure we have an object for reference

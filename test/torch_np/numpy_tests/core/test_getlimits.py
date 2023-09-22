@@ -8,7 +8,7 @@ import warnings
 
 # from numpy.core.getlimits import _discovered_machar, _float_ma
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import expectedFailure as xfail, skipIf
 
 import torch._numpy as np
 from pytest import raises as assert_raises
@@ -16,7 +16,7 @@ from torch._numpy import double, finfo, half, iinfo, single
 from torch._numpy.testing import assert_, assert_equal
 from torch.testing._internal.common_utils import run_tests, TestCase
 
-skip = functools.partial(skipif, True)
+skip = functools.partial(skipIf, True)
 
 ##################################################
 
