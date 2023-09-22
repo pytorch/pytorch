@@ -2,9 +2,7 @@
 
 import functools
 
-from unittest import expectedFailure as xfail, skipIf as skipif
-
-import pytest
+from unittest import expectedFailure as xfail, skipIf
 
 import torch._numpy as np
 
@@ -18,12 +16,18 @@ from torch._numpy.testing import (
     assert_array_equal,
     assert_equal,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
-skip = functools.partial(skipif, True)
+skip = functools.partial(skipIf, True)
 
 
 @xfail  # (reason="unravel_index not implemented")
+@instantiate_parametrized_tests
 class TestRavelUnravelIndex(TestCase):
     def test_basic(self):
         assert_equal(np.unravel_index(2, (2, 2)), (1, 0))
@@ -176,7 +180,7 @@ class TestRavelUnravelIndex(TestCase):
         assert_raises_regex(ValueError, "0d array", np.unravel_index, [0], ())
         assert_raises_regex(ValueError, "out of bounds", np.unravel_index, [1], ())
 
-    @pytest.mark.parametrize("mode", ["clip", "wrap", "raise"])
+    @parametrize("mode", ["clip", "wrap", "raise"])
     def test_empty_array_ravel(self, mode):
         res = np.ravel_multi_index(
             np.zeros((3, 0), dtype=np.intp), (2, 1, 0), mode=mode
@@ -197,6 +201,7 @@ class TestRavelUnravelIndex(TestCase):
 
 
 @xfail  # (reason="mgrid not implemented")
+@instantiate_parametrized_tests
 class TestGrid(TestCase):
     def test_basic(self):
         a = mgrid[-1:1:10j]

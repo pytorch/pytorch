@@ -3,7 +3,7 @@
 # from numpy.testing._private.utils import requires_memory
 import functools
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+from unittest import expectedFailure as xfail, skipIf
 
 import pytest
 import torch._numpy as np
@@ -24,10 +24,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    slowTest as slow,
     TestCase,
 )
 
-skip = functools.partial(skipif, True)
+skip = functools.partial(skipIf, True)
 
 
 class TestHistogram(TestCase):
@@ -405,7 +406,7 @@ class TestHistogram(TestCase):
 
     # @requires_memory(free_bytes=1e10)
     @xfail  # (reason="pytorch does not support bins = [int, int, array]")
-    @pytest.mark.slow
+    @slow
     def test_big_arrays(self):
         sample = np.zeros([100000000, 3])
         xbins = 400

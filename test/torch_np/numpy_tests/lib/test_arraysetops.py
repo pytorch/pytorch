@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
 
 
 @xfail  # (reason="TODO")
+@instantiate_parametrized_tests
 class TestSetOps(TestCase):
     def test_intersect1d(self):
         # unique inputs
@@ -779,9 +780,6 @@ class TestUnique(TestCase):
         assert_equal(np.unique(all_nans, return_counts=True), (ua, ua_cnt))
 
     def test_unique_axis_errors(self):
-        assert_raises(TypeError, self._run_axis_tests, object)
-        assert_raises(TypeError, self._run_axis_tests, [("a", int), ("b", object)])
-
         assert_raises(np.AxisError, unique, np.arange(10), axis=2)
         assert_raises(np.AxisError, unique, np.arange(10), axis=-2)
 
@@ -892,10 +890,6 @@ class TestUnique(TestCase):
         result = np.array([[0, 0, 1], [0, 1, 0], [0, 0, 1], [0, 1, 0]])
         assert_array_equal(unique(data, axis=1), result.astype(dtype), msg)
 
-        # XXX: local import in an already xfailed test; restructure when not xfailed
-        import pytest
-
-        pytest.xfail("torch has different unique ordering behaviour")
         # e.g.
         #
         #     >>> x = np.array([[[1, 1], [0, 1]], [[1, 0], [0, 0]]])

@@ -5,8 +5,6 @@ import sys
 
 from unittest import expectedFailure as xfail, skipIf as skipif
 
-import pytest
-
 import torch._numpy as np
 
 from pytest import raises as assert_raises
@@ -452,7 +450,7 @@ class TestArraySplit(TestCase):
         assert_(a.dtype.type is res[-1].dtype.type)
         # perhaps should check higher dimensions
 
-    @pytest.mark.skipif(not IS_64BIT, reason="Needs 64bit platform")
+    @skipif(not IS_64BIT, reason="Needs 64bit platform")
     def test_integer_split_2D_rows_greater_max_int32(self):
         a = np.broadcast_to([0], (1 << 32, 2))
         res = array_split(a, 4)

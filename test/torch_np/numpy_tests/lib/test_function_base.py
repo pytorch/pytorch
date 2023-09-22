@@ -867,7 +867,7 @@ class TestDelete(TestCase):
         with pytest.raises(IndexError):
             np.delete([0, 1, 2], np.array([], dtype=float))
 
-    @pytest.mark.parametrize("indexer", [np.array([1]), [1]])
+    @parametrize("indexer", [np.array([1]), [1]])
     def test_single_item_array(self, indexer):
         a_del_int = delete(self.a, 1)
         a_del = delete(self.a, indexer)
@@ -1680,9 +1680,7 @@ class TestDigitize(TestCase):
         x = 2**54  # loses precision in a float
         assert_equal(np.digitize(x, [x - 1, x + 1]), 1)
 
-    @pytest.mark.xfail(
-        reason="gh-11022: np.core.multiarray._monoticity loses precision"
-    )
+    @xfail  # "gh-11022: np.core.multiarray._monoticity loses precision"
     def test_large_integers_decreasing(self):
         # gh-11022
         x = 2**54  # loses precision in a float
@@ -3775,6 +3773,7 @@ class TestMedian(TestCase):
 
 
 @xfail  # (reason="TODO: implement")
+@instantiate_parametrized_tests
 class TestSortComplex(TestCase):
     @parametrize(
         "type_in, type_out",

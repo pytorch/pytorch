@@ -545,7 +545,9 @@ class TestConstant(TestCase):
         )
         assert_allclose(test, expected)
 
-    @skipif(True, reason='passes on MacOS, fails otherwise')  # (reason="int64 overflow")
+    @skipif(
+        True, reason="passes on MacOS, fails otherwise"
+    )  # (reason="int64 overflow")
     def test_check_large_integers(self):
         int64_max = 2**63 - 1
         arr = np.full(5, int64_max, dtype=np.int64)
