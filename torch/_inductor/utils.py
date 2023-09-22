@@ -42,7 +42,7 @@ from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
-from .cuda_properties import current_device, get_device_capability
+from .cuda_properties import current_device
 
 log = logging.getLogger(__name__)
 
@@ -157,18 +157,6 @@ def do_bench(*args, **kwargs):
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
-
-
-@functools.lru_cache(None)
-def has_triton() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
-
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
 
 
 @functools.lru_cache(None)
