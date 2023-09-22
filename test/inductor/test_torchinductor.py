@@ -629,8 +629,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([128], dtype=torch.uint8)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([64]*20), dtype=torch.uint8)
         x = torch.tensor([128], dtype=torch.uint8)
 
         self.common(fn, (x,))
@@ -641,8 +639,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([120], dtype=torch.int8)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([60]*2), dtype=torch.int8)
         x = torch.tensor([120], dtype=torch.int8)
 
         self.common(fn, (x,))
@@ -653,10 +649,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([32000], dtype=torch.int16)
-        # the below line fails with test_add_int16_tensor.<locals>.fn() takes 1 positional argument but 2 were given
-        # x = torch.tensor([16000]*2, dtype=torch.int16)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([16000]*2), dtype=torch.int16)
         x = torch.tensor([32000], dtype=torch.int16)
 
         self.common(fn, (x,))
@@ -667,8 +659,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([16], dtype=torch.uint8)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([8]*2), dtype=torch.uint8)
         x = torch.tensor([16], dtype=torch.uint8)
 
         self.common(fn, (x,))
@@ -679,8 +669,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([18], dtype=torch.uint8)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([9]*2), dtype=torch.uint8)
         x = torch.tensor([18], dtype=torch.uint8)
         self.common(fn, (x,))
 
@@ -690,8 +678,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([18], dtype=torch.uint8)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([9]*2), dtype=torch.uint8)
         x = torch.tensor([18], dtype=torch.uint8)
 
         self.common(fn, (x,))
@@ -702,8 +688,6 @@ class CommonTemplate:
 
         # issue 109016 has been raised to track that the below line fails the dynamic shape test
         # x = torch.tensor([16], dtype=torch.uint8)
-        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
-        # x = torch.tensor(([8]*2), dtype=torch.uint8)
         x = torch.tensor([18], dtype=torch.uint8)
 
         self.common(fn, (x,))
