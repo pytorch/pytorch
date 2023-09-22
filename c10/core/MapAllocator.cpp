@@ -6,7 +6,7 @@
 #include <random>
 #include <string>
 #if ATOMIC_INT_LOCK_FREE == 2
-#define AT_ATOMIC_IPC_REFCOUNT 1
+#define C10_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #include <c10/core/CPUAllocator.h>
@@ -712,7 +712,7 @@ void MapAllocator::close() {}
 
 #endif
 
-#if (defined(_WIN32) || defined(HAVE_MMAP)) && defined(AT_ATOMIC_IPC_REFCOUNT)
+#if (defined(_WIN32) || defined(HAVE_MMAP)) && defined(C10_ATOMIC_IPC_REFCOUNT)
 
 RefcountedMapAllocatorArgCheck::RefcountedMapAllocatorArgCheck(int flags) {
   if (flags & ALLOCATOR_MAPPED_FROMFD) {
