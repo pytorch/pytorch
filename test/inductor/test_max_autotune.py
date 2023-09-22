@@ -45,7 +45,9 @@ def _get_path_without_sccache() -> str:
     """
     Get the PATH environment variable without sccache.
     """
-    return os.environ.get("PATH", "").replace("/opt/cache/bin/", "")
+    path_envs = os.environ.get("PATH", "").split(":")
+    path_envs = [env for env in path_envs if "/opt/cache/bin" not in env]
+    return ":".join(path_envs)
 
 
 def benchmark_choice(choice, args, out, expected_out, timings):
