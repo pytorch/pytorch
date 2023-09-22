@@ -1,4 +1,5 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <chrono>
 #include <list>
 #include <sstream>
@@ -252,6 +253,62 @@ void Dispatcher::deregisterDef_(
   }
 
   cleanup(op, op_name);
+}
+
+namespace {
+
+using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
+  static AbstractImplPyStubsType _data;
+  return _data;
+}
+
+}
+
+RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
+  const OperatorName& op_name,
+  const char* pymodule,
+  const char* context
+) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  // If there are duplicates, we just let it through and warn about it.
+  // Throwing an error during static initialization causes a crash that
+  // doesn't give any sign of what happened.
+  auto found = abstractImplPyStubsSingleton().find(op_name);
+  if (found != abstractImplPyStubsSingleton().end()) {
+    TORCH_WARN(
+        "Tried to register an abstract impl pystub for ", op_name, " ",
+        "that specifies the Python module ", pymodule, " "
+        "but there already was a pystub that specifies the Python module ",
+        found->second.first, ". We will override the existing pystub.");
+  }
+  abstractImplPyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
+  return RegistrationHandleRAII([guard = this->guard_, op_name] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
+    abstractImplPyStubsSingleton().erase(op_name);
+  });
+}
+
+void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto elt = abstractImplPyStubsSingleton().find(op_name);
+  if (elt == abstractImplPyStubsSingleton().end()) {
+    return;
+  }
+  const char* pymodule = elt->second.first;
+  const char* context = elt->second.second;
+  auto* interpreter = at::impl::PythonOpRegistrationTrampoline::getInterpreter();
+  TORCH_CHECK(
+      interpreter != nullptr,
+      op_name,
+      ": while attempting to run this operator with Meta Tensors: "
+      "the abstract impl for this operator (necessary for Meta Tensors) "
+      "was declared to exist in the Python module ", pymodule,
+      " but Python is not available.");
+  (*interpreter)->throw_abstract_impl_not_imported_error(toString(op_name), pymodule, context);
 }
 
 RegistrationHandleRAII Dispatcher::registerImpl(
