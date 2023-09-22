@@ -132,6 +132,7 @@ class CachingAutotuner(KernelInterface):
         size_hints=None,
     ):
         super().__init__()
+
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
@@ -198,6 +199,10 @@ class CachingAutotuner(KernelInterface):
                     if nreg is None:
                         continue
 
+                    # make sure rblock is not too small
+                    if rblock <= 64:
+                        continue
+
                     # each SM of A100 has 65536 32-bit registers. To maximize
                     # the theoretical occupancy, we need run 2048 threads on each
                     # SM. So each thread should use no more than 65536 / 2048
@@ -211,17 +216,26 @@ class CachingAutotuner(KernelInterface):
                     # Note both A100 and H100 have 65536 32-bit registers per SM.
                     if nreg <= 65536 // device_prop.max_threads_per_multi_processor:
                         continue
-                    max_blocks_per_sm = device_prop.max_threads_per_multi_processor // (
-                        32 * triton_config.num_warps
-                    )
+
+                    nreg_per_warp = nreg * 32
+                    nreg_per_block = nreg_per_warp * triton_config.num_warps
+
+                    # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
+                    # The formula below is a tighter upper bound since we have the assumption that
+                    #   nreg > 65536 // device_prop.max_threads_per_multi_processor
+                    # due to the if condition above and:
+                    #   65536 / nreg_per_block
+                    #   = 65536 / (nreg * 32 * num_warps)
+                    #   < 65536 / ((65536 / max_threads_per_multi_processor) * 32 * num_warps)
+                    #   = max_threads_per_multi_processor / (32 * num_warps)
+                    # Using a tigher upper bound can reveal more optimization opportunities.
+                    max_blocks_per_sm = max(65536 // nreg_per_block, 1)
+
                     if (
                         total_block
                         <= max_blocks_per_sm * device_prop.multi_processor_count
                     ):
-                        # <100% occupancy is fine
-                        continue
-                    # make sure rblock is not too small
-                    if rblock <= 64:
+                        # no need to improve occupancy
                         continue
                     new_config = copy.deepcopy(triton_config)
                     new_config.kwargs["RBLOCK"] = rblock // 2
