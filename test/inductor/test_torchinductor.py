@@ -622,6 +622,99 @@ class CommonTemplate:
 
         self.common(fn, (x, y, z))
 
+    # lowering operation tests
+    def test_add_uint8_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int16)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([128], dtype=torch.uint8)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([64]*20), dtype=torch.uint8)
+        x = torch.tensor([128], dtype=torch.uint8)
+
+        self.common(fn, (x,))
+
+    def test_add_int8_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int16)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([120], dtype=torch.int8)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([60]*2), dtype=torch.int8)
+        x = torch.tensor([120], dtype=torch.int8)
+
+        self.common(fn, (x,))
+
+    def test_add_int16_tensor(self):
+        def fn(x):
+            return (x + x).to(torch.int32)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([32000], dtype=torch.int16)
+        # the below line fails with test_add_int16_tensor.<locals>.fn() takes 1 positional argument but 2 were given
+        # x = torch.tensor([16000]*2, dtype=torch.int16)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([16000]*2), dtype=torch.int16)
+        x = torch.tensor([32000], dtype=torch.int16)
+
+        self.common(fn, (x,))
+
+    def test_multiply_uint8_tensor(self):
+        def fn(x):
+            return (x * x).to(torch.int16)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([16], dtype=torch.uint8)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([8]*2), dtype=torch.uint8)
+        x = torch.tensor([16], dtype=torch.uint8)
+
+        self.common(fn, (x,))
+
+    def test_square_uint8_tensor_overflow(self):
+        def fn(x):
+            return (x**2).to(torch.int16)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([18], dtype=torch.uint8)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([9]*2), dtype=torch.uint8)
+        x = torch.tensor([18], dtype=torch.uint8)
+        self.common(fn, (x,))
+
+    def test_multiply_uint8_tensor_overflow(self):
+        def fn(x):
+            return (x * x).to(torch.int16)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([18], dtype=torch.uint8)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([9]*2), dtype=torch.uint8)
+        x = torch.tensor([18], dtype=torch.uint8)
+
+        self.common(fn, (x,))
+
+    def test_square_uint8_tensor(self):
+        def fn(x):
+            return (x**2).to(torch.int16)
+
+        # issue 109016 has been raised to track that the below line fails the dynamic shape test
+        # x = torch.tensor([16], dtype=torch.uint8)
+        # issue 109020 has been raised to track that the below line fails with 'takes 1 positional argument but 2 were given'
+        # x = torch.tensor(([8]*2), dtype=torch.uint8)
+        x = torch.tensor([18], dtype=torch.uint8)
+
+        self.common(fn, (x,))
+
+    #  issue 108520 raised for this
+    # def test_int32_tensor(self):
+    #     def fn(x):
+    #         return (x + x).to(torch.int64)
+    #     x = torch.tensor( ([2147483647]), dtype=torch.int32)
+    #     self.common(fn, x)
+
     def test_abs(self):
         def fn(a):
             return (a / (torch.abs(a) + 1),)
