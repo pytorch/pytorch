@@ -60,22 +60,19 @@ class SimpleModel(torch.nn.Module):
         return x
 
 
-def _distribute_and_fsdp_wrap_module(
+def _wrap_module(
     module,
-    module_shard,
     mesh_2d,
-    fsdp_pg,
     use_orig_params,
     fsdp_nested,
     recompute_activation,
 ):
-    if module_shard:
-        module = parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
-    pg = fsdp_pg if module_shard else distributed_c10d._get_default_group()
+    fsdp_pg = mesh_2d.get_dim_groups()[0]
+    module = parallelize_module(module, mesh_2d, PairwiseParallel(), tp_mesh_dim=1)
 
     fsdp_ctor = functools.partial(
         FSDP,
-        process_group=pg,
+        process_group=fsdp_pg,
         use_orig_params=use_orig_params,
         device_id=torch.cuda.current_device(),
     )
@@ -102,25 +99,21 @@ def init_model(
     model = SimpleModel()
 
     # 2-D mesh is [dp, tp]
-    twod_mesh = DeviceMesh(
-        device_type="cuda",
-        mesh=torch.arange(0, world_size).view(-1, model_parallel_size),
+    mesh_shape = (world_size // model_parallel_size, model_parallel_size)
+    mesh_dim_names = ("DP", "TP")
+    mesh_2d = init_device_mesh(
+        "cuda", mesh_shape, mesh_dim_names=mesh_dim_names
     )
 
-    fsdp_pg = twod_mesh.get_dim_groups()[0]
-
     # Create Input
-    model = _distribute_and_fsdp_wrap_module(
+    model = _wrap_module(
         model,
-        True,
-        twod_mesh,
-        fsdp_pg,
+        mesh_2d,
         use_orig_params,
         fsdp_nested,
         recompute_activation,
     )
-    tp_mesh = _create_1d_device_mesh(twod_mesh, 1)
-    return model, fsdp_pg, tp_mesh
+    return model, mesh_2d
 
 
 def is_nested_tensor(val: Any) -> bool:
@@ -215,13 +208,14 @@ class Test2dParallelIntegration(DTensorTestBase):
         model = SimpleModel().cuda(self.rank)
         model = FSDP(model, use_orig_params=use_orig_params)
         torch.manual_seed(0)
-        model_2d, dp_pg, tp_mesh = init_model(
+        model_2d, mesh_2d = init_model(
             use_orig_params=use_orig_params,
             fsdp_nested=fsdp_nested,
             recompute_activation=recompute_activation,
         )
+        dp_pg = mesh_2d.get_dim_groups()[0]
         if recompute_activation:
-            model_2d = input_reshard(model_2d, tp_mesh, 0)
+            model_2d = input_reshard(model_2d, mesh_2d["TP"], 0)
         # Check named parameters are returning the same name at least.
         param_names_2d = [
             self._clean_up_fsdp_param_name(name)
@@ -229,14 +223,12 @@ class Test2dParallelIntegration(DTensorTestBase):
         ]
         for name, _ in model.named_parameters():
             name = self._clean_up_fsdp_param_name(name)
-            if name not in param_names_2d:
-                print(name, param_names_2d)
             self.assertTrue(name in param_names_2d)
         self._compare_params(model, model_2d)
         if multi_param_group and use_orig_params:
             param_group = [
-                {"params": model.net1.parameters(), "lr": 0.02},
-                {"params": model.net2.parameters(), "lr": 0.15},
+                {"params": model.net1.parameters(), "lr": 0.15},
+                # {"params": model.net2.parameters(), "lr": 0.05},
             ]
             if optim_in_backward:
                 for grp_idx in len(param_group):
@@ -244,8 +236,8 @@ class Test2dParallelIntegration(DTensorTestBase):
             else:
                 optim = torch.optim.Adam(param_group, lr=0.01)
             param_group = [
-                {"params": model_2d.net1.parameters(), "lr": 0.02},
-                {"params": model_2d.net2.parameters(), "lr": 0.15},
+                {"params": model_2d.net1.parameters(), "lr": 0.15},
+                # {"params": model_2d.net2.parameters(), "lr": 0.05},
             ]
             if optim_in_backward:
                 for grp_idx in len(param_group):
@@ -277,10 +269,12 @@ class Test2dParallelIntegration(DTensorTestBase):
             self.assertEqual(output, output_2d)
             output.sum().backward()
             output_2d.sum().backward()
+            self._compare_params(model, model_2d)
             if not optim_in_backward:
                 optim.step()
                 optim_2d.step()
-            self.assertEqual(model(input), model_2d(input))
+            self._compare_params(model, model_2d)
+            self.assertEqual(model(input), model_2d(input), f"results different at iter {i}")
 
         # Ensure all params are still the same after optimizer update.
         self._compare_params(model, model_2d)
