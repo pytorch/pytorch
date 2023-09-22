@@ -36,13 +36,17 @@ import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
-from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
+from torch._dynamo.testing import (
+    dummy_fx_compile,
+    format_speedup,
+    reset_rng_state,
+    same,
+)
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import aot_inductor_launcher, fresh_inductor_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.testing._internal.common_utils import reset_rng_state
 
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
