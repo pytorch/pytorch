@@ -13,7 +13,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
-#include <ATen/detail/XPUHooksInterface.h>
+
 #include <utility>
 
 #ifdef USE_CUDA
@@ -73,8 +73,6 @@ static PyObject* THPGenerator_pynew(
 #endif
   else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
-  } else if (device.type() == at::kXPU) {
-    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
   } else {
     AT_ERROR(
         "Device type ",
