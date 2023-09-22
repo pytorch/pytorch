@@ -1321,11 +1321,12 @@ def method_to_operator(method):
         op = getattr(operator, method_attr)
     return op
 
-def cast_symbool_to_symint_guardless(maybe_symbool: torch.SymBool) -> torch.SymInt:
+def cast_symbool_to_symint_guardless(maybe_symbool: Union[bool, SymBool]) -> torch.SymInt:
     from torch.fx.experimental.proxy_tensor import thunkify, set_proxy_slot, ProxyTorchDispatchMode
 
     if isinstance(maybe_symbool, bool):
         return int(maybe_symbool)
+
     int_sym = sympy.Piecewise((1, maybe_symbool.node.expr), (0, True))
     out = maybe_symbool.node.shape_env.create_symintnode(int_sym, hint=int(maybe_symbool.node.require_hint()))
     if current_mode := torch.utils._python_dispatch._get_current_dispatch_mode():

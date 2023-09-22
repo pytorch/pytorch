@@ -1263,30 +1263,15 @@ class TestControlFlowTraced(TestCase):
         # The symbols in make_fx's shape_env should not be speciliazed.
         self.assertEqual(len(gm.shape_env.guards), 0)
 
-        self.assertExpectedInline(gm.print_readable(print_output=False), """\
-class foo(torch.nn.Module):
-    def forward(self, x_1: f32[s0, s1, 1]):
-        # No stacktrace found for following nodes
-        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
-        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
-        cast_symbool_to_symint_guardless: Sym(Piecewise((1, Eq(s0, 4)), (0, True))) = torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless(eq);  eq = None
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional: f32[s0, s1, 1] = torch.ops.higher_order.cond(cast_symbool_to_symint_guardless, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint_guardless = true_graph_0 = false_graph_0 = x_1 = None
-        return conditional
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1, 1]):
-            # No stacktrace found for following nodes
-            add: f32[s0, s1, 1] = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return add
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1, 1]):
-            # No stacktrace found for following nodes
-            mul: f32[s0, s1, 1] = torch.ops.aten.mul.Tensor(arg0_1, arg0_1);  arg0_1 = None
-            return mul
-            """)  # noqa: B950
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
+    cast_symbool_to_symint_guardless = torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless(eq);  eq = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint_guardless, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint_guardless = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional""")  # noqa: B950
 
         # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
@@ -1561,32 +1546,15 @@ def forward(self, arg0_1, arg1_1):
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
             gm = make_fx(foo, tracing_mode='symbolic')(torch.ones(3, 4))
-            self.assertExpectedInline(gm.print_readable(print_output=False), """\
-class foo(torch.nn.Module):
-    def forward(self, x_1: f32[s0, s1]):
-        # No stacktrace found for following nodes
-        sym_size: Sym(s0) = torch.ops.aten.sym_size(x_1, 0)
-        eq: Sym(Eq(s0, 4)) = sym_size == 4;  sym_size = None
-        cast_symbool_to_symint_guardless: Sym(Piecewise((1, Eq(s0, 4)), (0, True))) = torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless(eq);  eq = None
-        true_graph_0 = self.true_graph_0
-        false_graph_0 = self.false_graph_0
-        conditional: f32[s0, s1] = torch.ops.higher_order.cond(cast_symbool_to_symint_guardless, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint_guardless = true_graph_0 = false_graph_0 = x_1 = None
-        return conditional
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1]):
-            # No stacktrace found for following nodes
-            cos: f32[s0, s1] = torch.ops.aten.cos.default(arg0_1)
-            sub: f32[s0, s1] = torch.ops.aten.sub.Tensor(arg0_1, cos);  arg0_1 = cos = None
-            return sub
-
-    class <lambda>(torch.nn.Module):
-        def forward(self, arg0_1: f32[s0, s1]):
-            # No stacktrace found for following nodes
-            sin: f32[s0, s1] = torch.ops.aten.sin.default(arg0_1)
-            add: f32[s0, s1] = torch.ops.aten.add.Tensor(arg0_1, sin);  arg0_1 = sin = None
-            return add
-            """)  # noqa: B950
+            self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, x_1):
+    sym_size = torch.ops.aten.sym_size(x_1, 0)
+    eq = sym_size == 4;  sym_size = None
+    cast_symbool_to_symint_guardless = torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless(eq);  eq = None
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint_guardless, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint_guardless = true_graph_0 = false_graph_0 = x_1 = None
+    return conditional""")  # noqa: B950
 
 if __name__ == '__main__':
     run_tests()
