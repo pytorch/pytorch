@@ -191,12 +191,17 @@ class TestArgmaxArgminCommon(TestCase):
 
     @parametrize(
         "size, axis",
-        list(itertools.chain(
-            *[
-                [(size, axis) for axis in list(range(-len(size), len(size))) + [None]]
-                for size in sizes
-            ]
-        )),
+        list(
+            itertools.chain(
+                *[
+                    [
+                        (size, axis)
+                        for axis in list(range(-len(size), len(size))) + [None]
+                    ]
+                    for size in sizes
+                ]
+            )
+        ),
     )
     @parametrize("method", [np.argmax, np.argmin])
     def test_np_argmin_argmax_keepdims(self, size, axis, method):
@@ -424,8 +429,8 @@ class TestArgmax(TestCase):
         #      with suppress_warnings() as sup:
         #          sup.filter(RuntimeWarning,
         #                      "invalid value encountered in reduce")
-#        if np.asarray(arr).dtype.kind in "c":
-#            pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
+        #        if np.asarray(arr).dtype.kind in "c":
+        #            pytest.xfail(reason="'max_values_cpu' not implemented for 'ComplexDouble'")
 
         val = np.max(arr)
 
@@ -611,7 +616,6 @@ class TestNoExtraMethods(TestCase):
         a = np.ones(3)
         with pytest.raises(AttributeError):
             getattr(a, name)
-
 
 
 if __name__ == "__main__":

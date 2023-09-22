@@ -3,7 +3,7 @@
 """Test examples for NEP 50."""
 
 import itertools
-from unittest import SkipTest, skipIf as skipif
+from unittest import skipIf as skipif, SkipTest
 
 try:
     import numpy as _np
@@ -45,7 +45,6 @@ uint16 = uint8  # can be anything here, see below
 # import numpy as np
 # np._set_promotion_state('weak')
 
-import pytest
 from pytest import raises as assert_raises
 
 unchanged = None
