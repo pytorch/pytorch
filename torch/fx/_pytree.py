@@ -19,7 +19,7 @@ def register_pytree_flatten_spec(
     SUPPORTED_NODES[typ] = flatten_fn_spec
     SUPPORTED_NODES_EXACT_MATCH[typ] = flatten_fn_exact_match_spec
 
-def tree_flatten_spec(pytree: PyTree, spec: TreeSpec, exact_structural_match=False) -> List[Any]:
+def tree_flatten_spec(pytree: PyTree, spec: TreeSpec, exact_structural_match=True) -> List[Any]:
     if isinstance(spec, LeafSpec):
         return [pytree]
     if spec.type not in SUPPORTED_NODES:
