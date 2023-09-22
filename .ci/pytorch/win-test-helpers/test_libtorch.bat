@@ -30,8 +30,6 @@ set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\test
 :: Skip verify_api_visibility as it a compile level test
 if "%~1" == "verify_api_visibility" goto :eof
 
-if "%~1" == "module_test" goto :eof
-
 echo Running "%~2"
 if "%~1" == "c10_intrusive_ptr_benchmark" (
   :: NB: This is not a gtest executable file, thus couldn't be handled by pytest-cpp
