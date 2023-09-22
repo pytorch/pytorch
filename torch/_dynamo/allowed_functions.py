@@ -1,3 +1,4 @@
+# BROKEN WITH id()
 import builtins
 import collections
 import copy
@@ -9,7 +10,7 @@ import operator
 import types
 import warnings
 
-from typing import cast, Dict, Optional, Set
+from typing import cast, Dict, List, Optional, Set, Tuple
 
 try:
     import numpy as np
@@ -43,8 +44,7 @@ Skips are determined by (torch/_dynamo/skipfiles.py) - see "a note on
 skipfiles" there.
 """
 
-
-def make_function_id_set(lazy_initializer):
+class FunctionIdSet:
     """
     Track a set of `id()`s of objects which are either allowed or not
     allowed to go into the generated FX graph.  Use to test for torch.*,
@@ -54,40 +54,71 @@ def make_function_id_set(lazy_initializer):
     added to the graph and what will cause a graph break.
     """
 
-    class FunctionIdSet:
-        function_ids: Optional[Set[int]] = None
-        function_names: Optional[Dict[int, str]] = None
+    _pending_functions: List[Tuple["FunctionIdSet", bool, int]] = []
+    _function_ids: Optional[Set[int]] = None
+    _function_names: Optional[Dict[int, str]] = None
 
-        def __call__(self):
-            if self.function_ids is None:
-                value = lazy_initializer()
-                if isinstance(value, dict):
-                    self.function_ids = set(value.keys())
-                    self.function_names = value
+    def __init__(self, lazy_initializer) -> None:
+        self.lazy_initializer = lazy_initializer
+
+    def _initialize(self) -> None:
+        if self._function_ids is None:
+            value = self.lazy_initializer()
+            if isinstance(value, dict):
+                self._function_ids = set(value.keys())
+                self._function_names = value
+            else:
+                assert isinstance(value, set)
+                self._function_ids = value
+
+    @property
+    def function_ids(self) -> Set[int]:
+        self._initialize()
+        return self._function_ids
+
+    @property
+    def function_names(self) -> Dict[int, str]:
+        self._initialize()
+        return self._function_names
+
+    @staticmethod
+    def _resolve() -> None:
+        for self, _, _ in FunctionIdSet._pending_functions:
+            self._initialize()
+        while FunctionIdSet._pending_functions:
+            self, add, idx = FunctionIdSet._pending_functions[0]
+            try:
+                if add:
+                    self.function_ids.add(idx)
                 else:
-                    assert isinstance(value, set)
-                    self.function_ids = value
-            return self.function_ids
+                    if idx in self.function_ids:
+                        self.function_ids.remove(idx)
+            finally:
+                FunctionIdSet._pending_functions.pop(0)
 
-        def get_name(self, idx: int, default: str):
-            self()  # lazy init
-            return self.function_names.get(idx, default)
+        for idx in _disallowed_function_ids.function_ids:
+            if idx in _allowed_function_ids.function_ids:
+                _allowed_function_ids.function_ids.remove(idx)
 
-        def add(self, idx: int):
-            self()  # lazy init
-            self.function_ids.add(idx)
+    def __call__(self):
+        self._resolve()
+        return self.function_ids
 
-        def remove(self, idx: int):
-            if idx in self():
-                self.function_ids.remove(idx)
+    def add(self, idx: int):
+        FunctionIdSet._pending_functions.append((self, True, idx))
 
-        def __contains__(self, idx: int):
-            return idx in self()
+    def remove(self, idx: int):
+        FunctionIdSet._pending_functions.append((self, False, idx))
 
-    return FunctionIdSet()
+    def get_name(self, idx: int, default: str):
+        self()  # lazy init
+        return self.function_names.get(idx, default)
+
+    def __contains__(self, idx: int):
+        return idx in self()
 
 
-@make_function_id_set
+@FunctionIdSet
 def _disallowed_function_ids():
     remove = [
         True,
@@ -145,7 +176,7 @@ def _disallowed_function_ids():
     return {id(x) for x in remove}
 
 
-@make_function_id_set
+@FunctionIdSet
 def _allowed_function_ids():
     """
     Walk torch.* and get the ids of all the stuff in it
@@ -179,6 +210,19 @@ def _allowed_function_ids():
             # issues observed in
             # https://github.com/pytorch/pytorch/issues/108269
             "torch.distributed.algorithms.",
+            "torch._custom_ops",
+            "torch._dynamo",
+            "torch._functorch.aot_autograd",
+            "torch._functorch.compile_utils",
+            "torch._functorch.partitioners",
+            "torch._functorch.python_key",
+            "torch._higher_order_ops.cond",
+            "torch.ao.quantization.backend_config",
+            "torch.ao.quantization.fx._",
+            "torch.ao.quantization.quantizer",
+            "torch.backends.xnnpack",
+            "torch.jit.trace",
+            "torch.ops.foo",
         )
         allowed_modules_dot = tuple([x + "." for x in allowed_modules])
         module = inspect.getmodule(obj)
@@ -229,7 +273,11 @@ def _allowed_function_ids():
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
-                elif inspect.getmodule(obj) is None and not is_safe_constant(obj):
+                elif (
+                    inspect.getmodule(obj) is None
+                    and not is_safe_constant(obj)
+                    and not getattr(obj, "_torchdynamo_disable", False)
+                ):
                     torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
 
     _find_torch_objects(torch)
@@ -243,23 +291,19 @@ def _allowed_function_ids():
         ):
             torch_object_ids[id(method)] = f"torch.Tensor.{name}"
 
-    for idx in _disallowed_function_ids():
-        if idx in torch_object_ids:
-            del torch_object_ids[idx]
-
     for extra in (is_fx_tracing, is_compiling):
         torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
 
 
-@make_function_id_set
+@FunctionIdSet
 def _allowed_user_defined_function_ids():
     rv = {}
     return rv
 
 
-@make_function_id_set
+@FunctionIdSet
 def _builtin_function_ids():
     rv = {
         id(v): f"builtins.{k}"
@@ -281,7 +325,7 @@ def _builtin_function_ids():
     return rv
 
 
-@make_function_id_set
+@FunctionIdSet
 def _numpy_function_ids():
     rv = dict()
     for mod in NP_SUPPORTED_MODULES:
@@ -296,7 +340,7 @@ def _numpy_function_ids():
     return rv
 
 
-@make_function_id_set
+@FunctionIdSet
 def _builtin_constant_ids():
     """
     Collects constant builtins by eliminating callable items.
