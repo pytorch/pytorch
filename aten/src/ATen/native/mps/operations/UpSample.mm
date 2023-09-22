@@ -34,14 +34,14 @@ namespace mps {
 
 // Upsampling operations (1D/2D forward and backward)
 // supported resize_mode: 'nearest' | 'bilinear' | 'nearest-exact'
-void upsample_out_template(const Tensor& input,
-                           IntArrayRef output_size,
-                           c10::optional<IntArrayRef> input_size_opt, // only used for backward pass
-                           c10::optional<double> scale_h_opt,
-                           c10::optional<double> scale_w_opt,
-                           const Tensor& output,
-                           bool align_corners,
-                           const c10::string_view resize_mode_str) {
+static void upsample_out_template(const Tensor& input,
+                                  IntArrayRef output_size,
+                                  c10::optional<IntArrayRef> input_size_opt, // only used for backward pass
+                                  c10::optional<double> scale_h_opt,
+                                  c10::optional<double> scale_w_opt,
+                                  const Tensor& output,
+                                  bool align_corners,
+                                  const c10::string_view resize_mode_str) {
   if (input.numel() == 0) {
     return;
   }
@@ -75,7 +75,7 @@ void upsample_out_template(const Tensor& input,
 
   const bool is_macOS_13_0_or_newer = is_macos_13_or_newer();
   const int64_t output_width = output_size.size() > 1 ? output_size[1] : output_size[0];
-  const int64_t output_height = output_size.size() > 1 ? output_size[0] : 1;
+  const int64_t output_height = output_size.size() > 1 ? output_size[0] : (output.dim() > 2 ? output.size(-2) : 1);
   const float scale_w = (scale_w_opt.value_or(0.) > 0.) ? static_cast<float>(scale_w_opt.value()) : 0.;
   const float scale_h = (scale_h_opt.value_or(0.) > 0.) ? static_cast<float>(scale_h_opt.value()) : 1.;
   const float offset_y = centerResults ? (scale_h - 1.0f) / 2.0f : 0.0f;

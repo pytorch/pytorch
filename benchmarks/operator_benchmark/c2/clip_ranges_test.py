@@ -1,7 +1,8 @@
 import benchmark_caffe2 as op_bench_c2
-import operator_benchmark as op_bench
 from benchmark_caffe2 import Caffe2BenchmarkBase  # noqa: F401
 from caffe2.python import core, dyndep
+
+import operator_benchmark as op_bench
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/fb/operators:clip_ranges_op")
 
@@ -14,7 +15,7 @@ clip_ranges_long_configs = op_bench.cross_product_configs(
     N=[2],
     MAX_LENGTH=range(1, 100),
     dtype=["int32"],
-    tags=["long"]
+    tags=["long"],
 )
 
 
@@ -38,7 +39,9 @@ class ClipRangesBenchmark(op_bench_c2.Caffe2BenchmarkBase):
         self.set_module_name("clip_ranges")
 
     def forward(self):
-        op = core.CreateOperator("ClipRanges", self.input, self.input, max_length=self.max_length)
+        op = core.CreateOperator(
+            "ClipRanges", self.input, self.input, max_length=self.max_length
+        )
         return op
 
 

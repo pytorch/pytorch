@@ -998,7 +998,7 @@ class PackageExporter:
 
     def _validate_dependency_graph(self):
         # 1. Check the graph for any errors inserted during dependency analysis.
-        for module_name, attrs in self.dependency_graph.nodes.items():
+        for attrs in self.dependency_graph.nodes.values():
             if "error" in attrs:
                 raise PackagingError(self.dependency_graph, debug=self.debug)
 

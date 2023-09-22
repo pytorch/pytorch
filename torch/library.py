@@ -4,7 +4,7 @@ import traceback
 import torch
 import weakref
 
-__all__ = ['Library', 'impl', 'define']
+__all__ = ['Library', 'impl', 'define', 'fallthrough_kernel']
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
@@ -15,6 +15,11 @@ _impls: Set[str] = set()
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ['prim']
 
+def fallthrough_kernel():
+    """
+    A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
+    """
+    raise NotImplementedError("fallthrough_kernel() should never be called.")
 
 class Library:
     """
@@ -83,7 +88,8 @@ class Library:
 
         Args:
             op_name: operator name (along with the overload) or OpOverload object.
-            fn: function that's the operator implementation for the input dispatch key.
+            fn: function that's the operator implementation for the input dispatch key or :func:`~fallthrough_kernel`
+                to register a fallthrough.
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
 

@@ -156,7 +156,7 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
        \end{aligned}
 
     For further details regarding the algorithm we refer to `Adam: A Method for Stochastic Optimization`_.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -166,14 +166,14 @@ Adamax.__doc__ = r"""Implements Adamax algorithm (a variant of Adam based on inf
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def adamax(

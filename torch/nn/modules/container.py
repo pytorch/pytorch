@@ -15,7 +15,7 @@ __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList
 T = TypeVar('T', bound=Module)
 
 
-# Copied from torch.nn.modules.module, required for a cusom __repr__ for ModuleList
+# Copied from torch.nn.modules.module, required for a custom __repr__ for ModuleList
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
@@ -148,8 +148,7 @@ class Sequential(Module):
             return ret
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
@@ -164,8 +163,7 @@ class Sequential(Module):
             return self
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def __mul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):

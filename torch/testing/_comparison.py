@@ -1235,7 +1235,16 @@ def not_close_error_metas(
                 "please except the previous error and raise an expressive `ErrorMeta` instead."
             ) from error
 
-    return error_metas
+    # [ErrorMeta Cycles]
+    # ErrorMeta objects in this list capture
+    # tracebacks that refer to the frame of this function.
+    # The local variable `error_metas` refers to the error meta
+    # objects, creating a reference cycle. Frames in the traceback
+    # would not get freed until cycle collection, leaking cuda memory in tests.
+    # We break the cycle by removing the reference to the error_meta objects
+    # from this frame as it returns.
+    error_metas = [error_metas]
+    return error_metas.pop()
 
 
 def assert_close(

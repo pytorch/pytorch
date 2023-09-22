@@ -176,7 +176,7 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
     learning rate is thus :math:`\gamma/(\sqrt{v} + \epsilon)` where :math:`\gamma`
     is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
-    """ + r"""
+    """ + fr"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -188,11 +188,11 @@ RMSprop.__doc__ = r"""Implements RMSprop algorithm.
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        {foreach}
-        {maximize}
-        {differentiable}
+        {_foreach_doc}
+        {_maximize_doc}
+        {_differentiable_doc}
 
-    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+    """
 
 
 def rmsprop(

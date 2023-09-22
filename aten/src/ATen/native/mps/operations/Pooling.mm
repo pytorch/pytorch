@@ -11,6 +11,8 @@
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #include <ATen/ops/avg_pool2d_native.h>
+#include <ATen/ops/max_pool2d_backward_native.h>
+#include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool2d_with_indices_native.h>
 #endif

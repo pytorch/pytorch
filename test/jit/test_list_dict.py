@@ -1964,7 +1964,7 @@ class TestNamedTuple(JitTestCase):
                 self.configs = configs
 
             def forward(self, x):
-                for _id, config in self.configs.items():
+                for config in self.configs.values():
                     x += config.size
                 return x
 

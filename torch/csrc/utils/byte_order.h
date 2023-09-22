@@ -43,7 +43,7 @@
 #define from_le32(x) (x)
 #define to_le64(x) (x)
 #define from_le64(x) (x)
-#else
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define to_be16(x) (x)
 #define from_be16(x) (x)
 #define to_be32(x) (x)
@@ -56,6 +56,8 @@
 #define from_le32(x) thp_bswap32(x)
 #define to_le64(x) thp_bswap64(x)
 #define from_le64(x) thp_bswap64(x)
+#else
+#error Unexpected or undefined __BYTE_ORDER__
 #endif
 
 namespace torch {

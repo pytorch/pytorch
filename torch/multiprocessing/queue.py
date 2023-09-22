@@ -1,7 +1,7 @@
 import io
 import multiprocessing.queues
-from multiprocessing.reduction import ForkingPickler
 import pickle
+from multiprocessing.reduction import ForkingPickler
 
 
 class ConnectionWrapper:
@@ -21,13 +21,12 @@ class ConnectionWrapper:
         return pickle.loads(buf)
 
     def __getattr__(self, name):
-        if 'conn' in self.__dict__:
+        if "conn" in self.__dict__:
             return getattr(self.conn, name)
         raise AttributeError(f"'{type(self).__name__}' object has no attribute 'conn'")
 
 
 class Queue(multiprocessing.queues.Queue):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._reader: ConnectionWrapper = ConnectionWrapper(self._reader)
@@ -37,7 +36,6 @@ class Queue(multiprocessing.queues.Queue):
 
 
 class SimpleQueue(multiprocessing.queues.SimpleQueue):
-
     def _make_methods(self):
         if not isinstance(self._reader, ConnectionWrapper):
             self._reader: ConnectionWrapper = ConnectionWrapper(self._reader)

@@ -152,6 +152,49 @@ __device__ __forceinline__ void binary_op_scalar(
   }
 }
 
+template <int res_arg_index, typename Op, typename T, typename scalar_t = T>
+__device__ __forceinline__ void binary_op_scalar_tensor(
+    T r_args[][kILP],
+    T** args,
+    scalar_t* scalar,
+    const int64_t n,
+    const int chunk_size,
+    const bool all_aligned,
+    Op op) {
+  using opmath_t = at::opmath_type<T>;
+  // to make things simple, we put aligned case in a different code path
+  if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+    for (int64_t i_start = threadIdx.x;
+         i_start * kILP < n && i_start * kILP < chunk_size;
+         i_start += blockDim.x) {
+      // load
+      load_store(r_args[0], args[0], 0, i_start);
+#pragma unroll
+      for (int ii = 0; ii < kILP; ii++) {
+        r_args[0][ii] = static_cast<T>(
+            op(static_cast<opmath_t>(r_args[0][ii]),
+               static_cast<opmath_t>(*scalar)));
+      }
+      // store
+      load_store(args[res_arg_index], r_args[0], i_start, 0);
+    }
+  } else {
+    for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+         i_start += blockDim.x * kILP) {
+      // Regardless if depth is 1 (for inplace) or 2 (for out of place), r_args
+      // has depth 1
+      load_args<1>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+      for (int ii = 0; ii < kILP; ii++) {
+        r_args[0][ii] = static_cast<T>(
+            op(static_cast<opmath_t>(r_args[0][ii]),
+               static_cast<opmath_t>(*scalar)));
+      }
+      store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+    }
+  }
+}
+
 template <int res_arg_index, typename Op, typename T, typename opmath_t>
 __device__ __forceinline__ void pointwise_op_scalar(
     T r_args[][kILP],
@@ -300,6 +343,30 @@ struct BinaryOpListAlphaFunctor {
         store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
       }
     }
+  }
+};
+
+template <typename T, int depth, int r_args_depth, int res_arg_index>
+struct BinaryOpScalarTensorFunctor {
+  using opmath_t = at::opmath_type<T>;
+  template <typename Op>
+  __device__ __forceinline__ void operator()(
+      int chunk_size,
+      TensorListMetadata<depth>& tl,
+      Op op,
+      T* scalar) {
+    const int tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const int chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    T* args[depth];
+    const bool all_aligned =
+        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    n -= chunk_idx * chunk_size;
+    T r_args[r_args_depth][kILP];
+
+    binary_op_scalar_tensor<res_arg_index>(
+        r_args, args, scalar, n, chunk_size, all_aligned, op);
   }
 };
 

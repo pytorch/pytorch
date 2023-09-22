@@ -1,35 +1,40 @@
-
-import torch
-
 import inspect
-import typing
 import pathlib
 import sys
-from typing import Optional, Iterable, List, Dict
+import typing
 from collections import defaultdict
 from types import CodeType
+from typing import Dict, Iterable, List, Optional
+
+import torch
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
     from monkeytype import trace as monkeytype_trace
-    from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
+    from monkeytype.db.base import (  # type: ignore[import]
+        CallTraceStore,
+        CallTraceStoreLogger,
+        CallTraceThunk,
+    )
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
+
 # Checks whether a class is defind in `torch.*` modules
 def is_torch_native_class(cls):
-    if not hasattr(cls, '__module__'):
+    if not hasattr(cls, "__module__"):
         return False
 
-    parent_modules = cls.__module__.split('.')
+    parent_modules = cls.__module__.split(".")
     if not parent_modules:
         return False
 
     root_module = sys.modules.get(parent_modules[0])
     return root_module is torch
+
 
 def get_type(type):
     """
@@ -43,14 +48,15 @@ def get_type(type):
         # with a null string. This needs to be done since
         # typing.List is not accepted by TorchScript.
         type_to_string = str(type)
-        return type_to_string.replace(type.__module__ + '.', '')
+        return type_to_string.replace(type.__module__ + ".", "")
     elif is_torch_native_class(type):
         # If the type is a subtype of torch module, then TorchScript expects a fully qualified name
         # for the type which is obtained by combining the module name and type name.
-        return type.__module__ + '.' + type.__name__
+        return type.__module__ + "." + type.__name__
     else:
         # For all other types use the name for the type.
         return type.__name__
+
 
 def get_optional_of_element_type(types):
     """
@@ -63,15 +69,18 @@ def get_optional_of_element_type(types):
 
     # Optional type is internally converted to Union[type, NoneType], which
     # is not supported yet in TorchScript. Hence, representing the optional type as string.
-    return 'Optional[' + elem_type + ']'
+    return "Optional[" + elem_type + "]"
+
 
 def get_qualified_name(func):
     return func.__qualname__
+
 
 if _IS_MONKEYTYPE_INSTALLED:
 
     class JitTypeTraceStoreLogger(CallTraceStoreLogger):
         """A JitTypeCallTraceLogger that stores logged traces in a CallTraceStore."""
+
         def __init__(self, store: CallTraceStore):
             super().__init__(store)
 
@@ -95,7 +104,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             self,
             qualified_name: str,
             qualname_prefix: Optional[str] = None,
-            limit: int = 2000
+            limit: int = 2000,
         ) -> List[CallTraceThunk]:
             return self.trace_records[qualified_name]
 
@@ -122,7 +131,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                     # TODO: To remove this check once Union suppport in TorchScript lands.
                     all_args[arg] = get_optional_of_element_type(types)
                 elif type_length > 1:
-                    all_args[arg] = 'Any'
+                    all_args[arg] = "Any"
                 elif type_length == 1:
                     all_args[arg] = get_type(types[0])
             return all_args
@@ -147,6 +156,7 @@ if _IS_MONKEYTYPE_INSTALLED:
 
         def code_filter(self) -> Optional[CodeFilter]:
             return jit_code_filter
+
 else:
     # When MonkeyType is not installed, we provide dummy class definitions
     # for the below classes.
@@ -164,6 +174,7 @@ else:
 
     monkeytype_trace = None  # noqa: F811
 
+
 def jit_code_filter(code: CodeType) -> bool:
     """
     Custom CodeFilter for Torchscript to trace forward calls.
@@ -176,7 +187,9 @@ def jit_code_filter(code: CodeType) -> bool:
     excludes tracing of stdlib and site-packages.
     """
     # Filter code without a source file and exclude this check for 'forward' calls.
-    if code.co_name != 'forward' and (not code.co_filename or code.co_filename[0] == '<'):
+    if code.co_name != "forward" and (
+        not code.co_filename or code.co_filename[0] == "<"
+    ):
         return False
 
     filename = pathlib.Path(code.co_filename).resolve()

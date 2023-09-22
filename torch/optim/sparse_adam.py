@@ -97,7 +97,7 @@ class SparseAdam(Optimizer):
 
         return loss
 
-SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algorithm
+SparseAdam.__doc__ = fr"""SparseAdam implements a masked version of the Adam algorithm
     suitable for sparse gradients. Currently, due to implementation constraints (explained
     below), SparseAdam is only intended for a narrow subset of use cases, specifically
     parameters of a dense layout with gradients of a sparse layout. This occurs in a
@@ -150,9 +150,9 @@ SparseAdam.__doc__ = r"""SparseAdam implements a masked version of the Adam algo
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        {maximize}
+        {_maximize_doc}
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
 
-    """.format(maximize=_maximize_doc)
+    """

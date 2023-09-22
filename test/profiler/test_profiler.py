@@ -1485,10 +1485,49 @@ class TestProfiler(TestCase):
                     events = j["traceEvents"]
 
                     for e in events:
-                        self.assertNotEqual(getattr(e, "cat", None), "fwdbwd")
+                        self.assertNotEqual(e.get("cat", None), "fwdbwd")
         finally:
             torch._C._profiler._set_fwd_bwd_enabled_val(True)
 
+    # This test is broken on Windows, the likely reason is that kineto/CUPTI
+    # is not supported that particular environment. Once the CI stabilizes
+    # we can narrow the condition so Windows is checked as well (TODO)
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(IS_WINDOWS, "Test does not work on Windows")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_cuda_sync_events(self):
+        device = torch.device("cuda:0")
+        t1, t2 = torch.ones(1, device=device), torch.ones(1, device=device)
+
+        def workload() -> None:
+            torch.add(t1, t2)
+            torch.cuda.synchronize()
+            torch.add(t1, t2)
+
+        def trace_and_check(exp_config: Optional[_ExperimentalConfig]) -> None:
+            with _profile(use_kineto=True, use_cuda=True,
+                          experimental_config=exp_config,
+                          ) as prof:
+                workload()
+
+            with TemporaryFileName(mode="w+") as fname:
+                # fname = "/tmp/kineto_out.json"
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    j = json.load(f)
+                    cats = {e.get("cat", None) for e in j["traceEvents"]}
+            self.assertTrue("cuda_sync" in cats, "Expected to find cuda_sync event"
+                            f" found = {cats}")
+
+        print("Testing enable_cuda_sync_events in _ExperimentalConfig")
+        trace_and_check(exp_config=_ExperimentalConfig(enable_cuda_sync_events=True))
+
+        print("Testing _profiler._set_cuda_sync_enabled_val()")
+        try:
+            torch._C._profiler._set_cuda_sync_enabled_val(True)
+            trace_and_check(exp_config=None)
+        finally:
+            torch._C._profiler._set_cuda_sync_enabled_val(False)
 
     def test_profiler_type(self):
         profiler_type = torch._C._autograd._profiler_type
@@ -1522,7 +1561,7 @@ class TestProfiler(TestCase):
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
                 corr_id = event.correlation_id()
-                if (corr_id):
+                if (corr_id) and event.device_type() == DeviceType.CPU:
                     self.assertTrue(corr_id not in id_uniqueness_set)
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
@@ -1648,6 +1687,75 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(found, "Expected to find aten::as_strided but did not")
         finally:
             torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+
+    def test_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile() as p:
+            for _ in range(4):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf1"):
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf1"]), 4)
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2")
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf2"]), 4)
+
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3")
+            for _ in range(4):
+                try:
+                    with cm:
+                        x.add(y)
+                        raise ValueError()
+                        x.relu()
+                except ValueError:
+                    pass
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf3"]), 4)
+        self.assertFalse(any((e.name and "relu" in e.name) for e in p.events()))
+
+        with profile() as p:
+            for _ in range(4):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf4"):
+                    x.add(y)
+                    with torch._C._profiler._RecordFunctionFast("add_test_fast_rf5"):
+                        x.relu()
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf4"]), 4)
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf5"]), 4)
+
+    def test_is_profiler_enabled(self):
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+        with torch.autograd.profiler.profile() as p:
+            self.assertTrue(torch.autograd.profiler._is_profiler_enabled)
+
+        self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
+
+    def test_guarded_record_function_fast(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+
+        with profile() as p:
+            cm = torch._C._profiler._RecordFunctionFast("guarded_rff")
+            for _ in range(4):
+                if torch.autograd.profiler._is_profiler_enabled:
+                    with cm:
+                        x.add(y)
+                else:
+                    x.add(y)
+
+        self.assertGreaterEqual(len([e for e in p.events() if e.name == "guarded_rff"]), 4)
 
 
 def find_node_with_name(nodes, name):

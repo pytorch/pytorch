@@ -6,9 +6,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
 
-namespace at {
-
-namespace native {
+namespace at::native {
 
 bool is_pinned_cuda(const Tensor& self, c10::optional<Device> device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!device.has_value() || device->is_cuda());
@@ -31,5 +29,4 @@ Tensor _pin_memory_cuda(const Tensor& self, c10::optional<Device> device) {
 }
 
 
-} // namespace native
-} // namespace at
+} // namespace at::native

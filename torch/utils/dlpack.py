@@ -107,7 +107,7 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
             # attribute, but it is not documented
             # The array API specify that the default legacy stream must be passed
             # with a value of 1 for CUDA
-            # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none  # NOQA
+            # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none
             is_cuda = device[0] == DLDeviceType.kDLGPU
             # Since pytorch is not using PTDS by default, lets directly pass
             # the legacy stream

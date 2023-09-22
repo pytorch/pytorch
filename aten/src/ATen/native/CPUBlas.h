@@ -73,6 +73,15 @@ void gemm(
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
+    const float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    const float beta,
+    float *c, int64_t ldc);
+
+void gemm(
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
     c10::complex<double> alpha,
     const c10::complex<double> *a, int64_t lda,
     const c10::complex<double> *b, int64_t ldb,

@@ -1,5 +1,7 @@
+import torch
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
+from .code_context import code_context
 from .convert_frame import replay
 from .decorators import (
     allow_in_graph,
@@ -10,10 +12,12 @@ from .decorators import (
     graph_break,
     mark_dynamic,
     mark_static,
+    mark_static_address,
     maybe_mark_dynamic,
     run,
 )
 from .eval_frame import (
+    _reset_guarded_backend_cache,
     explain,
     export,
     is_dynamo_supported,
@@ -23,13 +27,7 @@ from .eval_frame import (
     reset_code,
 )
 from .external_utils import is_compiling
-from .utils import (
-    compilation_metrics,
-    graph_break_reasons,
-    guard_failures,
-    orig_code_map,
-    reset_frame_count,
-)
+from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
     "allow_in_graph",
@@ -40,6 +38,7 @@ __all__ = [
     "mark_dynamic",
     "maybe_mark_dynamic",
     "mark_static",
+    "mark_static_address",
     "optimize",
     "optimize_assert",
     "export",
@@ -67,8 +66,7 @@ def reset() -> None:
     guard_failures.clear()
     graph_break_reasons.clear()
     resume_execution.ContinueExecutionCache.cache.clear()
-    if hasattr(eval_frame.most_recent_backend, "reset"):
-        eval_frame.most_recent_backend.reset()
-    eval_frame.most_recent_backend = None
-    compilation_metrics.clear()
+    _reset_guarded_backend_cache()
     reset_frame_count()
+    torch._C._dynamo.compiled_autograd.clear_cache()
+    code_context.clear()

@@ -1846,13 +1846,13 @@ def gen_per_operator_headers(
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
-    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
+    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(list)
     for fn in native_functions:
         functions_by_root_name[fn.root_name].append(fn)
 
     grouped_functions_by_root_name: Dict[
         str, List[Union[NativeFunction, NativeFunctionsGroup]]
-    ] = defaultdict(lambda: [])
+    ] = defaultdict(list)
     for group in grouped_native_functions:
         name = group.root_name
         grouped_functions_by_root_name[name].append(group)

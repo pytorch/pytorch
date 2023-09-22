@@ -1430,33 +1430,35 @@ void prelu_backward_kernel(TensorIterator& iter) {
 
 } // namespace
 
-REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
-REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_cpu_kernel);
-REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
-REGISTER_DISPATCH(elu_stub, &elu_kernel);
-REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
-REGISTER_DISPATCH(GeluKernel, &GeluKernelImpl);
-REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
-REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
+
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
-REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
-REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
+REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
+REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
+REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
+REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
+REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
+REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
-REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
-REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
-REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
-REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
-REGISTER_DISPATCH(glu_stub, &glu_kernel);
-REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
-REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
-REGISTER_DISPATCH(silu_stub, &silu_kernel);
-REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
-REGISTER_DISPATCH(mish_stub, &mish_kernel);
-REGISTER_DISPATCH(mish_backward_stub, &mish_backward_kernel);
-REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
-REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
+
+ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_cpu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(glu_stub, &glu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(glu_backward_stub, &glu_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(elu_stub, &elu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(elu_backward_stub, &elu_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(GeluKernel, &GeluKernelImpl);
+ALSO_REGISTER_AVX512_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
+ALSO_REGISTER_AVX512_DISPATCH(hardswish_stub, &hardswish_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(softplus_stub, &softplus_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(silu_stub, &silu_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(silu_backward_stub, &silu_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(mish_stub, &mish_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(mish_backward_stub, &mish_backward_kernel);
 
 } // namespace at::native

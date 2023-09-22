@@ -1,6 +1,8 @@
 import sys
-import torch
 import types
+
+import torch
+
 
 class _XNNPACKEnabled:
     def __get__(self, obj, objtype):
@@ -8,6 +10,7 @@ class _XNNPACKEnabled:
 
     def __set__(self, obj, val):
         raise RuntimeError("Assignment not supported")
+
 
 class XNNPACKEngine(types.ModuleType):
     def __init__(self, m, name):
@@ -18,6 +21,7 @@ class XNNPACKEngine(types.ModuleType):
         return self.m.__getattribute__(attr)
 
     enabled = _XNNPACKEnabled()
+
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

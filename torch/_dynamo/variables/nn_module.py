@@ -2,7 +2,7 @@ import functools
 import inspect
 import itertools
 import types
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Dict, List
 
 import torch.nn
@@ -61,6 +61,16 @@ def initialize_lazy_module(tx, mod, args, kwargs):
             for arg in proxy_args_kwargs(args, {})[0]
         ]
         mod._infer_parameters(mod, input)
+
+
+@contextmanager
+def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
+    fully_qualified_name = source.name()
+    try:
+        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        yield
+    finally:
+        del tx.nn_module_stack[module_key]
 
 
 class NNModuleVariable(VariableTracker):
@@ -231,15 +241,6 @@ class NNModuleVariable(VariableTracker):
 
         return variables.GetAttrVariable(self, name, **options)
 
-    @contextmanager
-    def record_nn_module_stack(self, tx, mod):
-        fully_qualified_name = self.source.name()
-        try:
-            tx.nn_module_stack[self.module_key] = (fully_qualified_name, type(mod))
-            yield
-        finally:
-            del tx.nn_module_stack[self.module_key]
-
     def call_function(
         self,
         tx,
@@ -249,13 +250,19 @@ class NNModuleVariable(VariableTracker):
         options = VariableTracker.propagate(self, args, kwargs.values())
         mod = tx.output.get_submodule(self.module_key)
 
-        with self.record_nn_module_stack(tx, mod):
+        with record_nn_module_stack(self.module_key, self.source, tx, mod):
             is_lazy = is_lazy_module(mod)
             if (
                 isinstance(mod, torch.nn.Sequential)
                 and mod.__class__.forward is torch.nn.Sequential.forward
             ):
-                # unroll Sequential()
+                if nnmodule_has_hooks(mod):
+                    # We do not want to unroll sequential if it has hooks, since evaporating it
+                    # will cause hooks to not fire!
+                    # This terminates and restart the tracing process
+                    self.convert_to_unspecialized(tx)
+
+                # Unroll sequential
                 assert (
                     not is_lazy
                 ), "Expected lazy sequential isn't a valid combination?"
@@ -294,10 +301,8 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
-                    unimplemented(
-                        f"Forward/backward hooks aren't yet supported on 'allowed' modules (e.g. {mod.__class__}), "
-                        "which don't get traced through by dynamo. Graph-breaking to run hooks without compile."
-                    )
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
 
                 from .builder import wrap_fx_proxy
 
@@ -385,7 +390,7 @@ class NNModuleVariable(VariableTracker):
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
-            with self.record_nn_module_stack(tx, module):
+            with record_nn_module_stack(self.module_key, self.source, tx, module):
                 return generic_call_method_helper(name)
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
@@ -593,8 +598,8 @@ class NNModuleVariable(VariableTracker):
             submod = module[key]
             return tx.output.register_attr_or_module(
                 submod,
+                self.module_key,
                 key,
-                args[0].as_python_constant(),
                 source=NNModuleSource(GetItemSource(self.source, key)),
                 **options,
             )
@@ -713,9 +718,15 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         else:
             source = None
 
-        return variables.UserFunctionVariable(
-            fn, source=source, **options
-        ).call_function(tx, [self] + list(args), kwargs)
+        ctx = (
+            record_nn_module_stack(str(id(mod)), self.source, tx, mod)
+            if self.source
+            else nullcontext()
+        )
+        with ctx:
+            return variables.UserFunctionVariable(
+                fn, source=source, **options
+            ).call_function(tx, [self] + list(args), kwargs)
 
     def call_method(
         self,

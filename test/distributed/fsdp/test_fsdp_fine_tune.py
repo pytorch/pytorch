@@ -101,11 +101,36 @@ class TestFSDPFineTune(FSDPTest):
             post_backward_reshard_count += 1
             return orig_post_backward_reshard(*args, **kwargs)
 
+        def _assert_post_backward_requires_grad(seq):
+            if step_idx == num_steps - 1 and unfreeze_params:
+                self.assertTrue(
+                    all(p.requires_grad for p in seq.parameters()),
+                    msg="Expected all parameters to require grad but some did not!",
+                )
+
+        def _assert_post_backward_reshard_count(step_idx, num_steps):
+            if step_idx < num_steps - 1 or not unfreeze_params:
+                # If the input does not require gradient, then the 0th
+                # frozen linear gets resharded in the catch-all reshard
+                # since we cannot register an autograd hook on it
+                expected_post_backward_reshard_count = (
+                    self.NUM_LINEARS if inp_requires_grad else self.NUM_LINEARS - 1
+                )
+            else:
+                # This follows the normal post-backward hook path
+                expected_post_backward_reshard_count = self.NUM_LINEARS
+            self.assertEqual(
+                post_backward_reshard_count, expected_post_backward_reshard_count
+            )
+
         with mock.patch(
             "torch.distributed.fsdp._runtime_utils._post_backward_reshard",
             _post_backward_reshard_with_count,
         ):
-            num_steps = 2
+            num_steps = 3
+            # interleave a `no_grad` step to validate post-backward hooks are not registered in that context
+            # and that `requires_grad` is reset appropriately when unfreezing
+            nograd_step_idx = 1
             for step_idx in range(num_steps):
                 if unfreeze_params and step_idx == num_steps - 1:
                     # Unfreeze the parameters on the last step to emulate some
@@ -115,21 +140,16 @@ class TestFSDPFineTune(FSDPTest):
                 inp = torch.randn(
                     (8, 5), device="cuda", requires_grad=inp_requires_grad
                 )
-                seq(inp).sum().backward()
-                if step_idx < num_steps - 1 or not unfreeze_params:
-                    # If the input does not require gradient, then the 0th
-                    # frozen linear gets resharded in the catch-all reshard
-                    # since we cannot register an autograd hook on it
-                    expected_post_backward_reshard_count = (
-                        self.NUM_LINEARS if inp_requires_grad else self.NUM_LINEARS - 1
-                    )
+                if step_idx == nograd_step_idx:
+                    with torch.no_grad():
+                        output = seq(inp)
                 else:
-                    # This follows the normal post-backward hook path
-                    expected_post_backward_reshard_count = self.NUM_LINEARS
-                self.assertEqual(
-                    post_backward_reshard_count, expected_post_backward_reshard_count
-                )
-                post_backward_reshard_count = 0
+                    output = seq(inp)
+                if step_idx != nograd_step_idx:
+                    output.sum().backward()
+                    _assert_post_backward_requires_grad(seq)
+                    _assert_post_backward_reshard_count(step_idx, num_steps)
+                    post_backward_reshard_count = 0
 
     @skip_if_lt_x_gpu(2)
     def test_parity_with_ddp(self):

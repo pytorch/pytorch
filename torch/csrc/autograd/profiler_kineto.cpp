@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/profiler_kineto.h>
 
 #include <c10/macros/Export.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
@@ -65,7 +64,6 @@ inline int64_t getTimeUs() {
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
-using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
@@ -378,7 +376,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
     for (auto& e : events) {
-      if (e->parent_.expired()) {
+      if (e->parent_.expired() && e->deviceType() == c10::DeviceType::CPU) {
         event_tree_.push_back(e);
       }
 
@@ -667,7 +665,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 KinetoEvent::KinetoEvent(
-    std::shared_ptr<const torch::profiler::impl::Result> result,
+    const std::shared_ptr<const torch::profiler::impl::Result>& result,
     const bool verbose)
     : result_{result} {
   TORCH_INTERNAL_ASSERT(result != nullptr);

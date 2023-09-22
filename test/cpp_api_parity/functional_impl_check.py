@@ -173,7 +173,7 @@ def write_test_to_test_class(
 
     assert not ('cpp_options_args' in test_params_dict and 'cpp_function_call' in test_params_dict), (
         "Only one of `cpp_options_args` and `cpp_function_call` entries "
-        "should be present in test params dict:\n{}").format(pprint.pformat(test_params_dict))
+        f"should be present in test params dict:\n{pprint.pformat(test_params_dict)}")
 
     functional_name = compute_functional_name(test_params_dict)
 
@@ -225,7 +225,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(unit_test_class.functional_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS + SAMPLE_FUNCTIONAL_CPP_SOURCE
     functions = []
-    for test_name, test_params in unit_test_class.functional_test_params_map.items():
+    for test_params in unit_test_class.functional_test_params_map.values():
         cpp_sources += generate_test_cpp_sources(test_params=test_params, template=TORCH_NN_FUNCTIONAL_TEST_FORWARD)
         functions.append(f'{test_params.functional_variant_name}_test_forward')
     if print_cpp_source:

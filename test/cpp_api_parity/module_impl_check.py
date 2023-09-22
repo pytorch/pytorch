@@ -209,11 +209,11 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
     if 'constructor_args' in test_params_dict:
         assert 'cpp_constructor_args' in test_params_dict, (
             "If `constructor_args` is present in test params dict, to enable C++ API parity test, "
-            "`cpp_constructor_args` must be present in:\n{}"
+            f"`cpp_constructor_args` must be present in:\n{pprint.pformat(test_params_dict)}"
             "If you are interested in adding the C++ API parity test, please see:\n"
             "NOTE [How to check NN module / functional API parity between Python and C++ frontends]. \n"
             "If not, please add `test_cpp_api_parity=False` to the test params dict and file an issue about this."
-        ).format(pprint.pformat(test_params_dict))
+        )
 
     return TorchNNModuleTestParams(
         module_name=module_name,
@@ -233,16 +233,16 @@ def write_test_to_test_class(
     module_name = compute_module_name(test_params_dict)
 
     assert hasattr(torch.nn, module_name), (
-        "`torch.nn` doesn't have module `{}`. "
+        f"`torch.nn` doesn't have module `{module_name}`. "
         "If you are adding a new test, please set `fullname` using format `ModuleName_desc` "
-        "or set `module_name` using format `ModuleName` in the module test dict:\n{}"
-    ).format(module_name, pprint.pformat(test_params_dict))
+        f"or set `module_name` using format `ModuleName` in the module test dict:\n{pprint.pformat(test_params_dict)}"
+    )
 
     module_full_name = 'torch::nn::' + module_name
 
     assert module_full_name in parity_table['torch::nn'], (
-        "Please add `{}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. "
-        "(Discovered while processing\n{}.)").format(module_full_name, pprint.pformat(test_params_dict))
+        f"Please add `{module_full_name}` entry to `torch::nn` section of `test/cpp_api_parity/parity-tracker.md`. "
+        f"(Discovered while processing\n{pprint.pformat(test_params_dict)}.)")
 
     for device in devices:
         test_params = process_test_params_for_module(
@@ -292,7 +292,7 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
     assert len(unit_test_class.module_test_params_map) > 0
     cpp_sources = TORCH_NN_COMMON_TEST_HARNESS + SAMPLE_MODULE_CPP_SOURCE
     functions = []
-    for test_name, test_params in unit_test_class.module_test_params_map.items():
+    for test_params in unit_test_class.module_test_params_map.values():
         cpp_sources += generate_test_cpp_sources(
             test_params=test_params, template=TORCH_NN_MODULE_TEST_FORWARD_BACKWARD)
         functions.append(f'{test_params.module_variant_name}_test_forward_backward')

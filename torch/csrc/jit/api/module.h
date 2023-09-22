@@ -11,7 +11,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
@@ -90,6 +89,8 @@ struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Module() = default;
+  Module(const Module&) = default;
+  Module& operator=(const Module&) = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
@@ -234,7 +235,7 @@ struct TORCH_API Module : public Object {
 
   Module copy() const;
 
-  Module deepcopy() const;
+  Module deepcopy(c10::optional<at::Device> device = c10::nullopt) const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the
@@ -268,7 +269,7 @@ struct TORCH_API Module : public Object {
   }
 
   void set_delete_memory(std::shared_ptr<char> delete_mem) {
-    mem_to_delete_ = delete_mem;
+    mem_to_delete_ = std::move(delete_mem);
   }
 
   // A set of functions to maintain input shapes through torch.jit.save and
@@ -279,11 +280,11 @@ struct TORCH_API Module : public Object {
       return;
     }
     auto c10_inputs = c10::impl::GenericList(AnyType::get());
-    for (const IValue& value : inputs) {
+    for (IValue& value : inputs) {
       // Not checking whether this is traceable type as that is already checked
       // higher up in the stack and changing that would require a larger
       // restructuring.
-      c10_inputs.push_back(value);
+      c10_inputs.emplace_back(std::move(value));
     }
     traced_inputs_.insert_or_assign(func_name, c10_inputs);
   }
@@ -326,7 +327,8 @@ struct TORCH_API Module : public Object {
 // details.
 TORCH_API Module freeze(
     const Module& module,
-    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    const c10::optional<std::vector<std::string>>& preserved_attrs =
+        c10::nullopt,
     bool optimize_numerics = true);
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
@@ -400,7 +402,7 @@ struct slot_iterator_impl {
                     // slots of root
       bool return_module) // if true include root itself as the first thing
                           // visited (used in modules())
-      : cursors_({SlotCursor{root, return_module ? -1 : 0}}),
+      : cursors_({SlotCursor{std::move(root), return_module ? -1 : 0}}),
         recurse_(recurse) {
     // advance iterator to first valid element (or the end, if empty)
     while_not_valid_next();
@@ -543,7 +545,7 @@ struct slot_list_impl {
   }
 
   slot_list_impl(Module module, bool recurse, bool return_module)
-      : module_(module),
+      : module_(std::move(module)),
         recurse_(recurse),
         return_module_(return_module),
         size_(c10::nullopt) {

@@ -15,7 +15,7 @@ def load(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='PyTorch distributed benchmark diff')
+    parser = argparse.ArgumentParser(description="PyTorch distributed benchmark diff")
     parser.add_argument("file", nargs=2)
     args = parser.parse_args()
 
@@ -49,13 +49,15 @@ def main():
 
         # Print header
         print("")
-        print(f"{'':>10s}", end='')  # noqa: E999
+        print(f"{'':>10s}", end="")  # noqa: E999
         for _ in [75, 95]:
-            print(f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end='')  # noqa: E999
+            print(
+                f"{'sec/iter':>16s}{'ex/sec':>10s}{'diff':>10s}", end=""
+            )  # noqa: E999
         print("")
 
         # Print measurements
-        for (i, (xa, xb)) in enumerate(zip(ra["result"], rb["result"])):
+        for i, (xa, xb) in enumerate(zip(ra["result"], rb["result"])):
             # Ignore round without ddp
             if i == 0:
                 continue
@@ -66,16 +68,19 @@ def main():
             ngpus = len(xa["ranks"])
             ma = sorted(xa["measurements"])
             mb = sorted(xb["measurements"])
-            print(f"{ngpus:>4d} GPUs:", end='')  # noqa: E999
+            print(f"{ngpus:>4d} GPUs:", end="")  # noqa: E999
             for p in [75, 95]:
                 va = np.percentile(ma, p)
                 vb = np.percentile(mb, p)
                 # We're measuring time, so lower is better (hence the negation)
                 delta = -100 * ((vb - va) / va)
-                print(f"  p{p:02d}: {vb:8.3f}s {int(batch_size / vb):7d}/s {delta:+8.1f}%", end='')  # noqa: E999
+                print(
+                    f"  p{p:02d}: {vb:8.3f}s {int(batch_size / vb):7d}/s {delta:+8.1f}%",
+                    end="",
+                )  # noqa: E999
             print("")
         print("")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

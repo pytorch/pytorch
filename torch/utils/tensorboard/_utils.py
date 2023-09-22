@@ -98,10 +98,8 @@ def convert_to_HWC(tensor, input_format):  # tensor: numpy array
     ), f"You can not use the same dimension shordhand twice.         input_format: {input_format}"
     assert len(tensor.shape) == len(
         input_format
-    ), "size of input tensor and input format are different. \
-        tensor shape: {}, input_format: {}".format(
-        tensor.shape, input_format
-    )
+    ), f"size of input tensor and input format are different. \
+        tensor shape: {tensor.shape}, input_format: {input_format}"
     input_format = input_format.upper()
 
     if len(input_format) == 4:

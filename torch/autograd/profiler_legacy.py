@@ -1,32 +1,42 @@
-import torch
-import torch.cuda
-from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, MEMORY_EVENT_NAME,
-    _filter_name, _filter_stack_entry, _rewrite_name
-)
-
-from torch.autograd import (
-    DeviceType, ProfilerConfig, ProfilerState,
-    _disable_profiler_legacy, _enable_profiler_legacy,
-)
-
 import itertools
 from warnings import warn
 
+import torch
+import torch.cuda
+
+from torch.autograd import (
+    _disable_profiler_legacy,
+    _enable_profiler_legacy,
+    DeviceType,
+    ProfilerConfig,
+    ProfilerState,
+)
+from torch.autograd.profiler_util import (
+    _filter_name,
+    _filter_stack_entry,
+    _rewrite_name,
+    EventList,
+    FunctionEvent,
+    MEMORY_EVENT_NAME,
+)
+
 __all__ = ["profile"]
+
 
 class profile:
     """DEPRECATED: use torch.profiler instead"""
+
     def __init__(
-            self,
-            enabled=True,
-            *,
-            use_cuda=False,
-            record_shapes=False,
-            with_flops=False,
-            profile_memory=False,
-            with_stack=False,
-            with_modules=False):
+        self,
+        enabled=True,
+        *,
+        use_cuda=False,
+        record_shapes=False,
+        with_flops=False,
+        profile_memory=False,
+        with_stack=False,
+        with_modules=False,
+    ):
         self.enabled: bool = enabled
         if not self.enabled:
             return
@@ -85,18 +95,19 @@ class profile:
             parsed_results,
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory,
-            with_flops=self.with_flops)
+            with_flops=self.with_flops,
+        )
         self.function_events._build_tree()
         return False
 
     def __repr__(self):
         if self.function_events is None:
-            return '<unfinished profiler_legacy.profile>'
+            return "<unfinished profiler_legacy.profile>"
         return repr(self.function_events)
 
     def __str__(self):
         if self.function_events is None:
-            return '<unfinished profile.profiler_legacy.profile>'
+            return "<unfinished profile.profiler_legacy.profile>"
         return str(self.function_events)
 
     def _check_finish(self):
@@ -104,14 +115,14 @@ class profile:
             raise RuntimeError("Profiler didn't finish running")
 
     def table(
-            self,
-            sort_by=None,
-            row_limit=100,
-            max_src_column_width=75,
-            max_name_column_width=55,
-            max_shapes_column_width=80,
-            header=None,
-            top_level_events_only=False
+        self,
+        sort_by=None,
+        row_limit=100,
+        max_src_column_width=75,
+        max_name_column_width=55,
+        max_shapes_column_width=80,
+        header=None,
+        top_level_events_only=False,
     ):
         self._check_finish()
         assert self.function_events is not None
@@ -122,14 +133,16 @@ class profile:
             max_name_column_width=max_name_column_width,
             max_shapes_column_width=max_shapes_column_width,
             header=header,
-            top_level_events_only=top_level_events_only
+            top_level_events_only=top_level_events_only,
         )
+
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
         self._check_finish()
         assert self.function_events is not None
         return self.function_events.export_chrome_trace(path)
+
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
@@ -142,17 +155,19 @@ class profile:
         self._check_finish()
         assert self.function_events is not None, "Expected profiling results"
         return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
+
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
         self._check_finish()
         assert self.function_events is not None, "Expected profiling results"
         return self.function_events.total_average()
+
     total_average.__doc__ = EventList.total_average.__doc__
 
     @property
     def self_cpu_time_total(self):
-        """ Returns total time spent on CPU obtained as a sum of
+        """Returns total time spent on CPU obtained as a sum of
         all self times across all the events.
         """
         self._check_finish()
@@ -176,7 +191,7 @@ def _parse_legacy_records(thread_records):
     # '__start_profile' is not guaranteed to be first, so we must find it here
     for record in itertools.chain(*thread_records):
         name = record.name()
-        if start_record is None and name == '__start_profile':
+        if start_record is None and name == "__start_profile":
             start_record = record
 
     assert start_record is not None and not start_record.is_remote()
@@ -192,12 +207,11 @@ def _parse_legacy_records(thread_records):
         prev_record = None
         for record in thread_record_list:
             record_key = _get_record_key(record)
-            if (_filter_name(record.name()) or
-                    record_key in filtered_handles):
+            if _filter_name(record.name()) or record_key in filtered_handles:
                 filtered_handles.add(record_key)
                 continue
 
-            if record.kind() == 'push':
+            if record.kind() == "push":
                 # workaround to reduce double logging from operator
                 # wrappers and redispatch
                 if prev_record is not None:
@@ -213,7 +227,7 @@ def _parse_legacy_records(thread_records):
                 range_starts[record_key] = record
                 cpu_memory_allocs[record_key] = 0
                 cuda_memory_allocs[record_key] = 0
-            elif record.kind() == 'pop':
+            elif record.kind() == "pop":
                 assert (
                     record_key in range_starts
                 ), f"""Expected record with key {record_key} to exist in range_starts.
@@ -223,9 +237,7 @@ def _parse_legacy_records(thread_records):
 
                 cpu_memory_usage = cpu_memory_allocs[record_key]
                 cuda_memory_usage = cuda_memory_allocs[record_key]
-                is_async = start.is_async() or (
-                    start.thread_id() != record.thread_id()
-                )
+                is_async = start.is_async() or (start.thread_id() != record.thread_id())
                 is_remote_event = record.is_remote()
                 start_flops = start.flops()
 
@@ -239,7 +251,9 @@ def _parse_legacy_records(thread_records):
                     end_us=start_record.cpu_elapsed_us(record),
                     fwd_thread=start.fwd_thread_id(),
                     input_shapes=start.shapes(),
-                    stack=[entry for entry in start.stack() if _filter_stack_entry(entry)],
+                    stack=[
+                        entry for entry in start.stack() if _filter_stack_entry(entry)
+                    ],
                     scope=start.scope(),
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
@@ -254,15 +268,12 @@ def _parse_legacy_records(thread_records):
                 if not is_async and start.has_cuda():
                     duration = start.cuda_elapsed_us(record)
                     if duration > 0:
-                        fe.append_kernel(
-                            start.name(),
-                            start.device(),
-                            duration)
+                        fe.append_kernel(start.name(), start.device(), duration)
                 functions.append(fe)
                 del range_starts[record_key]
                 del cpu_memory_allocs[record_key]
                 del cuda_memory_allocs[record_key]
-            elif record.kind() == 'memory_alloc':
+            elif record.kind() == "memory_alloc":
                 num_open_handles_cpu = len(cpu_memory_allocs)
                 num_open_handles_cuda = len(cuda_memory_allocs)
                 assert num_open_handles_cpu == num_open_handles_cuda

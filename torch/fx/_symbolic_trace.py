@@ -739,7 +739,7 @@ class Tracer(TracerBase):
                 self.root = torch.nn.Module()
                 fn = root
 
-            tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
+            tracer_cls: Optional[Type[Tracer]] = getattr(self, "__class__", None)
             self.graph = Graph(tracer_cls=tracer_cls)
             if hasattr(fn, '__code__'):
                 code = fn.__code__

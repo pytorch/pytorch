@@ -327,6 +327,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
             self.assertEqual(type(model.myadd), torch.ao.nn.quantized.QFunctional)
             self.assertEqual(type(model.mycat), torch.ao.nn.quantized.QFunctional)
             self.assertEqual(type(model.myadd_relu), torch.ao.nn.quantized.QFunctional)
+            self.assertEqual(type(model.mymatmul), torch.ao.nn.quantized.QFunctional)
             self.checkNoQconfig(model)
 
         checkQuantized(model)

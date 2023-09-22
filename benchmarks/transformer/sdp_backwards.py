@@ -1,8 +1,9 @@
-import torch
-import numpy as np
 import random
+
+import numpy as np
+import torch
 import torch.utils.benchmark as benchmark
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity, record_function
 
 
 class CompositeMHA(torch.nn.Module):

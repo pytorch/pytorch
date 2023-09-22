@@ -56,6 +56,11 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-conversion")
 #endif
 
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(push)
+#pragma warning(disable : 4624) // destructor was implicitly defined as deleted
+#endif
+
 #define TR2_OPTIONAL_REQUIRES(...) \
   typename std::enable_if<__VA_ARGS__::value, bool>::type = false
 
@@ -1258,5 +1263,9 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
 
 C10_CLANG_DIAGNOSTIC_POP()
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(pop)
+#endif
 
 #endif // C10_UTIL_OPTIONAL_H_

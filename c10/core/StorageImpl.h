@@ -55,7 +55,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   StorageImpl(
       use_byte_size_t /*use_byte_size*/,
-      SymInt size_bytes,
+      const SymInt& size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
@@ -201,6 +201,14 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   bool received_cuda() {
     return received_cuda_;
+  }
+
+  impl::PyObjectSlot* pyobj_slot() {
+    return &pyobj_slot_;
+  }
+
+  const impl::PyObjectSlot* pyobj_slot() const {
+    return &pyobj_slot_;
   }
 
  private:

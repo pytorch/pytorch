@@ -30,6 +30,17 @@ def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tens
 
 
 class RNNBase(Module):
+    r"""Base class for RNN modules (RNN, LSTM, GRU).
+
+    Implements aspects of RNNs shared by the RNN, LSTM, and GRU classes, such as module initialization
+    and utility methods for parameter storage management.
+
+    .. note::
+        The forward method is not implemented by the RNNBase class.
+
+    .. note::
+        LSTM and GRU classes override some methods implemented by RNNBase.
+    """
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
                      'batch_first', 'dropout', 'bidirectional', 'proj_size']
     __jit_unused_properties__ = ['all_weights']
@@ -59,7 +70,7 @@ class RNNBase(Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.proj_size = proj_size
-        self._flat_weight_refs: List[Optional[weakref.ReferenceType["Parameter"]]] = []
+        self._flat_weight_refs: List[Optional[weakref.ReferenceType[Parameter]]] = []
         num_directions = 2 if bidirectional else 1
 
         if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
@@ -70,13 +81,15 @@ class RNNBase(Module):
         if dropout > 0 and num_layers == 1:
             warnings.warn("dropout option adds dropout after all but last "
                           "recurrent layer, so non-zero dropout expects "
-                          "num_layers greater than 1, but got dropout={} and "
-                          "num_layers={}".format(dropout, num_layers))
+                          f"num_layers greater than 1, but got dropout={dropout} and "
+                          f"num_layers={num_layers}")
 
         if not isinstance(hidden_size, int):
             raise TypeError(f"hidden_size should be of type int, got: {type(hidden_size).__name__}")
         if hidden_size <= 0:
             raise ValueError("hidden_size must be greater than zero")
+        if num_layers <= 0:
+            raise ValueError("num_layers must be greater than zero")
         if proj_size < 0:
             raise ValueError("proj_size should be a positive integer or zero to disable projections")
         if proj_size >= hidden_size:
@@ -283,7 +296,14 @@ class RNNBase(Module):
             s += ', bidirectional={bidirectional}'
         return s.format(**self.__dict__)
 
+    def _update_flat_weights(self):
+        if not torch.jit.is_scripting():
+            if self._weights_have_changed():
+                self._init_flat_weights()
+
     def __getstate__(self):
+        # If weights have been changed, update the _flat_weights in __getstate__ here.
+        self._update_flat_weights()
         # Don't serialize the weight references.
         state = self.__dict__.copy()
         del state['_flat_weight_refs']
@@ -344,9 +364,10 @@ class RNNBase(Module):
 
 
 class RNN(RNNBase):
-    r"""Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
-    input sequence.
+    r"""__init__(self,input_size,hidden_size,num_layers=1,nonlinearity='tanh',bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
+    Applies a multi-layer Elman RNN with :math:`\tanh` or :math:`\text{ReLU}` non-linearity to an
+    input sequence.
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -446,6 +467,17 @@ class RNN(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
+    @overload
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1,
+                 nonlinearity: str = 'tanh', bias: bool = True, batch_first: bool = False,
+                 dropout: float = 0., bidirectional: bool = False, device=None,
+                 dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
@@ -455,7 +487,7 @@ class RNN(RNNBase):
         elif self.nonlinearity == 'relu':
             mode = 'RNN_RELU'
         else:
-            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'")
+            raise ValueError(f"Unknown nonlinearity '{self.nonlinearity}'. Select from 'tanh' or 'relu'.")
         super().__init__(mode, *args, **kwargs)
 
     @overload
@@ -469,9 +501,7 @@ class RNN(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         num_directions = 2 if self.bidirectional else 1
         orig_input = input
@@ -564,10 +594,13 @@ class RNN(RNNBase):
 #
 # TODO: remove the overriding implementations for LSTM and GRU when TorchScript
 # support expressing these two modules generally.
-class LSTM(RNNBase):
-    r"""Applies a multi-layer long short-term memory (LSTM) RNN to an input
-    sequence.
 
+
+class LSTM(RNNBase):
+    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,proj_size=0,device=None,dtype=None)
+
+    Applies a multi-layer long short-term memory (LSTM) RNN to an input
+    sequence.
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -590,7 +623,7 @@ class LSTM(RNNBase):
     :math:`\sigma` is the sigmoid function, and :math:`\odot` is the Hadamard product.
 
     In a multilayer LSTM, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
-    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    (:math:`l \ge 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
     dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random
     variable which is :math:`0` with probability :attr:`dropout`.
 
@@ -710,6 +743,9 @@ class LSTM(RNNBase):
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
 
+    .. note::
+        ``proj_size`` should be smaller than ``hidden_size``.
+
     .. include:: ../cudnn_rnn_determinism.rst
 
     .. include:: ../cudnn_persistent_rnn.rst
@@ -722,6 +758,16 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+
+    @overload
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
+                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
+                 proj_size: int = 0, device=None, dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
 
     def __init__(self, *args, **kwargs):
         super().__init__('LSTM', *args, **kwargs)
@@ -773,9 +819,7 @@ class LSTM(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -853,8 +897,9 @@ class LSTM(RNNBase):
 
 
 class GRU(RNNBase):
-    r"""Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
+    r"""__init__(self,input_size,hidden_size,num_layers=1,bias=True,batch_first=False,dropout=0.0,bidirectional=False,device=None,dtype=None)
 
+    Applies a multi-layer gated recurrent unit (GRU) RNN to an input sequence.
 
     For each element in the input sequence, each layer computes the following
     function:
@@ -874,7 +919,7 @@ class GRU(RNNBase):
     :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
 
     In a multilayer GRU, the input :math:`x^{(l)}_t` of the :math:`l` -th layer
-    (:math:`l >= 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
+    (:math:`l \ge 2`) is the hidden state :math:`h^{(l-1)}_t` of the previous layer multiplied by
     dropout :math:`\delta^{(l-1)}_t` where each :math:`\delta^{(l-1)}_t` is a Bernoulli random
     variable which is :math:`0` with probability :attr:`dropout`.
 
@@ -982,6 +1027,16 @@ class GRU(RNNBase):
         >>> output, hn = rnn(input, h0)
     """
 
+    @overload
+    def __init__(self, input_size: int, hidden_size: int, num_layers: int = 1, bias: bool = True,
+                 batch_first: bool = False, dropout: float = 0., bidirectional: bool = False,
+                 device=None, dtype=None) -> None:
+        ...
+
+    @overload
+    def __init__(self, *args, **kwargs):
+        ...
+
     def __init__(self, *args, **kwargs):
         if 'proj_size' in kwargs:
             raise ValueError("proj_size argument is only supported for LSTM, not RNN or GRU")
@@ -998,9 +1053,7 @@ class GRU(RNNBase):
         pass
 
     def forward(self, input, hx=None):  # noqa: F811
-        if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+        self._update_flat_weights()
 
         orig_input = input
         # xxx: isinstance check needs to be in conditional for TorchScript to compile
@@ -1177,6 +1230,8 @@ class RNNCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
             raise ValueError(f"RNNCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None and hx.dim() not in (1, 2):
+            raise ValueError(f"RNNCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1277,6 +1332,10 @@ class LSTMCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tuple[Tensor, Tensor]] = None) -> Tuple[Tensor, Tensor]:
         if input.dim() not in (1, 2):
             raise ValueError(f"LSTMCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None:
+            for idx, value in enumerate(hx):
+                if value.dim() not in (1, 2):
+                    raise ValueError(f"LSTMCell: Expected hx[{idx}] to be 1D or 2D, got {value.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)
@@ -1368,6 +1427,8 @@ class GRUCell(RNNCellBase):
     def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tensor:
         if input.dim() not in (1, 2):
             raise ValueError(f"GRUCell: Expected input to be 1D or 2D, got {input.dim()}D instead")
+        if hx is not None and hx.dim() not in (1, 2):
+            raise ValueError(f"GRUCell: Expected hidden to be 1D or 2D, got {hx.dim()}D instead")
         is_batched = input.dim() == 2
         if not is_batched:
             input = input.unsqueeze(0)

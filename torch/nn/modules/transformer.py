@@ -70,6 +70,8 @@ class Transformer(Module):
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, encoder and decoder layers will perform LayerNorms before
             other attention and feedforward operations, otherwise after. Default: ``False`` (after).
+        bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
+            bias. Default: ``True``.
 
     Examples::
         >>> transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12)
@@ -86,7 +88,7 @@ class Transformer(Module):
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
                  custom_encoder: Optional[Any] = None, custom_decoder: Optional[Any] = None,
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
-                 device=None, dtype=None) -> None:
+                 bias: bool = True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
@@ -96,8 +98,8 @@ class Transformer(Module):
         else:
             encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                     activation, layer_norm_eps, batch_first, norm_first,
-                                                    **factory_kwargs)
-            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+                                                    bias, **factory_kwargs)
+            encoder_norm = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
             self.encoder = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         if custom_decoder is not None:
@@ -105,8 +107,8 @@ class Transformer(Module):
         else:
             decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
                                                     activation, layer_norm_eps, batch_first, norm_first,
-                                                    **factory_kwargs)
-            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+                                                    bias, **factory_kwargs)
+            decoder_norm = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
             self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm)
 
         self._reset_parameters()
@@ -118,7 +120,9 @@ class Transformer(Module):
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None,
+                src_is_causal: Optional[bool] = None, tgt_is_causal: Optional[bool] = None,
+                memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -130,6 +134,28 @@ class Transformer(Module):
             src_key_padding_mask: the Tensor mask for src keys per batch (optional).
             tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
             memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
+            src_is_causal: If specified, applies a causal mask as ``src_mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``src_is_causal`` provides a hint that ``src_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            tgt_is_causal: If specified, applies a causal mask as ``tgt_mask``.
+                Default: ``None``; try to detect a causal mask.
+                Warning:
+                ``tgt_is_causal`` provides a hint that ``tgt_mask`` is
+                the causal mask. Providing incorrect hints can result in
+                incorrect execution, including forward and backward
+                compatibility.
+            memory_is_causal: If specified, applies a causal mask as
+                ``memory_mask``.
+                Default: ``False``.
+                Warning:
+                ``memory_is_causal`` provides a hint that
+                ``memory_mask`` is the causal mask. Providing incorrect
+                hints can result in incorrect execution, including
+                forward and backward compatibility.
 
         Shape:
             - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
@@ -175,10 +201,12 @@ class Transformer(Module):
         if src.size(-1) != self.d_model or tgt.size(-1) != self.d_model:
             raise RuntimeError("the feature number of src and tgt must be equal to d_model")
 
-        memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask)
+        memory = self.encoder(src, mask=src_mask, src_key_padding_mask=src_key_padding_mask,
+                              is_causal=src_is_causal)
         output = self.decoder(tgt, memory, tgt_mask=tgt_mask, memory_mask=memory_mask,
                               tgt_key_padding_mask=tgt_key_padding_mask,
-                              memory_key_padding_mask=memory_key_padding_mask)
+                              memory_key_padding_mask=memory_key_padding_mask,
+                              tgt_is_causal=tgt_is_causal, memory_is_causal=memory_is_causal)
         return output
 
     @staticmethod
@@ -239,15 +267,16 @@ class TransformerEncoder(Module):
         elif encoder_layer.norm_first :
             why_not_sparsity_fast_path = f"{enc_layer}.norm_first was True"
         elif not encoder_layer.self_attn.batch_first:
-            why_not_sparsity_fast_path = f" {enc_layer}.self_attn.batch_first was not True"
+            why_not_sparsity_fast_path = (f"{enc_layer}.self_attn.batch_first was not True" +
+                                          "(use batch_first for better inference performance)")
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
         elif not encoder_layer.activation_relu_or_gelu:
-            why_not_sparsity_fast_path = f" {enc_layer}.activation_relu_or_gelu was not True"
+            why_not_sparsity_fast_path = f"{enc_layer}.activation_relu_or_gelu was not True"
         elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
             why_not_sparsity_fast_path = f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
         elif encoder_layer.self_attn.num_heads % 2 == 1:
-            why_not_sparsity_fast_path = "num_head is odd"
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn.num_heads is odd"
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
             warnings.warn(f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}")
@@ -473,6 +502,8 @@ class TransformerEncoderLayer(Module):
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
         norm_first: if ``True``, layer norm is done prior to attention and feedforward
             operations, respectively. Otherwise it's done after. Default: ``False`` (after).
+        bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
+            bias. Default: ``True``.
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -516,19 +547,20 @@ class TransformerEncoderLayer(Module):
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
-                 device=None, dtype=None) -> None:
+                 bias: bool = True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
-        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
+        self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout,
+                                            bias=bias, batch_first=batch_first,
                                             **factory_kwargs)
         # Implementation of Feedforward model
-        self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
+        self.linear1 = Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)
         self.dropout = Dropout(dropout)
-        self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
+        self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
-        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
 
@@ -713,6 +745,8 @@ class TransformerDecoderLayer(Module):
         norm_first: if ``True``, layer norm is done prior to self attention, multihead
             attention and feedforward operations, respectively. Otherwise it's done after.
             Default: ``False`` (after).
+        bias: If set to ``False``, ``Linear`` and ``LayerNorm`` layers will not learn an additive
+            bias. Default: ``True``.
 
     Examples::
         >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8)
@@ -731,22 +765,22 @@ class TransformerDecoderLayer(Module):
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
                  activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
-                 device=None, dtype=None) -> None:
+                 bias: bool = True, device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
-                                            **factory_kwargs)
+                                            bias=bias, **factory_kwargs)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
-                                                 **factory_kwargs)
+                                                 bias=bias, **factory_kwargs)
         # Implementation of Feedforward model
-        self.linear1 = Linear(d_model, dim_feedforward, **factory_kwargs)
+        self.linear1 = Linear(d_model, dim_feedforward, bias=bias, **factory_kwargs)
         self.dropout = Dropout(dropout)
-        self.linear2 = Linear(dim_feedforward, d_model, **factory_kwargs)
+        self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
-        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
-        self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
+        self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
@@ -857,8 +891,8 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
 
 def _detect_is_causal_mask(
         mask: Optional[Tensor],
-        is_causal: Optional[bool],
-        size: Optional[int]
+        is_causal: Optional[bool] = None,
+        size: Optional[int] = None,
 ) -> bool:
     """Return whether the given attention mask is causal.
 
@@ -877,7 +911,7 @@ def _detect_is_causal_mask(
        hardware SKU, etc influence the decision whether to use a mask or
        rely on the hint.
     ``size`` if not None, check whether the mask is a causal mask of the provided size
-       Otherwhise, checks for any causal mask.
+       Otherwise, checks for any causal mask.
     """
     # Prevent type refinement
     make_causal = (is_causal is True)

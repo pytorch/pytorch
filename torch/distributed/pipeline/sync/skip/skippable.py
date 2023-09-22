@@ -396,7 +396,7 @@ def verify_skippables(module: nn.Sequential) -> None:
                 continue
 
             if (ns, name) in stashed:
-                msg = f"'{layer_name}' redeclared '{name}' as stashable " "but not isolated by namespace"
+                msg = f"'{layer_name}' redeclared '{name}' as stashable but not isolated by namespace"
                 msgs.append(msg)
                 continue
 
@@ -407,7 +407,7 @@ def verify_skippables(module: nn.Sequential) -> None:
                 continue
 
             if (ns, name) in popped:
-                msg = f"'{layer_name}' redeclared '{name}' as poppable " "but not isolated by namespace"
+                msg = f"'{layer_name}' redeclared '{name}' as poppable but not isolated by namespace"
                 msgs.append(msg)
                 continue
 

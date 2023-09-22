@@ -2,6 +2,7 @@
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as funcol
 
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor.placement_types import Shard
@@ -86,8 +87,8 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
         state_dict = {"dtensor": dist_tensor}
 
         gathered_state_dict = _gather_state_dict(state_dict)
-        expected_gathered_dtensor = device_mesh.all_gather(
-            dist_tensor.to_local(), mesh_dim=0, gather_dim=0
+        expected_gathered_dtensor = funcol.all_gather_tensor(
+            dist_tensor.to_local(), gather_dim=0, group=(device_mesh, 0)
         )
         self.assertEqual(expected_gathered_dtensor, gathered_state_dict["dtensor"])
 

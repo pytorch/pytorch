@@ -113,8 +113,10 @@ static ExprHandle quant(
     Dtype out_dtype,
     ExprHandle qscale,
     ExprHandle qzero) {
-  auto promoted_qscale = promoteToDtype(qscale, x.dtype().scalar_type());
-  auto promoted_qzero = promoteToDtype(qzero, x.dtype().scalar_type());
+  auto promoted_qscale =
+      promoteToDtype(std::move(qscale), x.dtype().scalar_type());
+  auto promoted_qzero =
+      promoteToDtype(std::move(qzero), x.dtype().scalar_type());
   return promoteToDtype(
       x / promoted_qscale + promoted_qzero + FloatImm::make(0.5f),
       out_dtype.scalar_type());
@@ -125,11 +127,11 @@ static ExprHandle dequant(
     Dtype out_dtype,
     ExprHandle qscale,
     ExprHandle qzero) {
-  auto qx_promoted = promoteToDtype(qx, out_dtype.scalar_type());
+  auto qx_promoted = promoteToDtype(std::move(qx), out_dtype.scalar_type());
   auto qscale_promoted =
-      promoteToDtype(ExprHandle(qscale), out_dtype.scalar_type());
+      promoteToDtype(std::move(qscale), out_dtype.scalar_type());
   auto qzero_promoted =
-      promoteToDtype(ExprHandle(qzero), out_dtype.scalar_type());
+      promoteToDtype(std::move(qzero), out_dtype.scalar_type());
   return promoteToDtype(
       (qx_promoted - qzero_promoted) * qscale_promoted,
       out_dtype.scalar_type());
@@ -708,13 +710,14 @@ Tensor computeUpsampleNearest2d(
       promoteToDtype(input_height, ScalarType::Double) / output_height;
   auto scale_w = promoteToDtype(input_width, ScalarType::Double) / output_width;
   // TODO: will repetitive if in idx calculation will be taken out of the loop?
-  auto compute_nearest_idx =
-      [](ExprHandle scale, ExprHandle dst_index, ExprHandle input_size) {
-        return Min::make(
-            promoteToDtype(floor(dst_index * scale), ScalarType::Long),
-            input_size - 1,
-            true);
-      };
+  auto compute_nearest_idx = [](ExprHandle scale,
+                                const ExprHandle& dst_index,
+                                const ExprHandle& input_size) {
+    return Min::make(
+        promoteToDtype(floor(dst_index * scale), ScalarType::Long),
+        input_size - 1,
+        true);
+  };
   auto body_func = [&](std::vector<VarHandle> axes) {
     std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
     newAxes[2] = compute_nearest_idx(scale_h, axes[2], input_height);

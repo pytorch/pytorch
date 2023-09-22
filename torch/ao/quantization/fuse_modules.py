@@ -56,11 +56,11 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     fused = fuser_method(is_qat, *mod_list)
     # NOTE: forward hooks not processed in the two following for loops will be lost after the fusion
     # Move pre forward hooks of the base module to resulting fused module
-    for handle_id, pre_hook_fn in mod_list[0]._forward_pre_hooks.items():
+    for pre_hook_fn in mod_list[0]._forward_pre_hooks.values():
         fused.register_forward_pre_hook(pre_hook_fn)
     mod_list[0]._forward_pre_hooks.clear()
     # Move post forward hooks of the last module to resulting fused module
-    for handle_id, hook_fn in mod_list[-1]._forward_hooks.items():
+    for hook_fn in mod_list[-1]._forward_hooks.values():
         fused.register_forward_hook(hook_fn)
     mod_list[-1]._forward_hooks.clear()
     new_mod[0] = fused
