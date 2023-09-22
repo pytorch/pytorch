@@ -1873,6 +1873,4 @@ class AsyncCompile:
         _compile_end()
 
 
-@functools.lru_cache(None)
-def warm_pool_once():
-    AsyncCompile.warm_pool()
+AsyncCompile.warm_pool()
