@@ -12,6 +12,7 @@ from torch.fx._compatibility import compatibility
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.export import InputDim
 from torch.utils._sympy.value_ranges import ValueRanges
 
 
@@ -234,9 +235,6 @@ class ExportedProgram:
         from torch._export.exported_program import (
             _create_graph_module_for_export,
             CallSpec,
-        )
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            InputDim,
         )
 
         # Remove codegen related things from the graph. It should just be a flat graph.
