@@ -1,4 +1,6 @@
-#include <ATen/MapAllocator.h>
+#include <c10/core/MapAllocator.h>
+
+#include <c10/util/Exception.h>
 
 #include <atomic>
 #include <random>
@@ -29,7 +31,7 @@
 #endif
 #include <fmt/format.h>
 
-namespace at {
+namespace c10 {
 
 static constexpr int64_t map_alloc_alignment = 64;
 
@@ -566,36 +568,36 @@ static void deleteRefcountedMapAllocator(void* ptr) {
   delete static_cast<RefcountedMapAllocator*>(ptr);
 }
 
-MapAllocator* MapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+MapAllocator* MapAllocator::fromDataPtr(const c10::DataPtr& dptr) {
   return dptr.cast_context<MapAllocator>(&deleteMapAllocator);
 }
 
-RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const c10::DataPtr& dptr) {
   return dptr.cast_context<RefcountedMapAllocator>(&deleteRefcountedMapAllocator);
 }
 
-at::DataPtr MapAllocator::makeDataPtr(c10::string_view filename, int flags, size_t size, size_t* actual_size_out) {
+c10::DataPtr MapAllocator::makeDataPtr(c10::string_view filename, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
-  return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
+  return {context->data(), context, &deleteMapAllocator, c10::DeviceType::CPU};
 }
 
-at::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+c10::DataPtr MapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
-  return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
+  return {context->data(), context, &deleteMapAllocator, c10::DeviceType::CPU};
 }
 
-at::DataPtr RefcountedMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+c10::DataPtr RefcountedMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new RefcountedMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - map_alloc_alignment;
-  return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};
+  return {context->data(), context, &deleteRefcountedMapAllocator, c10::DeviceType::CPU};
 }
 
-at::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+c10::DataPtr RefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new RefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = context->size() - map_alloc_alignment;
-  return {context->data(), context, &deleteRefcountedMapAllocator, at::DeviceType::CPU};
+  return {context->data(), context, &deleteRefcountedMapAllocator, c10::DeviceType::CPU};
 }
 
 void* RefcountedMapAllocator::data() const {
@@ -608,4 +610,4 @@ MapAllocator::~MapAllocator() {
   c10::reportMemoryUsageToProfiler(base_ptr_, -size_, 0, 0, c10::Device(c10::DeviceType::CPU));
 }
 
-}  // namespace at
+}  // namespace c10
