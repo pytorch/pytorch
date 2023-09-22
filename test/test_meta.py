@@ -17,7 +17,8 @@ from torch.testing._internal.common_utils import (
     suppress_warnings,
     TEST_WITH_ASAN,
     run_tests,
-    dtype_abbrs
+    dtype_abbrs,
+    parametrize
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -1177,6 +1178,133 @@ class TestMeta(TestCase):
         r = torch.ops.aten.huber_loss_backward(*inps, 0, 1.0)
         self.assertEqual(r.device.type, 'meta')
         self.assertEqual(r.shape, inps[0].shape)
+
+    def _norm_backwards_test_helper(self, op, args, output_mask, expected_shapes):
+
+        dtype = torch.float32
+        device = "meta"
+
+        # test functional call
+        grads = op(*args, output_mask)
+
+        def assertEqualShapes(res, exp):
+            self.assertIsNone(res) if exp is None else self.assertEqual(exp, res.shape)
+
+        assertEqualShapes(grads[0], expected_shapes[0])
+        assertEqualShapes(grads[1], expected_shapes[1])
+        assertEqualShapes(grads[2], expected_shapes[2])
+
+        out_kwargs = {
+            f"out{i}": torch.empty(0, device=device, dtype=dtype)
+            for i in range(len(output_mask))
+        }
+
+        # test call with out parameters
+        grads = op(*args, output_mask, **out_kwargs)
+
+        def assertEqualShapes(res, exp):
+            self.assertEqual(exp, res.shape) if exp is not None else True
+
+        assertEqualShapes(out_kwargs["out0"], expected_shapes[0])
+        assertEqualShapes(out_kwargs["out1"], expected_shapes[1])
+        assertEqualShapes(out_kwargs["out2"], expected_shapes[2])
+
+    @onlyCPU
+    @parametrize("output_mask", itertools.product([True, False], [True, False], [True, False]))
+    def test_layer_norm_backward(self, output_mask):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_layer_norm
+
+        device = "meta"
+        dtype = torch.float32
+
+        samples = sample_inputs_layer_norm(None, device, dtype, requires_grad=False)
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                # handle optional weight and bias
+                if len(sample.args) != 3:
+                    sample.args = (*sample.args, *([None] * (3 - len(sample.args))))
+
+                grad_out = torch.ones_like(sample.input)
+                normalized_shape, weight, bias = sample.args
+                ndims_after_reduction = sample.input.ndim - len(normalized_shape)
+                mean_shape = grad_out.shape[:ndims_after_reduction]
+                mean = torch.zeros(mean_shape, device=device, dtype=dtype)
+                rstd = torch.zeros(mean_shape, device=device, dtype=dtype)
+
+                expected_shapes = (
+                    sample.input.shape if output_mask[0] else None,
+                    weight.shape if output_mask[1] and weight is not None else None,
+                    bias.shape if output_mask[2] and bias is not None else None)
+
+                args = [grad_out, sample.input, normalized_shape, mean, rstd, weight, bias]
+
+                self._norm_backwards_test_helper(torch.ops.aten.native_layer_norm_backward,
+                                                 args, output_mask, expected_shapes)
+
+    @onlyCPU
+    @parametrize("output_mask", itertools.product([True, False], [True, False], [True, False]))
+    def test_group_norm_backward(self, output_mask):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_group_norm
+
+        # input, (args) num_groups, (kwargs) weight, bias eps
+        device = "meta"
+        dtype = torch.float32
+        samples = sample_inputs_group_norm(None, device, dtype, requires_grad=False)
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                grad_out = torch.ones_like(sample.input)
+                N, C = sample.input.shape[:2]
+                HxW = torch.prod(torch.as_tensor(sample.input.shape[2:]), dtype=torch.int32).item()
+                group = sample.args[0]
+                mean = torch.zeros((N, group), device=device, dtype=dtype)
+                rstd = torch.zeros((N, group), device=device, dtype=dtype)
+                weight = torch.zeros((C), device=device, dtype=dtype)
+
+                args = [grad_out, sample.input, mean, rstd, weight, N, C, HxW, group]
+
+                expected_shapes = (
+                    sample.input.shape if output_mask[0] else None,
+                    weight.shape if output_mask[1] else None,
+                    weight.shape if output_mask[2] else None)
+
+                # test functional call
+                self._norm_backwards_test_helper(torch.ops.aten.native_group_norm_backward,
+                                                 args, output_mask, expected_shapes)
+
+    @onlyCPU
+    @parametrize("output_mask", itertools.product([True], [True, False], [True, False]))
+    def test_batch_norm_backward(self, output_mask):
+        from torch.testing._internal.common_methods_invocations import sample_inputs_batch_norm
+
+        # input, (args) num_groups, (kwargs) weight, bias eps
+        device = "meta"
+        dtype = torch.float32
+        samples = sample_inputs_batch_norm(None, device, dtype, requires_grad=False)
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+
+                if sample.input.dim() < 2:
+                    continue
+
+                grad_out = torch.ones_like(sample.input)
+                running_mean, running_var, weight, bias = sample.args
+                train = sample.kwargs.get("training", True)
+                save_mean = torch.zeros((sample.input.shape[1], ), device=device, dtype=dtype) if train else None
+                save_invstd = torch.zeros((sample.input.shape[1], ), device=device, dtype=dtype) if train else None
+
+                args = [grad_out, sample.input, weight, running_mean, running_var,
+                        save_mean, save_invstd, train, sample.kwargs.get("eps", 1e-5)]
+
+                expected_shapes = (
+                    sample.input.shape,
+                    torch.Size([sample.input.shape[1]]) if output_mask[1] else None,
+                    torch.Size([sample.input.shape[1]]) if output_mask[2] else None)
+
+                self._norm_backwards_test_helper(torch.ops.aten.native_batch_norm_backward,
+                                                 args, output_mask, expected_shapes)
 
     def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
