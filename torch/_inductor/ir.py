@@ -1910,7 +1910,7 @@ class SliceView(View):
         end = cls.handle_negative_index(end, new_size[dim])
 
         end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(sizevars.evaluate_min(start, new_size[dim]), end)
+        start = sizevars.evaluate_min(start, end)
         if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
             sizevars.guard_equals(end, new_size[dim])
             return x
@@ -2411,11 +2411,7 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self, writer=None):
-        return (
-            self.get_name() + ".get()"
-            if V.graph.cpp_wrapper and config.aot_inductor.abi_compatible
-            else self.get_name()
-        )
+        return self.get_name()
 
     def decide_layout(self):
         pass
