@@ -8,7 +8,6 @@
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <c10/util/irange.h>
 
-
 // TODO: These functions should move to a common place.
 
 namespace {
@@ -864,6 +863,170 @@ TEST_F(VulkanAPITest, batch_norm_large) {
   }
 
   ASSERT_TRUE(check);
+}
+
+void test_baddbmm(
+    at::Tensor bias_cpu,
+    at::Tensor m1_cpu,
+    at::Tensor m2_cpu,
+    float beta,
+    float alpha) {
+  const auto out_cpu = at::baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+
+  const auto m1_vulkan = m1_cpu.vulkan();
+  const auto out_vulkan = at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+
+}
+
+TEST_F(VulkanAPITest, baddbmm) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+
+  const auto bias_cpu = at::rand({150, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_small) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 3.4f;
+
+  const auto bias_cpu = at::rand({3, 7, 3}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({3, 7, 6}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({3, 6, 3}, at::device(at::kCPU).dtype(at::kFloat));
+
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_one) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bais_error) {
+  constexpr float alpha = 2.1f;
+  constexpr float beta = 103.24;
+
+  // mismatched dimensions of batch sizes.
+  const auto bias_cpu = at::rand({200, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_vulkan = m1_cpu.vulkan();
+  EXPECT_THROW(at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_height) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({150, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_width) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({150, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch_width) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch_height) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_one) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 1, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch1) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({179, 1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch2) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_batch_height) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
+}
+
+TEST_F(VulkanAPITest, baddbmm_bias_boardcast_reduce_all) {
+  constexpr float alpha = 1.5f;
+  constexpr float beta = 2.0f;
+  const auto bias_cpu = at::rand({1}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m1_cpu = at::rand({150, 179, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto m2_cpu = at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  test_baddbmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 }
 
 void test_bmm(at::Tensor m1_cpu, at::Tensor m2_cpu) {
