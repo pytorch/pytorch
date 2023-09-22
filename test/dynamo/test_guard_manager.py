@@ -10,6 +10,8 @@ GuardManager = guards.GuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 GetDictItemGuardAccessor = guards.GetDictItemGuardAccessor
+NoTensorAliasingGuard = guards.NoTensorAliasingGuard
+install_no_tensor_aliasing_guard = guards.install_no_tensor_aliasing_guard
 
 
 def equals_match(x, expected):
@@ -186,6 +188,45 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check({"x": 3, "y": 4}))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_tensor_aliasing_guard(self):
+        guard_manager = GuardManager()
+        f_locals = {
+            "x": torch.randn(3, 4),
+            "y": torch.randn(3, 4),
+        }
+
+        x_guard_mgr = guard_manager.dict_get_item_manager("x")
+        y_guard_mgr = guard_manager.dict_get_item_manager("y")
+        install_no_tensor_aliasing_guard(x_guard_mgr, y_guard_mgr)
+
+        # Check structure
+        x_guards = x_guard_mgr.get_leaf_guards()
+        y_guards = y_guard_mgr.get_leaf_guards()
+        self.assertEqual(len(x_guards), 1)
+        self.assertEqual(len(y_guards), 1)
+        self.assertTrue(isinstance(x_guards[0], NoTensorAliasingGuard))
+        self.assertTrue(isinstance(y_guards[0], NoTensorAliasingGuard))
+        # Check that the two guards are the same object
+        self.assertTrue(x_guards[0] is y_guards[0])
+
+        self.assertEqual(len(x_guard_mgr.get_leaf_guards()), 1)
+        self.assertEqual(len(y_guard_mgr.get_leaf_guards()), 1)
+        self.assertTrue(guard_manager.check(f_locals))
+
+        a = torch.randn(3, 4)
+        f_locals_aliased = {
+            "x": a,
+            "y": a,
+        }
+        self.assertFalse(guard_manager.check(f_locals_aliased))
+
+        a = torch.randn(3, 4)
+        f_locals_not_aliased_same_value = {
+            "x": torch.zeros(4),
+            "y": torch.zeros(4),
+        }
+        self.assertTrue(guard_manager.check(f_locals_not_aliased_same_value))
 
     def test_reshuffling_and_reason(self):
         class Pair:

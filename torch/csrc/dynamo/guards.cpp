@@ -675,6 +675,39 @@ class PythonLambdaGuard : public LeafGuard {
   py::function _print_failure_fn;
 };
 
+/**
+ * This is an example of relational guard and checks tensor X is not tensor Y.
+ * We construct one leaf guard and install it at as a leaf of two guard managers
+ * (one for X and another for Y). Therefore, this guard is run twice. In the
+ * first invocation, it saves the first value and returns True. In the second
+ * invocation, it compares the saved value with the new value and returns True
+ * if they do not alias.
+ */
+class NoTensorAliasingGuard : public LeafGuard {
+ public:
+  NoTensorAliasingGuard() {
+    _is_first_call = true;
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (_is_first_call) {
+      _first_tensor = value;
+      _is_first_call = false;
+      return true;
+    }
+    _is_first_call = true;
+    return _first_tensor != value;
+  }
+
+  std::string get_failure_reason(PyObject* value) override { // borrowed ref
+    return "";
+  }
+
+ private:
+  bool _is_first_call;
+  PyObject* _first_tensor;
+};
+
 class GuardManager;
 /**
  * Base class representing a pair of accessor and the associated guard manager.
@@ -770,7 +803,7 @@ class GetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
- * GuardManger encapsulates all the guards related to a particular py::object.
+ * GuardManager encapsulates all the guards related to a particular py::object.
  * It is a tree structure and consists of
  * 1) Leaf guards - Guards that are run on the user given object
  * 2) Accessors - Guard accessors (like getattr, getitem) to access the next
@@ -783,7 +816,7 @@ class GetItemGuardAccessor : public GuardAccessor {
  *     int y = 2;
  *
  * At compile time
- * >> guard_mananger = GuardManger()
+ * >> guard_mananger = GuardManager()
  * >> guard_mananger.x.add_lambda_guard(
  *        lambda x: isinstance(x, Pair),
  *        lambda x: f"expected Pair, found {type(x)}"
@@ -968,16 +1001,37 @@ class GuardManager {
 
  private:
   // Leaf guards are the terminal guards on this object, e.g, type check on a
-  // list. These guards have to be run before any children are run
+  // list. These guards have to be run before any children are run.
+  //
+  // These leaf guards are not shufflable. In almost all cases, these guards
+  // will have an order, e,g., type(x) is int guard and x == 5 guard. We also
+  // expect very few leaf guards per GuardManager node.
+  //
+  // NB: Why are leaf guards shared ptr? This is primarily to enable relational
+  // guards like `tensor X is not tensor Y`. These guards require multiple
+  // values. We handle it by creating one guard object that holds state. This
+  // guard is run N times (for N inputs). For first N-1 invocations, we store
+  // the inputs. For the Nth invocation, it runs the actual check. So, same
+  // object is shared across multiple guard managers, and hence a shared ptr.
   std::vector<std::shared_ptr<LeafGuard>> _leaf_guards;
 
-  // GuardAccessors nodes to access the child guards.
+  // GuardAccessors nodes to access the child guards. These guards are
+  // shufflable. On a guard failure, they are sorted based on their fail count
+  // to enable fail fast for the next check.
   std::vector<std::unique_ptr<GuardAccessor>> _accessors;
 
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
   int _fail_count{0};
 };
+
+void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
+  // Adds tensor X is not tensor Y. This is a an example of relational guard.
+  // There is one guard object that is shared between two guard managers.
+  std::shared_ptr<LeafGuard> guard = std::make_shared<NoTensorAliasingGuard>();
+  x->add_leaf_guard(guard);
+  y->add_leaf_guard(guard);
+}
 
 } // namespace
 
@@ -1042,6 +1096,8 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "PythonLambdaGuard")
       .def(py::init<py::function, py::function>())
       .def("__call__", &PythonLambdaGuard::check);
+  py::class_<NoTensorAliasingGuard, std::shared_ptr<NoTensorAliasingGuard>>(
+      py_m, "NoTensorAliasingGuard");
 
   // Guard Accessors - These are present so that we can iterate over the
   // GuardManager hierarchy. We intentionally do not provide even an init
@@ -1104,6 +1160,9 @@ PyObject* torch_c_dynamo_guards_init() {
           "dict_get_item_manager",
           &GuardManager::get_child_manager<GetDictItemGuardAccessor>,
           py::return_value_policy::reference);
+
+  py_m.def(
+      "install_no_tensor_aliasing_guard", install_no_tensor_aliasing_guard);
 
   return m;
 }
