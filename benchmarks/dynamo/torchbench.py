@@ -209,6 +209,7 @@ DONT_CHANGE_BATCH_SIZE = {
     "pytorch_struct",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",  # https://github.com/pytorch/benchmark/pull/1656
+    "stable_diffusion", 
 }
 
 
