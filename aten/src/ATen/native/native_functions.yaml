@@ -5085,11 +5085,13 @@
   python_module: nn
   dispatch:
     CPU, CUDA: mish_out
+    MPS: mish_out_mps
 
 - func: mish_backward(Tensor grad_output, Tensor self) -> Tensor
   python_module: nn
   dispatch:
     CPU, CUDA: mish_backward
+    MPS: mish_backward_mps
     CompositeImplicitAutograd: math_mish_backward
 
 - func: sigmoid(Tensor self) -> Tensor

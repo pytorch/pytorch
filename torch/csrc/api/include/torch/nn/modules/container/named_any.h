@@ -7,7 +7,6 @@
 #include <torch/types.h>
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
 #include <ATen/Device.h>
