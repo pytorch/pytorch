@@ -12,6 +12,7 @@ from torch.fx._compatibility import compatibility
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.utils._sympy.value_ranges import ValueRanges
 
 
 __all__ = [
@@ -236,7 +237,6 @@ class ExportedProgram:
         )
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             InputDim,
-            RangeConstraint,
         )
 
         # Remove codegen related things from the graph. It should just be a flat graph.
@@ -248,7 +248,7 @@ class ExportedProgram:
         self._graph_signature: ExportGraphSignature = graph_signature
         self._call_spec: CallSpec = call_spec
         self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: Dict[sympy.Symbol, RangeConstraint] = range_constraints
+        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         self._equality_constraints: List[
             Tuple[InputDim, InputDim]
         ] = equality_constraints
@@ -423,10 +423,6 @@ class ExportedProgram:
         return unlift_exported_program_lifted_states(self)
 
     def _transform(self, *passes: PassType) -> "ExportedProgram":
-        from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
-            RangeConstraint,
-        )
-
         pm = PassManager(list(passes))
         res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
@@ -434,7 +430,7 @@ class ExportedProgram:
 
         def _get_updated_range_constraints(
             gm: torch.fx.GraphModule,
-        ) -> Dict[sympy.Symbol, RangeConstraint]:
+        ) -> Dict[sympy.Symbol, ValueRanges]:
             def get_shape_env(gm):
                 vals = [
                     node.meta["val"]
@@ -454,7 +450,7 @@ class ExportedProgram:
             if shape_env is None:
                 return {}
             range_constraints = {
-                k: RangeConstraint(v.lower, v.upper)
+                k: ValueRanges(v.lower, v.upper)
                 for k, v in shape_env.var_to_range.items()
             }
             return range_constraints
