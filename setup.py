@@ -1294,6 +1294,7 @@ def main():
         "include/torch/csrc/dynamo/*.h",
         "include/torch/csrc/inductor/*.h",
         "include/torch/csrc/inductor/aot_runtime/*.h",
+        "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
