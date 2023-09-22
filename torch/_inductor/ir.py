@@ -2263,6 +2263,25 @@ class AliasedLayout(Layout):
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
 
+class NoneLayout(IRNode):
+    # This is janky, I figured out what fields to populate by just running
+    # the model I was interested in and adding properties/methods as needed.
+    # This doesn't inherit from Layout because Layout assumes you have stuff
+    # like sizes, but I don't really have anything here.
+    #
+    # If you have an ir.Node with NoneLayout, you probably want
+    # has_side_effects() defined to return True
+
+    def __init__(self):
+        self.device = torch.device("cpu")
+
+    def storage_size(self):
+        return 0
+
+    def as_fixed(self):
+        return self
+
+
 class MutationLayout(Layout):
     def __init__(self, target: IRNode):
         super().__init__(
@@ -2417,7 +2436,7 @@ class Buffer(IRNode):
         pass
 
     def get_alias_names(self):
-        if isinstance(self.layout, AliasedLayout):
+        if isinstance(self.layout, (AliasedLayout)):
             return [self.layout.view.get_name()]
         return ()
 
@@ -3591,17 +3610,29 @@ class DeviceCopy(ExternKernelOut):
             )
 
 
-class DynamicScalar(IRNode):
+class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
-
-    This is not yet implemented.  The one model (so far) that calls this
-    (fastNLP_Bert) does not actually use the result.  So we expect this
-    node to get dead code eliminated.
     """
-
     def get_reads(self):
         return ()
+
+    def should_allocate(self):
+        return False
+
+    def has_side_effects(self):
+        return True
+
+    def __init__(self, sym, data):
+        super().__init__(None, NoneLayout(), [data])
+        self.sym = sym
+
+    def codegen(self, wrapper):
+        (data,) = (t.codegen_reference() for t in self.inputs)
+        wrapper.writeline(f"{self.sym} = {data}.item()")
+        # No one should ever use this buffer, but for uniformity
+        # define the variable and assign it None
+        wrapper.writeline(f"{self.get_name()} = None")
 
 
 @dataclasses.dataclass
@@ -3912,6 +3943,13 @@ class MultiOutput(ExternKernel):
         line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
         line += V.graph.wrapper_code.ending
         V.graph.wrapper_code.writeline(line)
+        # NB: If it is possible for other ir node types to return unbacked
+        # symints, we also have to add this logic there too.
+        # TODO: Also handle dynamic stride/offset (no real use case for this
+        # atm)
+        for i, s in enumerate(self.get_size()):
+            if V.graph.sizevars.shape_env.is_unbacked_symint(s):
+                V.graph.wrapper_code.writeline(f"{s} = {self.get_name()}.size({i})")
         self.codegen_size_asserts(V.graph.wrapper_code)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
