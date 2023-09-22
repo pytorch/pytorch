@@ -1186,7 +1186,7 @@ aot_inductor_launcher = """
             std::vector<at::Tensor>& output_tensors) {
         AOTInductorModelContainerHandle container_handle;
         AOT_INDUCTOR_ERROR_CHECK(
-            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/, false /*is_cpu*/))
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
