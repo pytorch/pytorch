@@ -312,14 +312,15 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        return (wrap,)
+        getitem = wrap[0];  wrap = None
+        return (getitem,)
 
     class GraphModule(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
-            return add_
+            return (add_,)
 """
-        check_count_and_graph(1, 1, 1, expected_graph)
+        check_count_and_graph(1, 2, 1, expected_graph)
 
         ff = torch.func.functionalize(f)
         ff_out = ff(t_clone)
