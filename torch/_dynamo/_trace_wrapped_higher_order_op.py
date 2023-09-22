@@ -11,28 +11,38 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
+__all__ = ["trace_wrapped"]
+
+
 # Trace wrapped is a higher order op meant for both invoking a bound function,
 # and for registering it as a call_function in the backward graph.
 # This allows us to re-enter dynamo during compiled autograd to trace (or graph break)
 # the functions as needed. This, in turn, means we can support functions in backward with complex python
 # state mutation. If we were to not do this, the functions would get inlined into their composing aten ops,
 # and we would lose the python state mutation.
-def _trace_wrapped(*args, fn):
+def trace_wrapped(*args, fn):
     return _trace_wrapped_op(*args, fn=fn)
 
 
-_trace_wrapped_op = HigherOrderOperator("_trace_wrapped")
+_trace_wrapped_op = HigherOrderOperator("trace_wrapped")
 
 
-def self_invoke(*args, fn):
+def _self_invoke(*args, fn):
     # This wrapper intercepts calls to fn, and calls the real fn via _trace_wrapped
     # Dynamo unpacks this higher order op into calling the wrapped fn
     return _trace_wrapped_op(*args, fn=fn)
 
 
+def _assert_meta(grad, size, stride, dtype):
+    assert grad.size() == size
+    assert grad.stride() == stride
+    assert grad.dtype == dtype
+    return grad
+
+
 @_trace_wrapped_op.py_impl(ProxyTorchDispatchMode)
 def inner_trace(mode, *args, fn):
-    import torch._functorch.aot_autograd
+    import torch
 
     assert len(args) == 1
     grad = args[0]
@@ -49,13 +59,14 @@ def inner_trace(mode, *args, fn):
     # Note: Instead of naming it "allow_in_graph", we opted for a different name since "allow_in_graph"
     # might imply that it's traceable, whereas this function is intrinsically non-traceable.
     # Note2: I hate this name
-    fn = functools.partial(self_invoke, fn=fn)
+    fn = functools.partial(_self_invoke, fn=fn)
     fn.__name__ = fn.func.__name__
 
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, (grad,))
     out_proxy = mode.tracer.create_proxy(
         "call_function", fn, proxy_args, {}, name="invocation"
     )
+    grad = torch.empty_like(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
 
     # We have a little shortcut here, wherein we DO NOT yet run a meta func, and so
@@ -66,11 +77,12 @@ def inner_trace(mode, *args, fn):
     )
     out_proxy = mode.tracer.create_proxy(
         "call_function",
-        torch._functional_assert_tensor_metadata,
+        _assert_meta,
         proxy_args,
         {},
         name="assert",
     )
+    grad = torch.empty_like(grad)
     grad = track_tensor_tree(grad, out_proxy, constant=None, tracer=mode.tracer)
     return grad
 
