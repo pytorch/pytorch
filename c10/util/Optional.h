@@ -42,6 +42,20 @@
 #include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
+C10_CLANG_DIAGNOSTIC_PUSH()
+#if C10_CLANG_HAS_WARNING("-Wstring-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wstring-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wshorten-64-to-32")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
+#endif
+#if C10_CLANG_HAS_WARNING("-Wimplicit-int-conversion")
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-conversion")
+#endif
+
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(push)
 #pragma warning(disable : 4624) // destructor was implicitly defined as deleted
@@ -199,9 +213,6 @@ union constexpr_storage_t {
   constexpr constexpr_storage_t(Args&&... args)
       : value_(constexpr_forward<Args>(args)...) {}
 
-  constexpr constexpr_storage_t(const constexpr_storage_t&) = default;
-  constexpr constexpr_storage_t& operator=(const constexpr_storage_t&) =
-      default;
   ~constexpr_storage_t() = default;
 };
 
@@ -429,11 +440,6 @@ struct trivially_copyable_optimization_optional_base {
       Args&&... args)
       : init_(true), storage_(il, std::forward<Args>(args)...) {}
 
-  constexpr trivially_copyable_optimization_optional_base(
-      const trivially_copyable_optimization_optional_base&) = default;
-
-  constexpr trivially_copyable_optimization_optional_base& operator=(
-      const trivially_copyable_optimization_optional_base&) = default;
   ~trivially_copyable_optimization_optional_base() = default;
 
   constexpr bool initialized() const noexcept {
@@ -682,15 +688,14 @@ class optional : private OptionalBase<T> {
 
   optional& operator=(optional&& rhs) = default;
 
-  template <
-      class U = T,
-      typename = std::enable_if_t<
-          std::is_constructible<T, U>::value &&
+  template <class U = T>
+  auto operator=(U&& v) -> typename std::enable_if<
+      std::is_constructible<T, U>::value &&
           !std::is_same<typename std::decay<U>::type, optional<T>>::value &&
           (std::is_scalar<T>::value ||
            std::is_same<typename std::decay<U>::type, T>::value) &&
-          std::is_assignable<T&, U>::value>>
-  optional& operator=(U&& v) {
+          std::is_assignable<T&, U>::value,
+      optional&>::type {
     if (initialized()) {
       contained_val() = std::forward<U>(v);
     } else {
@@ -784,8 +789,9 @@ class optional : private OptionalBase<T> {
 
   template <class V>
   constexpr T value_or(V&& v) && {
-    return *this ? constexpr_move(*this).contained_val()
-                 : detail_::convert<T>(constexpr_forward<V>(v));
+    return *this
+        ? constexpr_move(const_cast<optional<T>&>(*this).contained_val())
+        : detail_::convert<T>(constexpr_forward<V>(v));
   }
 
   // 20.6.3.6, modifiers
@@ -797,7 +803,9 @@ class optional : private OptionalBase<T> {
 template <class T, class F>
 constexpr T value_or_else(const optional<T>& v, F&& func) {
   static_assert(
-      std::is_convertible<typename std::invoke_result_t<F>, T>::value,
+      std::is_convertible<
+          typename guts::infer_function_traits_t<F>::return_type,
+          T>::value,
       "func parameters must be a callable that returns a type convertible to the value stored in the optional");
   return v.has_value() ? *v : detail_::convert<T>(std::forward<F>(func)());
 }
@@ -805,7 +813,9 @@ constexpr T value_or_else(const optional<T>& v, F&& func) {
 template <class T, class F>
 constexpr T value_or_else(optional<T>&& v, F&& func) {
   static_assert(
-      std::is_convertible<typename std::invoke_result_t<F>, T>::value,
+      std::is_convertible<
+          typename guts::infer_function_traits_t<F>::return_type,
+          T>::value,
       "func parameters must be a callable that returns a type convertible to the value stored in the optional");
   return v.has_value() ? constexpr_move(std::move(v).contained_val())
                        : detail_::convert<T>(std::forward<F>(func)());
@@ -870,11 +880,10 @@ class optional<T&> {
   // return *this;
   // }
 
-  template <
-      typename U,
-      typename = std::enable_if_t<
-          std::is_same_v<typename std::decay<U>::type, optional<T&>>>>
-  optional& operator=(U&& rhs) noexcept {
+  template <typename U>
+  auto operator=(U&& rhs) noexcept -> typename std::enable_if<
+      std::is_same<typename std::decay<U>::type, optional<T&>>::value,
+      optional&>::type {
     ref = rhs.ref;
     return *this;
   }
@@ -1252,6 +1261,8 @@ struct hash<c10::optional<T&>> {
 #undef TR2_OPTIONAL_REQUIRES
 #undef TR2_OPTIONAL_ASSERTED_EXPRESSION
 #undef TR2_OPTIONAL_HOST_CONSTEXPR
+
+C10_CLANG_DIAGNOSTIC_POP()
 
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(pop)
