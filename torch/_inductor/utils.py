@@ -384,6 +384,11 @@ def get_module_name_from_meta(meta_dict):
             mod_name, torch_op = list(meta_dict["nn_module_stack"].values())[0]
             mod_name = re.sub(r"\[[a-zA-Z\']*\]", "", mod_name)
             mod_name = re.sub(r"__", "", mod_name)
+
+        res = re.search(r"<class\s+(\S+)>", str(torch_op))
+        if res:
+            torch_op = res.group(1)
+            torch_op = re.sub("\'", "", torch_op)
     return mod_name, torch_op
 
 
@@ -1247,6 +1252,7 @@ class Placeholder(enum.Enum):
     # placeholder will be replaced with a string with more information.
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
+    ORIGIN_INFO = "ORIGIN_INFO"
 
 # A utility function for easier AOTInductor testing
 aot_inductor_launcher = """

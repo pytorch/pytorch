@@ -1933,7 +1933,7 @@ class TritonKernel(Kernel):
             "mutated_arg_names": mutated_args,
             "autotune_hints": set(self.autotune_hints),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
-            "origin_ops": str(op_info),
+            "origin_ops": str(Placeholder.ORIGIN_INFO),
         }
 
         for tree in self.range_trees:
@@ -2582,11 +2582,15 @@ class TritonScheduling(BaseScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
+            op_info = None
+            if node_schedule and config.triton.descriptive_names:
+                op_info = get_origin_op_info(node_schedule, config.triton.descriptive_names)
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
             # even when unique_kernel_names is turned off. Meanwhile, KERNEL_NAME is sometimes set
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
             src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
+            src_code = src_code.replace(f"\'{Placeholder.ORIGIN_INFO}\'", str(op_info))
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
