@@ -859,7 +859,7 @@ def test_scalar_integer_operation_overflow(dtype, operation):
         operation(min, max)
 
 
-@pytest.mark.xfail(reason="pytorch does not warn on overflow")
+@pytest.mark.skip(reason="integer overflow UB: crashes pytorch under ASAN")
 @pytest.mark.parametrize("dtype", np.typecodes["Integer"])
 @pytest.mark.parametrize(
     "operation",
@@ -1010,3 +1010,9 @@ def test_pyscalar_subclasses(subtype, __op__, __rop__, op, cmp):
     expected = op(np.float32(2), subtype(1))
     assert res == expected
     assert type(res) == type(expected)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
+    run_tests()
