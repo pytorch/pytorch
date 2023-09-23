@@ -1,6 +1,6 @@
 Thank you for your interest in contributing to PyTorch!
 If you're a new contributor, please first take a read through our
-[Contributing Guidelines](https://docs.google.com/document/d/1oNhUeGE-8ajsYaMpoV6ZQANQZVeKrdFanI9VMbFzOzc/edit)
+[Contributing Guide](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions), specifically the [Submitting a Change](https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions#submitting-a-change) section
 that walks through the process of contributing a change to PyTorch.
 
 The rest of this document (CONTRIBUTING.md) covers some of the more technical
@@ -562,7 +562,7 @@ rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 
 ### Previewing documentation on PRs
 
-PyTorch will host documentation previews at `https://docs-preview.pytorch.org/<pr number>/` once the
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/pytorch/pytorch/<pr number>/index.html` once the
 `pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
 or find its link in the automated Dr. CI comment on your PR.
 

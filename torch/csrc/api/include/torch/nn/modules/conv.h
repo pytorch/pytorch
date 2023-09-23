@@ -32,6 +32,10 @@ class ConvNdImpl : public torch::nn::Cloneable<Derived> {
 
   void reset() override {
     TORCH_CHECK(
+        options.in_channels() > 0 && options.groups() > 0 &&
+            options.out_channels() > 0,
+        "in_channels, groups and out_channels must be a positive integer.");
+    TORCH_CHECK(
         options.in_channels() % options.groups() == 0,
         "in_channels must be divisible by groups");
     TORCH_CHECK(
