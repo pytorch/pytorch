@@ -1132,6 +1132,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_getset_descriptor(self):
+        def fn(g, x):
+            return g.__get__(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        g = torch.Tensor.shape
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
+    def test_get_attr_function(self):
+        def fn(g, x):
+            return g(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        g = torch.Tensor.shape.__get__
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
     def test_user_getattribute(self):
         class MyObject:
             def __init__(self):
@@ -4688,6 +4712,8 @@ def fn():
         def fn():
             default_state = torch.default_generator.get_state()
             x = torch.rand([2, 3])
+            if default_state.dtype != "float32":
+                x = x * 2
             torch._dynamo.graph_break()
             torch.default_generator.set_state(default_state)
             y = torch.rand([2, 3])
@@ -4695,7 +4721,7 @@ def fn():
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
         x, y = opt_fn()
-        self.assertEqual(x, y)
+        self.assertEqual(x, y * 2)
 
     def test_torch_distributions_lazy_property(self):
         def fn(x):

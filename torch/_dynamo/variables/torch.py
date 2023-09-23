@@ -21,10 +21,10 @@ from torch._dynamo.variables import UserFunctionVariable
 from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
-from ..source import GeneratorStateSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    is_rng_state_getter_or_setter,
     istype,
     product,
     proxy_args_kwargs,
@@ -463,60 +463,14 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.nn.Parameter:
             # https://github.com/pytorch/pytorch/issues/99569
             unimplemented("torch.nn.Parameter not supported")
-        if (
-            self.value.__name__ == "get_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ):
-
-            def get_state_from_generator():
-                return self.value()
-
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    get_state_from_generator,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=self.value(),
-                source=GeneratorStateSource(
-                    self.value.__self__.device.type, self.value.__self__.initial_seed()
-                ),
-                **options,
-            )
-        if (
-            self.value.__name__ == "set_state"
-            and hasattr(self.value, "__self__")
-            and isinstance(self.value.__self__, torch._C.Generator)
-        ) or self.value == torch.random.set_rng_state:
-            assert len(args) == 1
-            assert isinstance(args[0], TensorVariable)
-
-            unimplemented(
-                "TODO: make torch.random.set_rng_state work with FakeTensor/aot_autograd"
-            )
-            # In fake tensor case, this state doesn't matter, but
-            # it needs to be valid to not segfault. Pull a real tensor out.
-            # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
-            # However, it is imperative to record the call_function in the graph with the true args
-            # (Not the fake example_value) - for the sake of graph correctness.
-            if self.value == torch.random.set_rng_state:
-                example_value = torch.random.get_rng_state()
-            else:
-                example_value = self.value.__self__.get_state()
-
-            self.value.__module__ = self.__module__
-            return wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-                example_value=example_value,
-                **options,
-            )
+        elif is_rng_state_getter_or_setter(self.value):
+            # We graph break on RNG state setters or getters like
+            # `torch.get_rng_state` or `torch.set_rng_state`. These functions
+            # are not aten operations and therefore they are completely ignored
+            # by the AOT dispatcher. As a result, the AOT graph does not have
+            # these setter or getter functions, producing an incorrect graph
+            # when it comes to rng states.
+            unimplemented(f"RNG state getter/setter function - {self.value}")
         elif (
             self.value == torch.numel
             and len(args) == 1
