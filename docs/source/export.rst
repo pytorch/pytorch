@@ -357,6 +357,12 @@ Some additional things to note:
   we see in the equality constraints the tuple specifying that ``arg5_1``
   dimension 0 and ``arg6_1`` dimension 0 are equal.
 
+(An experimental mechanism that is designed to eventually subsume the use of
+:func:`torch.export.dynamic_dim` and ``constraints`` involves constructing
+dynamic shape specifications with the :func:`torch.export.Dim` and
+:func:`torch.export.dims` APIs and passing them into :func:`torch.export.export`
+through the ``dynamic_shapes`` argument.)
+
 
 Serialization
 ^^^^^^^^^^^^^
@@ -555,6 +561,8 @@ API Reference
 .. autofunction:: save
 .. autofunction:: load
 .. autofunction:: register_dataclass
+.. autofunction:: Dim
+.. autofunction:: dims
 .. autoclass:: Constraint
 .. autoclass:: ExportedProgram
 

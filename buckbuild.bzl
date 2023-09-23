@@ -2087,6 +2087,7 @@ def define_buck_targets(
             "aten/src/ATen/core/dispatch/Dispatcher.cpp",
             "aten/src/ATen/core/dispatch/ObservedOperators.cpp",
             "aten/src/ATen/core/dispatch/OperatorEntry.cpp",
+            "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
             "aten/src/ATen/core/interned_strings.cpp",
             "aten/src/ATen/core/library.cpp",
             "aten/src/ATen/core/op_registration/infer_schema.cpp",
