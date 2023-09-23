@@ -6,11 +6,9 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
-import torch.distributed.distributed_c10d as distributed_c10d
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import (
-    DeviceMesh,
     DTensor as DT,
     init_device_mesh,
     Replicate,
@@ -28,7 +26,6 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -228,6 +225,8 @@ class Test2dParallelIntegration(DTensorTestBase):
         if multi_param_group and use_orig_params:
             param_group = [
                 {"params": model.net1.parameters(), "lr": 0.15},
+                # TODO: Disable it for now and we need to further investigate
+                # the reason why test_2d_fsdp_integration_fsdp_nested_param_groups failed.
                 # {"params": model.net2.parameters(), "lr": 0.05},
             ]
             if optim_in_backward:
