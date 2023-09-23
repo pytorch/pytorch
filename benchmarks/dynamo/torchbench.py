@@ -94,6 +94,7 @@ SKIP_FOR_CPU = {
     "stable_diffusion",  # flaky
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
     "simple_gpt",
+    "hf_Whisper",  # works on cuda, accuracy failure on cpu
 }
 
 SKIP_FOR_CUDA = {
@@ -148,12 +149,14 @@ REQUIRE_EVEN_HIGHER_TOLERANCE = {
 REQUIRE_HIGHER_FP16_TOLERANCE = {
     "doctr_reco_predictor",
     "drq",
+    "hf_Whisper",
 }
 
 
 REQUIRE_HIGHER_BF16_TOLERANCE = {
     "doctr_reco_predictor",
     "drq",
+    "hf_Whisper",
 }
 
 REQUIRE_COSINE_TOLERACE = {
@@ -245,6 +248,7 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
+    "clip",  # torchbench removed torchtext dependency
 }
 
 ONLY_MULTIPROCESS = {

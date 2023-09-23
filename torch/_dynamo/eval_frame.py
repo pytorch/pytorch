@@ -1225,14 +1225,10 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
-            if forced_specializations:
-                msg = (
-                    "Some dynamic dimensions need to be specialized because "
-                    "the constraints inferred for them are too complex to specify.\n"
-                    f"{forced_specializations}\n{msg}"
-                )
+            msg = dim_constraints.prettify_results(
+                original_signature, constraint_violation_error, forced_specializations
+            )
             if constraint_violation_error:
                 constraint_violation_error.args = (
                     constraint_violation_error.args[0] + msg,
@@ -1410,7 +1406,6 @@ class TorchPatcher:
 
         disabled_multi_tensor_opt_modules = {
             adamax,
-            nadam,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
