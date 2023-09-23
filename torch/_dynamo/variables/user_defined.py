@@ -75,7 +75,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj).add_options(options)
             elif ConstantVariable.is_literal(obj):
-                return ConstantVariable(obj, **options)
+                return ConstantVariable.create(obj, **options)
 
         return super().var_getattr(tx, name)
 
@@ -171,7 +171,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 is torch.nn.Module.__init__
             ):
                 tx.output.side_effects.store_attr(
-                    var, "__call_nn_module_init", variables.ConstantVariable(True)
+                    var,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
                 return var
             else:
@@ -251,7 +253,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable(None, **options)
+                return ConstantVariable.create(None, **options)
 
             if method is collections.OrderedDict.keys and self.source:
                 # subclass of OrderedDict
@@ -259,7 +261,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
-                    [ConstantVariable(k, **options) for k in keys], **options
+                    [ConstantVariable.create(k, **options) for k in keys], **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
@@ -270,7 +272,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
-                return ConstantVariable(
+                return ConstantVariable.create(
                     args[0].as_python_constant() in self.value, **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
@@ -372,10 +374,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 )
 
-            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
+            partial_args = [
+                variables.ConstantVariable.create(v) for v in self.value.args
+            ]
             partial_args.extend(args)
             partial_kwargs = {
-                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
+                k: variables.ConstantVariable.create(v)
+                for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
@@ -428,7 +433,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
-                ).call_function(tx, [ConstantVariable(name)], {})
+                ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
@@ -498,7 +503,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(subobj).add_options(options)
             elif ConstantVariable.is_literal(subobj):
-                return ConstantVariable(subobj, **options)
+                return ConstantVariable.create(subobj, **options)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -545,7 +550,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.is_attribute_mutation(self):
             try:
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                return variables.ConstantVariable(
+                return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
                 ).add_options(self, result)
             except KeyError:
@@ -560,9 +565,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         try:
             self._getattr_static(name)
-            return variables.ConstantVariable(True, **options)
+            return variables.ConstantVariable.create(True, **options)
         except AttributeError:
-            return variables.ConstantVariable(False, **options)
+            return variables.ConstantVariable.create(False, **options)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
@@ -623,7 +628,7 @@ class RemovableHandleVariable(VariableTracker):
     def call_method(self, tx, method_name, args, kwargs):
         if method_name == "remove":
             tx.output.side_effects.remove_hook(self.idx)
-            return variables.ConstantVariable(None)
+            return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
     # This reconstruct is actually pretty unique - it does not construct the object from scratch.

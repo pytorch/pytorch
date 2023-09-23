@@ -166,10 +166,6 @@ public:
   template<class FuncType>
   inline void assertSignatureIsCorrect() {
     assertSignatureIsCorrect(CppSignature::make<FuncType>(), fn_has_symint<FuncType>::value);
-    if (fn_has_symint<FuncType>::value) {
-      static_assert(!fn_has_symint<typename fn_remove_symint<FuncType>::type>::value);
-      assertSignatureIsCorrect<typename fn_remove_symint<FuncType>::type>();
-    }
   }
 
   void assertSignatureIsCorrect(const CppSignature& call_signature, bool has_symint) const;
