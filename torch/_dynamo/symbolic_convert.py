@@ -1331,7 +1331,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         for k, v in zip(items[::2], items[1::2]):
             assert isinstance(k, (ConstantVariable, EnumVariable, BuiltinVariable)) or (
                 isinstance(k, TensorVariable) and k.specialized_value is not None
-            )
+            ) or k.is_python_constant()
 
             result[ConstDictVariable.get_key(k)] = v
         assert len(result) == len(items) / 2
