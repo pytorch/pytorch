@@ -13,7 +13,6 @@ import itertools
 import logging
 import os
 import pathlib
-import random
 import shutil
 import signal
 import subprocess
@@ -37,7 +36,12 @@ import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
-from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
+from torch._dynamo.testing import (
+    dummy_fx_compile,
+    format_speedup,
+    reset_rng_state,
+    same,
+)
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
@@ -694,7 +698,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model_iter_fn)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, model_iter_fn
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1131,18 +1137,6 @@ class AOTInductorModelCache:
                 model, example_args, example_kwargs
             )
 
-            output_node = list(exported.graph.nodes)[-1]
-            output_tensors = [
-                torch.empty_strided(
-                    node.meta["val"].size(),
-                    node.meta["val"].stride(),
-                    dtype=node.meta["val"].dtype,
-                    layout=node.meta["val"].layout,
-                    device=node.meta["val"].device,
-                )
-                for node in output_node.args[0]
-            ]
-
             module = torch.utils.cpp_extension.load_inline(
                 name="aot_inductor",
                 cpp_sources=[aot_inductor_launcher],
@@ -1154,7 +1148,6 @@ class AOTInductorModelCache:
             value = {
                 "module": module,
                 "exported": exported,
-                "output_tensors": output_tensors,
                 "output_spec": exported.call_spec.out_spec,
             }
             cls.cache[key] = value
@@ -1162,25 +1155,21 @@ class AOTInductorModelCache:
         return (
             cls.cache[key]["module"],
             cls.cache[key]["exported"],
-            cls.cache[key]["output_tensors"],
             cls.cache[key]["output_spec"],
         )
 
 
-def export_aot_inductor(forward: Callable):
-    eager_forward = forward
+def export_aot_inductor(model, example_inputs, eager_forward):
+    module, exported, output_spec = AOTInductorModelCache.load(
+        model, example_inputs, eager_forward
+    )
 
-    def opt_aot_inductor(model, example_inputs, collect_outputs=False):
-        module, exported, output_tensors, output_spec = AOTInductorModelCache.load(
-            model, example_inputs, eager_forward
-        )
-        param_buffer_values = list(exported.state_dict.values())
+    def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
         flat_example_inputs = fx_pytree.tree_flatten_spec(
             (example_args, example_kwargs), exported.call_spec.in_spec
         )
-        all_args = (*param_buffer_values, *flat_example_inputs)
-        module.run(all_args, output_tensors)
+        output_tensors = module.run(flat_example_inputs)
         return pytree.tree_unflatten(output_tensors, output_spec)
 
     return opt_aot_inductor
@@ -1601,14 +1590,6 @@ def cast_to_fp64(model, inputs):
 
 def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
-
-
-def reset_rng_state(use_xla=False):
-    torch.manual_seed(1337)
-    random.seed(1337)
-    np.random.seed(1337)
-    if use_xla:
-        xm.set_rng_state(1337, str(xm.xla_device()))
 
 
 class DummyGradScaler:
@@ -2401,6 +2382,9 @@ class BenchmarkRunner:
 
         start_stats = get_dynamo_stats()
 
+        if self.args.export_aot_inductor:
+            optimize_ctx = functools.partial(optimize_ctx, model, example_inputs)
+
         if self.args.accuracy:
             status = self.check_accuracy(
                 name, model, example_inputs, optimize_ctx, experiment, tag
@@ -2969,7 +2953,7 @@ def parse_args(args=None):
 def process_entry(rank, runner, original_dir, args):
     args.rank = rank
     with maybe_init_distributed(
-        args.multiprocess,
+        args.init_distributed,
         rank=rank,
         world_size=args.world_size,
         port=args.distributed_master_port,
@@ -3001,7 +2985,8 @@ def main(runner, original_dir=None):
                 f"--diff-branch: current branch is same as {args.diff_branch} branch, what are you diffing?"
             )
 
-    if args.multiprocess:
+    args.init_distributed = args.only and args.multiprocess
+    if args.init_distributed:
         # NB: Do NOT query device count before CUDA initialization; we're
         # going to overwrite CUDA_VISIBLE_DEVICES and this will result in
         # https://github.com/pytorch/pytorch/issues/107300
@@ -3124,13 +3109,16 @@ def run(runner, args, original_dir=None):
         patch_torch_manual_seed()
 
         # Some models e.g. yolov3 assert batch size on n_gpus
-        if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        if "CUDA_VISIBLE_DEVICES" not in os.environ and not args.multiprocess:
             args.device_index = "0"
 
         # Stricter check to disable fallbacks
         args.suppress_errors = False
 
     if args.device_index is not None:
+        if args.multiprocess:
+            print("Cannot specify both --device_index and --multiprocess")
+            return sys.exit(-1)
         os.environ["CUDA_VISIBLE_DEVICES"] = args.device_index
 
     elif args.performance:

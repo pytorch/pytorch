@@ -17,6 +17,15 @@
   }                                                          \
   return AOTI_RUNTIME_SUCCESS;
 
+#define AOTI_VECTOR_SIZE_CHECK(actual_size, expected_size, name)  \
+  do {                                                            \
+    AOTI_RUNTIME_CHECK(                                           \
+        actual_size == expected_size,                             \
+        "expected " + std::string(name) + " vector size to be " + \
+            std::to_string(expected_size) + ", but got " +        \
+            std::to_string(actual_size));                         \
+  } while (0)
+
 extern "C" {
 
 AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -52,39 +61,29 @@ AOTIRuntimeError AOTInductorModelContainerDelete(
 
 AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    // Array of raw AtenTensorHandle for output tensors. Handles will be stolen
-    AtenTensorHandle* input_handles,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
     size_t num_inputs,
-    // Array of raw AtenTensorHandle for output tensors. Handles will be stolen
-    AtenTensorHandle* output_handles,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTIProxyExecutorHandle proxy_executor_handle,
-    const int64_t** ret_output_sizes,
-    int64_t* ret_output_ndims) {
+    AOTIProxyExecutorHandle proxy_executor_handle) {
   auto* container =
       reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(
           container_handle);
-
-  auto input_unique_handles =
-      torch::aot_inductor::steal_from_raw_handles_to_raii_handles(input_handles, num_inputs);
-  auto output_unique_handles =
-      torch::aot_inductor::steal_from_raw_handles_to_raii_handles(output_handles, num_outputs);
+  AOTI_VECTOR_SIZE_CHECK(num_inputs, container->num_inputs(), "inputs");
+  AOTI_VECTOR_SIZE_CHECK(num_outputs, container->num_outputs(), "outputs");
 
   auto stream = reinterpret_cast<cudaStream_t>(stream_handle);
-
   CONVERT_EXCEPTION_TO_ERROR_CODE({
-    std::vector<std::vector<int64_t>>* shapes;
     container->run(
-        input_unique_handles,
-        output_unique_handles,
-        &shapes,
+        input_handles,
+        output_handles,
         stream,
         proxy_executor_handle);
-    for (size_t i = 0; i < num_outputs; i++) {
-      ret_output_sizes[i] = shapes->at(i).data();
-      ret_output_ndims[i] = shapes->at(i).size();
-    }
   })
 }
 
