@@ -34,7 +34,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/autograd/python_return_types.h"
+#include "torch/csrc/autograd/generated/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 #include <ATen/FuncTorchTLS.h>
@@ -428,7 +428,7 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
 }
 
 static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AutoNoGIL no_gil;
+  pybind11::gil_scoped_release no_gil;
   return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 

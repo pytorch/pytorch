@@ -190,6 +190,27 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
 
 }
 
+// nt: NT of shape (B, *, C, D)
+// other: dense tensor of shape (D, E)
+// output: NT of shape (B, *, C, E)
+static Tensor matmul_nested_with_broadcasted_dense(const Tensor& nt, const Tensor& other) {
+  // View nt buffer as 3D jagged for matmul
+  auto *nt_impl = get_nested_tensor_impl(nt);
+  auto jagged = nt_impl->get_buffer().view({-1, nt.size(2), nt.size(3)});
+  auto new_buffer = at::matmul(jagged, other);
+
+  // Wrap result into nested tensor
+  const auto E = other.size(-1);
+  const auto component_dim = nt.dim() - 1;
+  auto new_sizes = nt_impl->get_nested_sizes().clone();
+  auto new_sizes_ptr = new_sizes.data_ptr<int64_t>();
+  for (const auto i : c10::irange(nt.size(0))) {
+    new_sizes_ptr[i * component_dim + 2] = E;
+  }
+  return at::detail::make_tensor<NestedTensorImpl>(
+      new_buffer.view(-1), new_sizes);
+}
+
 // Note [nested tensor matmul]
 // This is really a generalized batched matmul dedicated to nested tensors,
 // where `self` and `mat2` have same number (>= 3) of dimensions.
@@ -200,6 +221,18 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
 // for each batch dimension `self` and `mat2` must have same size.
 // TODO: Should make full matmul semantics support some day
 Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
+  // special case of NT (B, *, C, D) with broadcasted dense (D, E)
+  if (self.is_nested() &&
+          self.is_contiguous() &&
+          !mat2.is_nested() &&
+          self.dim() == 4 &&
+          mat2.dim() == 2 &&
+          get_nested_tensor_impl(self)->opt_size(2).has_value() &&
+          get_nested_tensor_impl(self)->opt_size(3).has_value() &&
+          self.size(3) == mat2.size(0)
+     ) {
+    return matmul_nested_with_broadcasted_dense(self, mat2);
+  }
   if (self.is_nested() && !mat2.is_nested()) {
     AT_ERROR("Expected both to be nested, but got a nested self and non-nested other");
   }
