@@ -464,7 +464,7 @@ class VariableBuilder:
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
-            return ConstantVariable(
+            return ConstantVariable.create(
                 value=value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
@@ -961,14 +961,14 @@ class VariableBuilder:
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
             ):
-                return ConstantVariable(
+                return ConstantVariable.create(
                     value=value,
                     guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                 )
             else:
                 return self.wrap_unspecialized_primitive(value)
         else:
-            return ConstantVariable(
+            return ConstantVariable.create(
                 value=value,
                 guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
             )
@@ -1173,7 +1173,7 @@ class VariableBuilder:
                     # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
-                    return ConstantVariable(
+                    return ConstantVariable.create(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
@@ -1208,7 +1208,7 @@ class VariableBuilder:
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
                     # for some reason it doesn't
-                    return ConstantVariable(
+                    return ConstantVariable.create(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
@@ -1462,7 +1462,7 @@ def wrap_fx_proxy_cls(
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
-        sizes = [ConstantVariable(x) for x in example_value]
+        sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list, set)):
         proxy.node.meta["example_value"] = example_value
@@ -1471,7 +1471,7 @@ def wrap_fx_proxy_cls(
             if val is None:
                 # nn.MultiheadAttention() can return None, see issue #175
                 unpacked.append(
-                    ConstantVariable(None, **options),
+                    ConstantVariable.create(None, **options),
                 )
             else:
                 unpacked.append(
@@ -1501,7 +1501,7 @@ def wrap_fx_proxy_cls(
             ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
-        return ConstantVariable(None, **options)
+        return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
@@ -1523,7 +1523,7 @@ def wrap_fx_proxy_cls(
         torch._export.constraints.constrain_as_value,
     ]:
         proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1788,4 +1788,4 @@ class SourcelessBuilder:
     @staticmethod
     def wrap_constant_literal(value):
         assert ConstantVariable.is_literal(value)
-        return ConstantVariable(value=value)
+        return ConstantVariable.create(value=value)

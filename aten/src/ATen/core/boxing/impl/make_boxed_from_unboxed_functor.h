@@ -179,6 +179,10 @@ namespace impl {
       "You tried to register a kernel with an unsupported input type: std::array<Scalar, N>. Please use std::array<int64_t, N> instead.");
   };
 
+  // The following specialisations of assert_is_valid_input_type are technically not
+  // necessary since we would hit the base case and show an error message
+  // there if they didn't exist, but we can show a better error message
+  // in some common error scenarios.
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<float, T>::value>> {
     // There is no reason to support float when we have double. Keep the API lean.
@@ -200,14 +204,6 @@ namespace impl {
     static_assert(guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported integral input type. Please use int64_t instead.");
   };
-  template<class T, bool AllowDeprecatedTypes>
-  struct assert_is_valid_input_type<T, AllowDeprecatedTypes, std::enable_if_t<std::is_same<const c10::SymInt&, T>::value>> {
-    static_assert(guts::false_t<T>::value,
-      "You tried to register a kernel taking c10::SymInt by reference. Please accept it by value instead.");
-  };
-
-  // TODO: it probably would be good to tighten this up quite a bit more with
-  // an explicit list for everything
 
   //
   // assert_is_valid_output_type
