@@ -13,6 +13,7 @@ import itertools
 import logging
 import os
 import pathlib
+import random
 import shutil
 import signal
 import subprocess
@@ -36,12 +37,7 @@ import torch.fx._pytree as fx_pytree
 import torch.multiprocessing as mp
 from scipy.stats import gmean, ttest_ind
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
-from torch._dynamo.testing import (
-    dummy_fx_compile,
-    format_speedup,
-    reset_rng_state,
-    same,
-)
+from torch._dynamo.testing import dummy_fx_compile, format_speedup, same
 from torch._dynamo.utils import clone_inputs, graph_break_reasons
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config
@@ -1590,6 +1586,14 @@ def cast_to_fp64(model, inputs):
 
 def cast_to_fp32(model, inputs):
     return cast_to(torch.float32, model, inputs)
+
+
+def reset_rng_state(use_xla=False):
+    torch.manual_seed(1337)
+    random.seed(1337)
+    np.random.seed(1337)
+    if use_xla:
+        xm.set_rng_state(1337, str(xm.xla_device()))
 
 
 class DummyGradScaler:
