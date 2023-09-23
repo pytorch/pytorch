@@ -131,6 +131,7 @@ class TORCH_API Unpickler {
   }
   std::string readString();
   void readList(IValue list_ivalue);
+  void readListElements(IValue list_ivalue, size_t start);
   void setInput(size_t memo_id);
   void run();
 
