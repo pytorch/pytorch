@@ -47,9 +47,15 @@ def normalize_array_like(x, parm=None):
 
 
 def normalize_array_like_or_scalar(x, parm=None):
-    if type(x) in _dtypes_impl.SCALAR_TYPES:
+    if _dtypes_impl.is_scalar_or_symbolic(x):
         return x
     return normalize_array_like(x, parm)
+
+
+def normalize_optional_array_like_or_scalar(x, parm=None):
+    if x is None:
+        return None
+    return normalize_array_like_or_scalar(x, parm)
 
 
 def normalize_optional_array_like(x, parm=None):
@@ -118,9 +124,10 @@ def normalize_casting(arg, parm=None):
 
 normalizers = {
     "ArrayLike": normalize_array_like,
-    "Union[ArrayLike, Scalar]": normalize_array_like_or_scalar,
+    "ArrayLikeOrScalar": normalize_array_like_or_scalar,
     "Optional[ArrayLike]": normalize_optional_array_like,
     "Sequence[ArrayLike]": normalize_seq_array_like,
+    "Optional[ArrayLikeOrScalar]": normalize_optional_array_like_or_scalar,
     "Optional[NDArray]": normalize_ndarray,
     "Optional[OutArray]": normalize_outarray,
     "NDArray": normalize_ndarray,
@@ -193,6 +200,7 @@ def normalizer(_func=None, *, promote_scalar_result=False):
             sig = inspect.signature(func)
             params = sig.parameters
             first_param = next(iter(params.values()))
+
             # NumPy's API does not have positional args before variadic positional args
             if first_param.kind == inspect.Parameter.VAR_POSITIONAL:
                 args = [maybe_normalize(arg, first_param) for arg in args]
@@ -210,6 +218,7 @@ def normalizer(_func=None, *, promote_scalar_result=False):
                 name: maybe_normalize(arg, params[name]) if name in params else arg
                 for name, arg in kwds.items()
             }
+
             result = func(*args, **kwds)
 
             # keepdims

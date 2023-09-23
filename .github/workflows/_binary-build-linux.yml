@@ -159,10 +159,12 @@ jobs:
       - name: Clean workspace
         shell: bash
         run: |
+          set -eux
+
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-          if [[ inputs.build_environment == 'linux-aarch64-binary-manywheel' ]]; then
+          if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]]; then
             rm -rf "${RUNNER_TEMP}/artifacts"
             mkdir "${RUNNER_TEMP}/artifacts"
           fi

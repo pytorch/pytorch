@@ -1,6 +1,7 @@
 from typing import List
 
-import torch
+from torch.ao.quantization.pt2e.utils import _is_sym_size_node
+
 from torch.ao.quantization.quantizer.quantizer import QuantizationAnnotation
 from torch.fx import Node
 
@@ -21,16 +22,6 @@ def _annotate_output_qspec(node: Node, qspec):
     )
     quantization_annotation.output_qspec = qspec
     node.meta["quantization_annotation"] = quantization_annotation
-
-
-def _is_sym_size_node(node: Node):
-    return (
-        node.op == "call_function"
-        and node.target == torch.ops.aten.sym_size.default
-        or node.target == torch.ops.aten.sym_numel.default
-        or node.target == torch.ops.aten.sym_numel
-        or node.target == torch.ops.aten.sym_size
-    )
 
 
 def _node_only_used_for_sym_size(node: Node, partition_nodes: List[Node]):
