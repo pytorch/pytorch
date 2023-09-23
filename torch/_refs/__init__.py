@@ -945,9 +945,14 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
-def trunc(a):
-    return prims.trunc(a)
+@out_wrapper()
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def trunc(a: TensorLikeType) -> TensorLikeType:
+    return handle_noncontiguous_outputs([a], prims.trunc(a))
 
 
 # TODO: register this as a real ref/decomposition once TorchInductor supports complex!
@@ -4900,8 +4905,8 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
 @register_decomposition(aten.linspace)
 @out_wrapper()
 def linspace(
-    start: NumberType,
-    end: NumberType,
+    start: Union[NumberType, TensorLikeType],
+    end: Union[NumberType, TensorLikeType],
     steps: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -4910,6 +4915,19 @@ def linspace(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
+    if isinstance(start, TensorLikeType):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        start = _maybe_convert_to_dtype(start, torch.float64)
+    if isinstance(end, TensorLikeType):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+        end = _maybe_convert_to_dtype(end, torch.float64)
+
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
             torch.get_default_dtype()
@@ -4928,7 +4946,8 @@ def linspace(
     # steps does not participate in the computation of the dtype
     torch._check_type(
         isinstance(steps, IntLike),
-        lambda: "steps must be int, not float",
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
     assert isinstance(steps, IntLike)  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
@@ -4942,9 +4961,10 @@ def linspace(
     if steps == 0:
         return torch.full((0,), 0, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
     if steps == 1:
-        return torch.full((1,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
-    if start == end:
-        return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
+        if isinstance(start, TensorLikeType):
+            return torch.empty((steps,), dtype=dtype, **factory_kwargs).copy_(start)  # type: ignore[arg-type]
+        else:
+            return torch.full((steps,), start, dtype=dtype, **factory_kwargs)  # type: ignore[arg-type]
 
     # Perform in arange in int because some backends like ATen or Triton do not support all the dtypes
     rg = torch.arange(0, steps, **factory_kwargs)  # type: ignore[arg-type]
@@ -4974,8 +4994,8 @@ def linspace(
 @register_decomposition(aten.logspace)
 @out_wrapper()
 def logspace(
-    start: NumberType,
-    end: NumberType,
+    start: Union[NumberType, TensorLikeType],
+    end: Union[NumberType, TensorLikeType],
     steps: NumberType,
     base: NumberType = 10,
     *,
@@ -4992,8 +5012,20 @@ def logspace(
     if prims.utils.is_integer_dtype(dtype):
         if isinstance(start, FloatLike):
             start = sym_int(start)
+        elif isinstance(start, TensorLikeType):
+            torch._check(
+                start.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
+            start = _maybe_convert_to_dtype(start, dtype)
         if isinstance(end, FloatLike):
             end = sym_int(end)
+        elif isinstance(end, TensorLikeType):
+            torch._check(
+                end.dim() == 0,
+                lambda: "logspace only supports 0-dimensional start and end tensors",
+            )
+            end = _maybe_convert_to_dtype(end, dtype)
 
     if py_any(isinstance(arg, complex) for arg in (start, end, steps)):
         default_complex_dtype = utils.corresponding_complex_dtype(
@@ -5008,8 +5040,8 @@ def logspace(
     if base < 0:
         raise NotImplementedError
     ret = torch.linspace(  # type: ignore[misc]
-        start,
-        end,
+        start,  # type: ignore[arg-type]
+        end,  # type: ignore[arg-type]
         steps,  # type: ignore[arg-type]
         dtype=_dtype,
         layout=layout,
@@ -6100,6 +6132,189 @@ exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
+
+
+# xref: isStorage in torch/csrc/DynamicTypes.cpp
+def _isStorage(obj):
+    return isinstance(obj, (torch.TypedStorage, torch.UntypedStorage))
+
+
+# xref: compute_sizes in torch/csrc/utils/tensor_new.cpp
+def _compute_sizes(seq, scalar_type):
+    MAX_DIMS = 128
+    is_storage = _isStorage(seq)
+    sizes = []
+    # TODO: this is inaccurate, we actually test PySequence_Check
+    while isinstance(seq, (list, tuple)):
+        length = len(seq)
+        if is_storage:
+            length //= scalar_type.itemsize
+        sizes.append(length)
+        if len(sizes) > MAX_DIMS:
+            raise ValueError(f"too many dimensions '{type(seq).__name__}'")
+        if length == 0:
+            break
+        try:
+            handle = seq[0]
+        except Exception:
+            raise ValueError(
+                f"could not determine the shape of object type '{type(seq).__name__}'"
+            )
+        seq = handle
+
+    return sizes
+
+
+# xref: infer_scalar_type in torch/csrc/utils/tensor_new.cpp
+def _infer_scalar_type(obj):
+    if isinstance(obj, FloatLike):
+        return torch.get_default_dtype()
+    if isinstance(obj, IntLike) and not isinstance(obj, bool):  # careful!
+        return torch.int64
+    if isinstance(obj, bool):
+        return torch.bool
+    if isinstance(obj, complex):
+        default_dtype = torch.get_default_dtype()
+        if default_dtype is torch.float:
+            return torch.cfloat
+        elif default_dtype is torch.double:
+            return torch.cdouble
+        else:
+            raise RuntimeError("invalid default scalar type for complex")
+    if isinstance(obj, torch.Tensor):
+        return obj.dtype
+    if isinstance(obj, str):
+        raise TypeError(f"new(): invalid data type '{type(obj).__name__}'")
+    # TODO: this is inaccurate, we actually test PySequence_Check
+    if isinstance(obj, (list, tuple)):
+        scalarType = None
+        length = len(obj)
+        # match NumPy semantics, except use default tensor type instead of
+        # double.
+        if length == 0:
+            return torch.get_default_dtype()
+        for i in range(length):
+            cur_item = obj[i]
+            # TODO: test this
+            """
+            if cur_item is obj:
+                raise TypeError("new(): self-referential lists are incompatible")
+            """
+            item_scalarType = _infer_scalar_type(cur_item)  # recurse!
+            if scalarType is not None:
+                scalarType = torch.promote_types(scalarType, item_scalarType)
+            else:
+                scalarType = item_scalarType
+            if scalarType is torch.cdouble:
+                # this won't change (unless we hit undefined, but that will
+                # fail later)
+                return scalarType
+        return scalarType
+    raise RuntimeError(f"Could not infer dtype of {type(obj).__name__}")
+
+
+# Analogous to recursive_store
+# xref: recursive_store in torch/csrc/utils/tensor_new.cpp
+def _recursive_build(sizes, dim, scalarType, obj):
+    ndim = len(sizes)
+    assert dim <= ndim
+    if dim == ndim:
+        return torch.scalar_tensor(obj, dtype=scalarType)
+    n = sizes[dim]
+    seq = obj
+    seq_size = len(seq)
+    if seq_size != n:
+        raise ValueError(
+            f"expected sequence of length {n} at dim {dim} (got {seq_size})"
+        )
+    return torch.stack(
+        [_recursive_build(sizes, dim + 1, scalarType, item) for item in seq]
+    )
+
+
+# xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
+def _internal_new_from_data(
+    options,
+    scalar_type,
+    device_opt,
+    data,
+    copy_variables,
+    copy_numpy,
+    type_inference,
+    pin_memory=False,
+):
+    if isinstance(data, torch.Tensor):
+        torch._check(
+            not pin_memory, lambda: "Can't pin tensor constructed from a variable"
+        )
+        var = data
+        if copy_variables:
+            var = var.detach()
+        inferred_scalar_type = var.dtype if type_inference else scalar_type
+        device = device_opt if device_opt is not None else var.device
+        return var.to(
+            device=device,
+            dtype=inferred_scalar_type,
+            non_blocking=False,
+            copy=copy_variables,
+        )
+
+    # TODO
+    if hasattr(data, "__cuda_array_interface__"):
+        return NotImplemented
+
+    # TODO: test for numpy input with PyArray_Check
+
+    device = device_opt if device_opt is not None else options["device"]
+    sizes = _compute_sizes(data, scalar_type)
+    inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
+
+    # NB: Don't need to avoid tracing, as we aren't going to do any manual
+    # pointer filling tricks
+    if _isStorage(data):
+        return NotImplemented
+    else:
+        if torch.device(device).type == "meta":
+            return NotImplemented
+
+        # In the C implementation, we would directly start poking the memory
+        # of a freshly allocated CPU tensor.  Here, we're going to do an
+        # alternate, heinously slow implementation: turn each individual
+        # scalar into a tensor, and then repeatedly cat them together
+        tensor = _recursive_build(sizes, 0, inferred_scalar_type, data)
+
+        tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
+
+    # NB: lift_fresh is not needed, because we built the tensor from scalars
+    # guaranteeing a fresh tensor in this case
+    return tensor
+
+
+# xref: tensor_ctor in torch/csrc/utils/tensor_new.cpp
+def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=False):
+    # TODO (or not): support names kwarg
+    if isinstance(data, torch.Tensor):
+        warnings.warn(
+            "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+            "or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor)"
+        )
+    type_inference = dtype is None
+    new_tensor = _internal_new_from_data(
+        # device="cpu" because that's what you get with torch.tensor(2) no
+        # device by default
+        {"device": "cpu"},  # TODO: use torch.get_default_tensor_type
+        dtype if dtype is not None else torch.get_default_dtype(),
+        device,
+        data,
+        copy_variables=True,
+        copy_numpy=True,
+        type_inference=type_inference,
+        pin_memory=pin_memory,
+    )
+    new_tensor.detach_()
+    new_tensor.requires_grad_(requires_grad)
+    return new_tensor
+
 
 # Views
 # We can't model these as above, as the pattern of doing `op(a, out=a)` does not work for a view function
