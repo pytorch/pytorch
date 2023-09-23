@@ -7478,6 +7478,21 @@ ShapeEnv not equal: field values don't match:
         # Should not have recompiled
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_complex_closure(self):
+        @torch.compile
+        def forward(y):
+            def a():
+                def x(z):
+                    return y + z
+                return x
+            return a()
+        input1 = torch.rand([2])
+        input2 = torch.rand([2])
+        res = forward(input1)(input2)       
+        # Should not have recompiled
+        self.assertEqual(res, input1 + input2)
+
+        
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

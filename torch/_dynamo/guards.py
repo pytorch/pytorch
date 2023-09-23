@@ -485,8 +485,18 @@ class GuardBuilder(GuardBuilderBase):
             # Strictly only want user-defined functions
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
                 ref = self.arg_ref(guard)
-                code = f"hasattr({ref}, '__code__') and ___check_obj_id({ref}.__code__, {self.id_ref(val.__code__)})"
-                self._produce_guard_code(guard, [code])
+                code = [
+                    f"hasattr({ref}, '__code__')",
+                    f"___check_obj_id({ref}.__code__, {self.id_ref(val.__code__)})",
+                ]
+                # Guard the free variables
+                freevars = val.__code__.co_freevars
+                for freevar in freevars:
+                    freevar = f"L['{freevar}']"
+                    freevar_ref = self.arg_ref(freevar)
+                    # TODO: This could be loosened in the future. For now, just check ID to be safe.
+                    code.append(f"___check_obj_id({freevar_ref}, {self.id_ref(self.get(freevar))})")
+                self._produce_guard_code(guard, code)
             else:
                 self.FUNCTION_MATCH(guard)
 
