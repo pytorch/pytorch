@@ -8,6 +8,7 @@ try:
 except ModuleNotFoundError:
     np = None
 
+
 import sympy
 
 import torch._numpy as tnp
@@ -35,7 +36,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .constant import ConstantVariable
-from .lists import ShapeVariable, SizeVariable
+from .lists import SizeVariable
 
 supported_tensor_comparison_ops = {
     ">": operator.gt,
@@ -228,7 +229,7 @@ class TensorVariable(VariableTracker):
             result = ConstantVariable(self.device.type == "cuda", **options)
         elif name == "shape" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
-            result = ShapeVariable(sizes, **options)
+            result = SizeVariable(sizes, **options)
         elif name == "requires_grad" and self.requires_grad is not None:
             result = ConstantVariable(self.requires_grad, **options)
         elif name == "is_quantized" and self.is_quantized is not None:
@@ -487,16 +488,26 @@ class TensorVariable(VariableTracker):
             if not np:
                 unimplemented("Tensor.numpy(). NumPy is not available")
             assert not args, "Tensor.numpy() doesn't take args."
-            # TODO: support force
-            if kwargs and "force" in kwargs:
-                unimplemented(f"Tensor.numpy(force={kwargs['force']})")
+            if self.layout != torch.strided:
+                raise TypeError(
+                    f"can't convert {self.layout} layout tensor to numpy. Use Tensor.dense() first"
+                )
+            # We don't check that the tensor is on CPU when force is False, as this
+            # allows us to execute NumPy code on CUDA.
+            # We don't check that requires_grad=False as we are curently doing an
+            # unconditional detach.
+            # TODO: We may want to avoid detching if `requires_grad=True`
+            #       and `force=False` to allow computing gradients.
+            force = "force" in kwargs and kwargs["force"].as_python_constant()
             proxy = tx.output.create_proxy(
-                "call_function",
-                torch.detach,
-                *proxy_args_kwargs([self], {}),
+                "call_method", "detach", *proxy_args_kwargs([self], {})
             )
+            if force:
+                # TODO Add resolve_conj and resolve_neg once we support complex tensors
+                proxy = tx.output.create_proxy(
+                    "call_method", "cpu", *proxy_args_kwargs([self], {})
+                )
             return NumpyNdarrayVariable.create(tx, proxy, **options)
-
         elif name == "tolist":
             from .builder import SourcelessBuilder
 
@@ -627,9 +638,10 @@ class TensorVariable(VariableTracker):
             # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
             # and rewrite args to have only proxyable args, then insert call_function
             args_as_value = [x.as_python_constant() for x in args]
+            kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
             def redistribute_fn_with_prim_types(x):
-                return x.redistribute(*args_as_value)
+                return x.redistribute(*args_as_value, **kwargs_as_value)
 
             # attach the same function name for better debugging
             redistribute_fn_with_prim_types.__name__ = f"prim_{name}"
@@ -643,14 +655,40 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+        elif name == "register_hook":
+            # see [On tensor.register_hook]
+            assert len(args) == 1
+            fn_var = args[0]
+
+            if isinstance(fn_var, variables.NestedUserFunctionVariable):
+                # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
+                # This should not be onerous to support when needed.
+                unimplemented("NYI - lambda variables as hooks")
+            elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
+                fn = fn_var.as_python_constant()
+                name = fn_var.func.fn.__name__
+            else:
+                fn = fn_var.fn
+                name = fn_var.fn.__name__
+
+            handle_variable = variables.user_defined.RemovableHandleVariable(
+                mutable_local=variables.base.MutableLocal(),
+                **options,
+            )
+            if not self.source:
+                # Intermediary
+                unimplemented("Intermediary tensors with registered hooks - NYI")
+            else:
+                assert (
+                    fn_var.source
+                ), "Unreachable - See unimplemented for lambdas above"
+            tx.output.side_effects.register_hook(self, fn_var, handle_variable)
+            return handle_variable
+
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
             # as Tensor.new acts differently with a Size input versus a tuple input.
-            if (
-                name == "new"
-                and len(args) == 1
-                and isinstance(args[0], (SizeVariable, ShapeVariable))
-            ):
+            if name == "new" and len(args) == 1 and isinstance(args[0], SizeVariable):
                 name = "new_empty"
             return wrap_fx_proxy(
                 tx,
@@ -661,6 +699,10 @@ class TensorVariable(VariableTracker):
                 ),
                 **options,
             )
+
+    def rename(self, tx, name):
+        self.proxy.node._rename(name)
+        return super().rename(tx, name)
 
 
 class SymNodeVariable(VariableTracker):

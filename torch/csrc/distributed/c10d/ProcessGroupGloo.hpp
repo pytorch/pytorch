@@ -71,6 +71,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
    public:
     explicit AsyncWork(
         std::vector<std::vector<at::Tensor>> outputTensors,
+        OpType opType,
         const char* profilingTitle = nullptr,
         const c10::optional<std::vector<at::Tensor>>& inputTensors =
             c10::nullopt);
@@ -199,6 +200,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     explicit RecvWork(
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer,
+        OpType opType,
         const char* profilingTitle = nullptr);
 
     int sourceRank() const override;
@@ -338,6 +340,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  void enableCollectivesTiming() override;
 
   const std::unique_ptr<::gloo::rendezvous::Store>& _getStore() const {
     return store_;
