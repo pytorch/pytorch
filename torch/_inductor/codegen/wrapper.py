@@ -156,12 +156,12 @@ class EnterCudaDeviceContextManagerLine:
                 # CUDAStreamGuard sets the stream and the device.
                 if config.aot_inductor.abi_compatible:
                     code.writeline(
-                        f"AOTICudaStreamGuard stream_guard(stream, {self.device_idx});"
+                        "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
                     )
                 else:
                     code.writeline(
                         "at::cuda::CUDAStreamGuard stream_guard("
-                        + f"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                        + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
                     )
             else:
                 if self.first_time:
@@ -1541,7 +1541,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.codegen_int_array_var(stride, self.wrapper_call),
                 dtype,
                 device_type,
-                device_id,
+                "this->device_idx_" if V.graph.aot_mode else device_id,
                 f"&{name}_handle",
             ]
             self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
@@ -1550,9 +1550,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
         else:
+            if V.graph.aot_mode and device.startswith("c10::Device("):
+                tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
+            else:
+                tensor_device = device
             return (
                 f"{self.declare}{name} = {self.namespace}empty_strided("
-                f"{size}, {stride}, at::TensorOptions({device}).dtype({dtype}));"
+                f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype}));"
             )
 
     def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
