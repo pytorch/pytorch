@@ -32,6 +32,7 @@ parametrize_value = parametrize(
 )
 
 
+@instantiate_parametrized_tests
 class TestArrayScalars(TestCase):
     @parametrize_value
     def test_array_scalar_basic(self, value):
@@ -78,6 +79,7 @@ class TestArrayScalars(TestCase):
         assert arr == 42
 
 
+@instantiate_parametrized_tests
 class TestIsScalar(TestCase):
     #
     # np.isscalar(...) checks that its argument is a numeric object with exactly one element.
@@ -120,9 +122,6 @@ class TestIsScalar(TestCase):
     def test_is_not_scalar(self, value):
         assert not np.isscalar(value)
 
-
-instantiate_parametrized_tests(TestArrayScalars)
-instantiate_parametrized_tests(TestIsScalar)
 
 if __name__ == "__main__":
     run_tests()

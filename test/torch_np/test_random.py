@@ -32,6 +32,7 @@ def control_stream(use_numpy=False):
         config.use_numpy_random_stream = oldstate
 
 
+@instantiate_parametrized_tests
 class TestScalarReturn(TestCase):
     @parametrize("use_numpy", [True, False])
     @parametrize(
@@ -76,6 +77,7 @@ class TestScalarReturn(TestCase):
         assert isinstance(r, tnp.ndarray)
 
 
+@instantiate_parametrized_tests
 class TestShuffle(TestCase):
     @parametrize("use_numpy", [True, False])
     def test_1d(self, use_numpy):
@@ -111,6 +113,7 @@ class TestShuffle(TestCase):
             tnp.random.shuffle(x)
 
 
+@instantiate_parametrized_tests
 class TestChoice(TestCase):
     @parametrize("use_numpy", [True, False])
     def test_choice(self, use_numpy):
@@ -141,11 +144,6 @@ class TestNumpyGlobal(TestCase):
 
         assert not (x_1 == x).all()
 
-
-instantiate_parametrized_tests(TestScalarReturn)
-instantiate_parametrized_tests(TestShuffle)
-instantiate_parametrized_tests(TestChoice)
-instantiate_parametrized_tests(TestNumpyGlobal)
 
 if __name__ == "__main__":
     run_tests()

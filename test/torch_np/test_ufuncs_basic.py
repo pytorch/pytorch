@@ -30,6 +30,7 @@ parametrize_casting = parametrize(
 )
 
 
+@instantiate_parametrized_tests
 class TestUnaryUfuncs(TestCase):
     def get_x(self, ufunc):
         return np.arange(5, dtype="float64")
@@ -149,6 +150,7 @@ parametrize_binary_ufuncs = parametrize(
 """
 
 
+@instantiate_parametrized_tests
 class TestBinaryUfuncs(TestCase):
     def get_xy(self, ufunc):
         return np.arange(5, dtype="float64"), np.arange(8, 13, dtype="float64")
@@ -205,6 +207,7 @@ class TestBinaryUfuncs(TestCase):
 dtypes_numeric = [np.int32, np.float32, np.float64, np.complex128]
 
 
+@instantiate_parametrized_tests
 class TestNdarrayDunderVsUfunc(TestCase):
     """Test ndarray dunders which delegate to ufuncs, vs ufuncs."""
 
@@ -394,12 +397,6 @@ class TestUfuncDtypeKwd(TestCase):
         r = np.add([1.0, 2.0], 1.0e-15, dtype=np.float64, out=out32)
         assert (r == [1, 2]).all()
         assert r.dtype == np.float32
-
-
-instantiate_parametrized_tests(TestUnaryUfuncs)
-instantiate_parametrized_tests(TestNdarrayDunderVsUfunc)
-
-instantiate_parametrized_tests(TestBinaryUfuncs)
 
 
 if __name__ == "__main__":

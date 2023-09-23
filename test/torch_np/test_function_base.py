@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
+@instantiate_parametrized_tests
 class TestArange(TestCase):
     def test_infinite(self):
         assert_raises(
@@ -101,8 +102,6 @@ class TestAppend(TestCase):
         with pytest.raises((RuntimeError, ValueError)):
             np.append([[1, 2, 3], [4, 5, 6]], [7, 8, 9], axis=0)
 
-
-instantiate_parametrized_tests(TestArange)
 
 if __name__ == "__main__":
     run_tests()
