@@ -3469,6 +3469,26 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(4)
         self.assertTrue(same(fn(x), opt_fn(x)))
 
+    def test_no_bad_ref_cycles_to_code(self):
+        import weakref
+        import sys
+        import gc
+
+        def fn(x, y):
+            return x + y
+        
+        co = weakref.ref(fn.__code__)
+        opt_fn = torch.compile(fn)
+        opt_fn(torch.rand([1]), torch.rand([1]))
+        del opt_fn
+        del fn
+        torch._dynamo.reset()
+        gc.collect()
+        # TODO once all refleaks are fixed, replace this line
+        # with the line below.
+        self.assertLessEqual(sys.getrefcount(co()), 2)
+        # self.assertIsNone(co())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

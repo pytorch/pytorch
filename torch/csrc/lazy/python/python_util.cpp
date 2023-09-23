@@ -25,6 +25,7 @@ c10::optional<SourceLocation> GetPythonFrameTop() {
   loc.line = PyFrame_GetLineNumber(frame);
   loc.file = THPUtils_unpackString(code->co_filename);
   loc.function = THPUtils_unpackString(code->co_name);
+  Py_DECREF(code.get());
   return loc;
 }
 
@@ -42,6 +43,7 @@ std::vector<SourceLocation> GetPythonFrames() {
       loc.line = PyFrame_GetLineNumber(frame);
       loc.file = THPUtils_unpackString(code->co_filename);
       loc.function = THPUtils_unpackString(code->co_name);
+      Py_DECREF(code.get());
       frames.push_back(std::move(loc));
       auto new_frame = PyFrame_GetBack(frame);
       Py_DECREF(frame);

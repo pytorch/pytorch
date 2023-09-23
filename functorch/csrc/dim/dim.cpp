@@ -1581,6 +1581,7 @@ static PyObject* _dims(PyObject *self,
     auto c = mpy::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
     auto lasti = PyFrame_GetLasti(f.ptr());
     auto decoder = PyInstDecoder(c.ptr(), lasti);
+    Py_DECREF(c.ptr());    
     #if IS_PYTHON_3_11_PLUS
     // When py3.11 adapts bytecode lasti points to the precall
     // rather than the call instruction after it
