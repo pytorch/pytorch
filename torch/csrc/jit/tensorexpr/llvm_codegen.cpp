@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
