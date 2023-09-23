@@ -1,13 +1,15 @@
 import copy
 import dataclasses
 import io
-import re
 import pathlib
+import re
+
 import types
 import weakref
 import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
+
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
@@ -21,7 +23,6 @@ import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
-from torch.export import Constraint, _create_constraint
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.exported_program import ModuleCallEntry, ModuleCallSignature
@@ -31,6 +32,7 @@ from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.export import _create_constraint, _Dim, Constraint
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -62,7 +64,95 @@ from .passes.replace_view_ops_with_view_copy_ops_pass import (
 from .wrappers import _wrap_submodules
 
 
-def dynamic_dim(t: torch.Tensor, index: int):
+def export__RC__(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
+) -> ExportedProgram:
+    """
+    API for exporting with dynamic shape specifications instead of constraints.
+    It should be considered "release candidate" (RC), meant to replace `export`.
+
+    Here, `dynamic_shapes` is expected to be a (possibly partial) dict from
+    argument names of `f` to dynamic shape specifications, as follows:
+    - The dynamic shape of a tensor argument can be specified as:
+      - Either a dict from dynamic dimension indices to Dim types. It is not
+        required to include static dimension indices in this dict, but when
+        they are, they should be mapped to None.
+      - Or a tuple of Dim types or None. The Dim types correspond to dynamic
+        dimensions, whereas static dimensions are denoted by None.
+    - Arguments that are dicts or tuples of tensors are recursively specified
+      by using mappings or sequences of contained specifications.
+
+    See `export` for documentation of `f`, `args`, `kwargs` and return.
+    """
+    if dynamic_shapes is None:
+        return export(f, args, kwargs)
+
+    kwargs = kwargs if kwargs is not None else {}
+
+    from collections.abc import Mapping, Sequence
+    from typing import get_origin, get_args
+
+    def assoc_zip(combined_args, dynamic_shapes):
+        if isinstance(combined_args, (tuple, list)):
+            assert isinstance(dynamic_shapes, Sequence)
+            assert len(combined_args) == len(dynamic_shapes)
+            for i, shape in enumerate(dynamic_shapes):
+                yield from assoc_zip(combined_args[i], shape)
+        elif isinstance(combined_args, dict):
+            assert isinstance(dynamic_shapes, Mapping)
+            assert len(combined_args) == len(dynamic_shapes)
+            for k, shape in dynamic_shapes.items():
+                yield from assoc_zip(combined_args[k], shape)
+        elif dataclasses.is_dataclass(combined_args):
+            assert type(dynamic_shapes) == type(combined_args)
+            for f in dataclasses.fields(combined_args):
+                yield from assoc_zip(getattr(combined_args, f.name), getattr(dynamic_shapes, f.name))
+        elif isinstance(combined_args, torch.Tensor):
+            yield (combined_args, dynamic_shapes)
+
+    from collections import defaultdict
+    symbols = defaultdict(list)
+
+    def update_symbols(tensor, shape):
+        if isinstance(shape, dict):
+            for i, dim in shape.items():
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+                else:
+                    assert dim is None
+        elif isinstance(shape, (tuple, list)):
+            for i, dim in enumerate(shape):
+                if isinstance(dim, _Dim):
+                    symbols[dim.__name__].append(dynamic_dim(tensor, i, debug_name=dim.__name__))
+                else:
+                    assert dim is None
+        else:
+            assert shape is None
+
+    import inspect
+    signature = inspect.signature(f.forward) if isinstance(f, torch.nn.Module) else inspect.signature(f)
+    combined_args = signature.bind(*args, **kwargs).arguments
+
+    for tensor, shape in assoc_zip(combined_args, dynamic_shapes):
+        update_symbols(tensor, shape)
+
+    constraints = []
+    for dynamic_dims in symbols.values():
+        primary, *others = dynamic_dims
+        if others:
+            for other in others:
+                constraints.append(primary == other)
+        else:
+            constraints.append(primary)
+
+    return export(f, args, kwargs, constraints=constraints)
+
+
+def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     if not isinstance(t, torch.Tensor):
         raise UserError(
             UserErrorType.DYNAMIC_DIM,
@@ -89,6 +179,7 @@ def dynamic_dim(t: torch.Tensor, index: int):
         StrictMinMaxConstraint(
             vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
         ),
+        debug_name=debug_name,
     )
 
 
