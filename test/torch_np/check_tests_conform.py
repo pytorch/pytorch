@@ -33,12 +33,13 @@ def check(path):
 
         if textwrap.dedent(line).startswith("@parametrize"):
             # backtrack to check
-            #  report_violation(line, num, header="parametrize")
             nn = num
             for nn in range(num, -1, -1):
                 ln = src[nn]
                 if "class Test" in ln:
-                    break
+                    # hack: large indent => likely an inner class
+                    if len(ln) - len(ln.lstrip()) < 8:
+                        break
             else:
                 report_violation(line, num, "off-class parametrize")
             if not src[nn - 1].startswith("@instantiate_parametrized_tests"):

@@ -4251,7 +4251,7 @@ class TestIO(TestCase):
 @xfail  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestFromBuffer(TestCase):
-    @parametrize("byteorder", ["<", ">"])
+    @parametrize("byteorder", [subtest("<", name="less"), subtest(">", name="greater")])
     @parametrize("dtype", [float, int, complex])
     def test_basic(self, byteorder, dtype):
         dt = np.dtype(dtype).newbyteorder(byteorder)
