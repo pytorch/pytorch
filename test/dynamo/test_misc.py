@@ -51,10 +51,10 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
+    _constrain_range_for_size,
     constrain_range,
     constrain_unify,
-    _constrain_range_for_size,
+    ConstraintViolationError,
     expect_true,
     ShapeEnv,
 )
@@ -7439,7 +7439,11 @@ ShapeEnv not equal: field values don't match:
         constrain_range(5, min=2, max=10)
         constrain_unify(5, 5)
 
-        self.assertExpectedRaisesInline(AssertionError, lambda: _constrain_range_for_size(5, min=2, max=10), """can only constrain range for SymInt""")
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: _constrain_range_for_size(5, min=2, max=10),
+            """can only constrain range for SymInt""",
+        )
 
     def test_default_dtype_change(self):
         @torch.compile
