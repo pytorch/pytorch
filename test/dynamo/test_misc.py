@@ -7484,15 +7484,17 @@ ShapeEnv not equal: field values don't match:
             def a():
                 def x(z):
                     return y + z
+
                 return x
+
             return a()
+
         input1 = torch.rand([2])
         input2 = torch.rand([2])
-        res = forward(input1)(input2)       
+        res = forward(input1)(input2)
         # Should not have recompiled
         self.assertEqual(res, input1 + input2)
 
-        
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

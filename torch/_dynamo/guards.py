@@ -495,7 +495,9 @@ class GuardBuilder(GuardBuilderBase):
                     freevar = f"L['{freevar}']"
                     freevar_ref = self.arg_ref(freevar)
                     # TODO: This could be loosened in the future. For now, just check ID to be safe.
-                    code.append(f"___check_obj_id({freevar_ref}, {self.id_ref(self.get(freevar))})")
+                    code.append(
+                        f"___check_obj_id({freevar_ref}, {self.id_ref(self.get(freevar))})"
+                    )
                 self._produce_guard_code(guard, code)
             else:
                 self.FUNCTION_MATCH(guard)
