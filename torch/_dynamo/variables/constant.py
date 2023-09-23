@@ -2,13 +2,12 @@ import operator
 from typing import Dict, List
 
 import torch
-from torch._dynamo.source import GetItemSource
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder
-from ..utils import np
+from ..utils import istype, np
 from .base import typestr, VariableTracker
+
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
@@ -30,33 +29,6 @@ _type_to_assert_reason = {
 class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs):
-        source = kwargs.get("source", None)
-        is_literal = ConstantVariable.is_literal(value)
-        if not is_literal:
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
-
-        # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (list, tuple)):
-            items = []
-            for i, x in enumerate(value):
-                item_source = GetItemSource(source, i) if source else None
-                guards = (
-                    {item_source.make_guard(GuardBuilder.CONSTANT_MATCH)}
-                    if item_source
-                    else None
-                )
-                items.append(
-                    ConstantVariable.create(
-                        x,
-                        source=item_source,
-                        guards=guards,
-                    )
-                )
-            return variables.BaseListVariable.cls_for(type(value))(
-                items, regen_guards=True, **kwargs
-            )
-
         return ConstantVariable(value, **kwargs)
 
     def __init__(self, value, **kwargs):
@@ -65,9 +37,6 @@ class ConstantVariable(VariableTracker):
             for disallowed_type, reason in _type_to_assert_reason.items():
                 assert not isinstance(value, disallowed_type), reason
 
-        assert not isinstance(
-            value, (list, tuple)
-        ), "ConstantVariable(list) is banned - please create a ListVariable(items)"
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -102,7 +71,7 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (int, float, bool, type(None), str, Ellipsis.__class__):
+        if type(obj) in (int, float, bool, type(None), str):
             return True
         if type(obj) in (list, tuple, set, frozenset):
             return all(ConstantVariable.is_literal(x) for x in obj)
@@ -139,6 +108,17 @@ class ConstantVariable(VariableTracker):
         from .tensor import SymNodeVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if istype(self.value, tuple):
+            # empty tuple constant etc
+            return variables.TupleVariable(
+                items=self.unpack_var_sequence(tx), source=self.source, **options
+            ).call_method(tx, name, args, kwargs)
+
+        if istype(self.value, list):
+            return variables.ListVariable(
+                items=self.unpack_var_sequence(tx), source=self.source, **options
+            ).call_method(tx, name, args, kwargs)
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
