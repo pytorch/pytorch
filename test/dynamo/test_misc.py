@@ -69,6 +69,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, IS_FBCODE
 from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
+T = typing.TypeVar("T")
 
 
 # Specializes a test to run only if translation validation is set.
@@ -1131,6 +1132,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_getset_descriptor(self):
+        def fn(g, x):
+            return g.__get__(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        g = torch.Tensor.shape
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
+    def test_get_attr_function(self):
+        def fn(g, x):
+            return g(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        g = torch.Tensor.shape.__get__
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
     def test_user_getattribute(self):
         class MyObject:
             def __init__(self):
@@ -1339,6 +1364,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 # skip
                 # Did you know that tensor[ndarray_of_floats] works?
                 continue
+            if op is operator.imatmul and (t1_np or t2_np):
+                # skip
+                # in numpy, in place matmul does not work single
+                # dimensional arrays
+                continue
             t1 = torch.rand(5)
             if t1_np:
                 t1 = t1.numpy()
@@ -1389,6 +1419,25 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_numpy_force(self):
+        def fn(x):
+            return x.numpy(force=False)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
+        def fn(x):
+            return x.numpy(force=True)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        x = torch.randn(3, requires_grad=True)
+        res = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_numpy_recompilation_scalar(self):
         def fn(x, a):
@@ -2184,6 +2233,24 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_typing_typevar(self):
+        def fn(x):
+            def sumt(y: torch.Tensor) -> torch.Tensor:
+                return torch.sum(y)
+
+            def foo(c: typing.Callable[[T], T], y: T) -> T:
+                return c(y)
+
+            return foo(sumt, x)
+
+        x = torch.randn(3)
+        ref = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_typing_union_and_optional(self):
         def fn(x):
             a = torch.jit.annotate(typing.Dict[str, typing.Optional[torch.Tensor]], {})
@@ -2708,9 +2775,9 @@ def fn():
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": ConstantVariable(10), "b": ConstantVariable(20)}
+        d1 = {"a": ConstantVariable.create(10), "b": ConstantVariable.create(20)}
         d2 = collections.OrderedDict(
-            [("x", ConstantVariable(12)), ("y", ConstantVariable(22))]
+            [("x", ConstantVariable.create(12)), ("y", ConstantVariable.create(22))]
         )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
@@ -4645,6 +4712,8 @@ def fn():
         def fn():
             default_state = torch.default_generator.get_state()
             x = torch.rand([2, 3])
+            if default_state.dtype != "float32":
+                x = x * 2
             torch._dynamo.graph_break()
             torch.default_generator.set_state(default_state)
             y = torch.rand([2, 3])
@@ -4652,7 +4721,7 @@ def fn():
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
         x, y = opt_fn()
-        self.assertEqual(x, y)
+        self.assertEqual(x, y * 2)
 
     def test_torch_distributions_lazy_property(self):
         def fn(x):
@@ -7068,6 +7137,26 @@ def ___make_guard_fn():
         self.assertEqual(actual, expected)
         self.assertEqual(counter.op_count, 6)
 
+    def test_torch_device_python_type(self):
+        def fn(target):
+            target_device = target.device
+            self.assertIsInstance(target_device, torch.device)
+            a = torch.zeros(2, 3, device=target_device)
+            b = torch.zeros(2, 3, device=target_device)
+            c = torch.zeros(2, 3, device=target_device)
+            return a + b + c
+
+        from torch._dynamo.variables import TorchVariable
+
+        device = torch.device("cpu")
+        expected_variable = TorchVariable(device)
+        self.assertEqual(expected_variable.python_type(), type(device))
+
+        opt_func = torch._dynamo.optimize("inductor")(fn)
+        a = torch.tensor([2, 3], device=device)
+        res = opt_func(a)
+        self.assertIsInstance(res, torch.Tensor)
+
     def test_itertools_accumulate_tensors_default_sum(self):
         def fn(a, b, c, d, x):
             l = [a, b, c, d, x]
@@ -7210,6 +7299,9 @@ ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {}
+==> runtime_var_to_range: values don't match.
+  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
@@ -7404,6 +7496,20 @@ ShapeEnv not equal: field values don't match:
 """,
         )
         self._replay_and_check(main)
+
+    def test_default_dtype_change(self):
+        @torch.compile
+        def foo():
+            def inner(a, b, res_dtype):
+                print(a, b, res_dtype)
+                self.assertEqual(torch.result_type(a, b), res_dtype)
+
+            inner(torch.tensor(1, device="cpu"), 1.0, torch.get_default_dtype())
+
+        torch.set_default_dtype(torch.float)
+        foo()
+        torch.set_default_dtype(torch.double)
+        foo()
 
 
 class TestTracer(JitTestCase):

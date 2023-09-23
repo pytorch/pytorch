@@ -33,7 +33,12 @@ from . import (
     variables,
 )
 from .allowed_functions import is_allowed, is_builtin_constant
-from .bytecode_analysis import get_indexof, JUMP_OPNAMES, livevars_analysis
+from .bytecode_analysis import (
+    get_indexof,
+    JUMP_OPNAMES,
+    livevars_analysis,
+    propagate_line_nums,
+)
 from .bytecode_transformation import (
     cleaned_instructions,
     create_call_function,
@@ -43,6 +48,7 @@ from .bytecode_transformation import (
     is_generator,
     unique_id,
 )
+from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import ArgsMismatchError, BackendCompilerFailed, unimplemented, Unsupported
 from .guards import GuardBuilder
@@ -240,7 +246,7 @@ def _detect_and_normalize_assert_statement(
     if inst.opname != "RAISE_VARARGS":
         return False
 
-    self.push(ConstantVariable(error_msg))
+    self.push(ConstantVariable.create(error_msg))
 
     return True
 
@@ -811,7 +817,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(inst.argval, tuple) and not inst.argval:
             self.push(TupleVariable([]))
         else:
-            self.push(ConstantVariable(value=inst.argval))
+            self.push(ConstantVariable.create(value=inst.argval))
 
     def get_global_source(self, name):
         if self.output.global_scope is self.f_globals:
@@ -989,7 +995,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
         else:
             assert is_builtin_constant(val)
-            self.push(ConstantVariable(value=val))
+            self.push(ConstantVariable.create(value=val))
 
     def jump(self, inst):
         self.instruction_pointer = self.indexof[inst.target]
@@ -1026,7 +1032,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         exit, exc = self.popn(2)
         assert exc is None
         self.push(exc)
-        self.push(exit.call_function(self, [ConstantVariable(None)] * 3, {}))
+        self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst):
         self.popn(2)
@@ -1089,7 +1095,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ):
             # <non-None> is None
             self.push(
-                ConstantVariable(
+                ConstantVariable.create(
                     supported_const_comparison_ops[op](object(), right.value), **options
                 )
             )
@@ -1101,7 +1107,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         ):
             # constant fold
             self.push(
-                ConstantVariable(
+                ConstantVariable.create(
                     supported_any[op](
                         left.as_python_constant(), right.as_python_constant()
                     ),
@@ -1203,7 +1209,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def LOAD_ATTR(self, inst):
         obj = self.pop()
         result = BuiltinVariable(getattr).call_function(
-            self, [obj, ConstantVariable(inst.argval)], {}
+            self, [obj, ConstantVariable.create(inst.argval)], {}
         )
         self.push(result)
 
@@ -1221,7 +1227,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             self.output.guards.update(
                 BuiltinVariable(setattr)
-                .call_function(self, [obj, ConstantVariable(inst.argval), val], {})
+                .call_function(
+                    self, [obj, ConstantVariable.create(inst.argval), val], {}
+                )
                 .guards
             )
             return
@@ -1247,7 +1255,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         obj = self.pop()
         self.output.guards.update(
             BuiltinVariable(delattr)
-            .call_function(self, [obj, ConstantVariable(inst.argval)], {})
+            .call_function(self, [obj, ConstantVariable.create(inst.argval)], {})
             .guards
         )
 
@@ -1422,7 +1430,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             # MAKE_FUNCTION behavior actually changed in 3.11, see
             # https://github.com/python/cpython/pull/93189/
             assert hasattr(code.value, "co_qualname")
-            fn_name = ConstantVariable(value=code.value.co_qualname)
+            fn_name = ConstantVariable.create(value=code.value.co_qualname)
         defaults = None
         closure = None
         annotations = None
@@ -1540,11 +1548,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if (flags & 0x04) == 0x04:
             fmt_spec = self.pop()
         else:
-            fmt_spec = ConstantVariable("")
+            fmt_spec = ConstantVariable.create("")
 
         value = self.pop()
         if isinstance(value, SymNodeVariable):
-            value = ConstantVariable(str(value.sym_num))
+            value = ConstantVariable.create(str(value.sym_num))
         if (flags & 0x03) == 0x01:
             value = BuiltinVariable(str).call_function(self, [value], {})
         elif (flags & 0x03) == 0x02:
@@ -1552,7 +1560,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         elif (flags & 0x03) == 0x03:
             value = BuiltinVariable(ascii).call_function(self, [value], {})
 
-        fmt_var = ConstantVariable(
+        fmt_var = ConstantVariable.create(
             "{:" + fmt_spec.as_python_constant() + "}"
         ).add_options(fmt_spec)
 
@@ -1564,7 +1572,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             str_var = self.pop()
             assert isinstance(str_var, ConstantVariable)
             result = str_var.value + result
-        self.push(ConstantVariable(value=result))
+        self.push(ConstantVariable.create(value=result))
 
     def IS_OP(self, inst):
         assert inst.argval == 0 or inst.argval == 1
@@ -1610,7 +1618,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     def GET_LEN(self, inst):
         tos = self.stack[-1]
         if tos.is_python_constant():
-            self.push(ConstantVariable(len(tos.as_python_constant())))
+            self.push(ConstantVariable.create(len(tos.as_python_constant())))
         else:
             self.push(tos.call_method(self, "__len__", [], {}))
 
@@ -1618,9 +1626,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         tos = self.stack[-1]
         assert isinstance(tos, ConstDictVariable)
         if isinstance(tos.items, collections.abc.Mapping):
-            self.push(ConstantVariable(True))
+            self.push(ConstantVariable.create(True))
         else:
-            self.push(ConstantVariable(False))
+            self.push(ConstantVariable.create(False))
 
     def MATCH_SEQUENCE(self, inst):
         tos = self.stack[-1]
@@ -1629,9 +1637,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if isinstance(tos_value, collections.abc.Sequence) and not isinstance(
             tos_value, (str, bytes, bytearray)
         ):
-            self.push(ConstantVariable(True))
+            self.push(ConstantVariable.create(True))
         else:
-            self.push(ConstantVariable(False))
+            self.push(ConstantVariable.create(False))
 
     def MATCH_KEYS(self, inst):
         tos = self.stack[-1]
@@ -1643,11 +1651,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         if all(key in match_obj for key in keys):
             self.push(TupleVariable([match_obj[key] for key in keys]))
             if sys.version_info < (3, 11):
-                self.push(ConstantVariable(True))
+                self.push(ConstantVariable.create(True))
         else:
-            self.push(ConstantVariable(None))
+            self.push(ConstantVariable.create(None))
             if sys.version_info < (3, 11):
-                self.push(ConstantVariable(False))
+                self.push(ConstantVariable.create(False))
 
     def LOAD_ASSERTION_ERROR(self, inst):
         unimplemented("assert with non-string message")
@@ -1714,7 +1722,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         for name in kw_names:
             assert isinstance(name, str)
         assert self.kw_names is None
-        self.kw_names = ConstantVariable(value=kw_names)
+        self.kw_names = ConstantVariable.create(value=kw_names)
 
     def PUSH_NULL(self, inst):
         self.push(NullVariable())
@@ -2151,6 +2159,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(null_idxes),
         )
 
+        # Add original GraphModule context to the resume function to handle
+        # the case of a graph break while tracing a GraphModule
+        orig_graphmodule_maybe = code_context.get_context(self.f_code).get(
+            "orig_graphmodule", None
+        )
+        if orig_graphmodule_maybe is not None:
+            code_context.get_context(new_code)[
+                "orig_graphmodule"
+            ] = orig_graphmodule_maybe
+
         if new_code.co_freevars:
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
@@ -2274,7 +2292,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 unimplemented(f"unconverted arg {v}")
 
         code: types.CodeType = func.get_code()
-        if code.co_name in ("__setitem__", "__setattr__"):
+        if code.co_name in ("__setitem__", "__setattr__") and not (
+            args is not None
+            and len(args) > 0
+            and isinstance(args[0], variables.CustomizedDictVariable)
+        ):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""
@@ -2293,6 +2315,17 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             trace_call_log.debug("%s", LazyString(get_trace_call_log_str))
         log.debug("INLINING %s%s", code, suffix)
+
+        # Detect inline GraphModule calls in order to propgate node metadata,
+        # by checking if the first argument (self) is a variable tracking a GraphModule.
+        if args and isinstance(args[0], NNModuleVariable):
+            module = parent.output.get_submodule(args[0].module_key)
+            if isinstance(module, torch.fx.GraphModule):
+                # The inline call might not actually be a call to `forward`,
+                # but it is enough to add a context for `forward` in case it is called.
+                code_context.get_context(module.forward.__code__)[
+                    "orig_graphmodule"
+                ] = module
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2350,6 +2383,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
+        instructions = cleaned_instructions(code)
+        propagate_line_nums(instructions)
         super().__init__(
             output=parent.output,
             f_locals={},
@@ -2357,7 +2392,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             f_builtins=f_builtins,
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
-            instructions=cleaned_instructions(code),
+            instructions=instructions,
             code_options={k: getattr(code, k) for k in dir(code)},
             f_code=code,
             export=parent.export,
@@ -2472,7 +2507,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
         # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
-        self.push(ConstantVariable(None))
+        self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):
         tos = self.stack[-1]

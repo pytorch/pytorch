@@ -202,6 +202,16 @@ capture_scalar_outputs = False
 # (these are separated for historical reasons).
 capture_dynamic_output_shape_ops = False
 
+# By default, dynamo will treat all ints as backed SymInts, which means (1) it
+# will wait to see the int change over multiple runs before generalizing and
+# (2) it will still always 0/1 specialize an int.  When true, this knob
+# forces dynamo to treat _length_per_key and _offset_per_key on
+# KeyedJaggedTensor from torchrec as size-like unbacked SymInts, so that
+# they (1) generalize immediately and (2) unsoundly never compare equal to
+# 0/1.  This is not on by default as AOTAutograd/Inductor cannot currently
+# compile this code; however, this can be useful for export.
+force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
+
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
@@ -219,6 +229,8 @@ skip_fsdp_guards = True
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
 # dynamo will not notice and will execute whichever version you first compiled.
+# TODO(janimesh) - Remove as once internal is not reliant on this flag. This
+# flag has no meaning now after nn_module_guard is introduced.
 skip_nnmodule_hook_guards = True
 
 # If True, raises exception if TorchDynamo is called with a context manager
@@ -263,9 +275,6 @@ translation_validation_timeout = int(
 translation_validation_no_bisect = (
     os.environ.get("TORCHDYNAMO_TRANSLATION_NO_BISECT", "0") == "1"
 )
-# Disables ShapeEnv event recording.
-# See: [Note: Recording ShapeEnv Events]
-dont_record_shape_env_events = False
 # Checks whether replaying ShapeEnv events on a freshly constructed one yields
 # the a ShapeEnv with the same state. This should be used only in testing.
 check_shape_env_recorded_events = False
@@ -331,6 +340,10 @@ _autograd_backward_strict_mode_banned_ops = [
 _autograd_backward_strict_mode_banned_ops.extend(
     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
 )
+
+# support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
+# WARNING: this is an experimental flag and is subject to change.
+_experimental_support_context_fn_in_torch_utils_checkpoint = False
 
 
 from .config_utils import install_config_module

@@ -45,7 +45,7 @@ from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
-from .cuda_properties import current_device, get_device_capability
+from .cuda_properties import current_device
 
 log = logging.getLogger(__name__)
 
@@ -160,18 +160,6 @@ def do_bench(*args, **kwargs):
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
-
-
-@functools.lru_cache(None)
-def has_triton() -> bool:
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
-
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
 
 
 @functools.lru_cache(None)
@@ -1259,35 +1247,64 @@ class Placeholder(enum.Enum):
 aot_inductor_launcher = """
     #include <c10/cuda/CUDAStream.h>
     #include <torch/csrc/inductor/aot_runtime/interface.h>
+    #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
-    void run(
-            std::vector<at::Tensor>& input_tensors,
-            std::vector<at::Tensor>& output_tensors) {
+    class RAIIModelContainer {
+    public:
+        RAIIModelContainer() {
+            AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerCreate(
+                &container_handle,
+                1 /*num_models*/,
+                false /*is_cpu*/,
+                nullptr /*cubin_dir*/));
+        }
+
+        ~RAIIModelContainer() {
+            AOTI_RUNTIME_ERROR_CODE_CHECK(
+                AOTInductorModelContainerDelete(container_handle));
+        }
+
+        AOTInductorModelContainerHandle get() const {
+            return container_handle;
+        }
+
+    private:
         AOTInductorModelContainerHandle container_handle;
-        AOT_INDUCTOR_ERROR_CHECK(
-            AOTInductorModelContainerCreate(&container_handle, 1 /*num_models*/))
+    };
+
+    // Global instance
+    RAIIModelContainer model_container;
+
+    std::vector<at::Tensor> run(std::vector<at::Tensor>& input_tensors) {
+        auto input_handles =
+            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(input_tensors);
+
+        // For outputs, we only allocate a vector to hold returned tensor handles,
+        // not allocating the actual output tensor storage here
+        size_t num_outputs;
+        AOTI_RUNTIME_ERROR_CODE_CHECK(
+            AOTInductorModelContainerGetNumOutputs(
+                model_container.get(),
+                &num_outputs));
+        std::vector<AtenTensorHandle> output_handles(num_outputs);
+
         const auto& cuda_stream = c10::cuda::getCurrentCUDAStream();
         const auto stream_id = cuda_stream.stream();
         AOTInductorStreamHandle stream_handle =
             reinterpret_cast<AOTInductorStreamHandle>(stream_id);
-        AOTInductorTensorHandle inputs_handle =
-            reinterpret_cast<AOTInductorTensorHandle>(input_tensors.data());
-        AOTInductorTensorHandle outputs_handle =
-            reinterpret_cast<AOTInductorTensorHandle>(output_tensors.data());
-        std::vector<AOTInductorParamShape> output_shapes(
-            output_tensors.size(), AOTInductorParamShape());
-        AOTInductorProxyExecutorHandle proxy_executor_handle = nullptr;
 
-        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerRun(
-            container_handle,
-            inputs_handle,
+        AOTIProxyExecutorHandle proxy_executor_handle = nullptr;
+
+        AOTI_RUNTIME_ERROR_CODE_CHECK(AOTInductorModelContainerRun(
+            model_container.get(),
+            input_handles.data(),
             input_tensors.size(),
-            outputs_handle,
-            output_tensors.size(),
-            output_shapes.data(),
+            output_handles.data(),
+            output_handles.size(),
             stream_handle,
             proxy_executor_handle));
 
-        AOT_INDUCTOR_ERROR_CHECK(AOTInductorModelContainerDelete(container_handle));
+        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+            output_handles.data(), output_handles.size());
     }
 """

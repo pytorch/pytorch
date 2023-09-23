@@ -60,6 +60,7 @@ else:
         globals()[name] = getattr(torch._C._dynamo.eval_frame, name)
 
 from . import config, convert_frame, external_utils, skipfiles, utils
+from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import DynamoCallback
@@ -337,6 +338,14 @@ class _TorchDynamoContext:
             return self.compiler_config
 
         fn = innermost_fn(fn)
+
+        # add context containing GraphModule to any GraphModule forward functions
+        if isinstance(fn, torch.fx.GraphModule):
+            # Assume that the underlying node metadata of `fn`,
+            # a GraphModule instance, accurately represents
+            # all instances of type(fn).
+            code_context.get_context(fn.forward.__code__)["orig_graphmodule"] = fn
+
         # Optimize the forward method of torch.nn.Module object
         if isinstance(fn, torch.nn.Module):
             mod = fn
@@ -1216,14 +1225,10 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
-            if forced_specializations:
-                msg = (
-                    "Some dynamic dimensions need to be specialized because "
-                    "the constraints inferred for them are too complex to specify.\n"
-                    f"{forced_specializations}\n{msg}"
-                )
+            msg = dim_constraints.prettify_results(
+                original_signature, constraint_violation_error, forced_specializations
+            )
             if constraint_violation_error:
                 constraint_violation_error.args = (
                     constraint_violation_error.args[0] + msg,
@@ -1401,7 +1406,6 @@ class TorchPatcher:
 
         disabled_multi_tensor_opt_modules = {
             adamax,
-            nadam,
             radam,  # data-dependent control flow
             sgd,  # for now, until we can speed up compilation (this affects the benchmarks)
         }
@@ -1455,10 +1459,6 @@ class TorchPatcher:
 
             # disable future hooking
             opt.step.hooked = True
-
-        torch._dynamo.variables.lists._register_dynamo_list_to_tree_spec()
-        torch._dynamo.variables.lists._register_dynamo_tuple_to_tree_spec()
-        torch._dynamo.variables.dicts._register_dynamo_dict_to_tree_spec()
 
     @staticmethod
     def suppress_torch_distributed_warnings(fn):

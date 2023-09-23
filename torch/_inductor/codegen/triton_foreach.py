@@ -1,9 +1,12 @@
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Dict, List, Tuple
+
+from sympy import Integer
 
 from .. import metrics
+from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
@@ -13,8 +16,12 @@ from .triton_utils import config_of, signature_to_meta
 
 @dataclass
 class PartitionState:
-    partitions: List[Tuple]
-    cur_partition: List[Tuple]
+    partitions: List[
+        List[Tuple[List[SchedulerNode], Tuple[Integer, ...], Integer, Integer]]
+    ]
+    cur_partition: List[
+        Tuple[List[SchedulerNode], Tuple[Integer, ...], Integer, Integer]
+    ]
     cur_count: int
 
     def finalize(self):
@@ -43,7 +50,9 @@ class ForeachKernel(Kernel):
         assert len(subkernel_nodes) >= 1
 
         partition_state_1d = PartitionState([], [], 0)
-        yelem_to_partition_state_2d = defaultdict(lambda: PartitionState([], [], 0))
+        yelem_to_partition_state_2d: Dict[Integer, PartitionState] = defaultdict(
+            lambda: PartitionState([], [], 0)
+        )
 
         for node in subkernel_nodes:
             fused_nodes = node.get_nodes()
@@ -144,10 +153,10 @@ class ForeachKernel(Kernel):
 
     def jit_line(self):
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
-        index_dtype = "tl.int32" if can_use_32bit else "tl.int64"
+        size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         _, _, signature = self.args.python_argdefs()
         triton_meta = {
-            "signature": signature_to_meta(signature, size_dtype=can_use_32bit),
+            "signature": signature_to_meta(signature, size_dtype=size_dtype),
             "device": V.graph.scheduler.current_device.index,
             "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
