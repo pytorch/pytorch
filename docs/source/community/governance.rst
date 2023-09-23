@@ -312,9 +312,9 @@ discuss.
 relatively minor, a pull request on GitHub can be opened up immediately
 for review and merge by the project committers. For larger changes,
 please open an issue to make a proposal to discuss prior. Please also
-see the :doc:`PyTorch Contributor
-Guide <contribution_guide>` for contribution
-guidelines.
+see the `PyTorch Contributor
+Wiki <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>` for contribution
+for a walkthrough.
 
 **Q: Can I become a committer on the project?** Unfortunately, the
 current commit process to PyTorch involves an interaction with Facebook

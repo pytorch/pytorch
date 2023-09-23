@@ -2,15 +2,15 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc)
 from torch._utils import is_compiling
 from typing import List, Optional
 
 __all__ = ["ASGD", "asgd"]
 
-def _to_tensor(x):
+def _to_tensor(x, device=None):
     if not isinstance(x, torch.Tensor):
-        return torch.tensor(x)
+        return torch.tensor(x, device=device)
 
     return x
 
@@ -26,11 +26,15 @@ class ASGD(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
+        capturable: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+
+        if foreach is False and capturable:
+            raise ValueError("Capturable not supported with single tensor ASGD")
 
         defaults = dict(
             lr=lr,
@@ -41,6 +45,7 @@ class ASGD(Optimizer):
             foreach=foreach,
             maximize=maximize,
             differentiable=differentiable,
+            capturable=capturable,
         )
         super().__init__(params, defaults)
 
@@ -50,6 +55,7 @@ class ASGD(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("maximize", False)
             group.setdefault("differentiable", False)
+            group.setdefault("capturable", False)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -81,9 +87,9 @@ class ASGD(Optimizer):
                 state = self.state[p]
                 # State initialization
                 if len(state) == 0:
-                    state["step"] = torch.tensor(0.0)
-                    state["eta"] = torch.tensor(group["lr"])
-                    state["mu"] = torch.tensor(1.0)
+                    state["step"] = torch.zeros((), device=p.device)
+                    state["eta"] = torch.tensor(group["lr"], device=p.device)
+                    state["mu"] = torch.ones((), device=p.device)
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
                     )
@@ -131,6 +137,7 @@ class ASGD(Optimizer):
                 foreach=group["foreach"],
                 maximize=group["maximize"],
                 differentiable=group["differentiable"],
+                capturable=group["capturable"],
             )
 
         return loss
@@ -152,6 +159,7 @@ ASGD.__doc__ = fr"""Implements Averaged Stochastic Gradient Descent.
         {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
+        {_capturable_doc} For ASGD, capturable is only supported when foreach is True.
 
     .. _Acceleration of stochastic approximation by averaging:
         https://dl.acm.org/citation.cfm?id=131098
@@ -171,6 +179,7 @@ def asgd(
     foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
+    capturable: bool = False,
     *,
     lambd: float,
     lr: float,
@@ -192,6 +201,8 @@ def asgd(
     if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_asgd
     else:
+        if capturable and not is_compiling():
+            raise RuntimeError("Capturable not supported with single tensor ASGD")
         func = _single_tensor_asgd
 
     func(
@@ -208,6 +219,7 @@ def asgd(
         weight_decay=weight_decay,
         maximize=maximize,
         differentiable=differentiable,
+        capturable=capturable,
     )
 
 
@@ -226,12 +238,8 @@ def _single_tensor_asgd(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
 ):
-    def _to_tensor(x):
-        if not isinstance(x, torch.Tensor):
-            return torch.tensor(x)
-        return x
-
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -286,6 +294,7 @@ def _multi_tensor_asgd(
     weight_decay: float,
     maximize: bool,
     differentiable: bool,
+    capturable: bool,
 ):
 
     if len(params) == 0:
@@ -294,8 +303,8 @@ def _multi_tensor_asgd(
     assert not differentiable, "_foreach ops don't support autograd"
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, axs, mus, etas, state_steps])
-    for ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
-         grouped_etas, grouped_state_steps), _) in grouped_tensors.values():
+    for ((device, _), ((grouped_params, grouped_grads, grouped_axs, grouped_mus,
+         grouped_etas, grouped_state_steps), _)) in grouped_tensors.items():
         if maximize:
             grouped_grads = torch._foreach_neg(grouped_grads)
 
@@ -311,32 +320,65 @@ def _multi_tensor_asgd(
         # update step
         torch._foreach_add_(grouped_state_steps, 1)
 
+        # intermediate = grad + param * lambd
         if weight_decay != 0:
-            # Re-use the intermediate memory (grouped_grads) already allocated for maximize
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
+                intermediate = grouped_grads
             else:
-                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+                intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-        # decay term
-        eta = _get_value(grouped_etas[0])
-        torch._foreach_mul_(grouped_params, 1 - lambd * eta)
+            torch._foreach_add_(intermediate, grouped_params, alpha=lambd)
+        else:
+            intermediate = torch._foreach_add(grouped_grads, grouped_params, alpha=lambd)
 
-        # update parameter
-        torch._foreach_add_(grouped_params, grouped_grads, alpha=-eta)
+        # update param
+        # param * (1 - lambd * eta) - eta * grad
+        # => param - param * lambd * eta - eta * grad
+        # => param - eta * intermediate
+        torch._foreach_addcmul_(grouped_params, intermediate, grouped_etas, value=-1)
+        del intermediate
 
-        # averaging
-        for i in range(len(grouped_axs)):
-            if is_compiling() or grouped_mus[i].item() != 1:
-                grouped_axs[i].add_(grouped_params[i].sub(grouped_axs[i]).mul(grouped_mus[i]))
-            else:
-                grouped_axs[i].copy_(grouped_params[i])
+        # update grouped_axs
+        # averaging: ax = ax + mu * (param - ax)
+        # Note (mlazos): We can't use lerp here since it requires weight to be float64
+        # and our grouping code requires dtypes to match for all tensors in a group (and it should, since
+        # we use the mus in other places)
+        # all dtypes need to match, so we could introduce a cast in a loop
+        # but since this only adds one additional kernel launch, this looks like the cleaner
+        # and faster solution
+        intermediate = torch._foreach_sub(grouped_params, grouped_axs)
+        torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
+        del intermediate
 
-        # update eta and mu
-        for i in range(len(grouped_mus)):
-            new_eta = _to_tensor(
-                lr / (1 + lambd * lr * _get_value(grouped_state_steps[i]) ** alpha)
-            )
-            grouped_etas[i].copy_(new_eta)
-            new_mu = _to_tensor(1 / max(1, _get_value(grouped_state_steps[i]) - t0))
-            grouped_mus[i].copy_(new_mu)
+        if capturable:
+            # update grouped_mus
+            new_mus = torch._foreach_sub(grouped_state_steps, t0)
+            torch._foreach_maximum_(new_mus, 1.0)
+            torch._foreach_reciprocal_(new_mus)
+            torch._foreach_copy_(grouped_mus, new_mus)
+            del new_mus
+
+            # update eta = lr / (1 + lambd * lr * step^alpha)
+            new_etas = torch._foreach_pow(grouped_state_steps, alpha)
+            torch._foreach_mul_(new_etas, lambd)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_add_(new_etas, 1)
+            torch._foreach_reciprocal_(new_etas)
+            torch._foreach_mul_(new_etas, lr)
+            torch._foreach_copy_(grouped_etas, new_etas)
+        else:
+            step = grouped_state_steps[0].item()
+            new_etas = []
+            new_mus = []
+
+            for i in range(len(grouped_mus)):
+                new_eta = _to_tensor(
+                    lr / (1 + lambd * lr * step ** alpha), device=device
+                )
+                new_etas.append(new_eta)
+                new_mu = _to_tensor(1 / max(1, step - t0), device=device)
+                new_mus.append(new_mu)
+
+            torch._foreach_copy_(grouped_etas, new_etas)
+            torch._foreach_copy_(grouped_mus, new_mus)

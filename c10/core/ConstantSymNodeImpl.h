@@ -50,6 +50,10 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   }
   c10::SymNode eq(const c10::SymNode& other) override;
   c10::SymNode ne(const c10::SymNode& other) override;
+  c10::SymNode ge(const c10::SymNode& other) override;
+  c10::SymNode le(const c10::SymNode& other) override;
+  c10::SymNode lt(const c10::SymNode& other) override;
+  c10::SymNode gt(const c10::SymNode& other) override;
   std::string str() override {
     if (is_int()) {
       return std::to_string(c10::get<int64_t>(value_));
@@ -70,6 +74,12 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
     } else {
       return c10::nullopt;
     }
+  }
+  bool is_constant() override {
+    return true;
+  }
+  bool is_symbolic() override {
+    return false;
   }
 
  private:

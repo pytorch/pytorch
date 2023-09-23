@@ -19,18 +19,27 @@ def triton_config(num_stages, num_warps, **kwargs):
 
 
 def filtered_configs(
-    m: int, n: int, k: int, configs: List[Tuple[int, int, int, int, int]]
+    m: int,
+    n: int,
+    k: int,
+    configs: List[Tuple[int, int, int, int, int]],
+    has_int8_tensor=False,
 ):
     """Heuristic to shrink configs when they are bigger than the input size"""
-    m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), 16)
-    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), 16)
-    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), 16)
+
+    # According to https://github.com/openai/triton/issues/2156#issuecomment-1695897424
+    # it's safer to use at least [32, 32] block size for int8/uint8
+    # tensors
+    min_block_size = 32 if has_int8_tensor else 16
+    m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), min_block_size)
+    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), min_block_size)
+    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), min_block_size)
     used = set()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
-        block_m = min(block_m, m)
-        block_n = min(block_n, n)
-        block_k = min(block_k, k)
+        block_m = max(min(block_m, m), min_block_size)
+        block_n = max(min(block_n, n), min_block_size)
+        block_k = max(min(block_k, k), min_block_size)
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
         if (block_m, block_n, block_k, num_stages, num_warps) not in used:

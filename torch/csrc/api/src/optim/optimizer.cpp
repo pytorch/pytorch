@@ -109,7 +109,7 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   }
   for (const auto& p : param_group_.params()) {
     TORCH_CHECK(
-        state_.count(c10::guts::to_string(p.unsafeGetTensorImpl())) == 0,
+        state_.count(p.unsafeGetTensorImpl()) == 0,
         "some parameters appear in more than one parameter group");
   }
   param_groups_.emplace_back(std::move(param_group_));
@@ -171,12 +171,12 @@ const std::vector<OptimizerParamGroup>& Optimizer::param_groups()
   return param_groups_;
 }
 
-ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
-Optimizer::state() noexcept {
+ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& Optimizer::
+    state() noexcept {
   return state_;
 }
 
-const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
 Optimizer::state() const noexcept {
   return state_;
 }
