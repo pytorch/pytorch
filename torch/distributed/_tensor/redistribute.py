@@ -202,7 +202,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=input.shape,
             dtype=input.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=input.requires_grad,
             stride=input.stride(),
         )
 
@@ -229,7 +229,11 @@ class Redistribute(torch.autograd.Function):
                 target_placements.append(Replicate())
             else:
                 target_placements.append(target)
-        target_spec = DTensorSpec(previous_spec.mesh, tuple(target_placements))
+        target_spec = DTensorSpec(
+            previous_spec.mesh,
+            tuple(target_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         local_tensor = grad_output._local_tensor
         output = redistribute_local_tensor(local_tensor, current_spec, target_spec)
@@ -239,7 +243,7 @@ class Redistribute(torch.autograd.Function):
             target_spec.placements,
             shape=grad_output.shape,
             dtype=grad_output.dtype,
-            requires_grad=local_tensor.requires_grad,
+            requires_grad=grad_output.requires_grad,
             stride=grad_output.stride(),
         )
 

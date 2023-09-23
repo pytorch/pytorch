@@ -678,6 +678,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return getDefaultBackend()->hasHooks();
   }
 
+  const std::string& getGroupName() const;
+  void setGroupName(const std::string& name);
+  void enableCollectivesTiming();
+
  protected:
   // Implementations of this interface need to call this to setup
   // appropriate logging etc.

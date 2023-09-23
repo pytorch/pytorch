@@ -1356,6 +1356,28 @@ class CPUReproTests(TestCase):
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
 
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_scatter_using_atomic_add(self):
+        def fn(a, dim, index, b):
+            return aten.scatter(a, dim, index, b, reduce="add")
+
+        inps = (
+            torch.randn(5, 29, 13),
+            2,
+            torch.tensor([[[3, 5, 7, 9]]]),
+            torch.randn(1, 1, 10),
+        )
+
+        fn_opt = torch.compile()(fn)
+        with config.patch({"cpp.fallback_scatter_reduce_sum": False}):
+            code = run_and_get_cpp_code(fn_opt, *inps)
+            FileCheck().check("atomic_add").run(code)
+
+            self.assertEqual(
+                fn(*inps),
+                fn_opt(*inps),
+            )
+
     @unittest.skipIf(
         not codecache.valid_vec_isa_list(), "Does not support vectorization"
     )
@@ -2443,6 +2465,51 @@ class CPUReproTests(TestCase):
         x = torch.randn(8, 64, 56, 56)
         y = torch.randn(8, 8, 3136, 8)
         self.common(fn, (x, y))
+
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_no_default_contiguous_input(self):
+        mod = torch.nn.Sequential(torch.nn.Linear(16, 16)).eval()
+        temp = torch.randn(1, 16, 1, 1)
+        v = torch.as_strided(temp, [1, 16], [0, 1], 0)
+        self.assertTrue(v.is_contiguous())
+        with torch.no_grad():
+            self.common(
+                mod,
+                (v,),
+            )
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            mod = mod.to(torch.bfloat16)
+            v = v.to(torch.bfloat16)
+            with torch.no_grad():
+                self.common(
+                    mod,
+                    (v,),
+                )
+
+    @patch("torch.cuda.is_available", lambda: False)
+    @config.patch(freezing=True)
+    def test_linear_with_reshape(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16, bias=False)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return x.view(4, 4, 4)
+
+        mod = M().eval()
+        v = torch.randn(4, 16)
+        with torch.no_grad():
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(
+                mod,
+                (v,),
+            )
+            assert metrics.generated_kernel_count == 0
 
 
 if __name__ == "__main__":

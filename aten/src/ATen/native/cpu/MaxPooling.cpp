@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/MaxPooling.h>
 #include <c10/util/irange.h>
@@ -31,25 +31,30 @@ void max_pool1d_impl(
     Tensor& output,
     const Tensor& input,
     const PoolingParams1D& p) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, input.scalar_type(), "max_pool1d_impl", [&] {
-    const Tensor in = input.contiguous();
-    scalar_t* const OP = output.data_ptr<scalar_t>();
-    const scalar_t* const IP = in.data_ptr<scalar_t>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      input.scalar_type(),
+      "max_pool1d_impl",
+      [&] {
+        const Tensor in = input.contiguous();
+        scalar_t* const OP = output.data_ptr<scalar_t>();
+        const scalar_t* const IP = in.data_ptr<scalar_t>();
 
-    // Value used for padding
-    scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
-        ? -std::numeric_limits<scalar_t>::infinity()
-        : std::numeric_limits<scalar_t>::lowest();
+        // Value used for padding
+        scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
+            ? -std::numeric_limits<scalar_t>::infinity()
+            : std::numeric_limits<scalar_t>::lowest();
 
-    at::parallel_for(0, p.NB * p.NC, 0, [&](int64_t begin, int64_t end) {
-      for (const auto it : c10::irange(begin, end)) {
-        scalar_t* op = OP + it * p.OW;
-        const scalar_t* ip = IP + it * p.IW;
-        std::fill_n(op, p.OW, FILL);
-        max_pool1d_kernel(op, ip, p);
-      }
-    });
-  });
+        at::parallel_for(0, p.NB * p.NC, 0, [&](int64_t begin, int64_t end) {
+          for (const auto it : c10::irange(begin, end)) {
+            scalar_t* op = OP + it * p.OW;
+            const scalar_t* ip = IP + it * p.IW;
+            std::fill_n(op, p.OW, FILL);
+            max_pool1d_kernel(op, ip, p);
+          }
+        });
+      });
 }
 
 } // namespace

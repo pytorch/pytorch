@@ -8460,6 +8460,56 @@ get_out().sum().backward()
         _test_op(torch.view_as_complex, torch.rand(2, 2), ())
         _test_op(torch.view_as_real, torch.rand(2, 2, dtype=torch.cfloat), ())
 
+    def test_setup_context_when_forward_has_default_args(self):
+        class PowFunction(Function):
+            @staticmethod
+            def forward(x, y=3):
+                return torch.pow(x, y)
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                x, y = inputs
+                ctx.save_for_backward(x)
+                ctx.y = y
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        class PowFunctionWithClassmethod(Function):
+            @classmethod
+            def forward(cls, x, y=3):
+                return torch.pow(x, y)
+
+            @classmethod
+            def setup_context(cls, ctx, inputs, output):
+                x, y = inputs
+                ctx.save_for_backward(x)
+                ctx.y = y
+
+            @classmethod
+            def backward(cls, ctx, gO):
+                x, = ctx.saved_tensors
+                y = ctx.y
+                return gO * y * torch.pow(x, y - 1), None
+
+        x = torch.tensor(2.0, requires_grad=True)
+
+        y = torch.tensor(8.0)
+        y_expected = torch.tensor(12.0)
+
+        y1 = PowFunction.apply(x)
+        y1_expected, = torch.autograd.grad(y1, x)
+
+        y2 = PowFunctionWithClassmethod.apply(x)
+        y2_expected, = torch.autograd.grad(y2, x)
+
+        self.assertEqual(y, y1)
+        self.assertEqual(y_expected, y1_expected)
+        self.assertEqual(y, y2)
+        self.assertEqual(y_expected, y2_expected)
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -9988,6 +10038,27 @@ class TestAutogradDeviceType(TestCase):
             error_msg = 'This view is the output of a function that returns multiple views.'
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 s1.mul_(s2)
+
+    def test_inplace_on_view_undefined_grad_output(self, device):
+        a = torch.tensor([1.], requires_grad=True)
+        c = a.clone()
+        v = c[:]
+        b = torch.tensor(1., requires_grad=True)
+
+        class InplaceFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, other):
+                ctx.mark_dirty(x)
+                return x.mul_(2)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return grad * 2, None
+
+        out = InplaceFunc.apply(v, b)
+        out.backward()
+        self.assertIsNone(b.grad)
+        self.assertEqual(a.grad.item(), 2)
 
     @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_mv_grad_stride_0(self, device):
