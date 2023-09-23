@@ -15,7 +15,7 @@ import sympy
 
 import torch
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters, identity
+from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
@@ -337,7 +337,7 @@ class TritonTemplateKernel(TritonKernel):
         self.body.clear()
         self.indexing_code.clear()
 
-    def call_kernel(self, name: str, node: ir.TritonTemplateBuffer):
+    def call_kernel(self, name: str, node: Optional[ir.IRNode] = None):
         wrapper = V.graph.wrapper_code
         _, call_args, _ = self.args.python_argdefs()
         call_args = [str(a) for a in call_args]
@@ -880,9 +880,14 @@ class AlgorithmSelectorCache(PersistentCache):
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(
-                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
-            )
+            if result:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+                )
+            else:
+                sys.stderr.write(
+                    f"  {choice.name} {result:.4f} ms <DIVIDED BY ZERO ERROR>\n"
+                )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
@@ -900,13 +905,17 @@ class AlgorithmSelectorCache(PersistentCache):
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
-        return rand_strided(
-            V.graph.sizevars.size_hints(node.get_size()),
-            V.graph.sizevars.size_hints(node.get_stride()),
-            device=node.get_device(),
-            dtype=node.get_dtype(),
-            extra_size=node.layout.offset,
-        )
+
+        # preserve rng states to avoid the rand_strided call below changes
+        # the rng states for the real model code.
+        with preserve_rng_state():
+            return rand_strided(
+                V.graph.sizevars.size_hints(node.get_size()),
+                V.graph.sizevars.size_hints(node.get_stride()),
+                device=node.get_device(),
+                dtype=node.get_dtype(),
+                extra_size=node.layout.offset,
+            )
 
     @staticmethod
     def key_of(node):
