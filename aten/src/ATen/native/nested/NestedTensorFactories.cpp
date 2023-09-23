@@ -193,5 +193,42 @@ std::vector<at::Tensor> NestedTensor_unbind(
   return result_tensors;
 }
 
+Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  TORCH_CHECK(dim == 0, "narrow(): only dim=0 supported for nested tensors, but got: ", dim);
+  TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative");
+  auto cur_size = self.sym_size(dim);
+  TORCH_CHECK_INDEX(
+      ((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size))).expect_true(__FILE__, __LINE__),
+      "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ",
+      start, ")");
+  if (start < 0) {
+    start = start + cur_size;
+  }
+  TORCH_SYM_CHECK(start.sym_le(cur_size - length),
+      "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  auto *nt_impl = get_nested_tensor_impl(self);
+  TORCH_CHECK(self.is_contiguous(), "narrow(): only contiguous nested tensors supported");
+  auto buffer = nt_impl->get_unsafe_storage_as_tensor();
+  auto nested_sizes = nt_impl->get_nested_sizes();
+  auto nested_strides = nt_impl->get_nested_strides();
+  auto storage_offsets = nt_impl->get_storage_offsets();
+  auto storage_offsets_ptr = storage_offsets.data_ptr<int64_t>();
+
+  auto start_int = start.expect_int();
+  auto length_int = length.expect_int();
+  auto buffer_offset = storage_offsets_ptr[start_int];
+
+  nested_sizes = nested_sizes.narrow(0, start_int, length_int);
+  nested_strides = nested_strides.narrow(0, start_int, length_int);
+  storage_offsets = storage_offsets.narrow(0, start_int, length_int);
+
+  return at::detail::make_tensor<NestedTensorImpl>(
+      c10::TensorImpl::VIEW,
+      buffer.narrow(0, buffer_offset, buffer.numel() - buffer_offset),
+      nested_sizes,
+      nested_strides,
+      storage_offsets);
+}
+
 } // namespace native
 } // namespace at

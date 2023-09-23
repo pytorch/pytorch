@@ -45,10 +45,6 @@ set(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory"
 set(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
 set(MEM_EFF_ATTENTION_CUDA_SOURCES)
 
-if(USE_CUDA)
-  list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
-endif()
-
 set(TH_LINK_STYLE STATIC)
 set(TH_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src

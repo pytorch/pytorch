@@ -7,7 +7,7 @@ import torch  # noqa: F401
 import torch.nn as nn
 import torch._dynamo as torchdynamo
 from functorch import make_fx
-from functorch.experimental import functionalize
+from functorch.experimental import functionalize, control_flow
 from torch import Tensor
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._dynamo.eval_frame import is_dynamo_supported
@@ -108,6 +108,11 @@ class FeedForwardBlock(nn.Module):
         y = self.dropout2(y)
         return y
 
+class ControlFlow(nn.Module):
+
+    def forward(self, pred: Tensor, x: Tensor) -> Tensor:
+        return control_flow.cond(pred, lambda x: x.sin(), lambda x: x.cos(), (x,))
+
 
 class VerifierTest(TestCase):
 
@@ -205,6 +210,14 @@ class VerifierTest(TestCase):
         with self.assertRaises(SpecViolationError):
             verifier(egm)
         self.assertFalse(verifier.is_valid(egm))
+
+    @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
+    def test_verifier_control_flow_success(self) -> None:
+        m = ControlFlow()
+        gm = torch._export.export(m, (torch.tensor(True), torch.randn(3, 4))).graph_module
+        # No error should be raised
+        verifier = ATenDialectVerifier()
+        verifier(gm)
 
 
 if __name__ == '__main__':

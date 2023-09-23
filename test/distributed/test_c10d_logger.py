@@ -116,7 +116,11 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             error_msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
-            self.assertEqual(len(error_msg_dict), 7)
+
+            self.assertEqual(len(error_msg_dict), 9)
+
+            self.assertIn("pg_name", error_msg_dict.keys())
+            self.assertEqual("None", error_msg_dict["pg_name"])
 
             self.assertIn("func_name", error_msg_dict.keys())
             self.assertEqual("broadcast", error_msg_dict["func_name"])
@@ -125,6 +129,10 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
 
             self.assertIn("backend", error_msg_dict.keys())
             self.assertEqual("nccl", error_msg_dict["backend"])
+
+            # In this test case, group_size = world_size, since we don't have multiple processes on one node.
+            self.assertIn("group_size", error_msg_dict.keys())
+            self.assertEqual(str(self.world_size), error_msg_dict["group_size"])
 
             self.assertIn("world_size", error_msg_dict.keys())
             self.assertEqual(str(self.world_size), error_msg_dict["world_size"])
@@ -147,7 +155,10 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             msg_dict = json.loads(
                 re.search("({.+})", captured.output[0]).group(0).replace("'", '"')
             )
-            self.assertEqual(len(msg_dict), 7)
+            self.assertEqual(len(msg_dict), 9)
+
+            self.assertIn("pg_name", msg_dict.keys())
+            self.assertEqual("None", msg_dict["pg_name"])
 
             self.assertIn("func_name", msg_dict.keys())
             self.assertEqual("_dummy_sleep", msg_dict["func_name"])
@@ -156,6 +167,10 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
 
             self.assertIn("backend", msg_dict.keys())
             self.assertEqual("nccl", msg_dict["backend"])
+
+            # In this test case, group_size = world_size, since we don't have multiple processes on one node.
+            self.assertIn("group_size", msg_dict.keys())
+            self.assertEqual(str(self.world_size), msg_dict["group_size"])
 
             self.assertIn("world_size", msg_dict.keys())
             self.assertEqual(str(self.world_size), msg_dict["world_size"])
@@ -168,8 +183,8 @@ class C10dErrorLoggerTest(MultiProcessTestCase):
             self.assertIn(str(dist.get_rank()), msg_dict["local_rank"])
 
             self.assertIn("time_spent", msg_dict.keys())
-            time_ns = re.findall(r'\d+', msg_dict["time_spent"])[0]
-            self.assertLess(5, float(time_ns))
+            time_ns = re.findall(r"\d+", msg_dict["time_spent"])[0]
+            self.assertEqual(5, int(float(time_ns) / pow(10, 9)))
 
 
 if __name__ == "__main__":

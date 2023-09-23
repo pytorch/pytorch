@@ -214,7 +214,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
   const int64_t nb_values = 1000;
   HMap map;
   for (const auto i : c10::irange(nb_values)) {
-    map[c10::guts::to_string(i)] = i;
+    map[std::to_string(i)] = i;
     auto begin = map.begin();
     for (int64_t j = 0; j <= i; ++j, begin++) {
       TORCH_INTERNAL_ASSERT(begin->second == j);
@@ -239,8 +239,7 @@ TEST(OrderedPreservingDictTest, test_range_erase) {
     if (i >= 10 && i < 220) {
       continue;
     }
-    auto exp_it =
-        std::pair<std::string, std::int64_t>(c10::guts::to_string(i), i);
+    auto exp_it = std::pair<std::string, std::int64_t>(std::to_string(i), i);
     TORCH_INTERNAL_ASSERT(*it == exp_it);
     ++it;
   }
@@ -313,13 +312,13 @@ TEST(OrderedPreservingDictTest, test_copy_constructor_and_operator) {
   const std::size_t nb_values = 100;
   HMap map;
   for (const auto i : c10::irange(nb_values)) {
-    map[c10::guts::to_string(i)] = c10::guts::to_string(i);
+    map[std::to_string(i)] = std::to_string(i);
   }
 
   HMap map_copy = map;
   HMap map_copy2(map);
   HMap map_copy3;
-  map_copy3[c10::guts::to_string(0)] = c10::guts::to_string(0);
+  map_copy3[std::to_string(0)] = std::to_string(0);
 
   map_copy3 = map;
 

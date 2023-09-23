@@ -64,22 +64,6 @@ def _get_output_names(gm: torch.fx.GraphModule) -> List[str]:
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
-    def test_replace_broken_ops(self) -> None:
-        x = torch.randn([2, 3, 4, 5])
-        model: torch.nn.Linear = torch.nn.Linear(5, 5)
-
-        def f(inp: torch.Tensor) -> torch.Tensor:
-            return model(inp)
-
-        ep = export(f, (x,))._transform(ReplaceViewOpsWithViewCopyOpsPass())
-
-        count_after = 0
-        for node in ep.graph.nodes:
-            if node.target == torch.ops.aten.view.default:
-                count_after += 1
-        self.assertEqual(count_after, 0)
-        self.assertTrue(torch.allclose(ep(x), f(x), atol=1e-3, rtol=0.01))
-
     def test_runtime_assert_one_dim(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):

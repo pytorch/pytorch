@@ -285,9 +285,22 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         _fn.__annotations__ = fn.__annotations__
         _fn.__annotations__["out"] = out_type
         _fn.__annotations__["return"] = return_type
+
+        # Add an indicator attribute that can be used in special cases
+        # where having a function wrapped by `out_wrapper` is not desirable e.g.
+        # jit
+        _fn._torch_decompositions_out_wrapper = f"This function is wrapped by {out_wrapper.__module__}.out_wrapper"  # type: ignore[attr-defined]
+
         return _fn
 
     return _out_wrapper
+
+
+def _maybe_remove_out_wrapper(fn: Callable):
+    return inspect.unwrap(
+        fn,
+        stop=lambda f: not hasattr(f, "_torch_decompositions_out_wrapper"),
+    )
 
 
 def backwards_not_supported(prim):
