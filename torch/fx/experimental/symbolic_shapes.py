@@ -80,6 +80,7 @@ def uninteresting_files():
     import torch._inductor.sizevars
     mods = [
         sys.modules[__name__],
+        torch.fx.experimental.recording,
         torch,
         torch._inductor.sizevars,
     ]
