@@ -3470,13 +3470,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(fn(x), opt_fn(x)))
 
     def test_no_bad_ref_cycles_to_code(self):
-        import weakref
-        import sys
         import gc
+        import sys
+        import weakref
 
         def fn(x, y):
             return x + y
-        
+
         co = weakref.ref(fn.__code__)
         opt_fn = torch.compile(fn)
         opt_fn(torch.rand([1]), torch.rand([1]))
