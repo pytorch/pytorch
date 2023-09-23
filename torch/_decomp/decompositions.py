@@ -4131,11 +4131,6 @@ def scaled_dot_product_flash_attention(
     )
 
 
-@register_decomposition([aten.trunc])
-def trunc(self: Tensor, **kwargs) -> Tensor:
-    return torch.where(self > 0, torch.floor(self), torch.ceil(self))
-
-
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
