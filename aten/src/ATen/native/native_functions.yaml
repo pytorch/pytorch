@@ -1692,6 +1692,7 @@
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: copy
+  tags: core
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
   variants: method
@@ -2082,7 +2083,7 @@
   structured_delegate: div.out_mode
   dispatch:
     SparseCPU, SparseCUDA: div_sparse
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str? rounding_mode) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2123,7 +2124,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: div
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str? rounding_mode) -> Tensor(a!)
   variants: method
