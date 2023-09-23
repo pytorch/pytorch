@@ -51,10 +51,10 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
+    _constrain_range_for_size,
     constrain_range,
     constrain_unify,
-    _constrain_range_for_size,
+    ConstraintViolationError,
     expect_true,
     ShapeEnv,
 )
@@ -7219,7 +7219,10 @@ def ___make_guard_fn():
         self.assertEqual(len(main.events), 0)
 
         if torch.fx.experimental.validator.translation_validation_enabled():
-            from torch.fx.experimental.symbolic_shapes import SHAPEENV_EVENT_KEY, CURRENT_NODE_KEY
+            from torch.fx.experimental.symbolic_shapes import (
+                CURRENT_NODE_KEY,
+                SHAPEENV_EVENT_KEY,
+            )
 
             # Check that we don't store any recording metadata on nodes
             # from the symbolic shape FX graph.
@@ -7468,7 +7471,11 @@ ShapeEnv not equal: field values don't match:
         constrain_range(5, min=2, max=10)
         constrain_unify(5, 5)
 
-        self.assertExpectedRaisesInline(AssertionError, lambda: _constrain_range_for_size(5, min=2, max=10), """can only constrain range for SymInt""")
+        self.assertExpectedRaisesInline(
+            AssertionError,
+            lambda: _constrain_range_for_size(5, min=2, max=10),
+            """can only constrain range for SymInt""",
+        )
 
     def test_default_dtype_change(self):
         @torch.compile
