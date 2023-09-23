@@ -7315,11 +7315,43 @@ def ___make_guard_fn():
         self.assertEqual(list(eager), list(compiled))
         self.assertEqual(counter.frame_count, 1)
 
-    def _replay_and_check(self, shape_env: ShapeEnv):
-        replayed = replay_shape_env_events(shape_env.events)
-        shape_env.check_equal(replayed)
+    def test_shape_env_no_recording(self):
+        main = ShapeEnv(should_record_events=False)
 
-    @onlyIfTranslationValidation
+        # The main ShapeEnv should have no event recorded.
+        self.assertEqual(len(main.events), 0)
+
+        # Call create_symbolic_sizes_strides_storage_offset on both of them.
+        r = main.create_symbolic_sizes_strides_storage_offset(
+            torch.randn(3, 2), ConstantSource("x")
+        )
+
+        # Create a guard: size[0] == 3 (call evaluate_expr)
+        #   - +1 guard entry
+        #   - +1 replacement entry
+        size = r[0]
+        bool(size[0] == 3)
+
+        # The main ShapeEnv should remain with no event recorded.
+        self.assertEqual(len(main.events), 0)
+
+        if torch.fx.experimental.validator.translation_validation_enabled():
+            from torch.fx.experimental.symbolic_shapes import (
+                CURRENT_NODE_KEY,
+                SHAPEENV_EVENT_KEY,
+            )
+
+            # Check that we don't store any recording metadata on nodes
+            # from the symbolic shape FX graph.
+            for n in main.graph.nodes:
+                self.assertFalse(SHAPEENV_EVENT_KEY in n.meta)
+                self.assertFalse(CURRENT_NODE_KEY in n.meta)
+
+    def _replay_and_check(self, shape_env: ShapeEnv):
+        if shape_env.should_record_events:
+            replayed = replay_shape_env_events(shape_env.events)
+            shape_env.check_equal(replayed)
+
     def test_shape_env_equal_empty(self):
         main, other = ShapeEnv(), ShapeEnv()
         main.check_equal(other)

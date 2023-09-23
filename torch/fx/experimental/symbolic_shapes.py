@@ -2604,8 +2604,10 @@ class ShapeEnv:
 
     def add_fx_node_metadata(self, node: torch.fx.Node) -> None:
         from torch._dynamo.utils import get_current_node
-        node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
-        node.meta[CURRENT_NODE_KEY] = get_current_node()
+
+        if self.should_record_events:
+            node.meta[SHAPEENV_EVENT_KEY] = self.last_event_index()
+            node.meta[CURRENT_NODE_KEY] = get_current_node()
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
