@@ -349,6 +349,272 @@ class TestExport(TestCase):
                 self.assertTrue("source_fn" in node.meta)
                 self.assertTrue("nn_module_stack" in node.meta)
 
+    def test_export_api_with_dynamic_shapes(self):
+        from torch.export import Dim, dims, export
+
+        # pass dynamic shapes of inputs [args]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch = Dim("batch")
+        efoo = export(foo, inputs, dynamic_shapes={k: {0: batch} for k in ["x", "y"]})
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [kwargs]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3),)
+        kwinputs = {"y": torch.randn(10, 3, 4)}
+        batch = Dim("batch")
+        efoo = export(
+            foo, inputs, kwinputs, dynamic_shapes={k: {0: batch} for k in ["x", "y"]}
+        )
+        self.assertEqual(efoo(*inputs, **kwinputs).shape, foo(*inputs, **kwinputs).shape)
+
+        # pass dynamic shapes of inputs [partial, error]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3),)
+        kwinputs = {"y": torch.randn(10, 3, 4)}
+        batch = Dim("batch")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "batch was inferred to be a constant(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "batch = None  # 10"
+            ),
+        ):
+            export(foo, inputs, kwinputs, dynamic_shapes={"x": {0: batch}, "y": None})
+
+        # pass dynamic shapes of inputs [module]
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.matmul(x, y)
+
+        foo = Foo()
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch = Dim("batch")
+        efoo = export(foo, inputs, dynamic_shapes={"x": {0: batch}, "y": {0: batch}})
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [bounds, mostly shared]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 3, 3), torch.randn(10, 3, 3))
+        batch = Dim("batch", min=8, max=64)
+        size = Dim("size")
+        efoo = export(
+            foo,
+            inputs,
+            dynamic_shapes={
+                "x": (batch, size, size),
+                "y": (batch, size, size),
+            },
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in efoo.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, s1, s1])", "torch.Size([s0, s1, s1])"],
+        )
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [multiple, mostly distinct]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch, M, K, N = dims("batch", "M", "K", "N")
+        efoo = export(
+            foo,
+            inputs,
+            dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in efoo.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, s1, s2])", "torch.Size([s0, s2, s5])"],
+        )
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [dict]
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                return torch.matmul(inputs["x"], inputs["y"])
+
+        foo = Foo()
+        inputs = ({"x": torch.randn(10, 2, 3), "y": torch.randn(10, 3, 4)},)
+        batch = Dim("batch")
+        efoo = export(
+            foo, inputs, dynamic_shapes={"inputs": {k: {0: batch} for k in ["x", "y"]}}
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in efoo.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+        )
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [list]
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                return torch.matmul(inputs[0], inputs[1])
+
+        foo = Foo()
+        inputs = ((torch.randn(10, 2, 3), torch.randn(10, 3, 4)),)
+        batch = Dim("batch")
+        efoo = export(
+            foo, inputs, dynamic_shapes={"inputs": [{0: batch} for _ in range(2)]}
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in efoo.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+        )
+        self.assertEqual(efoo(*inputs).shape, foo(*inputs).shape)
+
+        # pass dynamic shapes of inputs [dataclass]
+        @dataclass
+        class DataClass:
+            a: Tensor
+            b: Tensor
+
+        register_dataclass_as_pytree_node(DataClass)
+
+        class Foo(torch.nn.Module):
+            def forward(self, inputs):
+                return torch.matmul(inputs.a, inputs.b)
+
+        foo = Foo()
+        inputs = (DataClass(a=torch.randn(10, 2, 3), b=torch.randn(10, 3, 4)),)
+        batch = Dim("batch")
+        efoo = export(
+            foo, inputs, dynamic_shapes={"inputs": DataClass(a={0: batch}, b={0: batch})}
+        )
+        self.assertEqual(
+            [
+                str(node.meta["val"].shape)
+                for node in efoo.graph_module.graph.nodes
+                if node.op == "placeholder"
+            ],
+            ["torch.Size([s0, 2, 3])", "torch.Size([s0, 3, 4])"],
+        )
+
+        # pass dynamic shapes of inputs [distinct, error]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch, M, K1, K2, N = dims("batch", "M", "K1", "K2", "N")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated \\(K2\\)!(.*\n)*.*"
+                "K2.*and.*K1.*must always be equal(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "K2 = K1"
+            ),
+        ):
+            export(
+                foo,
+                inputs,
+                dynamic_shapes={"x": (batch, M, K1), "y": (batch, K2, N)},
+            )
+
+        # pass dynamic shapes of inputs [specialized, error]
+        def foo(x, y):
+            return torch.matmul(x, y)
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch, M, K1, N = dims("batch", "M", "K1", "N")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated \\(K1\\)!(.*\n)*.*"
+                "K1 was inferred to be a constant(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "K1 = None  # 3"
+            ),
+        ):
+            export(
+                foo,
+                inputs,
+                dynamic_shapes={"x": (batch, M, K1), "y": (batch, None, N)},
+            )
+
+        # pass dynamic shapes of inputs [guards, error]
+        def foo(x, y):
+            if x.shape[0] < 16 and y.shape[1] % 3 == 0:
+                return torch.matmul(x, y)
+            else:
+                return x + y
+
+        inputs = (torch.randn(10, 2, 3), torch.randn(10, 3, 4))
+        batch, M, K, N = dims("batch", "M", "K", "N")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError,
+            (
+                "Constraints violated \\(batch\\)!(.*\n)*.*"
+                "Not all values of batch.*satisfy the generated guard(.*\n)*.*"
+                "Specializations unexpectedly required \\(K\\)!(.*\n)*.*"
+                "K.*specialized.*because the guards generated for it are too complex(.*\n)*.*"
+                "Suggested fixes:(.*\n)*.*"
+                "batch = Dim\\('batch', max=15\\)(.*\n)*.*"
+                "K = None  # 3"
+            ),
+        ):
+            export(
+                foo,
+                inputs,
+                dynamic_shapes={"x": (batch, M, K), "y": (batch, K, N)},
+            )
+
+    def test_dynamic_shapes_spec_with_pytree(self):
+        from torch.export import Dim, export
+        from torch.utils._pytree import tree_map
+
+        inputs = {
+            "tensor": torch.randn(3),
+            "dict_of_tensors": {k: torch.randn(3) for k in ["A", "B", "C", "D"]},
+            "list_of_tensors": [torch.randn(3) for _ in range(4)],
+        }
+
+        batch = Dim("batch")
+        # uniformly specify dynamic shapes for all inputs
+        spec = tree_map(lambda x: {0: batch}, inputs)
+
+        def foo(inputs):
+            return (
+                inputs["tensor"]
+                + inputs["dict_of_tensors"]["A"]
+                + inputs["list_of_tensors"][0]
+            )
+
+        ep = export(foo, (inputs,), dynamic_shapes={"inputs": spec})
+        input_shapes = [
+            str(node.meta["val"].shape)
+            for node in ep.graph_module.graph.nodes
+            if node.op == "placeholder"
+        ]
+        self.assertEqual(len(input_shapes), 9)
+        self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
     def test_error_does_not_reference_eager_fallback(self):
         def fn_ddo(x):
