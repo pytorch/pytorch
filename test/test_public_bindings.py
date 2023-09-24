@@ -199,6 +199,7 @@ class TestPublicBindings(TestCase):
             "SUM",
             "SymFloat",
             "SymInt",
+            "TensorBase",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
