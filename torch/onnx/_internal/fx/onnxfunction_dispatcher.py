@@ -116,6 +116,7 @@ class OnnxFunctionDispatcher:
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
+        default_set_kwargs: Set[str],
         diagnostic_context: diagnostics.DiagnosticContext,
     ) -> Union["onnxscript.OnnxFunction", "onnxscript.TracedOnnxFunction"]:
         """Dispatches an ONNX function based on the given FX node, arguments, and keyword arguments.
@@ -142,6 +143,7 @@ class OnnxFunctionDispatcher:
             default_and_custom_functions,
             onnx_args,
             onnx_kwargs,
+            default_set_kwargs,
             diagnostic_context,
         )
 
@@ -209,6 +211,7 @@ class OnnxFunctionDispatcher:
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         onnx_kwargs: Dict[str, fx_type_utils.Argument],
+        default_set_kwargs: Set[str],
         diagnostic_context: diagnostics.DiagnosticContext,
     ):
         """Find the perfect/nearest matched OnnxFunction for the given FX node, arguments, and keyword arguments.
@@ -218,6 +221,7 @@ class OnnxFunctionDispatcher:
                 custom ones appearing after the default ones.
             onnx_args: Arguments organized in PyTorch inputs way.
             onnx_kwargs: Keyword arguments organized in PyTorch inputs way.
+            default_set_kwargs: Set of the keyword arguments having the default value.
             diagnostic_context: The diagnostic context to use for reporting errors.
 
             Returns:
@@ -235,7 +239,7 @@ class OnnxFunctionDispatcher:
 
             # NOTE: 1. If the perfect match is found, return the function
             if function_opschema.perfect_match_inputs(
-                diagnostic, onnx_args, onnx_kwargs
+                diagnostic, onnx_args, onnx_kwargs, default_set_kwargs
             ):
                 return symbolic_function.onnx_function
             # Record the match score for the nearest match if it's not the perfect match
@@ -582,6 +586,7 @@ class _OnnxSchemaChecker:
             Optional[Union[fx_type_utils.TensorLike, str, int, float, bool, list]]
         ],
         kwargs: Dict[str, fx_type_utils.Argument],
+        default_set_kwargs: Set[str],
     ) -> bool:
         """Check if the inputs perfectly match the OpSchema requirements.
 
@@ -600,6 +605,7 @@ class _OnnxSchemaChecker:
             diagnostic: The diagnostic to use for logging detailed info.
             args: The input arguments organized in PyTorch inputs way.
             kwargs: The input keyword arguments organized in PyTorch inputs way.
+            default_set_kwargs: Set of the keyword arguments having the default value.
 
         Returns:
             True if the inputs match the requirements, False otherwise.
@@ -638,6 +644,12 @@ class _OnnxSchemaChecker:
                     )
                 diagnostic.info("The function is not a nearest match candidate.")
                 is_perfect_match = False
+
+            # Try to remove attributes with default values.
+            while len(function_attributes) > len(self.attributes):
+                last_attr = list(function_attributes.keys())[-1]
+                if last_attr in default_set_kwargs:
+                    del function_attributes[last_attr]
 
             if set(function_attributes) != set(self.attributes):
                 with diagnostic.log_section(

@@ -5,7 +5,7 @@ import logging
 import operator
 import re
 import types
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import onnxscript  # type: ignore[import]
 from onnxscript.function_libs.torch_lib import (  # type: ignore[import]
@@ -279,7 +279,7 @@ def _fill_tensor_shape_type(
 @_beartype.beartype
 def _fill_in_default_kwargs(
     node: torch.fx.Node,
-) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument]]:
+) -> Tuple[List[fx_type_utils.Argument], Dict[str, fx_type_utils.Argument], Set[str]]:
     """Find and Fill in the not provided kwargs with default values."""
 
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
@@ -295,6 +295,7 @@ def _fill_in_default_kwargs(
     # same as the order of arguments in TorchScript op.
     complete_args: List[fx_type_utils.Argument] = []
     complete_kwargs: Dict[str, fx_type_utils.Argument] = {}
+    default_set_kwargs: Set[str] = set()
 
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
@@ -307,8 +308,9 @@ def _fill_in_default_kwargs(
             else:
                 # Get default from schema.
                 complete_kwargs[expected_arg.name] = expected_arg.default_value
+                default_set_kwargs.add(expected_arg.name)
 
-    return complete_args, complete_kwargs
+    return complete_args, complete_kwargs, default_set_kwargs
 
 
 @_beartype.beartype
@@ -635,9 +637,13 @@ class FxOnnxInterpreter:
             fx_name_to_onnxscript_value[node.name] = output
             return
 
+        default_and_custom_functions = onnxfunction_dispatcher.get_function_overloads(
+            node, self.diagnostic_context
+        )
+
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
-        fx_args, fx_kwargs = _fill_in_default_kwargs(node)
+        fx_args, fx_kwargs, default_set_kwargs = _fill_in_default_kwargs(node)
         onnx_args, onnx_kwargs = _wrap_fx_args_as_onnxscript_args(
             fx_args,
             fx_kwargs,
@@ -651,6 +657,7 @@ class FxOnnxInterpreter:
             node=node,
             onnx_args=onnx_args,
             onnx_kwargs=onnx_kwargs,
+            default_set_kwargs=default_set_kwargs,
             diagnostic_context=self.diagnostic_context,
         )
         with onnxscript.evaluator.default_as(onnxscript_tracer):
