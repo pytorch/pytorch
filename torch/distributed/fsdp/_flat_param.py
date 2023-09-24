@@ -1279,23 +1279,8 @@ class FlatParamHandle:
             self._use_unsharded_flat_param(unsharded_flat_param)
             return
 
-        if self.in_forward:
-            self._unshard_in_forward(unshard_stream)
-        elif self.in_backward:
-            self._unshard_in_backward(unshard_stream)
-        else:
-            raise NotImplementedError(
-                "Unsharding parameter out of forward and backward is not implemented."
-            )
-
-    def _unshard_in_forward(
-        self,
-        unshard_stream: torch.Stream,
-    ):
-        if self._limit_all_gathers:
+        if self.in_forward and self._limit_all_gathers:
             # All-gather rate limiting coming into effect via stream wait
-            # Current stream is unshard stream as we call `handle.unshard` in
-            # its with-stream context
             tensor_free_event = self._free_event_queue.dequeue_if_needed()
             if tensor_free_event:
                 tensor, event = tensor_free_event
@@ -1307,18 +1292,11 @@ class FlatParamHandle:
                 # storage into the unshard stream's pool, and potentially reuse
                 # it for the current unshard
 
-        with self._device_handle.stream(unshard_stream):
-            unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-            padded_unsharded_flat_param = self._all_gather_flat_param(
-                unsharded_flat_param
-            )
+        # Note: backward's rate limiting occurs in `_post_backward_reshard`.
+        # Forward's rate limiting occurs here because we need to stash the
+        # unshard buffer.
 
-        self._use_unsharded_flat_param(padded_unsharded_flat_param)
-
-    def _unshard_in_backward(
-        self,
-        unshard_stream: torch.Stream,
-    ):
+        # The following is common between forward and backward
         with self._device_handle.stream(unshard_stream):
             # Allocate buffer on unshard stream
             unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
@@ -1326,6 +1304,8 @@ class FlatParamHandle:
                 unsharded_flat_param
             )
 
+        # Split_and_view on default stream so that its backward op is also on
+        # default stream
         self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def needs_unshard(self) -> bool:
