@@ -780,6 +780,12 @@ def _post_backward_reshard(
     handle: FlatParamHandle,
     *unused: Any,
 ) -> None:
+    if state.limit_all_gathers:
+        # If limit_all_gather is on, we ask the unshard stream to wait for the
+        # default stream, before we free the unshard buffer (because it was
+        # allocated in the unshard stream)
+        state._unshard_stream.wait_stream(state._device_handle.current_stream())
+
     free_unsharded_flat_param = _should_free_in_backward(state, handle)
     _reshard(state, handle, free_unsharded_flat_param)
 

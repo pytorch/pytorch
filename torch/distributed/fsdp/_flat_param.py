@@ -1319,17 +1319,9 @@ class FlatParamHandle:
         self,
         unshard_stream: torch.Stream,
     ):
-        if self._limit_all_gathers:
-            # Allocate buffer on default stream
-            unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-            # Unshard stream wait for default stream
-            unshard_stream.wait_stream(self._device_handle.current_stream())  # type: ignore[attr-defined]
-        else:
-            # Allocate buffer on unshard stream
-            with self._device_handle.stream(unshard_stream):
-                unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-
         with self._device_handle.stream(unshard_stream):
+            # Allocate buffer on unshard stream
+            unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
             padded_unsharded_flat_param = self._all_gather_flat_param(
                 unsharded_flat_param
             )
@@ -1759,7 +1751,9 @@ class FlatParamHandle:
             # e.g. last two layers of forward
             # If it is, unstash it from queue
             self._free_event_queue.pop(unsharded_flat_param)
-            # Then direct free
+            # Then direct free, because we have asked unshard stream to wait for
+            # default stream before calling `reshard`. See the wait in
+            # `_post_backward_reshard`.
             _free_storage(unsharded_flat_param)
 
     def post_reshard(self):
