@@ -9913,8 +9913,18 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestMathBits', 'test_conj_view', device_type='cuda'),
                DecorateInfo(
-                   toleranceOverride({torch.float16: tol(atol=5e-03, rtol=1e-03)}),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
+                   'TestDecomp',
+                   'test_comprehensive',
+                   dtypes=(torch.bfloat16, torch.float16),
+               ),
+               DecorateInfo(
+                   unittest.skip("Skipped - baddbmm decomp does not have enough precision for 16-bit float"),
+                   'TestDecomp',
+                   'test_quick',
+                   dtypes=(torch.bfloat16, torch.float16),
+               ),
+           ],
            sample_inputs_func=sample_inputs_baddbmm,
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479

@@ -67,9 +67,6 @@ def mps_ops_grad_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float16],
         'polygammapolygamma_n_0': [torch.float16],
 
-        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
-        'addr': [torch.float16],
-
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'sgn': [torch.float16, torch.float32],
@@ -586,7 +583,6 @@ def mps_ops_modifier(ops):
         'nn.functional.max_unpool1d': None,
         'nn.functional.max_unpool2d': None,
         'nn.functional.max_unpool3d': None,
-        'nn.functional.mish': None,
         'nn.functional.multi_margin_loss': None,
         'nn.functional.multilabel_margin_loss': None,
         'nn.functional.pdist': None,

@@ -1035,7 +1035,7 @@ class TestDimConstraints(TestCase):
         from torch.fx.experimental.symbolic_shapes import DimConstraints
 
         s = Symbol("s", positive=True, integer=True)
-        dim_constraints = DimConstraints({}, {}, set())
+        dim_constraints = DimConstraints({}, {}, set(), {})
         dim_constraints._congruences[s] = {
             (s / 2) % 2,
             (s / 2) % 8,
@@ -1130,7 +1130,7 @@ class TestDimConstraints(TestCase):
         }
         var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
         marked_dynamic = {s0, s1, s5, s6}
-        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic)
+        dim_constraints = DimConstraints(symbol_to_source, var_to_val, marked_dynamic, {})
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
         dim_constraints.add_equality(src4, s0)
