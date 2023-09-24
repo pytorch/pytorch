@@ -6,7 +6,12 @@
 namespace c10 {
 namespace impl {
 
-enum class TorchDispatchModeKey : int8_t { FAKE, PROXY, NUM_MODE_KEYS };
+enum class TorchDispatchModeKey : int8_t {
+  FAKE,
+  PROXY,
+  FUNCTIONAL,
+  NUM_MODE_KEYS
+};
 
 struct C10_API TorchDispatchModeTLS {
   // This API is NOT invariant safe.

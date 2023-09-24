@@ -64,6 +64,9 @@ post_grad_custom_post_pass = None
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
+efficient_conv_bn_eval_fx_passes = False
+
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
@@ -72,6 +75,9 @@ batch_fusion = True
 
 # enable reordering pass
 reordering = True
+
+# Scale down RBLOCK for better occupancy
+dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
@@ -112,6 +118,9 @@ save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
+# If autotuning in subprocess, whether to use multiple devices
+autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
@@ -430,6 +439,9 @@ class aot_inductor:
     # If not specified, a temp directory will be created under the default caching path
     output_path = ""
 
+    # Wether to codegen abi compatible model.so
+    abi_compatible = is_fbcode()
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -508,6 +520,9 @@ class trace:
 
     # SVG figure showing post-fusion graph
     graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+
+    # SVG figure showing fx with fusion
+    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
