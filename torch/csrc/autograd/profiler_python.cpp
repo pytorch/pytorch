@@ -52,8 +52,6 @@ struct CodeLocation {
     auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
     filename_ = THPUtils_unpackStringView(code->co_filename).data();
     name_ = THPUtils_unpackStringView(code->co_name).data();
-    // Safe as long as the code object is kept alive somewhere else.
-    Py_DECREF(code.get());
   }
 
   bool operator==(const CodeLocation& other) const {
@@ -324,7 +322,7 @@ typename Config<C>::cls_t set_class(
     const typename Config<C>::key_t& key,
     const typename Config<C>::ephemeral_t& frame) {
   if (C10_UNLIKELY(!cache.location_.has_value())) {
-    auto code = THPCodeObjectPtr(_PyFrame_GetCodeBorrow(frame));
+    auto code = THPCodeObjectPtr(PyFrame_GetCode(frame));
     TORCH_INTERNAL_ASSERT(code.get() == getCode<C>());
     cache.location_ = PyCallKey(frame);
     value_cache->store<CallType::PyCall>(*cache.location_, no_ephemeral_t());
