@@ -4268,7 +4268,7 @@ class TestFromBuffer(TestCase):
         # See also gh-21612
         if isinstance(obj, str):
             # @parametrize breaks with bytes objects
-            obj = bytes(obj, enconding=latin-1)
+            obj = bytes(obj, enconding="latin-1")
         new = np.frombuffer(obj)
         assert new.base is obj
 
