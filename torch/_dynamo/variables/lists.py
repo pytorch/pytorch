@@ -65,7 +65,6 @@ class BaseListVariable(VariableTracker):
         super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
-
         # Sometimes, we know that we have passed in the guards from the items in the list
         if regen_guards:
             self.guards.update(VariableTracker.propagate(items)["guards"])
@@ -74,6 +73,10 @@ class BaseListVariable(VariableTracker):
 
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
+
+    @property
+    def value(self):
+        return self.as_python_constant()
 
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
