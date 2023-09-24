@@ -34,6 +34,9 @@ struct TORCH_API MPSHooksInterface {
   virtual bool isOnMacOS13orNewer(unsigned minor = 0) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual bool isOnMacOS14orNewer(unsigned minor = 0) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   virtual const Generator& getDefaultMPSGenerator() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
