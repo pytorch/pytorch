@@ -1521,10 +1521,14 @@ class BuiltinVariable(VariableTracker):
                 return True
 
         if isinstance(it, ListIteratorVariable):
-            return SymNodeVariable.create(
-                tx,
-                tx.output.create_proxy(
-                    "call_function", all_impl, *proxy_args_kwargs([it], {})
-                ),
-                sym_num=None,
-            )
+            try:
+                # Constant fold
+                return ConstantVariable.create(all(it.as_python_constant()))
+            except NotImplementedError:
+                return SymNodeVariable.create(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function", all_impl, *proxy_args_kwargs([it], {})
+                    ),
+                    sym_num=None,
+                )
