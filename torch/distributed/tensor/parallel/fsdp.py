@@ -54,6 +54,7 @@ def enable_2d_with_fsdp() -> bool:
                 world_size: int,
                 num_devices_per_node: int,
                 pg: dist.ProcessGroup,
+                device: Optional[torch.device] = None,
             ) -> torch.Tensor:
                 return _chunk_tensor(tensor, rank, world_size, num_devices_per_node, pg)
 

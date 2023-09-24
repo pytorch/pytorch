@@ -450,7 +450,7 @@ def createResolutionCallbackForClassMethods(cls):
     # Skip built-ins, as they do not have global scope nor type hints
     # Needed to support `enum.Enum` derived classes in Python-3.11
     # That adds `_new_member_` property which is an alias to `__new__`
-    fns = [fn for fn in fns if not inspect.isbuiltin(fn)]
+    fns = [fn for fn in fns if not inspect.isbuiltin(fn) and hasattr(fn, "__globals__")]
     captures = {}
 
     for fn in fns:
@@ -1491,3 +1491,13 @@ def _extract_tensors(obj):
     extractor = _TensorExtractor(io.BytesIO(), protocol=-1, tensors=tensors)
     extractor.dump(obj)
     return tensors
+
+
+# In Python-3.11+ typed enums (i.e. IntEnum for example) retain number of base class methods in subclass
+# that were previously dropped. To preserve the behavior, explicitly drop them there
+
+if sys.version_info > (3, 10):
+    _drop(enum.Enum.__new__)
+    _drop(enum.Enum.__format__)
+    _drop(enum.Enum.__repr__)
+    _drop(enum.Enum.__str__)

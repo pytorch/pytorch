@@ -1,7 +1,5 @@
 #include <c10/core/ConstantSymNodeImpl.h>
-#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
-#include <iostream>
 
 namespace c10 {
 
@@ -121,6 +119,10 @@ class C10_API SingletonSymNodeImpl : public SymNodeImpl {
 
   c10::optional<int64_t> singleton_int() override {
     return val_;
+  }
+
+  bool is_symbolic() override {
+    return false;
   }
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
