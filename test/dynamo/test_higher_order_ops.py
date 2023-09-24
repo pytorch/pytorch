@@ -227,6 +227,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
         )
 
+    def test_wrap_pytree_inputs(self):
+        def f(x, y):
+            return wrap(lambda z: z[0].sin() * z[1].cos(), (x, y))
+
+        x = torch.tensor(1.5)
+        y = torch.tensor(2.0)
+        self._test_wrap_simple(f, (x, y), 3)
+
     def test_capture_constants(self):
         x = torch.randn(3, 3)
         y = 4.0

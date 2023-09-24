@@ -134,10 +134,13 @@ def validate_args_and_maybe_create_graph_inputs(
                 tracer.create_graph_input(a.as_proxy().node.name)
             new_arg = a
         else:
-            raise unimplemented(
-                f"HigherOrderOperator with body that accepts non-Tensors as input. "
-                f"Got: {a.python_type()}"
-            )
+            if manually_set_subgraph_inputs:
+                raise unimplemented(
+                    f"HigherOrderOperator with body that accepts non-Tensors as input. "
+                    f"Got: {a.python_type()}"
+                )
+            else:
+                new_arg = a
 
         args.append(new_arg)
     return args
