@@ -2202,6 +2202,8 @@ class LiteInterpreterDynamicTypeTestFixture
   static constexpr size_t kNumSplits = 10;
 };
 
+constexpr size_t LiteInterpreterDynamicTypeTestFixture::kNumSplits;
+
 /**
  * Enumerate all possible JIT types appearing in mobile runtime, and test
  * whether subtyping relation is preserved after one of the JIT types is
