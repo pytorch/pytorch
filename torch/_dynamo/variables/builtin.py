@@ -1518,7 +1518,8 @@ class BuiltinVariable(VariableTracker):
             for elem in iterator:
                 if not bool(elem):
                     return False
-                return True        
+                return True
+
         if isinstance(it, ListIteratorVariable):
             return SymNodeVariable.create(
                 tx,
@@ -1526,4 +1527,4 @@ class BuiltinVariable(VariableTracker):
                     "call_function", all_impl, *proxy_args_kwargs([it], {})
                 ),
                 sym_num=None,
-            )            
+            )

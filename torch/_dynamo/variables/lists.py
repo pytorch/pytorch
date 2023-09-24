@@ -710,7 +710,7 @@ class ListIteratorVariable(VariableTracker):
         ]
 
     def as_proxy(self):
-        return [x.as_proxy() for x in self.items][self.index:]
+        return [x.as_proxy() for x in self.items][self.index :]
 
 
 class TupleIteratorVariable(ListIteratorVariable):
