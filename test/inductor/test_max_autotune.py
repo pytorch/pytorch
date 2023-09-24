@@ -7,7 +7,6 @@ from typing import List, Optional
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import reset_rng_state
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -33,7 +32,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
 if HAS_CUDA:
@@ -65,7 +64,7 @@ class FailChoiceCaller(ChoiceCaller):
 
 
 @instantiate_parametrized_tests
-class TestMaxAutotune(TestCase):
+class TestDoBench(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
@@ -479,37 +478,6 @@ class TestMaxAutotune(TestCase):
             y1_expected = fn(x1, w, b, mul1)
             torch.testing.assert_close(y1, y1_expected)
 
-    @config.patch(
-        benchmark_kernel=True,
-        fallback_random=True,
-        max_autotune_gemm=True,
-    )
-    @parametrize("device", ("cpu", "cuda"))
-    def test_matmul_dropout(self, device):
-        def fwd(a, b):
-            x = a @ b
-            x = torch.nn.functional.dropout(x, 0.1)
-            return x
-
-        def fn(a, b):
-            x = fwd(a, b).sum()
-            x.backward()
-            return a.grad
-
-        N = 128
-        a = torch.randn(N, N, device=device, requires_grad=True)
-        b = torch.randn(N, N, device=device)
-
-        opt_fn = torch.compile(fn)
-        reset_rng_state()
-        ref = fn(a, b)
-        reset_rng_state()
-        act = opt_fn(a, b)
-
-        if N <= 8:
-            print(f"ref\n{ref}\nact\n{act}")
-        torch.testing.assert_close(ref, act, atol=1e-1, rtol=1e-1)
-
 
 class TestBenchmarkRequest(BenchmarkRequest):
     def __init__(
@@ -607,5 +575,5 @@ class TestTuningProcess(TestCase):
 
 if __name__ == "__main__":
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU:
+    if HAS_CUDA:
         run_tests()

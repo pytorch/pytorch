@@ -6,6 +6,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -16,7 +17,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <ATen/TensorSubclassLikeUtils.h>
