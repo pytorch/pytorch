@@ -727,6 +727,9 @@ class ListIteratorVariable(VariableTracker):
             create_instruction("GET_ITER"),
         ]
 
+    def as_proxy(self):
+        return [x.as_proxy() for x in self.items][self.index:]
+
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
