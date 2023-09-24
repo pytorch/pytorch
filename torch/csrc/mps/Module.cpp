@@ -73,6 +73,19 @@ static PyObject* MPSModule_isMacOS13orNewer(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_isMacOS14orNewer(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPUtils_checkLong(args), "invalid argument to isOnMacOS14orNewer()");
+  auto minor = THPUtils_unpackUInt32(args);
+  if (at::detail::getMPSHooks().isOnMacOS14orNewer(minor)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* MPSModule_deviceSynchronize(
     PyObject* _unused,
     PyObject* noargs) {
@@ -226,6 +239,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_is_available", MPSModule_isAvailable, METH_NOARGS, nullptr},
     {"_mps_is_on_macos_13_or_newer",
      MPSModule_isMacOS13orNewer,
+     METH_O,
+     nullptr},
+     {"_mps_is_on_macos_14_or_newer",
+     MPSModule_isMacOS14orNewer,
      METH_O,
      nullptr},
     {"_mps_get_default_generator",

@@ -17,6 +17,7 @@ struct MPSHooks : public at::MPSHooksInterface {
   // MPSDevice interface
   bool hasMPS() const override;
   bool isOnMacOS13orNewer(unsigned minor) const override;
+  bool isOnMacOS14orNewer(unsigned minor) const override;
 
   // MPSGeneratorImpl interface
   const Generator& getDefaultMPSGenerator() const override;

@@ -141,5 +141,9 @@ bool is_macos_13_or_newer(MacOSVersion version) {
   return MPSDevice::getInstance()->isMacOS13Plus(version);
 }
 
+bool is_macos_14_or_newer(MacOSVersion version) {
+  return MPSDevice::getInstance()->isMacOS14Plus(version);
+}
+
 } // namespace mps
 } // namespace at

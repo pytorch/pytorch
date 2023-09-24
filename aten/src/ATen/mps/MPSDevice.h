@@ -33,6 +33,7 @@ enum class MacOSVersion : uint32_t {
   MACOS_VER_13_1_PLUS,
   MACOS_VER_13_2_PLUS,
   MACOS_VER_13_3_PLUS,
+  MACOS_VER_14_0_PLUS,
 };
 
 //-----------------------------------------------------------------
@@ -65,6 +66,10 @@ class TORCH_API MPSDevice {
    * Returns whether running on Ventura or newer
    */
   bool isMacOS13Plus(MacOSVersion version) const;
+  /**
+   * Returns whether running on Sonoma or newer
+   */
+  bool isMacOS14Plus(MacOSVersion version) const;
 
   MTLComputePipelineState_t metalIndexingPSO(const std::string &kernel);
   MTLLibrary_t getMetalIndexingLibrary();
@@ -80,6 +85,7 @@ class TORCH_API MPSDevice {
 
 TORCH_API bool is_available();
 TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_13_0_PLUS);
+TORCH_API bool is_macos_14_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_14_0_PLUS);
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
 } // namespace mps

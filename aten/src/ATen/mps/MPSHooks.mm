@@ -36,6 +36,16 @@ bool MPSHooks::isOnMacOS13orNewer(unsigned minor) const {
   }
 }
 
+bool MPSHooks::isOnMacOS14orNewer(unsigned minor) const {
+  switch (minor) {
+    case 0:
+      return is_macos_14_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
+    default:
+      TORCH_WARN("Can't check whether running on 14.", minor, "+ returning one for 14.0+");
+      return is_macos_14_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS);
+  }
+}
+
 Allocator* MPSHooks::getMPSDeviceAllocator() const {
   return at::mps::GetMPSAllocator();
 }
