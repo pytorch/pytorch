@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/DispatchStub.h>
 
+#include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
-#include <c10/macros/Macros.h>
 
 #include <cpuinfo.h>
 #include <cstdlib>

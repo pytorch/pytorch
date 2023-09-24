@@ -5,6 +5,9 @@ import pytest
 
 import torch._numpy as tnp
 
+from torch.testing._internal.common_utils import run_tests
+
+
 dtype_names = [
     "bool_",
     *[f"int{w}" for w in [8, 16, 32, 64]],
@@ -54,6 +57,4 @@ def test_convert_np_dtypes(name, np_dtype):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()
