@@ -1281,7 +1281,7 @@ struct TORCH_API IValue final {
             0;
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        tag >= 0 && uint32_t(tag) < kNumTags,
+        uint32_t(tag) < kNumTags,
         "unexpected tag ",
         static_cast<int>(tag));
     return kTruthTableBitVector & (1 << (uint32_t(tag) % 32));
