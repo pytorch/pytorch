@@ -161,14 +161,14 @@ def do_bench(*args, **kwargs):
 
 @functools.lru_cache(None)
 def has_torchvision_roi_align() -> bool:
-    # try:
-    #     from torchvision.ops import roi_align  # noqa: F401
+    try:
+        from torchvision.ops import roi_align  # noqa: F401
 
-    #     return roi_align is not None and hasattr(
-    #         getattr(torch.ops, "torchvision", None), "roi_align"
-    #     )
-    # except ImportError:
-    return False
+        return roi_align is not None and hasattr(
+            getattr(torch.ops, "torchvision", None), "roi_align"
+        )
+    except ImportError:
+        return False
 
 
 def conditional_product(*args):
