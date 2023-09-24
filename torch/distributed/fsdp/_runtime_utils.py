@@ -775,6 +775,7 @@ def _post_backward_hook(
             )
 
 
+@no_type_check
 def _post_backward_reshard(
     state: _FSDPState,
     handle: FlatParamHandle,

@@ -144,6 +144,8 @@ class _FSDPState(_State):
         self._free_event_queue: Optional[_FreeEventQueue] = None
         # Defaults to true per PyTorch module convention
         self._is_training: bool = True
+        # Defaults rate limiting to true; may be changed in `_init_core_state`
+        self.limit_all_gathers: bool = True
         # All following attributes should only be used for root states:
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
