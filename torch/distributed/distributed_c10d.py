@@ -183,7 +183,7 @@ class Backend:
         GLOO : ["cpu", "cuda"],
         NCCL : ["cuda"],
         UCC : ["cpu", "cuda"],
-        MPI : ["cpu"],
+        MPI : ["cpu", "cuda"],
     }
 
     backend_type_map: Dict[str, ProcessGroup.BackendType] = {
@@ -658,6 +658,10 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
     last_worker_key = f"{store_key}:last_worker"
     if worker_count == world_size:
         store.set(last_worker_key, "1")
+
+    # adjust the timeout to be at least 10secs + 1sec per thousand ranks to reduce the odds of timeout
+    # this value was empirically found while scale testing.
+    logging_interval = max(logging_interval, timedelta(seconds=10 + world_size / 1000))
 
     start = time.time()
     while True:
@@ -4277,6 +4281,8 @@ def _get_group_tag(pg: ProcessGroup) -> str:
 def _get_process_group_name(pg: ProcessGroup) -> str:
     return _world.pg_names.get(pg, "None")
 
+def _get_process_group_store(pg: ProcessGroup) -> Store:
+    return _world.pg_map[pg][1]
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.
