@@ -7559,8 +7559,27 @@ ShapeEnv not equal: field values don't match:
         input1 = torch.rand([2])
         input2 = torch.rand([2])
         res = forward(input1)(input2)
-        # Should not have recompiled
-        self.assertEqual(res, input1 + input2)
+        self.assertTrue(same(res, input1 + input2))
+
+    def test_non_inlined_closure(self):
+        @torch.compile()
+        def program(x, y):
+            one = lambda x, y: x + y
+
+            def inner():
+                # Force no inlining
+                torch._dynamo.graph_break()
+                return one(x, y)
+
+            res = inner()
+            one = lambda x, y: x - y
+            res += inner()
+            return res
+
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+
+        self.assertTrue(same(program(input1, input2), input1 + input1))
 
 
 class TestTracer(JitTestCase):

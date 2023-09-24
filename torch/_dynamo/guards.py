@@ -249,9 +249,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        return eval(
-            name, self.scope, CLOSURE_VARS + self.check_fn_manager.check_fn.closure_vars
-        )
+        return eval(name, self.scope, CLOSURE_VARS)
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -500,15 +498,6 @@ class GuardBuilder(GuardBuilderBase):
                     f"hasattr({ref}, '__code__')",
                     f"___check_obj_id({ref}.__code__, {self.id_ref(val.__code__)})",
                 ]
-                # Guard the free variables
-                freevars = val.__code__.co_freevars
-                for freevar in freevars:
-                    freevar = f"L['{freevar}']"
-                    freevar_ref = self.arg_ref(freevar)
-                    # TODO: This could be loosened in the future. For now, just check ID to be safe.
-                    code.append(
-                        f"___check_obj_id({freevar_ref}, {self.id_ref(self.get(freevar))})"
-                    )
                 self._produce_guard_code(guard, code)
             else:
                 self.FUNCTION_MATCH(guard)
