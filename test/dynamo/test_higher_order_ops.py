@@ -227,13 +227,25 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
         )
 
-    def test_wrap_pytree_inputs(self):
+    def test_wrap_pytree_args(self):
         def f(x, y):
             return wrap(lambda z: z[0].sin() * z[1].cos(), (x, y))
 
         x = torch.tensor(1.5)
         y = torch.tensor(2.0)
         self._test_wrap_simple(f, (x, y), 3)
+
+    def test_wrap_pytree_kwargs(self):
+        def f(x, y, z):
+            def fn(*, x, y, z):
+                z1, z2 = z
+                return (x * 2) + y + z1
+
+            return wrap(fn, x=x, y=y, z=z)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 3)
+        self._test_wrap_simple(f, (x, y, (x, y)), 3)
 
     def test_capture_constants(self):
         x = torch.randn(3, 3)
@@ -899,19 +911,6 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(3, 3)
 
         self._test_wrap_simple(f, (x, y, 8), 2)
-
-    def test_wrap_unsupported_kwarg(self):
-        def f(x, y, z):
-            def fn(*, x, y, z):
-                z1, z2 = z
-                return (x * 2) + y + z1
-
-            return wrap(fn, x=x, y=y, z=z)
-
-        x = torch.randn(3)
-        y = torch.randn(3, 3)
-
-        self._assert_wrap_fallback(f, (x, y, (x, y)))
 
     def test_map_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
