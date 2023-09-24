@@ -4251,7 +4251,9 @@ class TestIO(TestCase):
 @xfail  # (reason="TODO")
 @instantiate_parametrized_tests
 class TestFromBuffer(TestCase):
-    @parametrize("byteorder", [subtest("<", name="less"), subtest(">", name="greater")])
+    @parametrize(
+        "byteorder", [subtest("little", name="little"), subtest("big", name="big")]
+    )
     @parametrize("dtype", [float, int, complex])
     def test_basic(self, byteorder, dtype):
         dt = np.dtype(dtype).newbyteorder(byteorder)
@@ -4259,11 +4261,14 @@ class TestFromBuffer(TestCase):
         buf = x.tobytes()
         assert_array_equal(np.frombuffer(buf, dtype=dt), x.flat)
 
-    @parametrize("obj", [np.arange(10), b"12345678"])
+    @parametrize("obj", [np.arange(10), "12345678"])
     def test_array_base(self, obj):
         # Objects (including NumPy arrays), which do not use the
         # `release_buffer` slot should be directly used as a base object.
         # See also gh-21612
+        if isinstance(obj, str):
+            # @parametrize breaks with bytes objects
+            obj = bytes(obj, enconding=latin-1)
         new = np.frombuffer(obj)
         assert new.base is obj
 
