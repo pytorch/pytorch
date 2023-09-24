@@ -18,6 +18,10 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/enum_tag.h>
 
+#ifndef NDEBUG
+#include <iostream>
+#endif
+
 namespace c10 {
 
 TORCH_API bool show_dispatch_trace();
@@ -218,6 +222,17 @@ public:
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+
+  /**
+   * Given an operator, tells the Dispatcher that we have implemented an abstract impl
+   * for this op in the given Python module. Call this a "pystub".
+   */
+  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+
+  /**
+   * Given an operator, throws if we have an abstract impl pystub.
+   */
+  void throwIfHasAbstractImplPyStub(OperatorName op_name);
 
   /**
    * Register a new operator by name.
