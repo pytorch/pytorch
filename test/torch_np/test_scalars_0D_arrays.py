@@ -8,28 +8,47 @@ Extensive tests of this sort of functionality is in numpy_tests/core/*scalar*
 
 Also test the isscalar function (which is deliberately a bit more lax).
 """
-import pytest
 
 import torch._numpy as np
 from torch._numpy.testing import assert_equal
 
-
-@pytest.mark.parametrize(
-    "value", [np.int64(42), np.array(42), np.asarray(42), np.asarray(np.int64(42))]
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    subtest,
+    TestCase,
 )
-class TestArrayScalars:
+
+
+parametrize_value = parametrize(
+    "value",
+    [
+        subtest(np.int64(42), name="int64"),
+        subtest(np.array(42), name="array"),
+        subtest(np.asarray(42), name="asarray"),
+        subtest(np.asarray(np.int64(42)), name="asarray_int"),
+    ],
+)
+
+
+@instantiate_parametrized_tests
+class TestArrayScalars(TestCase):
+    @parametrize_value
     def test_array_scalar_basic(self, value):
         assert value.ndim == 0
         assert value.shape == ()
         assert value.size == 1
         assert value.dtype == np.dtype("int64")
 
+    @parametrize_value
     def test_conversion_to_int(self, value):
         py_scalar = int(value)
         assert py_scalar == 42
         assert isinstance(py_scalar, int)
         assert not isinstance(value, int)
 
+    @parametrize_value
     def test_decay_to_py_scalar(self, value):
         # NumPy distinguishes array scalars and 0D arrays. For instance
         # `scalar * list` is equivalent to `int(scalar) * list`, but
@@ -48,28 +67,28 @@ class TestArrayScalars:
         assert product.shape == (3,)
         assert_equal(product, [42, 42 * 2, 42 * 3])
 
+    def test_scalar_comparisons(self):
+        scalar = np.int64(42)
+        arr = np.array(42)
 
-def test_scalar_comparisons():
-    scalar = np.int64(42)
-    arr = np.array(42)
+        assert arr == scalar
+        assert arr >= scalar
+        assert arr <= scalar
 
-    assert arr == scalar
-    assert arr >= scalar
-    assert arr <= scalar
-
-    assert scalar == 42
-    assert arr == 42
+        assert scalar == 42
+        assert arr == 42
 
 
-class TestIsScalar:
+@instantiate_parametrized_tests
+class TestIsScalar(TestCase):
     #
     # np.isscalar(...) checks that its argument is a numeric object with exactly one element.
     #
     # This differs from NumPy which also requires that shape == ().
     #
     scalars = [
-        42,
-        int(42.0),
+        subtest(42, "literal"),
+        subtest(int(42.0), "int"),
         np.float32(42),
         np.array(42),
         [42],
@@ -95,16 +114,14 @@ class TestIsScalar:
         np.float32([1, 2]),
     ]
 
-    @pytest.mark.parametrize("value", scalars)
+    @parametrize("value", scalars)
     def test_is_scalar(self, value):
         assert np.isscalar(value)
 
-    @pytest.mark.parametrize("value", not_scalars)
+    @parametrize("value", not_scalars)
     def test_is_not_scalar(self, value):
         assert not np.isscalar(value)
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

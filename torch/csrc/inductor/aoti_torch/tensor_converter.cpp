@@ -25,13 +25,16 @@ std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
 }
 
 std::vector<at::Tensor> alloc_tensors_by_stealing_from_handles(
-    std::vector<AtenTensorHandle>& handles) {
+    AtenTensorHandle* handles,
+    size_t length) {
   std::vector<at::Tensor> result;
-  result.reserve(handles.size());
-  for (auto handle : handles) {
-    result.emplace_back(std::move(*tensor_handle_to_tensor_pointer(handle)));
+  result.reserve(length);
+  for (size_t i = 0; i < length; i++) {
+    result.emplace_back(
+        std::move(*tensor_handle_to_tensor_pointer(handles[i])));
+    aoti_torch_delete_tensor_object(handles[i]);
+    handles[i] = nullptr;
   }
-  handles.clear();
   return result;
 }
 
