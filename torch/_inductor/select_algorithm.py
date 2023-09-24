@@ -367,7 +367,7 @@ class TritonTemplateKernel(TritonKernel):
             )
         else:
             call_args = ", ".join(call_args)  # type: ignore[assignment]
-            stream_name = wrapper.write_get_cuda_stream(
+            stream_name = wrapper.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
 
