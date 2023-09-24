@@ -437,18 +437,19 @@ struct GlobalStateGuard {
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
+    _default_dtype = at::get_default_dtype();
   }
 
   inline bool check() {
     auto& ctx = at::globalContext();
-    return (
-        _grad_mode == at::GradMode::is_enabled() &&
-        _torch_function == torch::torch_function_enabled() &&
-        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-        _allow_tf32 == ctx.allowTF32CuBLAS() &&
-        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
-        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
-        _num_threads == at::get_num_threads());
+    return (_grad_mode == at::GradMode::is_enabled() &&
+            _torch_function == torch::torch_function_enabled() &&
+            _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+            _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+            _num_threads == at::get_num_threads()) &&
+        _default_dtype == at::get_default_dtype();
   }
 
   bool _grad_mode;
@@ -458,6 +459,7 @@ struct GlobalStateGuard {
   bool _allow_fp16_reduce;
   bool _allow_bf16_reduce;
   int _num_threads;
+  caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 
@@ -516,6 +518,18 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   } else {
     Py_RETURN_FALSE;
   }
+}
+
+static PyObject* dict_version(PyObject* dummy, PyObject* args) {
+  // Retrieves the version of a dictionary.
+  PyObject* obj = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return nullptr;
+  }
+  if (!PyDict_Check(obj)) {
+    return nullptr;
+  }
+  return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
 }
 
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
@@ -716,6 +730,7 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
     {"nn_module_guard", nn_module_guard, METH_O, NULL},
+    {"dict_version", dict_version, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
