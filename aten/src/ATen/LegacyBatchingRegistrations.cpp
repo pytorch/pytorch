@@ -1,9 +1,10 @@
 #include <torch/library.h>
-#include <ATen/RedispatchFunctions.h>
+#include <ATen/ATen.h>
 #include <ATen/LegacyVmapTransforms.h>
 #include <ATen/LegacyBatchedFallback.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/ATen.h>
 #include <ATen/core/IListRef.h>
 #include <c10/util/irange.h>
 #include <c10/core/SymIntArrayRef.h>
