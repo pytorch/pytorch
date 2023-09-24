@@ -1544,6 +1544,7 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('_segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
+        xfail('masked_scatter_backward'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
