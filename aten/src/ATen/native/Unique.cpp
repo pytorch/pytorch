@@ -30,6 +30,83 @@ namespace native{
 
 namespace {
 
+// This unique implementation when dtype is bool is mapped
+// from UniqueCub.cu which uses a reduction to find the number of
+// true values.
+std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
+    const Tensor& self,
+    const bool return_inverse,
+    const bool return_counts) {
+  const Tensor& input = self.contiguous();
+  bool* input_data = input.data_ptr<bool>();
+
+  int64_t numel = input.numel();
+  Tensor output = at::empty({0}, self.options());
+  Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
+  Tensor counts = at::empty({0}, self.options().dtype(kLong));
+
+  if (numel == 0) {
+    if (return_inverse) {
+      inverse_indices.resize_(input.sizes());
+    }
+    return std::make_tuple(output, inverse_indices, counts);
+  }
+
+  int num_threads = at::get_num_threads();
+  std::vector<int64_t> num_true_thread(num_threads, 0);
+
+  const int64_t grain_size = at::internal::GRAIN_SIZE;
+  at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
+    int tid = at::get_thread_num();
+    for (const auto i : c10::irange(begin, end)) {
+      const bool value = c10::load(&input_data[i]);
+      if (value) {
+        num_true_thread[tid]++;
+      }
+    }
+  });
+
+  int64_t num_true = std::accumulate(num_true_thread.begin(), num_true_thread.end(), 0);
+  int64_t num_false = numel - num_true;
+  int num_out = ((num_true > 0) + (num_false > 0));
+
+  constexpr int false_idx = 0;
+  const int true_idx = num_false > 0;
+
+  output.resize_({num_out});
+  if (return_counts) {
+    counts.resize_({num_out});
+  }
+  bool* output_data = output.data_ptr<bool>();
+  int64_t* counts_data = return_counts ? counts.data_ptr<int64_t>() : nullptr;
+
+  // write output and counts
+  if (num_false > 0) {
+    output_data[false_idx] = false;
+    if (return_counts) {
+      counts_data[false_idx] = num_false;
+    }
+  }
+  if (num_true > 0) {
+    output_data[true_idx] = true;
+    if (return_counts) {
+      counts_data[true_idx] = num_true;
+    }
+  }
+
+  if (return_inverse) {
+    inverse_indices.resize_(input.sizes());
+    int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
+    at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
+      for (const auto i : c10::irange(begin, end)) {
+        const bool value = c10::load(&input_data[i]);
+        inverse_indices_data[i] = value ? true_idx : false_idx;
+      }
+    });
+  }
+  return std::make_tuple(output, inverse_indices, counts);
+}
+
 // check whether the element on index i is `unique`,
 // in the sorted sequence, the 1st element is always true.
 //
@@ -365,7 +442,13 @@ std::tuple<Tensor, Tensor, Tensor> _unique_dim_cpu_template(
 
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
-  return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
+  if (self.scalar_type() == kBool) {
+    Tensor output, inverse;
+    std::tie(output, inverse, std::ignore) = unique_cpu_bool_template(
+        self, return_inverse, /* return_counts */false);
+    return std::make_tuple(output, inverse);
+  }
+  return AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "unique", [&] {
     Tensor output, inverse;
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
@@ -377,7 +460,10 @@ _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
 
 std::tuple<Tensor, Tensor, Tensor>
 _unique2_cpu(const Tensor& self, const bool sorted, const bool return_inverse, const bool return_counts) {
-  return AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kBool, kHalf, self.scalar_type(), "unique", [&] {
+  if (self.scalar_type() == kBool) {
+    return unique_cpu_bool_template(self, return_inverse, return_counts);
+  }
+  return AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "unique", [&] {
     // The current CPU implementation of unique always sort due to
     // this is faster than hash table
     return unique_cpu_sorted_template<scalar_t>(

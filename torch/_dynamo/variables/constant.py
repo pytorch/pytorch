@@ -10,7 +10,7 @@ from .base import typestr, VariableTracker
 
 
 _type_to_assert_reason = {
-    # NB - We CAN have ConstantVariable(set) because of how sets interact with guards.
+    # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
     # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
     # from somewhere else, or unsourced. An input set would imply sources derived from set contents. For example, an
     # input list's contents will have a source like some_list[0], some_list[1][1], etc. For a set, arbitrary access is
@@ -27,6 +27,10 @@ _type_to_assert_reason = {
 
 
 class ConstantVariable(VariableTracker):
+    @staticmethod
+    def create(value, **kwargs):
+        return ConstantVariable(value, **kwargs)
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         if not ConstantVariable.is_literal(value):
@@ -60,7 +64,7 @@ class ConstantVariable(VariableTracker):
         return self.unpack_var_sequence(tx=None)
 
     def getitem_const(self, arg: VariableTracker):
-        return ConstantVariable(
+        return ConstantVariable.create(
             self.value[arg.as_python_constant()],
             **VariableTracker.propagate([self, arg]),
         )
@@ -76,7 +80,9 @@ class ConstantVariable(VariableTracker):
     def unpack_var_sequence(self, tx):
         try:
             options = VariableTracker.propagate([self])
-            return [ConstantVariable(x, **options) for x in self.as_python_constant()]
+            return [
+                ConstantVariable.create(x, **options) for x in self.as_python_constant()
+            ]
         except TypeError as e:
             raise NotImplementedError from e
 
@@ -136,7 +142,9 @@ class ConstantVariable(VariableTracker):
 
         if isinstance(self.value, str) and name in str.__dict__.keys():
             method = getattr(self.value, name)
-            return ConstantVariable(method(*const_args, **const_kwargs), **options)
+            return ConstantVariable.create(
+                method(*const_args, **const_kwargs), **options
+            )
         elif has_arith_binop(int) or has_arith_binop(float):
             op = getattr(operator, name)
             add_target = const_args[0]
@@ -151,20 +159,20 @@ class ConstantVariable(VariableTracker):
                     "call_function", op, (self.value, add_target), {}
                 )
                 return SymNodeVariable.create(tx, proxy, add_target, **options)
-            return ConstantVariable(op(self.value, add_target), **options)
+            return ConstantVariable.create(op(self.value, add_target), **options)
         elif name == "__len__" and not (args or kwargs):
-            return ConstantVariable(len(self.value), **options)
+            return ConstantVariable.create(len(self.value), **options)
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
             result = search in self.value
-            return ConstantVariable(result, **options)
+            return ConstantVariable.create(result, **options)
 
         unimplemented(f"const method call {typestr(self.value)}.{name}")
 
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         result = hasattr(self.value, name)
-        return variables.ConstantVariable(result).add_options(self)
+        return variables.ConstantVariable.create(result).add_options(self)
 
 
 class EnumVariable(VariableTracker):

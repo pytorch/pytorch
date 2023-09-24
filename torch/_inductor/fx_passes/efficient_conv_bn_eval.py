@@ -3,6 +3,7 @@ import torch.nn as nn
 
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
+from torch.func import functional_call
 
 from ..pattern_matcher import CallModuleVarArgs, Match, register_graph_pattern
 
@@ -48,9 +49,11 @@ def efficient_conv_bn_eval(
         bn_bias = torch.zeros_like(bn.running_var)
 
     # shape of [C_out, 1, 1, 1] in Conv2d
-    weight_coeff = torch.rsqrt(bn.running_var + bn.eps).reshape(
-        [-1] + [1] * (conv.weight.ndim - 1)
-    )
+    target_shape = [-1] + [1] * (conv.weight.ndim - 1)
+    if isinstance(conv, nn.modules.conv._ConvTransposeNd):
+        # for transposed conv, the C_out dimension should at index 1.
+        target_shape[:2] = [target_shape[1], target_shape[0]]
+    weight_coeff = torch.rsqrt(bn.running_var + bn.eps).reshape(target_shape)
     # shape of [C_out, 1, 1, 1] in Conv2d
     coefff_on_the_fly = bn_weight.view_as(weight_coeff) * weight_coeff
 
@@ -62,7 +65,8 @@ def efficient_conv_bn_eval(
     )
 
     input = x
-    output = conv._conv_forward(input, weight_on_the_fly, bias_on_the_fly)
+    params = {"weight": weight_on_the_fly, "bias": bias_on_the_fly}
+    output = functional_call(conv, params, input)
     return output
 
 
@@ -101,13 +105,14 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
     if not hasattr(gm, input_node.target):
         return
     input_mod = getattr(gm, input_node.target)
-    # TODO(youkaichao) support nn.Linear
-    # nn.ConvTranspose1d/nn.ConvTranspose2d/nn.ConvTranspose3d not supported,
-    # as they do not have `_conv_forward` method yet
     supported_convs = [
+        nn.Linear,
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
+        nn.ConvTranspose1d,
+        nn.ConvTranspose2d,
+        nn.ConvTranspose3d,
     ]
     if not any(isinstance(input_mod, cls) for cls in supported_convs):
         return
