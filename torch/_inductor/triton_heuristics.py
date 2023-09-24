@@ -19,8 +19,7 @@ import torch
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
-from torch._inductor import cuda_properties
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
