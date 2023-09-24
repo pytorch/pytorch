@@ -1,9 +1,14 @@
-from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint
-from itertools import count
 import inspect
+import logging
 
-uid = count(1)
+import torch
+from torch._ops import HigherOrderOperator
+from torch.utils.checkpoint import checkpoint, uid
+import torch._dynamo.config
+
+log = logging.getLogger(__name__)
+
+
 
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):
@@ -65,9 +70,13 @@ class TagActivationCheckpoint(HigherOrderOperator):
     accepts a Fx graph module which needs to be checkpointed. This operator adds
     "recomputable" tag to the nodes of the Fx graph that should be recomputed.
 
-    The goal is to avoid both Dynamo and AOT Autograd to trace through saved
-    tensor hooks, and rather rely on the partitioners to actually duplicate the
-    nodes. This sits well in the torch.compile stack, because by the time graph
+    The goal is to:
+    1. Avoid using Dynamo to trace through saved tensor hooks.
+    2. For selective checkpointing case, let AOTAutograd trace through
+       saved tensor hooks but has special logic with TorchDispatchMode to override
+       the usual saved_tensor_hooks fn logic in order to tag the nodes.
+    3. Rely on the partitioners to actually duplicate the nodes.
+    This sits well in the torch.compile stack, because by the time graph
     reaches partitioner, inductor has already run its functionalization of rng
     ops. Therefore, the duplication of nodes, by design, respects the rng states
     in the forward and recomputed forward in backward.
@@ -75,6 +84,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
 
     def __init__(self):
         super().__init__("tag_activation_checkpoint")
+        self.context_fn = None
 
     @staticmethod
     def divide_kwargs(kwargs):
@@ -110,10 +120,6 @@ class TagActivationCheckpoint(HigherOrderOperator):
         return checkpoint_kwargs, gmod_kwargs
 
     def tag_nodes(self, gmod):
-        # TODO - This needs major investigation. Currently, we are tagging all
-        # the forward nodes as recomputable. However, torch.utils.checkpoint
-        # provides a custom function to selectively recompute. We will have to
-        # figure out how to tag seletively.
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
@@ -121,13 +127,33 @@ class TagActivationCheckpoint(HigherOrderOperator):
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
-        if "context_fn" in kwargs:
-            raise RuntimeError("Tagged Activation checkpointing does not support selective checkpointing yet.")
         import torch.fx.traceback as fx_traceback
         from torch.fx import Interpreter
-        gmod = self.tag_nodes(gmod)
-        # Using interpreter allows preservation of metadata through torch.compile stack.
-        with fx_traceback.preserve_node_meta():
-            return Interpreter(gmod).run(*args)
+        if self.context_fn is not None:
+            assert torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint, \
+                "Passing context_fn to torch.utils.checkpoint is currently not supported under torch.compile"
+            log.warning("""
+Detected that context_fn is passed to torch.utils.checkpoint under torch.compile.
+Please make sure the checkpointed region does not contain in-place ops (e.g. torch.relu_).
+""")
+            # use_reentrant is set to False because this op is going to be traced.
+            # And we ensure that AOT Autograd traces through the non reentrant
+            # version of checkpointing.
+            kwargs["use_reentrant"] = False
+            kwargs["context_fn"] = self.context_fn
+            # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
+            # for specific nodes in _CachedTorchDispatchMode.
+            gmod = self.tag_nodes(gmod)
+            # Using interpreter allows preservation of metadata through torch.compile stack.
+            with fx_traceback.preserve_node_meta():
+                return checkpoint(Interpreter(gmod).run, *args, **kwargs)
+        else:
+            gmod = self.tag_nodes(gmod)
+            # Using interpreter allows preservation of metadata through torch.compile stack.
+            # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
+            # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
+            # (for details on in-place op issue, run `test_compile_selective_checkpoint_inplace_op` unit test)
+            with fx_traceback.preserve_node_meta():
+                return Interpreter(gmod).run(*args)
 
 tag_activation_checkpoint = TagActivationCheckpoint()

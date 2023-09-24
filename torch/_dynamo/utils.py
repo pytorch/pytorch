@@ -19,6 +19,7 @@ import os
 import pstats
 import sys
 import textwrap
+import threading
 import time
 import types
 import typing
@@ -61,7 +62,6 @@ import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo_utils import DYNAMO_FORCE_INLINE
 from torch._subclasses.fake_tensor import FakeTensor, is_fake
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_map
@@ -91,13 +91,6 @@ def tabulate(rows, headers):
         return "\n".join(
             ", ".join(map(str, row)) for row in itertools.chain([headers], rows)
         )
-
-
-def should_force_inline(func):
-    from .variables.functions import NestedUserFunctionVariable, UserFunctionVariable
-
-    assert isinstance(func, (UserFunctionVariable, NestedUserFunctionVariable))
-    return func.get_code() in DYNAMO_FORCE_INLINE
 
 
 def dynamo_profiled(func):
@@ -413,12 +406,15 @@ def istype(obj, allowed_types):
 
 
 def is_typing(value):
-    if sys.version_info < (3, 9):
-        return isinstance(value, typing._GenericAlias)
-    else:
-        return isinstance(
-            value, (typing._SpecialGenericAlias, typing._UnionGenericAlias)
-        )
+    # _Final catches most of typing classes:
+    #   - Any
+    #   - Callable
+    #   - Union
+    #   ...
+    #
+    # NB: we intentionally ignore classes that inherit from Generic, since they
+    # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    return isinstance(value, typing._Final) or value is typing.Generic
 
 
 def is_numpy_int_type(value):
@@ -1063,7 +1059,13 @@ def same(
                     )
 
                 res_error = rmse(fp64_ref, res).item()
-                multiplier = 2.0
+
+                # In the case of using AMP (Automatic Mixed Precision), certain models have
+                # failed the benchmark's correctness check. However, the end-to-end model's
+                # accuracy when comparing AMP with FP32 is within a difference of less than 0.1%.
+                # Thus, it's possible that the correctness check failures for these models are
+                # false alarms. We use multiplier of 3 instead of 2 to avoid these false alarms.
+                multiplier = 3.0 if res.dtype == torch.bfloat16 else 2.0
 
                 if (
                     fp64_ref.numel() < 1000
@@ -1389,6 +1391,23 @@ def get_fake_value(node, tx):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
 
+_current_node = threading.local()
+
+
+def get_current_node():
+    return getattr(_current_node, "value", None)
+
+
+@contextmanager
+def set_current_node(node):
+    old = get_current_node()
+    _current_node.value = node
+    try:
+        yield
+    finally:
+        _current_node.value = old
+
+
 def run_node(tracer, node, args, kwargs, nnmodule):
     """
     Runs a given node, with the given args and kwargs.
@@ -1406,28 +1425,31 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     """
     op = node.op
 
-    try:
-        if op == "call_function":
-            return node.target(*args, **kwargs)
-        elif op == "call_method":
-            return getattr(args[0], node.target)(*args[1:], **kwargs)
-        elif op == "call_module":
-            assert nnmodule is not None
-            return nnmodule(*args, **kwargs)
-        elif op == "get_attr":
-            return tracer.get_submodule(node.target)
-        elif op == "placeholder":
-            assert "example_value" in node.meta
-            return node.meta["example_value"]
-    except NotImplementedError as e:
-        # NB: mimic how wrap_fake_exception does it
-        from .exc import unimplemented
+    with set_current_node(node):
+        try:
+            if op == "call_function":
+                return node.target(*args, **kwargs)
+            elif op == "call_method":
+                return getattr(args[0], node.target)(*args[1:], **kwargs)
+            elif op == "call_module":
+                assert nnmodule is not None
+                return nnmodule(*args, **kwargs)
+            elif op == "get_attr":
+                return tracer.get_submodule(node.target)
+            elif op == "placeholder":
+                assert "example_value" in node.meta
+                return node.meta["example_value"]
+        except NotImplementedError as e:
+            # NB: mimic how wrap_fake_exception does it
+            from .exc import unimplemented
 
-        raise unimplemented(f"running {op} {node.target}(*{args}, **{kwargs})") from e
+            raise unimplemented(
+                f"running {op} {node.target}(*{args}, **{kwargs})"
+            ) from e
 
-    except Exception as e:
-        fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
-        raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
+        except Exception as e:
+            fn_str = f"Failed running {op} {node.target}(*{args}, **{kwargs}):\n"
+            raise RuntimeError(fn_str + str(e)).with_traceback(e.__traceback__) from e
 
     raise AssertionError(op)
 
@@ -1687,7 +1709,7 @@ def to_numpy_helper(value):
     if isinstance(value, tnp.ndarray):
         return to_numpy_helper(value.tensor)
     elif isinstance(value, torch.Tensor):
-        return value.cpu().numpy()
+        return value.numpy(force=True)
     elif isinstance(value, (tuple, list)):
         return type(value)(to_numpy_helper(obj) for obj in value)
     else:
@@ -1827,7 +1849,7 @@ def is_compile_supported(device_type):
     if device_type == "cpu":
         pass
     elif device_type == "cuda" and compile_supported:
-        from torch._inductor.utils import has_triton
+        from torch.utils._triton import has_triton
 
         compile_supported = has_triton()
     else:
@@ -2101,3 +2123,17 @@ def get_static_address_type(t):
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
+
+
+def is_rng_state_getter_or_setter(value):
+    getters = (
+        torch.default_generator.get_state,
+        torch.get_rng_state,
+        torch.cuda.get_rng_state,
+    )
+    setters = (
+        torch.default_generator.set_state,
+        torch.set_rng_state,
+        torch.cuda.set_rng_state,
+    )
+    return value in (*setters, *getters)

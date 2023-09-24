@@ -72,6 +72,64 @@ def check_inplace_broadcast(self_shape, *args_shape):
     )
 
 
+@register_meta([aten.linspace, aten.logspace])
+@out_wrapper()
+def meta_linspace_logspace(
+    start,
+    end,
+    steps,
+    base=None,
+    dtype=None,
+    device=None,
+    layout=torch.strided,
+    pin_memory=False,
+    requires_grad=False,
+):
+    if isinstance(start, torch.Tensor):
+        torch._check(
+            start.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+    if isinstance(end, torch.Tensor):
+        torch._check(
+            end.dim() == 0,
+            lambda: "linspace only supports 0-dimensional start and end tensors",
+        )
+
+    if any(isinstance(arg, complex) for arg in (start, end, steps)):
+        default_complex_dtype = utils.corresponding_complex_dtype(
+            torch.get_default_dtype()
+        )
+        if dtype is None:
+            dtype = default_complex_dtype
+        else:
+            torch._check(
+                utils.is_complex_dtype(dtype),
+                lambda: f"linspace(): inferred dtype {default_complex_dtype} can't be safely cast to passed dtype {dtype}",
+            )
+    else:
+        dtype = dtype or torch.get_default_dtype()
+    assert isinstance(dtype, torch.dtype)
+
+    # steps does not participate in the computation of the dtype
+    torch._check_type(
+        isinstance(steps, IntLike),
+        lambda: f"received an invalid combination of arguments - got \
+({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
+    )
+    assert isinstance(steps, IntLike)  # for mypy
+    torch._check(steps >= 0, lambda: "number of steps must be non-negative")
+
+    return torch.empty(
+        (steps,),  # type: ignore[arg-type]
+        dtype=dtype,
+        layout=layout,
+        device="meta",
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
 @register_meta([aten.take.default, aten.take.out])
 @out_wrapper()
 def meta_take(self, index):
@@ -229,8 +287,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
 @register_meta(aten.randperm.generator_out)
 def meta_randperm(n, *, generator=None, out):
-    assert out.ndim == 1 and out.size(0) == n
-    return out
+    return _maybe_resize_out(out, torch.Size([n]))
 
 
 @register_meta(aten.randperm.default)
@@ -289,6 +346,12 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+
+    if torch._debug_has_internal_overlap(self) == 1:  # 1 == MemOverlap::Yes
+        raise RuntimeError(
+            "more than one element of the written-to tensor refers to a single memory location"
+        )
+
     intermediate = src.to(self, non_blocking)
     if self.size() != intermediate.size():
         aten.expand_copy.default(intermediate, self.size())
@@ -351,6 +414,42 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
+
+
+@register_meta(aten.segment_reduce.default)
+def meta_segment_reduce(
+    data: Tensor,
+    reduce: str,
+    *,
+    lengths: Optional[Tensor] = None,
+    indices: Optional[Tensor] = None,
+    offsets: Optional[Tensor] = None,
+    axis: int = 0,
+    unsafe: bool = False,
+    initial=None,
+) -> Tensor:
+    if indices is not None:
+        raise NotImplementedError(
+            "segment_reduce(): indices based reduction is not supported yet."
+        )
+
+    def segment_reduce_lengths_tensor(lengths_shape):
+        return torch.empty(
+            lengths_shape + data.shape[axis + 1 :],
+            dtype=data.dtype,
+            device="meta",
+            memory_format=torch.contiguous_format,
+        )
+
+    if lengths is not None:
+        return segment_reduce_lengths_tensor(lengths.shape)
+    # FIXME should probably check that lengths and offset aren't both set, but
+    # the ATen implementation neglects this too
+    if offsets is not None:
+        # lengths == torch.diff(offsets)
+        lengths_shape = offsets.shape[:-1] + (offsets.shape[-1] - 1,)
+        return segment_reduce_lengths_tensor(lengths_shape)
+    raise RuntimeError("segment_reduce(): Either lengths or offsets must be defined.")
 
 
 @register_meta([aten.max.default, aten.max.unary_out])
@@ -2067,6 +2166,39 @@ if torch._C._has_mkldnn:
         out = x.new_empty(output_shape, dtype=(torch.float32 if fp32_output else None))
         return out
 
+    _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
+        "quantized", "IMPL", "Meta"
+    )
+
+    @register_meta(torch.ops.quantized.max_pool2d)
+    def meta_quantized_max_pool2d(
+        input,
+        kernel_size,
+        stride=(),
+        padding=(0,),
+        dilation=(1,),
+        ceil_mode=False,
+    ):
+        (
+            nInputPlane,
+            outputHeight,
+            outputWidth,
+        ) = max_pool2d_checks_and_compute_shape(
+            input, kernel_size, stride, padding, dilation, ceil_mode
+        )
+        nbatch = input.size(-4) if input.dim() == 4 else 1
+        memory_format = torch.channels_last
+        if input.dim() == 3:
+            size = [nInputPlane, outputHeight, outputWidth]
+        else:
+            size = [nbatch, nInputPlane, outputHeight, outputWidth]
+        return torch.empty(
+            size,
+            dtype=input.dtype,
+            device=input.device,
+            memory_format=memory_format,
+        )
+
 
 # from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
 def check_dim_size(tensor, dim, dim_size, size):
@@ -3447,6 +3579,26 @@ def meta_masked_fill_(self, mask, value):
     return self
 
 
+@register_meta(aten.masked_scatter_)
+def meta_masked_scatter_(self, mask, source):
+    torch._check(
+        mask.dtype in (torch.bool, torch.uint8), lambda: "Mask must be bool or uint8"
+    )
+    torch._check(
+        self.dtype == source.dtype,
+        lambda: "masked_scatter: expected self and source to have same "
+        "dtypes but got {self.dtype} and {source.dtype}",
+    )
+    return self
+
+
+@register_meta(aten.masked_scatter)
+def meta_masked_scatter(self, mask, source):
+    self, mask = _maybe_broadcast(self, mask)
+    output = torch.empty_like(self, memory_format=torch.contiguous_format)
+    return meta_masked_scatter_(output, mask, source)
+
+
 @register_meta(aten.index_put_.default)
 def meta_index_put_(self, indices, values, accumulate=False):
     return self
@@ -4725,16 +4877,13 @@ def meta__scaled_dot_product_flash(
     head_dim = query.size(3)
 
     max_seqlen_batch_k = key.size(2)
-    Nnz_q = batch_size * max_seqlen_batch_q
-
-    query_t = query.transpose(1, 2)
-    query_reshaped = query_t.reshape(Nnz_q, num_heads, head_dim)
-    attention = torch.empty_like(query_reshaped, device=query.device)
-    attention = attention.view(
-        batch_size, max_seqlen_batch_q, num_heads, head_dim
-    ).transpose(1, 2)
 
     if device_hint(query) == "cpu":
+        attention = torch.empty(
+            (batch_size, max_seqlen_batch_q, num_heads, head_dim),
+            dtype=query.dtype,
+            device=query.device,
+        ).transpose(1, 2)
         logsumexp = torch.empty(
             (
                 batch_size,
@@ -4755,17 +4904,14 @@ def meta__scaled_dot_product_flash(
             torch.empty((), dtype=torch.long, device="meta"),
             torch.empty((), dtype=query.dtype, device=query.device),
         )
-    max_seqlen_q = math.ceil(max_seqlen_batch_q / 16) * 16
+
+    # Cuda Path
+    query_t = query.transpose(1, 2)
+    attention = torch.empty_like(query_t).transpose(1, 2)
     logsumexp = torch.empty(
-        (batch_size, num_heads, max_seqlen_q),
+        (batch_size, num_heads, max_seqlen_batch_q),
         dtype=torch.float,
         device=query.device,
-    )
-    cumulative_sequence_length_q = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
-    )
-    cumulative_sequence_length_k = torch.empty(
-        batch_size + 1, dtype=torch.int32, device="meta"
     )
 
     if return_debug_mask:
@@ -4776,7 +4922,7 @@ def meta__scaled_dot_product_flash(
         elif max_seqlen_batch_k <= 256:
             max_seqlen_k = 256
         debug_mask = torch.empty(
-            (batch_size, num_heads, max_seqlen_q, max_seqlen_k),
+            (batch_size, num_heads, max_seqlen_batch_q, max_seqlen_k),
             dtype=query.dtype,
             device=query.device,
         )
@@ -4791,8 +4937,8 @@ def meta__scaled_dot_product_flash(
     return (
         attention,
         logsumexp,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_k,
+        None,
+        None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
         torch.empty((), dtype=torch.long, device="meta"),
@@ -4823,6 +4969,12 @@ def meta__scaled_dot_product_flash_backward(
     philox_offset: Tensor,
     scale: Optional[float] = None,
 ):
+    if device_hint(query) != "cpu":
+        grad_q = torch.empty_like(query.transpose(1, 2)).transpose(1, 2)
+        grad_k = torch.empty_like(key.transpose(1, 2)).transpose(1, 2)
+        grad_v = torch.empty_like(value.transpose(1, 2)).transpose(1, 2)
+        return grad_q, grad_k, grad_v
+
     batch_size = query.size(0)
     num_heads = query.size(1)
     head_dim = query.size(3)
@@ -5672,6 +5824,10 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             elif "onednn::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_onednn.impl(op_overload, fn)
+            elif "quantized::" in op_overload.name():
+                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(
+                    op_overload, fn
+                )
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 

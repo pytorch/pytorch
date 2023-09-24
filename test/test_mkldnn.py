@@ -142,7 +142,7 @@ class TestMkldnn(TestCase):
 
     def test_unsupported(self):
         # unsupported types and unsupported types with gpu
-        for dtype in [torch.double, torch.half, torch.uint8, torch.int8,
+        for dtype in [torch.double, torch.uint8, torch.int8,
                       torch.short, torch.int, torch.long]:
             with self.assertRaises(RuntimeError) as context:
                 torch.randn(1, 2, 3, 4, dtype=dtype, device=torch.device('cpu')).to_mkldnn()
@@ -279,8 +279,7 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def _test_conv_bf16_base(self, dim):
+    def _test_conv_lower_precision_base(self, dim, dtype):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
         input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
         options = itertools.product([True, False], [1, 2], [1, 4])
@@ -299,27 +298,34 @@ class TestMkldnn(TestCase):
                                     dilation=dilation,
                                     bias=bias,
                                     groups=groups).float()
-            x_bf16 = x.bfloat16()
-            if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            x_lower = x.to(dtype=dtype)
+            if (dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported()) or \
+               (dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported()):
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
-                mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
+                mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
                 y = mkldnn_conv(x.to_mkldnn()).to_dense()
-                y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
-                self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
+                y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
+                self.assertEqual(y, y_lower, atol=1e-1, rtol=1e-3)
             else:
-                msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
-                with self.assertRaisesRegex(RuntimeError, msg):
-                    mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
-                    y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
+                msg = {
+                    torch.bfloat16: r"bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq",
+                    torch.half: r"fp16 path needs the cpu support avx_ne_convert or avx512_fp16",
+                }
+                with self.assertRaisesRegex(RuntimeError, msg[dtype]):
+                    mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
+                    y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
 
-    def test_conv1d_bf16(self):
-        self._test_conv_bf16_base(dim=1)
+    def test_conv1d_lower_precision(self):
+        self._test_conv_lower_precision_base(dim=1, dtype=torch.bfloat16)
+        self._test_conv_lower_precision_base(dim=1, dtype=torch.half)
 
-    def test_conv2d_bf16(self):
-        self._test_conv_bf16_base(dim=2)
+    def test_conv2d_lower_precision(self):
+        self._test_conv_lower_precision_base(dim=2, dtype=torch.bfloat16)
+        self._test_conv_lower_precision_base(dim=2, dtype=torch.half)
 
-    def test_conv3d_bf16(self):
-        self._test_conv_bf16_base(dim=3)
+    def test_conv3d_lower_precision(self):
+        self._test_conv_lower_precision_base(dim=3, dtype=torch.bfloat16)
+        self._test_conv_lower_precision_base(dim=3, dtype=torch.half)
 
     def _test_conv_deconv_nhwc_base(self, conv_module, weight_memory_format, dtype, prec=None):
         input_shapes = {2: (55, 55), 3: (14, 14, 14)}
@@ -376,15 +382,20 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.float32)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_conv_nhwc_bf16(self):
-        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() returns false, bf16 CPU conv will fall back to thnn impl
+    def test_conv2d_nhwc_lower_precision(self):
+        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        # returns false, bf16/fp16 CPU conv will fall back to thnn impl
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.bfloat16)
-        # test fall back to thnn impl
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.half)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.half)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.half)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.half)
+        # test fall back
         with torch.backends.mkldnn.flags(enabled=False):
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-2)
             self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16, prec=1e-2)
@@ -397,15 +408,20 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32)
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_conv_transpose_nhwc_bf16(self):
-        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() returns false, bf16 CPU conv will fall back to thnn impl
+    def test_conv_transpose2d_nhwc_lower_precision(self):
+        # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
+        # returns false, bf16/fp16 CPU conv will fall back to thnn impl
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.bfloat16)
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.bfloat16)
-        # test fall back to thnn impl
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.half)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.half)
+        # test fall back
         with torch.backends.mkldnn.flags(enabled=False):
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16, prec=2e-2)
             self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16, prec=2e-2)

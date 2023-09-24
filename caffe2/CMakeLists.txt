@@ -400,6 +400,7 @@ set(GENERATED_CXX_PYTHON
 
 set(GENERATED_H_PYTHON
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.h"
   )
 
 set(GENERATED_TESTING_PYTHON
@@ -630,8 +631,7 @@ if(USE_CUDA)
     set(DELAY_LOAD_FLAGS "")
   endif()
 
-  target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
-  target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
+  target_link_libraries(caffe2_nvrtc ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
   install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   if(USE_NCCL)
     list(APPEND Caffe2_GPU_SRCS
@@ -841,6 +841,25 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
     endif()
   endforeach()
+endif()
+
+option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
+if(TORCH_USE_IWYU)
+  find_program(iwyu NAMES include-what-you-use)
+  if(iwyu)
+    set(iwyu_cmd
+        "include-what-you-use"
+        "-Xiwyu"
+        "--transitive_includes_only"
+        "-Xiwyu"
+        "--no_fwd_decls"
+        "-Xiwyu"
+        "--prefix_header_includes=keep"
+        "-Xiwyu"
+        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
+        )
+    set_property(TARGET torch_cpu PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
+  endif()
 endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND

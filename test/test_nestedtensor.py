@@ -28,6 +28,8 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+from torch.nested._internal.nested_tensor import jagged_from_list, buffer_from_jagged
+
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
 
@@ -2826,10 +2828,99 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+# We can probably parametrizing existing tests instead of having a separate
+# test class as we begin to support more ops. Also maybe rewrite with OpInfos.
+class TestNestedTensorSubclass(TestCase):
+    def test_tensor_attributes(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        nt, _offsets = jagged_from_list([a, b, c], None)
+
+        for op in (
+            torch.ops.aten.is_non_overlapping_and_dense.default,
+            torch.ops.aten.sym_size.default,
+            torch.ops.aten.dim.default,
+            torch.ops.aten.sym_numel.default,
+        ):
+            op(nt)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "directly calling torch.ops.aten.size"):
+            torch.ops.aten.size.default(nt)
+
+        singleton_int = torch.nested._internal.nested_tensor.get_tensor_id(_offsets)
+        self.assertEqual(nt.size(), (3, singleton_int, 3))
+        self.assertEqual(nt.shape, (3, singleton_int, 3))
+        self.assertEqual(nt.dim(), 3)
+        self.assertEqual(nt.numel(), 27)
+
+        for op in (
+            torch.ops.aten.sym_stride.default,
+            torch.ops.aten.is_contiguous.default,
+            torch.ops.aten.is_contiguous.memory_format,
+            torch.ops.aten.sym_storage_offset.default,
+        ):
+            error_msg = "NestedTensors do not support directly querying strides"
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                if "memory_format" in op.__name__:
+                    op(nt, torch.preserve_format)
+                op(nt)
+
+    def test_linear(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, weight):
+            nt, _ = jagged_from_list([a, b, c], None)
+            out = torch.nn.functional.linear(nt, weight)
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
+
+    def test_unary_pointwise(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        weight = torch.randn(3, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c, weight):
+            nt, _ = jagged_from_list([a, b, c], None)
+            out = nt.sin().cos()
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c, weight), check_batched_grad=False)
+
+    def test_binary_pointwise(self, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+
+        # Incorrect usage: shape check will fail if the offsets tensor are not
+        #                  the same exact tensor object
+        nt1, _ = jagged_from_list([a, b, c], None)
+        nt2, _ = jagged_from_list([a, b, c], None)
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            "expected lhs and rhs to have the same exact offsets tensor",
+            lambda: nt1 * nt2)
+
+        # Correct usage: chain the calls using the same offsets tensor object
+        def grad_test_func(a, b, c):
+            nt1, offsets = jagged_from_list([a, b, c], None)
+            nt2, offsets = jagged_from_list([a, b, c], offsets)
+            out = nt1 * nt2
+            return buffer_from_jagged(out)
+
+        gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
+instantiate_device_type_tests(TestNestedTensorSubclass, globals())
 
 if __name__ == '__main__':
     run_tests()
