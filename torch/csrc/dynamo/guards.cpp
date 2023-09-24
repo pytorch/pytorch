@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/extension.h>
 #include <sstream>
@@ -436,18 +437,19 @@ struct GlobalStateGuard {
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
+    _default_dtype = at::get_default_dtype();
   }
 
   inline bool check() {
     auto& ctx = at::globalContext();
-    return (
-        _grad_mode == at::GradMode::is_enabled() &&
-        _torch_function == torch::torch_function_enabled() &&
-        _deterministic_algorithms == ctx.deterministicAlgorithms() &&
-        _allow_tf32 == ctx.allowTF32CuBLAS() &&
-        _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
-        _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
-        _num_threads == at::get_num_threads());
+    return (_grad_mode == at::GradMode::is_enabled() &&
+            _torch_function == torch::torch_function_enabled() &&
+            _deterministic_algorithms == ctx.deterministicAlgorithms() &&
+            _allow_tf32 == ctx.allowTF32CuBLAS() &&
+            _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
+            _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
+            _num_threads == at::get_num_threads()) &&
+        _default_dtype == at::get_default_dtype();
   }
 
   bool _grad_mode;
@@ -457,6 +459,7 @@ struct GlobalStateGuard {
   bool _allow_fp16_reduce;
   bool _allow_bf16_reduce;
   int _num_threads;
+  caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
 };
 
@@ -517,6 +520,18 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   }
 }
 
+static PyObject* dict_version(PyObject* dummy, PyObject* args) {
+  // Retrieves the version of a dictionary.
+  PyObject* obj = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return nullptr;
+  }
+  if (!PyDict_Check(obj)) {
+    return nullptr;
+  }
+  return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
+}
+
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   /*
    Assert that a given tensor has a given size/stride, but ignore strides
@@ -560,12 +575,163 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   Py_RETURN_TRUE;
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+typedef struct {
+  /* Dict for an attr of the nn module */
+  PyDictObject* dict; // borrowed reference
+  /* version tag of the attr dict to watch mutations */
+  uint64_t dict_version_tag;
+} AttrTag;
+
+static const char* module_guard_attrs[] = {
+    "_parameters",
+    "_buffers",
+    "_modules",
+    "_forward_hooks",
+    "_forward_pre_hooks",
+    "_backward_hooks",
+    "_backward_pre_hooks",
+};
+
+typedef struct {
+  PyObject_HEAD;
+  PyObject* mod; // borrowed reference
+  unsigned int version_tag;
+  uint64_t dict_version_tag;
+  AttrTag attr_tags[sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0])];
+} NNModuleGuard;
+
+static void NNModuleGuard_dealloc(NNModuleGuard* self) {
+  self->mod = nullptr;
+  Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static PyTypeObject NNModuleGuardType = {
+    // NOLINTNEXTLINE
+    PyVarObject_HEAD_INIT(nullptr, 0)};
+
+static PyObject* NNModuleGuard_call(
+    PyObject* callable,
+    PyObject* args,
+    PyObject* kwargs) {
+  NNModuleGuard* guard = (NNModuleGuard*)callable;
+
+  if (PyTuple_GET_SIZE(args) != 1) {
+    PyErr_SetString(
+        PyExc_TypeError, "NNModuleGuardType: expected one argument");
+    return nullptr;
+  }
+
+  PyObject* mod = PyTuple_GET_ITEM(args, 0);
+  if (guard->mod != mod) {
+    Py_RETURN_FALSE;
+  }
+
+  // TODO(sgross): temporarily disable tp_version_tag check due to
+  // torch.fx._symbolic_trace patching __getattr__ and __call__.  Modifying
+  // those attributes on the class changes the tp_version_tag, invalidating
+  // the guard.
+  // if (Py_TYPE(mod)->tp_version_tag != guard->version_tag) {
+  //   Py_RETURN_FALSE;
+  // }
+
+  // NOTE: we must check the dict version tag before we check the attributes,
+  // because the attributes may be dead references if the dict has been updated.
+  PyObject* dict = PyObject_GenericGetDict(mod, nullptr);
+  if (((PyDictObject*)dict)->ma_version_tag != guard->dict_version_tag) {
+    Py_DECREF(dict);
+    Py_RETURN_FALSE;
+  }
+  Py_DECREF(dict);
+
+  for (auto& attr_tag : guard->attr_tags) {
+    if (attr_tag.dict->ma_version_tag != attr_tag.dict_version_tag) {
+      Py_RETURN_FALSE;
+    }
+  }
+  Py_RETURN_TRUE;
+}
+
+static PyObject* nn_module_guard(PyObject* dummy, PyObject* obj) {
+  // Uses a private tags introduced in PEP 509 - ma_version_tag to check if
+  // there are any changes in the dict.
+  // TODO(jansel,janimesh) Note that this ma_version_tag be removed/repurposed
+  // in Python 3.12 under PEP 699. We can rely on newly introduced dict watchers
+  // in 3.12 - https://docs.python.org/3.12/c-api/dict.html#c.PyDict_Watch
+
+  NNModuleGuard* guard =
+      (NNModuleGuard*)NNModuleGuardType.tp_alloc(&NNModuleGuardType, 0);
+  if (guard == nullptr) {
+    return nullptr;
+  }
+
+  guard->mod = obj;
+
+  PyObject* dict = PyObject_GenericGetDict(obj, nullptr);
+  if (dict == nullptr) {
+    Py_DECREF(guard);
+    return nullptr;
+  }
+  guard->dict_version_tag = ((PyDictObject*)dict)->ma_version_tag;
+
+  Py_ssize_t idx = 0;
+  for (const char* name : module_guard_attrs) {
+    auto& tag = guard->attr_tags[idx];
+
+    PyObject* key = PyUnicode_FromString(name);
+    if (key == nullptr) {
+      Py_DECREF(dict);
+      Py_DECREF(guard);
+      return nullptr;
+    }
+
+    PyObject* attr_obj = PyDict_GetItemWithError(dict, key);
+    if (attr_obj == nullptr) {
+      if (!PyErr_Occurred()) {
+        // this module doesn't have the specific attribute
+        PyErr_Format(
+            PyExc_AttributeError,
+            "'%s' object has no attribute '%s'",
+            Py_TYPE(obj)->tp_name,
+            name);
+      }
+      Py_DECREF(dict);
+      Py_DECREF(guard);
+      return nullptr;
+    }
+
+    tag.dict = (PyDictObject*)attr_obj;
+    tag.dict_version_tag = tag.dict->ma_version_tag;
+    idx++;
+  }
+  Py_DECREF(dict);
+
+  if (Py_TYPE(obj)->tp_version_tag == 0) {
+    // The tp_version_tag may be lazily set on attribute access. If we don't
+    // have a valid tag, perform a property lookup to force the tag to be set.
+    PyObject* tmp = PyObject_GetAttrString(obj, "__dict__");
+    if (tmp == nullptr) {
+      Py_DECREF(guard);
+      return nullptr;
+    }
+    Py_DECREF(tmp);
+  }
+
+  guard->version_tag = Py_TYPE(obj)->tp_version_tag;
+  if (guard->version_tag == 0) {
+    Py_DECREF(guard);
+    PyErr_SetString(PyExc_ValueError, "object has no version tag");
+    return nullptr;
+  }
+  return (PyObject*)guard;
+}
+
 static PyMethodDef _methods[] = {
-    {"check_type_id", check_type_id, METH_VARARGS, nullptr},
-    {"check_obj_id", check_obj_id, METH_VARARGS, nullptr},
-    {"assert_size_stride", assert_size_stride, METH_VARARGS, nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"check_type_id", check_type_id, METH_VARARGS, NULL},
+    {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
+    {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
+    {"nn_module_guard", nn_module_guard, METH_O, NULL},
+    {"dict_version", dict_version, METH_VARARGS, NULL},
+    {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
@@ -582,11 +748,10 @@ struct GuardDebugInfo {
   GuardDebugInfo(
       bool result,
       std::string failure_reason,
-      int num_guards_executed) {
-    this->result = result;
-    this->num_guards_executed = num_guards_executed;
-    this->failure_reason = failure_reason;
-  }
+      int num_guards_executed)
+      : result(result),
+        failure_reason(failure_reason),
+        num_guards_executed(num_guards_executed) {}
 
   // Whether the guard passed or failed.
   bool result;
@@ -609,11 +774,11 @@ class LeafGuard {
     return check_nopybind(value.ptr());
   }
 
-  GuardDebugInfo debug_check(py::handle value) {
-    return debug_check_nopybind(value.ptr());
+  GuardDebugInfo check_verbose(py::handle value) {
+    return check_verbose_nopybind(value.ptr());
   }
 
-  GuardDebugInfo debug_check_nopybind(PyObject* value) { // borrowed ref
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) { // borrowed ref
     bool result = check_nopybind(value);
     std::string failure_reason = "";
     if (!result) {
@@ -654,7 +819,10 @@ class PythonLambdaGuard : public LeafGuard {
 
   // Runs the lambda function with the current f_locals value.
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyObject_IsTrue(PyObject_CallOneArg(_guard_check_fn_pyobj, value));
+    PyObject* x = PyObject_CallOneArg(_guard_check_fn_pyobj, value); // new ref
+    bool result = PyObject_IsTrue(x);
+    Py_DECREF(x);
+    return result;
   }
 
   std::string get_failure_reason(PyObject* value) override {
@@ -692,7 +860,8 @@ class NoTensorAliasingGuard : public LeafGuard {
   }
 
   std::string get_failure_reason(PyObject* value) override { // borrowed ref
-    return "";
+    // TODO - Generate better error  msg
+    return "Tensor aliasing guard failed";
   }
 
  private:
@@ -720,7 +889,7 @@ class GuardAccessor {
  public:
   GuardAccessor(py::object accessor_key)
       : _guard_manager(std::make_unique<GuardManager>()),
-        _accessor_key(accessor_key) {}
+        _accessor_key(std::move(accessor_key)) {}
 
   // Return by reference as GuardAccessor owns the GuardManager.
   std::unique_ptr<GuardManager>& get_guard_manager() {
@@ -731,15 +900,10 @@ class GuardAccessor {
     return _accessor_key.equal(key);
   }
 
-  virtual ~GuardAccessor() {
-    // _accessed_value is owned by the GuardAccessor. method access returns an
-    // owning reference.
-    Py_DECREF(_accessed_value);
-  }
-
-  // Returns a borrowed reference. The accessed_value is owned by the
-  // GuardAccessor itself and is decref'd on destruction.
+  // Returns a new reference. It is the responsbility of the GuardManager
+  // (caller in this case) to decref.
   virtual PyObject* access(PyObject* obj) = 0;
+  virtual ~GuardAccessor() = default;
 
  private:
   // Guard manager corresponding to the retrieved value from the GuardAccessor.
@@ -749,8 +913,6 @@ class GuardAccessor {
   // accessor key could be py::str for getattr, getitem or py::function for
   // lambda accessor.
   py::object _accessor_key;
-  // Keeps the pointer to the accessed value to implement RAII mechanism.
-  PyObject* _accessed_value;
 };
 
 /**
@@ -761,12 +923,10 @@ class GetAttrGuardAccessor : public GuardAccessor {
   GetAttrGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
+
+  // Returns a new reference.
   PyObject* access(PyObject* obj) override { // borrowed ref
-    PyObject* ret = PyObject_GetAttr(obj, _attr_name);
-    // Store the owning reference to _accessed_value to be decref'd on
-    // destruction.
-    _accessed_value = ret;
-    return ret;
+    return PyObject_GetAttr(obj, _attr_name); // new ref
   }
 
  private:
@@ -783,13 +943,11 @@ class GetDictItemGuardAccessor : public GuardAccessor {
   GetDictItemGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
+  // Returns a new reference.
   PyObject* access(PyObject* obj) override { // borrowed ref
-    PyObject* item = PyDict_GetItem(obj, _attr_name);
+    PyObject* item = PyDict_GetItem(obj, _attr_name); // borrowed ref
     // GetItem returns a borrowed reference, incref to own it.
     Py_INCREF(item);
-    // Store the owning reference to _accessed_value to be decref'd on
-    // destruction.
-    _accessed_value = item;
     return item;
   }
 
@@ -805,12 +963,9 @@ class GetItemGuardAccessor : public GuardAccessor {
   GetItemGuardAccessor(py::str name)
       : GuardAccessor(name), _attr_name(name.ptr()) {}
 
+  // Returns a new reference.
   PyObject* access(PyObject* obj) override { // borrowed ref
-    PyObject* ret = PyObject_GetItem(obj, _attr_name);
-    // Store the owning reference to _accessed_value to be decref'd on
-    // destruction.
-    _accessed_value = ret;
-    return ret;
+    return PyObject_GetItem(obj, _attr_name);
   }
 
  private:
@@ -870,7 +1025,7 @@ class GuardManager {
 
   // GuardManager is the owner of the leaf_guards
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
-    _leaf_guards.push_back(leaf_guard);
+    _leaf_guards.emplace_back(std::move(leaf_guard));
   }
 
   /**
@@ -878,7 +1033,7 @@ class GuardManager {
    * already present, we just return the guard manager.
    */
   template <typename GuardAccessorT>
-  GuardManager* get_child_manager(py::object accessor_key) {
+  GuardManager* get_child_manager(const py::object& accessor_key) {
     // accessor_key type depends on the GuardAccessorT
     // for GetAttrGuardAccessor - py::str name
     // for GetItemGuardAccessor - py::str name
@@ -899,16 +1054,16 @@ class GuardManager {
     return check_nopybind(value.ptr());
   }
 
-  GuardDebugInfo debug_check(py::handle value) {
-    return debug_check_nopybind(value.ptr());
+  GuardDebugInfo check_verbose(py::handle value) {
+    return check_verbose_nopybind(value.ptr());
   }
 
   // Runs the leaf guards check and then child managers check function.
   //
-  // NB: There is some code DUPLICATION between this and debug_check function.
+  // NB: There is some code DUPLICATION between this and check_verbose function.
   // This is intentional. check function is in the hot path and is kept very
-  // simple. The purpose of debug_check function is to get guard failure
-  // reasoning to understand recompilations. debug_check function does not
+  // simple. The purpose of check_verbose function is to get guard failure
+  // reasoning to understand recompilations. check_verbose function does not
   // change the state of the guard, e.g., it does not shuffle the guards and
   // does not change the fail count. For simplicity, we duplicate the code here.
   bool check_nopybind(PyObject* value) { // borrowed ref
@@ -916,14 +1071,21 @@ class GuardManager {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       result = result && guard->check_nopybind(value);
+      if (!result) { // early exit
+        _fail_count += 1;
+        return result;
+      }
     }
 
     // Iterate over accessors.
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
       auto& manager = accessor->get_guard_manager();
-      result = result && manager->check_nopybind(accessor->access(value));
-      if (!result) {
+      PyObject* accessed_value = accessor->access(value); // new ref
+      result = result && manager->check_nopybind(accessed_value);
+      Py_DECREF(accessed_value);
+      if (!result) { // early exit
+        _fail_count += 1;
         break;
       }
       failed_on_first = false;
@@ -935,12 +1097,12 @@ class GuardManager {
     if (!result && !failed_on_first) {
       // Inplace sort the child guards by fail count. This moves the guard with
       // higher fail count earlier in the queue, and enables fail fast for the
-      // next debug_check.
+      // next check_verbose.
 
       // An alternate implementation was to use priority queue directly on
       // _accessors, but it was rejected because of the complexity of
       // popping and creating a new pq on each run_guards. Moreover, this sort
-      // is happening on the unhappy path when debug_check guard
+      // is happening on the unhappy path when check_verbose guard
       // fails. So, its probably ok.
       std::sort(
           _accessors.begin(),
@@ -952,20 +1114,17 @@ class GuardManager {
           });
     }
 
-    if (!result) {
-      _fail_count += 1;
-    }
     return result;
   }
 
   // This function has some code duplication with function check. This is
   // deliberate to keep check function simple and fast.
-  GuardDebugInfo debug_check_nopybind(PyObject* value) { // borrowed ref
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) { // borrowed ref
     bool result = true;
     int num_guards_executed = 0;
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
-      const GuardDebugInfo& debug_info = guard->debug_check_nopybind(value);
+      const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
       result = result && debug_info.result;
       num_guards_executed++;
       if (!result) {
@@ -978,7 +1137,7 @@ class GuardManager {
     for (const auto& accessor : _accessors) {
       auto& manager = accessor->get_guard_manager();
       const GuardDebugInfo& debug_info =
-          manager->debug_check_nopybind(accessor->access(value));
+          manager->check_verbose_nopybind(accessor->access(value));
       result = result && debug_info.result;
       num_guards_executed += debug_info.num_guards_executed;
       if (result == false) {
@@ -1051,6 +1210,10 @@ void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
 } // namespace
 
 PyObject* torch_c_dynamo_guards_init() {
+  PyObject* m = PyModule_Create(&_module);
+  if (m == nullptr)
+    return nullptr;
+
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
   TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
@@ -1062,8 +1225,11 @@ PyObject* torch_c_dynamo_guards_init() {
   TensorGuardsType.tp_init = (initproc)TensorGuards_init;
   TensorGuardsType.tp_new = TensorGuards_new;
 
-  if (PyType_Ready(&TensorGuardsType) < 0)
-    return nullptr;
+  NNModuleGuardType.tp_name = "torch._C._dynamo.guards.NNModuleGuard";
+  NNModuleGuardType.tp_basicsize = sizeof(NNModuleGuard);
+  NNModuleGuardType.tp_call = NNModuleGuard_call;
+  NNModuleGuardType.tp_dealloc = (destructor)NNModuleGuard_dealloc;
+  NNModuleGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
 
   GlobalStateGuardType.tp_name = "torch._C._dynamo.guards.GlobalStateGuard";
   GlobalStateGuardType.tp_basicsize = sizeof(GlobalStateGuard);
@@ -1074,11 +1240,13 @@ PyObject* torch_c_dynamo_guards_init() {
   GlobalStateGuardType.tp_init = (initproc)GlobalStateGuard_init;
   GlobalStateGuardType.tp_new = PyType_GenericNew;
 
+  if (PyType_Ready(&TensorGuardsType) < 0)
+    return nullptr;
+
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  auto m = PyModule_Create(&_module);
-  if (m == nullptr)
+  if (PyType_Ready(&NNModuleGuardType) < 0)
     return nullptr;
 
   Py_INCREF(&TensorGuardsType);
@@ -1092,6 +1260,13 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyModule_AddObject(
           m, "GlobalStateGuard", (PyObject*)&GlobalStateGuardType) < 0) {
     Py_DECREF(&GlobalStateGuardType);
+    Py_DECREF(m);
+    return nullptr;
+  }
+
+  if (PyModule_AddObject(
+          m, "NNModuleGuardType", Py_NewRef(&NNModuleGuardType)) < 0) {
+    Py_DECREF(&NNModuleGuardType);
     Py_DECREF(m);
     return nullptr;
   }
@@ -1148,7 +1323,7 @@ PyObject* torch_c_dynamo_guards_init() {
           "get_leaf_guards",
           &GuardManager::get_leaf_guards,
           py::return_value_policy::reference)
-      .def("debug_check", &GuardManager::debug_check)
+      .def("check_verbose", &GuardManager::check_verbose)
       .def(
           "add_lambda_guard",
           [](GuardManager& self,

@@ -1,11 +1,16 @@
 #pragma once
 
+#include <algorithm>
+#include <deque>
 #include <future>
 #include <mutex>
 #include <shared_mutex>
 
+// WARNING: Be careful when adding new includes here. This header will be used
+// in model.so, and should not refer to any aten/c10 headers except the stable
+// C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
+// applies to other files under torch/csrc/inductor/aot_runtime/.
 #include <torch/csrc/inductor/aot_runtime/model.h>
-#include <torch/csrc/inductor/aot_runtime/proxy_executor.h>
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
@@ -17,7 +22,7 @@
 extern const uint8_t _binary_constants_bin_start[];
 extern const uint8_t _binary_constants_bin_end[];
 
-#define AOT_CONST_GPU_ALIGNMENT 64
+#define AOTI_CONST_GPU_ALIGNMENT 64
 
 namespace {
 
@@ -25,8 +30,8 @@ using CUDAPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
   void* data_ptr;
-  C10_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
-  auto deleter = [](void* ptr) { C10_CUDA_CHECK(cudaFree(ptr)); };
+  AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
+  auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return CUDAPtr(data_ptr, deleter);
 }
 } // anonymous namespace
@@ -36,16 +41,15 @@ namespace aot_inductor {
 
 class AOTInductorModelContainer {
  public:
-  AOTInductorModelContainer(size_t num_models) {
-    LOG(INFO) << "Constructing an AOTInductorModelContainer with " << num_models
-              << " model instances";
-    TORCH_CHECK(num_models > 0, "expected num_models to be larger than 0");
-
+  AOTInductorModelContainer(
+      size_t num_models,
+      bool is_cpu = false,
+      std::optional<std::string> cubin_dir = std::nullopt) {
     constants_ = std::make_shared<ConstantMap>();
     models_.reserve(num_models);
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
-      models_.push_back(AOTInductorModel::Create(constants_));
+      models_.push_back(AOTInductorModel::Create(constants_, cubin_dir));
       available_models_.push_back(models_.back().get());
     }
 
@@ -65,75 +69,103 @@ class AOTInductorModelContainer {
     for (size_t i = 0; i < num_inputs; i++) {
       input_names_.push_back(model->input_name(i));
       input_dtypes_.push_back(model->get_input_dtype(i));
-      max_input_shapes_.emplace_back(model->max_input_shape(i));
+      max_input_shapes_.push_back(model->max_input_shape(i));
     }
 
     size_t num_outputs = model->num_outputs();
     output_names_.reserve(num_outputs);
     output_dtypes_.reserve(num_outputs);
     max_output_shapes_.reserve(num_outputs);
+    output_shapes_.reserve(num_outputs);
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.push_back(model->output_name(i));
       output_dtypes_.push_back(model->get_output_dtype(i));
-      max_output_shapes_.emplace_back(model->max_output_shape(i));
+      max_output_shapes_.push_back(model->max_output_shape(i));
+      output_shapes_.emplace_back(max_output_shapes_.back().size(), -1);
     }
 
     size_t num_constants = model->num_constants();
-    std::vector<size_t> constants_internal_offset(num_constants);
-    // Compute required blob size with 64-alignment
-    size_t max_blob = 0;
-    for (size_t i = 0; i < num_constants; i++) {
-      size_t data_size = model->constant_data_size(i);
-      if (data_size % AOT_CONST_GPU_ALIGNMENT) {
-        data_size = AOT_CONST_GPU_ALIGNMENT +
-            (data_size / AOT_CONST_GPU_ALIGNMENT) * AOT_CONST_GPU_ALIGNMENT;
-      }
-      constants_internal_offset[i] = max_blob;
-      max_blob += data_size;
-    }
-    constant_blob_ = RAII_cudaMalloc(max_blob);
-
     constants_->reserve(num_constants);
-    auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+
+    std::vector<size_t> constants_internal_offset(num_constants);
+    if (!is_cpu) {
+      // Compute required blob size with 64-alignment if on GPU.
+      size_t max_blob = 0;
+      for (size_t i = 0; i < num_constants; i++) {
+        size_t data_size = model->constant_data_size(i);
+        if (data_size % AOTI_CONST_GPU_ALIGNMENT) {
+          data_size = AOTI_CONST_GPU_ALIGNMENT +
+              (data_size / AOTI_CONST_GPU_ALIGNMENT) * AOTI_CONST_GPU_ALIGNMENT;
+        }
+        constants_internal_offset[i] = max_blob;
+        max_blob += data_size;
+      }
+      constant_blob_ = RAII_cudaMalloc(max_blob);
+    }
+
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
       std::string name = model->constant_name(i);
       size_t data_size = model->constant_data_size(i);
-      auto* internal_ptr = constants_ptr + constants_internal_offset[i];
-      // Copy data to GPU memory
-      // TODO: Handle shared storage case.
-      C10_CUDA_CHECK(cudaMemcpy(
-          internal_ptr,
-          _binary_constants_bin_start + bytes_read,
-          data_size,
-          cudaMemcpyHostToDevice));
+      uint8_t* internal_ptr;
+      if (is_cpu) {
+        // get pointer to constant which is packed in model during compile time.
+        internal_ptr =
+            const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
+      } else {
+        auto* constants_ptr = static_cast<uint8_t*>(constant_blob_.get());
+        internal_ptr = constants_ptr + constants_internal_offset[i];
+        // Copy data to GPU memory
+        // TODO: Handle shared storage case.
+        AOTI_RUNTIME_CUDA_CHECK(cudaMemcpy(
+            internal_ptr,
+            _binary_constants_bin_start + bytes_read,
+            data_size,
+            cudaMemcpyHostToDevice));
+      }
       bytes_read += data_size;
 
       // Create at::Tensor from copied memory.
       auto dtype = model->constant_type(i);
+      auto ndim = model->constant_ndim(i);
       auto size = model->constant_shape(i);
       auto stride = model->constant_stride(i);
       auto offset = model->constant_offset(i);
 
-      auto tensor = at::for_blob(internal_ptr, size)
-                        .strides(stride)
-                        .storage_offset(offset)
-                        .options(at::device(at::kCUDA).dtype(dtype))
-                        .make_tensor();
-      constants_->emplace(std::move(name), std::move(tensor));
+      auto device_type = aoti_torch_device_type_cuda();
+      if (is_cpu) {
+        device_type = aoti_torch_device_type_cpu();
+      }
+
+      AtenTensorHandle tensor_handle;
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type,
+          0, // device index, should read it from cudaStream_t?
+          &tensor_handle));
+      constants_->emplace(
+          std::move(name), std::move(RAIIAtenTensorHandle(tensor_handle)));
     }
   }
 
   void run(
-      const std::vector<at::Tensor>& inputs,
-      std::vector<at::Tensor>& outputs,
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
       cudaStream_t stream,
-      ProxyExecutor* proxy_executor) {
+      AOTIProxyExecutorHandle proxy_executor) {
     auto* model = get_available_model();
     try {
-      AOT_VECTOR_SIZE_CHECK(inputs, num_inputs());
-      AOT_VECTOR_SIZE_CHECK(outputs, num_outputs());
-      model->run(inputs, outputs, stream, proxy_executor);
+      model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
       std::lock_guard lk(models_mutex_);
       available_models_.push_back(model);
@@ -200,6 +232,9 @@ class AOTInductorModelContainer {
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in constant_blob_.
   std::shared_ptr<ConstantMap> constants_;
+
+  // Holds the current value for each dimension of any output shape.
+  std::vector<std::vector<int64_t>> output_shapes_;
 
   // Holds all the AOTInductorModel instances owned by this container.
   std::vector<std::unique_ptr<AOTInductorModel>> models_;

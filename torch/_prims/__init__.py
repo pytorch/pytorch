@@ -290,6 +290,8 @@ def _make_prim(
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
             return meta(*args, **kwargs)
+        if any(isinstance(x, torch.device) and x.type == "meta" for x in args):
+            return meta(*args, **kwargs)
         else:
             return _prim_impl(*args, **kwargs)
 
@@ -305,7 +307,12 @@ def _make_prim(
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
-    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments):
+    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments) or str(
+        _prim
+    ) in [
+        # See https://github.com/pytorch/pytorch/issues/103532
+        "prims.device_put.default"
+    ]:
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
