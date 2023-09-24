@@ -509,11 +509,11 @@ class TestPaternMatcher(TestCase):
             t2 = t1.to(dtype=torch.bool)
             return torch.cumsum(t2, 1)
 
-        def fn5():
+        def fn6():
             x = torch.full([10, 10], True, dtype=torch.int32)
             return torch.cumsum(x, 1)
 
-        for fn in (fn1, fn2, fn3, fn4):
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
