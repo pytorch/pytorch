@@ -46,13 +46,13 @@ if(USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-      caffe2::cufft caffe2::curand caffe2::cublas)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
     if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
       caffe2_update_option(USE_NVRTC OFF)
     endif()
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
     else()
@@ -279,21 +279,6 @@ elseif(INTERN_USE_EIGEN_BLAS)
   set(USE_BLAS 1)
   include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
   list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
-endif()
-
-# ---[ FFTW
-set(AT_FFTW_ENABLED 0)
-set(USE_FFTW OFF)
-if(USE_FFTW OR NOT MKL_FOUND)
-  find_library(LIBFFTW3 fftw3)
-  if(LIBFFTW3)
-    find_path(FFTW3_INCLUDE_DIR NAMES fftw3.h ONLY_CMAKE_FIND_ROOT_PATH)
-    if(FFTW3_INCLUDE_DIR)
-      SET(AT_FFTW_ENABLED 1)
-      SET(USE_FFTW ON)
-      include_directories(${FFTW3_INCLUDE_DIR})
-    endif()
-  endif()
 endif()
 
 # --- [ PocketFFT
@@ -896,10 +881,7 @@ endif()
 if(USE_NUMA)
   if(LINUX)
     find_package(Numa)
-    if(NUMA_FOUND)
-      include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${Numa_LIBRARIES})
-    else()
+    if(NOT NUMA_FOUND)
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
       caffe2_update_option(USE_NUMA OFF)
     endif()
@@ -1165,9 +1147,6 @@ if(USE_MPI)
     message(STATUS "MPI include path: " ${MPI_CXX_INCLUDE_PATH})
     message(STATUS "MPI LINK flags path: " ${MPI_CXX_LINK_FLAGS})
     message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
-    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
     find_program(OMPI_INFO
       NAMES ompi_info
       HINTS ${MPI_CXX_LIBRARIES}/../bin)
@@ -1813,18 +1792,6 @@ if(NOT INTERN_BUILD_MOBILE)
 
   add_definitions(-DUSE_EXTERNAL_MZCRC)
   add_definitions(-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS)
-
-  # Is __thread supported?
-  if(NOT MSVC)
-    CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
-  else(NOT MSVC)
-    CHECK_C_SOURCE_COMPILES("static __declspec( thread ) int x = 1; int main() { return x; }" C_HAS_THREAD)
-  endif(NOT MSVC)
-  if(NOT C_HAS_THREAD)
-    message(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
-  else(NOT C_HAS_THREAD)
-    add_compile_options(-DTH_HAVE_THREAD)
-  endif(NOT C_HAS_THREAD)
 
   find_package(ZVECTOR) # s390x simd support
 endif()

@@ -27,6 +27,7 @@ from torch._prims_common import (
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     free_symbols,
@@ -534,10 +535,8 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
         ):
             raise DynamicOutputShapeException(func)
 
-        from torch.fx.experimental.symbolic_shapes import constrain_range
-
         output_size = fake_mode.shape_env.create_unbacked_symint()
-        constrain_range(output_size, min=2, max=sys.maxsize - 1)
+        _constrain_range_for_size(output_size)
         # TODO: consider a memo
     return repeats.new_empty(output_size)
 
@@ -567,8 +566,6 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
-        from torch.fx.experimental.symbolic_shapes import constrain_range
-
         nnz = fake_mode.shape_env.create_unbacked_symint()
 
         # This is unsound, but it works well in practice
@@ -588,7 +585,7 @@ def nonzero(fake_mode, func, arg):
             if arg.numel() >= 2:
                 maxval = int(arg.numel())
 
-        constrain_range(nnz, min=2, max=maxval)
+        _constrain_range_for_size(nnz, max=maxval)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
@@ -1531,13 +1528,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.impl.global_registry:
-            custom_op = torch._custom_op.impl.global_registry[func.name()]
-            if custom_op is not None and custom_op._has_impl("abstract"):
-                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
-                    result = custom_op._get_impl("abstract").func(*args, **kwargs)
-                    return result
+        maybe_abstract_impl = torch._custom_op.impl.get_abstract_impl(func.name())
+        if maybe_abstract_impl:
+            ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
+            with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
+                result = maybe_abstract_impl(*args, **kwargs)
+                return result
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors

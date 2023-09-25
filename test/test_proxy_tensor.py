@@ -977,6 +977,22 @@ def forward(self, y_1, x_1):
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
 
+    def test_repeat_interleave_unbacked_output_size(self):
+        def f(x, y):
+            s = x.sum().item()
+            return y.repeat_interleave(x, dim=0, output_size=s)
+
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor([2, 3]), torch.randn(2)).code).strip()
+        self.assertExpectedInline(
+            r, """\
+def forward(self, x_1, y_1):
+    sum_1 = torch.ops.aten.sum.default(x_1)
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(sum_1);  sum_1 = None
+    repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1, output_size = _local_scalar_dense);  x_1 = _local_scalar_dense = None
+    index_select = torch.ops.aten.index_select.default(y_1, 0, repeat_interleave);  y_1 = repeat_interleave = None
+    return index_select"""  # noqa: B950
+        )
+
     def test_adv_index_batch(self):
         def f(src_tokens):
             bsz, src_len = src_tokens.size()[:2]
@@ -1067,7 +1083,6 @@ def forward(self, a_1):
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            constrain_as_size(r)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -1075,7 +1090,6 @@ def forward(self, a_1):
             r, """\
 def forward(self, a_1):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(a_1);  a_1 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = None, max = None)
     empty = torch.ops.aten.empty.memory_format([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
     return empty"""  # noqa: B950
         )
@@ -1325,15 +1339,17 @@ def forward(self, a_1):
         self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False).shape_env
 
     def test_size_with_tensor(self):
+        # I think I messed up writing this test case originally, I think
+        # I'm supposed to hit an error case, but the code here works in both
+        # eager and tracing
         def f(tensor):
             max_size = torch.tensor([800, 1216], dtype=torch.int64)
             batch_shape = [2] + list(tensor.shape[:-2]) + list(max_size)
             return tensor.new_empty(batch_shape)
 
         a = torch.randn(3, 800, 1199)
-        self.assertRaisesRegex(
-            RuntimeError, "data-dependent", lambda: make_fx(f, tracing_mode="symbolic")(a)
-        )
+        f(a)
+        make_fx(f, tracing_mode="symbolic")(a)
 
     def test_expand(self):
         def f(a):
