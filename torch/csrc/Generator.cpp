@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -13,7 +14,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/tensor_types.h>
-#include <ATen/detail/XPUHooksInterface.h>
+
 #include <utility>
 
 #ifdef USE_CUDA
