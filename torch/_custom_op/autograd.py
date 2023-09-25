@@ -31,7 +31,7 @@ def autograd_kernel_indirection(custom_op):
                 else 'backward'
             )
             found = 'save_for_backward' if missing == 'backward' else 'backward'
-            loc = custom_op._get_impl(found).location
+            loc = custom_op._get_impl(found).source
             raise RuntimeError(
                 f"We found a '{found}' registration for {custom_op} at "
                 f"{loc} but were unable to find a '{missing}' registration. "
@@ -177,7 +177,7 @@ def validate_grad_inputs_dict(grad_inputs_dict, forward_op, args_info):
         backward = forward_op._get_impl('backward')
         raise RuntimeError(
             f"In the backward function defined for {forward_op} at "
-            f"{backward.location} using the CustomOp API, {what}")
+            f"{backward.source} using the CustomOp API, {what}")
 
     if not isinstance(grad_inputs_dict, dict):
         error(f"expected the output of the backward function to be a dict but "

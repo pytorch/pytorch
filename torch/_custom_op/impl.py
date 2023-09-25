@@ -1,4 +1,3 @@
-import dataclasses
 import functools
 import inspect
 import typing
@@ -10,6 +9,7 @@ import torch
 import torch._C as _C
 import torch.library as library
 from torch._library.abstract_impl import get_ctx, AbstractImplCtx
+from torch._library.utils import Kernel
 
 from .autograd import autograd_kernel_indirection, construct_autograd_kernel
 
@@ -193,7 +193,7 @@ class CustomOp:
         self.__name__ = None  # mypy requires this
         # NB: Some of these impls are registered as kernels to DispatchKeys.
         # Modifying the _impls dict directly won't do anything in that case.
-        self._impls: typing.Dict[str, typing.Optional[FuncAndLocation]] = {}
+        self._impls: typing.Dict[str, typing.Optional[Kernel]] = {}
         # See NOTE [CustomOp autograd kernel indirection]
         self._registered_autograd_kernel_indirection = False
 
@@ -209,16 +209,16 @@ class CustomOp:
     # needs to be done in a separate self._lib.impl call.
     def _register_impl(self, kind, func, stacklevel=2):
         if self._has_impl(kind):
-            func_and_location = self._impls[kind]
-            assert func_and_location is not None  # Pacify mypy
-            location = func_and_location.location
+            kernel = self._impls[kind]
+            assert kernel is not None  # Pacify mypy
+            source = kernel.source
             raise RuntimeError(
                 f"Attempting to register a {kind} impl for operator {self._qualname} "
                 f"that already has a {kind} impl registered from Python at "
-                f"{location}. This is not supported."
+                f"{source}. This is not supported."
             )
-        location = torch._library.utils.get_source(stacklevel + 1)
-        self._impls[kind] = FuncAndLocation(func, location)
+        source = torch._library.utils.get_source(stacklevel + 1)
+        self._impls[kind] = Kernel(func, source)
 
     def _get_impl(self, kind):
         return self._impls[kind]
@@ -407,7 +407,7 @@ class CustomOp:
             frame = inspect.stack()[1]
             self._check_doesnt_have_library_meta_impl()
             self._register_impl("abstract", f, stacklevel=_stacklevel)
-            location = self._get_impl("abstract").location
+            source = self._get_impl("abstract").source
 
             qualname = self._qualname
 
@@ -423,7 +423,7 @@ class CustomOp:
                         f"such meta implementation and this error is the correct "
                         f"behavior. Otherwise, please remove the call to get_ctx() "
                         f"in the implementation registered with impl_abstract "
-                        f"at {location}"
+                        f"at {source}"
                     )
 
                 with torch._library.abstract_impl.set_ctx_getter(error_on_ctx):
@@ -626,12 +626,6 @@ class CustomOp:
             if self._has_impl("save_for_backward"):
                 self._register_autograd_kernel()
         return inner
-
-
-@dataclasses.dataclass
-class FuncAndLocation:
-    func: typing.Callable
-    location: str
 
 
 def find_ophandle_or_throw(cpp_ns: str, operator_name: OperatorName):

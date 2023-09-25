@@ -1,5 +1,17 @@
 import inspect
 import sys
+from typing import Callable
+
+
+class Kernel:
+    """Models a (function, source location)"""
+
+    def __init__(self, func: Callable, source: str):
+        self.func: Callable = func
+        self.source: str = source
+
+    def __call__(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
 
 
 def get_source(stacklevel: int) -> str:

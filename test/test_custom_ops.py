@@ -1425,7 +1425,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         custom_op = torch._custom_op.impl._find_custom_op(
             "_torch_testing::numpy_nonzero"
         )
-        loc = custom_op._get_impl("abstract").location
+        loc = custom_op._get_impl("abstract").source
         matches = re.match(r".*custom_op_db.py:\d+", loc)
         self.assertIsNotNone(matches)
 
