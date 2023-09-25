@@ -21,7 +21,7 @@ from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 from torch import nn
 import re
 
@@ -1550,6 +1550,50 @@ L['a'].size()[0] < 20""")
 
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(10))
         self.assertExpectedInline(show_guards(tensor), """""")
+
+    # TODO this test is pointless, delete
+    def test_get_isolated_subgraph_with_subclass(self):
+        # What is this testing?
+        # Functionalization runs below __torch_dispatch__ during tracing.
+        # If a subclass
+        class TestSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                kwargs = {}
+                kwargs["device"] = elem.device
+                kwargs["layout"] = elem.layout
+                kwargs["requires_grad"] = elem.requires_grad
+                kwargs["dtype"] = elem.dtype
+                return torch.Tensor._make_wrapper_subclass(cls, elem.shape, **kwargs)
+
+            def __init__(self, elem):
+                self.elem = elem
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                args_unwrapped = tree_map_only(TestSubclass, lambda x: x.elem, args)
+                fx_g = get_isolated_graphmodule(func, args_unwrapped, kwargs)
+                return fx_g(*args_unwrapped, **kwargs)
+
+        def f(x):
+            out = torch.mul(x, x)
+            out.add_(2)
+            return out
+
+
+        x_elem = torch.randn(4, requires_grad=True)
+
+        def f_functionalized_subclass(x):
+            x_wrapped = TestSubclass(x)
+            f_functionalized = torch._subclasses.functional_tensor.dispatch_functionalize(f)
+            out = f_functionalized(x_wrapped)
+            return out.elem
+
+        fx_g = make_fx(f_functionalized_subclass)(x_elem)
+        out_ref = f(x)
+        out_test = fx_g(x)
+        self.assertEqual(out_test, out_ref)
 
 
 make_fx_failures = {
