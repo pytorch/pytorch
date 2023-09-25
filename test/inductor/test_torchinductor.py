@@ -43,7 +43,11 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import FileCheck, make_tensor
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUDNN
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    SM80OrLater,
+    TEST_CUDNN,
+)
 from torch.testing._internal.common_device_type import _has_sufficient_memory
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
@@ -253,6 +257,7 @@ def check_model(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -364,6 +369,11 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
+        actual = output_process_fn_grad(actual)
+        correct = output_process_fn_grad(correct)
+        actual_flat = tree_flatten(actual)[0]
+        correct_flat = tree_flatten(correct)[0]
+
         # generate random unit norm gradients
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
@@ -426,6 +436,7 @@ def check_model_cuda(
     assert_equal=True,
     check_gradient=False,
     check_has_compiled=True,
+    output_process_fn_grad=lambda x: x,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
@@ -449,6 +460,7 @@ def check_model_cuda(
         assert_equal=assert_equal,
         check_gradient=check_gradient,
         check_has_compiled=check_has_compiled,
+        output_process_fn_grad=output_process_fn_grad,
     )
 
     if check_lowp:
@@ -478,6 +490,7 @@ def check_model_cuda(
             assert_equal=assert_equal,
             check_gradient=check_gradient,
             check_has_compiled=check_has_compiled,
+            output_process_fn_grad=output_process_fn_grad,
         )
 
 
@@ -947,6 +960,20 @@ class CommonTemplate:
 
         self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
         self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
+
+    def test_embedding_bag_byte_unpack(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("No CUDA implementation (it returns empty)")
+
+        def fn(a):
+            return torch.ops.quantized.embedding_bag_byte_unpack(a)
+
+        M, N = 32, 64
+        scales = torch.randn(M, 1).view(torch.uint8)
+        offsets = torch.randn(M, 1).view(torch.uint8)
+        data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
+        packed = torch.cat([data, scales, offsets], dim=-1)
+        self.common(fn, [packed])
 
     def test_expanded_reduction(self):
         if self.device == "cpu":
@@ -1858,6 +1885,7 @@ class CommonTemplate:
 
     @slowTest
     @expectedFailureCodegenDynamic
+    @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
@@ -3173,6 +3201,16 @@ class CommonTemplate:
                 inp,
             )
             self.assertEqual(fn(*inputs), opt_fn(*inputs))
+
+    def test_masked_scatter(self):
+        def fn(value, mask, source):
+            return torch.masked_scatter(value, mask, source)
+
+        value = make_tensor(10, 10, dtype=torch.float32, device="cpu")
+        mask = make_tensor(10, 10, dtype=torch.bool, device="cpu")
+        source = make_tensor(mask.count_nonzero(), dtype=torch.float32, device="cpu")
+
+        self.common(fn, (value, mask, source))
 
     def test_fill1(self):
         def fn(x):
@@ -6045,6 +6083,21 @@ class CommonTemplate:
 
             self.assertTrue(torch.allclose(actual, expected, atol=1e-3, rtol=1e-3))
 
+    def test_zero_element_mutation(self):
+        class CustomModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = nn.LeakyReLU(negative_slope=5.2955089, inplace=True)
+
+            def forward(self, inputs):
+                return self.layer1(inputs)
+
+        ip_size = [0]
+        input_tensor = torch.randn(ip_size)
+
+        mymodel = CustomModel()
+        self.common(mymodel, (input_tensor,))
+
     def test_lerp(self):
         # non-contiguous inputs for lerp
         def fn0(i0, i1):
@@ -6211,6 +6264,30 @@ class CommonTemplate:
             self.common(lambda x, y: torch.bmm(x, y), (x, y))
             self.common(lambda x, y: torch.matmul(x, y), (x, y))
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
+
+    @requires_cuda()
+    @torch._inductor.config.patch("layout_optimization", True)
+    def test_inductor_layout_optimization_input_mutations(self):
+        # channel dim must be > 64 for inductor to do layout optimization and use NHWC
+        mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).cuda()
+
+        def f(x):
+            x.mul_(2)
+            out = mod(x)
+            return out
+
+        f_compiled = torch.compile(f)
+        x_ref = torch.rand(2, 3, 128, 128, device="cuda")
+        x_test = x_ref.clone().detach()
+        with torch.no_grad():
+            out_ref = f(x_ref)
+            out_test = f_compiled(x_test)
+            self.assertEqual(out_ref, out_test)
+            self.assertEqual(out_ref.shape, out_test.shape)
+            # Importantly, since inductor._config.keep_output_stride is True,
+            # the outputs should have matching strides here.
+            self.assertEqual(out_ref.stride(), out_test.stride())
+            self.assertEqual(x_ref, x_test)
 
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
@@ -6749,6 +6826,29 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(26),))
 
+    def test_scaled_dot_product_attention(self):
+        if self.device == "cuda" and not PLATFORM_SUPPORTS_FLASH_ATTENTION:
+            raise unittest.SkipTest("Can't run flash attention on this platform")
+
+        def fn(q, k, v):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q.transpose(1, 2).contiguous(),
+                k.transpose(1, 2),
+                v.transpose(1, 2),
+                scale=0.125,
+            )[:2]
+
+        self.common(
+            fn,
+            (
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+                torch.randn(4, 2, 4, 2),
+            ),
+            atol=2e-4,  # to pass lowp check on GPU
+            rtol=1e-2,  # to pass lowp check on GPU
+        )
+
     @skipIfRocm
     def test_scaled_dot_product_efficient_attention(self):
         if self.device == "cpu":
@@ -6977,6 +7077,24 @@ class CommonTemplate:
         self.assertEqual(ref, actual)
         self.assertTrue(called)
 
+    def test_mutations_loop_fusion(self):
+        def fn(tensor, index, source):
+            out = tensor.index_add(0, index, source, alpha=2.0) / 2
+            return out
+
+        device = "cpu"
+        tensor = torch.rand((1,), dtype=torch.double, device=device)
+        index = torch.tensor([0], dtype=torch.long, device=device)
+        source = torch.rand((1,), dtype=torch.double, device=device)
+        self.common(
+            fn,
+            (
+                tensor,
+                index,
+                source,
+            ),
+        )
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -7173,11 +7291,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             import torch._inductor
 
             def fn():
-                x = torch.empty([100])
-                for _ in range(10):
+                li = []
+                for i in range(10):
+                    x = torch.full([100], i)
                     x = x + 1
+                    li.append(x)
 
-                return x
+                return li
 
             mod = make_fx(fn)()
 
@@ -7195,19 +7315,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                             live_tensors[arg] = True
 
                     out = func(*args, **kwargs)
+                    if not isinstance(out, torch.Tensor):
+                        return out
 
                     live_tensors[out] = True
                     max_live_tensors = max(max_live_tensors, len(live_tensors))
-
                     return out
 
             mode = LiveTensors()
-            from torch._inductor.constant_folding import ConstantFolder
+            from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
 
             with mode:
-                ConstantFolder(mod).run()
+                UniformValueConstantFolder(mod).run()
 
-            self.assertTrue(max_live_tensors == 2)
+            # there are a couple extra tensors created in `insertable_tensor_check`
+            self.assertTrue(max_live_tensors == 4)
 
         @skipIfRocm
         def test_neg_index(self):

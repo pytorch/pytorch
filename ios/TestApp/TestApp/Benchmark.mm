@@ -60,7 +60,7 @@ static int iter = 10;
     auto input_dims_str = caffe2::split(',', input_dims_list[i]);
     std::vector<int64_t> input_dims;
     for (const auto& s : input_dims_str) {
-      input_dims.push_back(c10::stoi(s));
+      input_dims.push_back(std::stoi(s));
     }
     if (input_type_list[i] == "float") {
       inputs.push_back(torch::ones(input_dims, at::ScalarType::Float));

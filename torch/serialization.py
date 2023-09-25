@@ -114,19 +114,11 @@ def _is_zipfile(f) -> bool:
     # collisions and assume the zip has only 1 file.
     # See bugs.python.org/issue28494.
 
-    # Read the first 4 bytes of the file
-    read_bytes = []
     start = f.tell()
-
-    byte = f.read(1)
-    while byte != b"":
-        read_bytes.append(byte)
-        if len(read_bytes) == 4:
-            break
-        byte = f.read(1)
+    # Read the first few bytes and match against the ZIP file signature
+    local_header_magic_number = b'PK\x03\x04'
+    read_bytes = f.read(len(local_header_magic_number))
     f.seek(start)
-
-    local_header_magic_number = [b'P', b'K', b'\x03', b'\x04']
     return read_bytes == local_header_magic_number
 
 
@@ -300,9 +292,9 @@ def validate_hpu_device(location):
 
 
 def _hpu_deserialize(obj, location):
-    hpu = getattr(torch, "hpu", None)
-    assert hpu is not None, "HPU device module is not loaded"
     if location.startswith('hpu'):
+        hpu = getattr(torch, "hpu", None)
+        assert hpu is not None, "HPU device module is not loaded"
         device = validate_hpu_device(location)
         if getattr(obj, "_torch_load_uninitialized", False):
             with hpu.device(device):
@@ -1017,7 +1009,7 @@ def load(
                              overall_storage=overall_storage,
                              **pickle_load_args)
         if mmap:
-            raise RuntimeError("mmap can only be used with files saved with ",
+            raise RuntimeError("mmap can only be used with files saved with "
                                "`torch.save(_use_new_zipfile_serialization=True), "
                                "please torch.save your checkpoint with this option in order to use mmap.")
         if weights_only:
