@@ -96,6 +96,8 @@ def _convert_out_params(f):
         for o in out_params:
             _fn.__annotations__[o.name] = o.annotation
 
+        # Propagate that this function is wrapped by `out_wrapper`
+        _fn._torch_decompositions_out_wrapper = f._torch_decompositions_out_wrapper  # type: ignore[attr-defined]
         fn = _fn
 
     return fn
@@ -373,7 +375,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.tril_,
             aten.triu,
             aten.triu_,
-            aten.trunc,
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
