@@ -4019,6 +4019,7 @@ def multilabel_margin_loss_forward(
 
 
 @register_decomposition(aten.all)
+@out_wrapper()
 def all_dim(input, dim=None, keepdim=False):
     if dim is None:
         all_dim_output = aten.logical_not(aten.any(aten.logical_not(input)))
