@@ -49,7 +49,7 @@ from torch.utils.weak import TensorWeakRef, WeakIdRef
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .source import LocalSource, TypeSource
+from .source import DefaultsSource, LocalSource, TypeSource
 from .types import GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
     dict_const_keys,
@@ -923,6 +923,20 @@ class PyExprCSEPass:
         return replacer.preface, _ast_unparse(new_node)
 
 
+def must_add_nn_module_guards(guard):
+    # For config.guard_nn_modules=False, we can skip all the guards that
+    # originate from inside of nn module except for a few categories.
+    return (
+        # Guard for defaults
+        isinstance(guard.originating_source, DefaultsSource)
+        # Guard using dict tags if the config flag is set
+        or (
+            config.guard_nn_modules_using_dict_tags
+            and guard.create_fn is GuardBuilder.NN_MODULE
+        )
+    )
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -994,14 +1008,10 @@ class CheckFunctionManager:
             if (
                 not config.guard_nn_modules
                 and guard.is_nn_module()
-                # Default func args must be guarded on.
-                # TODO: we could make use of 'DefaultsSource' and offer a .guard.is_defaults() API
-                and "__defaults__" not in guard.name
-                and "__kwdefaults__" not in guard.name
-                # Force-enable NN_MODULE checks
-                and guard.create_fn is not GuardBuilder.NN_MODULE
+                and not must_add_nn_module_guards(guard)
             ):
                 continue
+
             guard.create(local_builder, global_builder)
         self.check_fn = self.compile_check_fn(
             local_builder, global_builder, guards, guard_fail_fn
