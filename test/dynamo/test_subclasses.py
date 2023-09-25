@@ -554,17 +554,17 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         return jagged_from_list([a, b, c], offsets)
 
     def _check_recompiles(self, fn, inputs1, inputs2, recompiles):
-            compile_count = [0]
+        compile_count = [0]
 
-            def counter(gm, example_inputs):
-                compile_count[0] += 1
-                return gm
+        def counter(gm, example_inputs):
+            compile_count[0] += 1
+            return gm
 
-            compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
-            out = compiled_f(*inputs1)
-            self.assertEqual(compile_count[0], 1)
-            out = compiled_f(*inputs2)
-            self.assertEqual(compile_count[0], 2 if recompiles else 1)
+        compiled_f = torch.compile(fn, fullgraph=True, backend=counter, dynamic=True)
+        out = compiled_f(*inputs1)
+        self.assertEqual(compile_count[0], 1)
+        out = compiled_f(*inputs2)
+        self.assertEqual(compile_count[0], 2 if recompiles else 1)
 
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
@@ -598,6 +598,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 3), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         self._check_recompiles(lambda nt1, nt2: nt1.sin(), (nt1, nt2), (nt1, nt3), True)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

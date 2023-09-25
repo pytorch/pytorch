@@ -1,5 +1,4 @@
 #define PY_SSIZE_T_CLEAN
-#include <c10/core/DispatchKey.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/dynamo/guards.h>
@@ -60,22 +59,18 @@ class TensorCheck {
       return false;
     }
     const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
+      auto known_stride = strides_[i];
       if (known_size.has_value()) {
         if (known_size.value() != sizes[i]) {
           return false;
         }
       }
-    }
-    if (!v.is_nested()) {
-      const auto& strides = v.sym_strides();
-      for (auto i : c10::irange(ndim)) {
-        auto known_stride = strides_[i];
-        if (known_stride.has_value()) {
-          if (known_stride.value() != strides[i]) {
-            return false;
-          }
+      if (known_stride.has_value()) {
+        if (known_stride.value() != strides[i]) {
+          return false;
         }
       }
     }
@@ -123,23 +118,19 @@ class TensorCheck {
       return fail_reason.str();
     }
     const auto& sizes = v.sym_sizes();
+    const auto& strides = v.sym_strides();
     for (auto i : c10::irange(ndim)) {
       auto known_size = sizes_[i];
+      auto known_stride = strides_[i];
       if (known_size.has_value() && (known_size.value() != sizes[i])) {
         fail_reason << "size mismatch at index " << i << ". expected "
                     << known_size.value() << ", actual " << sizes[i];
         return fail_reason.str();
       }
-    }
-    if (!v.is_nested()) {
-      const auto& strides = v.sym_strides();
-      for (auto i : c10::irange(ndim)) {
-        auto known_stride = strides_[i];
-        if (known_stride.has_value() && known_stride.value() != strides[i]) {
-          fail_reason << "stride mismatch at index " << i << ". expected "
-                      << known_stride.value() << ", actual " << strides[i];
-          return fail_reason.str();
-        }
+      if (known_stride.has_value() && known_stride.value() != strides[i]) {
+        fail_reason << "stride mismatch at index " << i << ". expected "
+                    << known_stride.value() << ", actual " << strides[i];
+        return fail_reason.str();
       }
     }
     return "";
@@ -229,14 +220,8 @@ static std::vector<std::vector<std::optional<c10::SymInt>>> get_dynamic_dims(
   if (dynamic_dims_py != Py_None) {
     Py_ssize_t size = PyList_Size(dynamic_dims_py);
     for (Py_ssize_t i = 0; i < size; i++) {
-      PyObject* mb_py_list = PyList_GetItem(dynamic_dims_py, i);
-      // None is used when tensor does not have strides, e.g. nested tensors
-      if (mb_py_list == Py_None) {
-        per_tensor_dynamic_dims.emplace_back();
-        continue;
-      }
-      std::vector<std::optional<c10::SymInt>> vec =
-          pyListToVecOptInt(mb_py_list);
+      PyObject* py_list = PyList_GetItem(dynamic_dims_py, i);
+      std::vector<std::optional<c10::SymInt>> vec = pyListToVecOptInt(py_list);
       per_tensor_dynamic_dims.push_back(std::move(vec));
     }
   }
@@ -290,11 +275,9 @@ static int TensorGuards_init(
         ? wrapIntegersInOptional(tensor.sym_sizes())
         : per_tensor_dynamic_dims_sizes[i];
     std::vector<std::optional<c10::SymInt>> tensor_dims_stride = {};
-    if (!tensor.is_nested()) {
-      tensor_dims_stride = per_tensor_dynamic_dims_strides.empty()
-          ? wrapIntegersInOptional(tensor.sym_strides())
-          : per_tensor_dynamic_dims_strides[i];
-    }
+    tensor_dims_stride = per_tensor_dynamic_dims_strides.empty()
+        ? wrapIntegersInOptional(tensor.sym_strides())
+        : per_tensor_dynamic_dims_strides[i];
 
     checks.emplace_back(
         state,
@@ -543,6 +526,18 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   }
 }
 
+static PyObject* dict_version(PyObject* dummy, PyObject* args) {
+  // Retrieves the version of a dictionary.
+  PyObject* obj = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &obj)) {
+    return nullptr;
+  }
+  if (!PyDict_Check(obj)) {
+    return nullptr;
+  }
+  return THPUtils_packUInt64(((PyDictObject*)obj)->ma_version_tag);
+}
+
 static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   /*
    Assert that a given tensor has a given size/stride, but ignore strides
@@ -741,6 +736,7 @@ static PyMethodDef _methods[] = {
     {"check_obj_id", check_obj_id, METH_VARARGS, NULL},
     {"assert_size_stride", assert_size_stride, METH_VARARGS, NULL},
     {"nn_module_guard", nn_module_guard, METH_O, NULL},
+    {"dict_version", dict_version, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

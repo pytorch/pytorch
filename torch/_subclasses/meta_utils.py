@@ -13,7 +13,7 @@ from torch._C._functorch import (
 )
 from torch._guards import Source
 
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic, is_symbolic
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -406,7 +406,11 @@ class MetaConverter:
 
                 else:
                     is_leaf = safe_is_leaf(t)
+
                     if not t.is_nested:
+                        # FIXME: nested tensors DO support strides, but the issue
+                        # is that we're introducing a symbol that does not get
+                        # tracked later and therefore does not have a source.
                         (
                             sizes,
                             strides,
@@ -436,6 +440,8 @@ class MetaConverter:
                         # their sizes will be used to construct the (symbolic) sizes of the wrapper tensor.
                         from torch._dynamo.source import AttrSource
 
+                        extra_context = (source,) if t.is_nested else None
+
                         r = transform_subclass(
                             t,
                             lambda attr, inner_t: callback(
@@ -444,25 +450,8 @@ class MetaConverter:
                                     AttrSource(source, attr),
                                 )
                             ),
+                            extra_context=extra_context,
                         )
-                        if r.is_nested:
-                            assert not is_symbolic(r._size[1])
-                            # Avoid circular import
-                            from torch._dynamo.source import (
-                                TensorProperty,
-                                TensorPropertySource,
-                            )
-
-                            sym_ragged_size = shape_env.create_symintnode(
-                                shape_env.create_symbol(
-                                    r._size[1],
-                                    TensorPropertySource(
-                                        source, TensorProperty.SIZE, 1
-                                    ),
-                                ),
-                                hint=r._size[1],
-                            )
-                            r.set_raggedness_id(sym_ragged_size)
                     else:
                         r = callback(
                             lambda: torch.empty_strided(
@@ -489,8 +478,9 @@ class MetaConverter:
 
                     s = t.untyped_storage()
                     swr = StorageWeakRef(s)
-                    if swr not in self.storage_memo and (
-                        t.is_nested
+                    if (
+                        swr not in self.storage_memo
+                        and r.is_nested
                         or (
                             r.stride() == strides
                             and r.storage_offset() == storage_offset
@@ -499,10 +489,6 @@ class MetaConverter:
                         # You're normal and happy, install the fresh storage into the memo
                         self.storage_memo[swr] = r.untyped_storage()
                     else:
-                        # We don't support views with nested tensors (yet?), so
-                        # we don't expect storage to be aliased with any other
-                        # tensors.
-                        assert not t.is_nested
                         # You're in crazy town; somehow you gave us a tensor
                         # that wasn't a view, but had nonzero storage offset,
                         # nontrivial strides (such that clone() couldn't

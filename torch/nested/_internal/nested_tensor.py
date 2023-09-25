@@ -9,20 +9,19 @@ _tensor_id_counter = 0
 _tensor_id_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_id(tensor):
+def get_tensor_id(tensor, factor):
     global _tensor_id_counter
     if tensor not in _tensor_id_registry:
         _tensor_id_registry[tensor] = _tensor_id_counter
         _tensor_id_counter += 1
-    return torch._C._get_singleton_int(_tensor_id_registry[tensor])
+    return torch._C._get_singleton_int(_tensor_id_registry[tensor], factor)
 
 
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
-    _size: Tuple[int, int, int]
+    _size: Tuple[int, torch.SymInt, int]
     ragged_size: torch.SymInt
-    is_fake: bool
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
@@ -33,8 +32,8 @@ class NestedTensor(torch.Tensor):
         offsets,
         *,
         sym_size=None,
-        raggedness_id=None,
-        is_fake=False,
+        sym_stride=None,
+        ragged_size=None,
         **kwargs,
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
@@ -62,7 +61,7 @@ class NestedTensor(torch.Tensor):
         r._values = values.detach() if values.requires_grad else values
         return r
 
-    def __init__(self, values, offsets, *, sym_size=None, raggedness_id=None, **kwargs):
+    def __init__(self, values, offsets, *, sym_size=None, sym_stride=None, **kwargs):
         super().__init__()
         # Only support jagged for now.
         assert offsets is not None
@@ -71,20 +70,20 @@ class NestedTensor(torch.Tensor):
         assert values.ndim == 2
 
         if sym_size is not None:
-            # Passed during meta utils fakification
+            assert sym_stride is not None
+            # sym_size and sym_stride are passed during tracing (1) when we
+            # initially fakify the nested tensor, and (2) when we rewrap as we
+            # perform operations on fake nested tensors.
             self._size = sym_size
-            self.raggedness_id = self._size[1]
+            self._strides = sym_stride
+            self.ragged_size = self._size[1]  # type: ignore[assignment]
         else:
-            # We need to pass in raggedness id because in the situation where
-            # raggedness id is symbolic, calling get_tensor_id with the same
-            # offsets would not help us recover the symbolic int.
-            if raggedness_id is not None:
-                self.raggedness_id = raggedness_id
-            else:
-                self.raggedness_id = get_tensor_id(offsets)
+            self.ragged_size = get_tensor_id(offsets, 1)
             D = values.shape[1]
             B = offsets.shape[0] - 1
-            self._size = (B, self.raggedness_id, D)
+            # TODO: factor out and generalize the stride computing logic
+            self._size = (B, self.ragged_size, D)
+            self._strides = (self.ragged_size * D, D, 1)
         self._offsets = offsets
         return
 
@@ -93,10 +92,6 @@ class NestedTensor(torch.Tensor):
 
     def offsets(self):
         return self._offsets
-
-    def set_raggedness_id(self, id):
-        self.raggedness_id = id
-        self._size = (self._size[0], id, self._size[2])
 
     def __repr__(self):
         # We should implement this in torch/_tensor_str.py instead
@@ -108,27 +103,42 @@ class NestedTensor(torch.Tensor):
         return f"NestedTensor(size={self._size}, offsets={self.offsets}{grad_fn_str})"
 
     def __tensor_flatten__(self):
-        return ["_values", "_offsets"], (
-            self.size(1),
-            self.requires_grad,
-        )
+        return ["_values", "_offsets"], (self.requires_grad, self.ragged_size)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors: Dict, meta):
         assert len(inner_tensors) == 2
         values = inner_tensors["_values"]
         offsets = inner_tensors["_offsets"]
-        (
-            symint,
-            requires_grad,
-        ) = meta
+        (requires_grad, ragged_size, *extra_meta) = meta
+
+        if len(extra_meta) > 0:
+            (source,) = extra_meta
+            # Avoid circular import
+            from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+            shape_env = offsets.shape[0].node.shape_env
+            sym_ragged_size = shape_env.create_symintnode(
+                shape_env.create_symbol(
+                    ragged_size,
+                    TensorPropertySource(source, TensorProperty.SIZE, 1),
+                ),
+                hint=ragged_size,
+            )
+            ragged_size = sym_ragged_size
 
         B = offsets.shape[0] - 1
         D = values.shape[1]
-        sym_size = (B, symint, D)
+        sym_size = (B, ragged_size, D)
+        # Assume contiguous
+        sym_stride = (ragged_size * D, D, 1)
 
         return NestedTensor(
-            values, offsets=offsets, sym_size=sym_size, requires_grad=requires_grad
+            values,
+            offsets=offsets,
+            sym_size=sym_size,
+            sym_stride=sym_stride,
+            requires_grad=requires_grad,
         )
 
     @classmethod
@@ -142,7 +152,7 @@ class NestedTensor(torch.Tensor):
         if fn is not None:
             return fn(*args, **kwargs)
 
-        raise NotImplementedError
+        raise NotImplementedError(func)
 
 
 # Not actually a view!

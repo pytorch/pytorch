@@ -489,6 +489,9 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
+    elif name == 'TensorBase':
+        # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
+        delattr(sys.modules[__name__], name)
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -1841,28 +1844,29 @@ if TYPE_CHECKING:
     from torch import _inductor as _inductor
     from torch import onnx as onnx
 
-_lazy_modules = {
-    "_dynamo",
-    "_inductor",
-    "_export",
-    # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
-    "onnx",
-}
+else:
+    _lazy_modules = {
+        "_dynamo",
+        "_inductor",
+        "_export",
+        # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
+        "onnx",
+    }
 
-def __getattr__(name):
-    # Deprecated attrs
-    replacement = _deprecated_attrs.get(name)
-    if replacement is not None:
-        import warnings
-        warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
-        return replacement()
+    def __getattr__(name):
+        # Deprecated attrs
+        replacement = _deprecated_attrs.get(name)
+        if replacement is not None:
+            import warnings
+            warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+            return replacement()
 
-    # Lazy modules
-    if name in _lazy_modules:
-        import importlib
-        return importlib.import_module(f".{name}", __name__)
+        # Lazy modules
+        if name in _lazy_modules:
+            import importlib
+            return importlib.import_module(f".{name}", __name__)
 
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 from . import _logging
 _logging._init_logs()

@@ -1885,6 +1885,7 @@ class CommonTemplate:
 
     @slowTest
     @expectedFailureCodegenDynamic
+    @config.patch({"freezing": True})
     def test_conv_bn_fuse(self):
         # For gpu path, there is an accuracy issue
         if self.device == "cuda":
@@ -7075,6 +7076,24 @@ class CommonTemplate:
             actual = torch.compile(f, fullgraph=True)(x)
         self.assertEqual(ref, actual)
         self.assertTrue(called)
+
+    def test_mutations_loop_fusion(self):
+        def fn(tensor, index, source):
+            out = tensor.index_add(0, index, source, alpha=2.0) / 2
+            return out
+
+        device = "cpu"
+        tensor = torch.rand((1,), dtype=torch.double, device=device)
+        index = torch.tensor([0], dtype=torch.long, device=device)
+        source = torch.rand((1,), dtype=torch.double, device=device)
+        self.common(
+            fn,
+            (
+                tensor,
+                index,
+                source,
+            ),
+        )
 
 
 @dataclasses.dataclass

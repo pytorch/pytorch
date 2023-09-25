@@ -59,6 +59,7 @@ class GuardOnDataDependentSymNode(RuntimeError):
 import sympy
 from sympy.printing.str import StrPrinter
 from sympy.printing.precedence import precedence
+from sympy.multipledispatch import dispatch
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
@@ -97,13 +98,14 @@ class ConstraintViolationError(RuntimeError):
     pass
 
 class _SingletonInt(sympy.AtomicExpr):
-    def __init__(self, name):
-        self.name = name
+    def __init__(self, val, factor):
+        self.val = val
+        self.factor = factor
         super().__init__()
 
     def _eval_Eq(self, other):
         # TODO: support more cases
-        if isinstance(other, _SingletonInt) and other.name == self.name:
+        if isinstance(other, _SingletonInt) and other.val == self.val and self.factor == other.factor:
             return sympy.true
         return sympy.false
 
@@ -112,6 +114,23 @@ class _SingletonInt(sympy.AtomicExpr):
     @property
     def free_symbols(self):
         return set()
+
+    def __mul__(self, other):
+        if isinstance(other, _SingletonInt):
+            return NotImplemented
+        return _SingletonInt(self.name, self.factor * other)
+
+@dispatch(_SingletonInt, sympy.Integer)
+def _eval_is_ge(a, b):
+    if b <= 2:
+        return sympy.true
+    return sympy.false
+
+@dispatch(_SingletonInt, _SingletonInt)
+def _eval_is_ge(a, b):  # noqa: F811
+    if a.val == b.val and a.factor >= b.factor:
+        return sympy.true
+    return sympy.false
 
 # SymDispatchMode gets invoked whenever an operation is processed on
 # a PySymInt.  When this occurs, you get called at __sym_dispatch__
@@ -230,8 +249,6 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     elif isinstance(val, (int, float, bool)):
         return set()
     elif isinstance(val, torch.Tensor):
-        if val.is_nested:
-            return free_symbols(val.size())
         return (
             free_symbols(val.size()) |
             free_symbols(val.stride()) |
@@ -341,6 +358,7 @@ def guard_scalar(a):
 
 @record_shapeenv_event()
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int, runtime_min: int, runtime_max: int):
+    log.debug("_constrain_symbol_range %s [%s, %s] [%s, %s]", s, compiler_min, compiler_max, runtime_min, runtime_max)
     if r := shape_env.var_to_range.get(s, None):
         shape_env.var_to_range[s] = ValueRanges(
             builtins.max(r.lower, compiler_min), builtins.min(r.upper, compiler_max)
@@ -394,7 +412,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     if isinstance(a, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
-    assert isinstance(a, SymInt)
+    assert isinstance(a, SymInt), "can only constrain range for SymInt"
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
     if min is None:
@@ -1040,6 +1058,18 @@ class SymNode:
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
         return self.shape_env.defer_runtime_assert(self.expr, f"{file}:{line}", fx_node=self.fx_node)
+
+    def expect_size(self, file, line):
+        b = self.ge(self.wrap_int(0))
+        # Generate a deferred runtime assert
+        r = b.expect_true(file, line)
+        # Refine compile time range, but only if it's unbacked.
+        # If you refine range for hinted variables, you can end up making
+        # improper deductions since compile time reasoning may be
+        # incompatible with runtime reasoning.
+        if r and not self.has_hint():
+            _advise_is_size(SymInt(self))
+        return r
 
     def bool_(self):
         return self.guard_bool("", 0)
@@ -1693,11 +1723,14 @@ class DynamicDimConstraintPrinter(StrPrinter):
 
     We use this to suggest code for specifying dynamic dim constraints.
     """
-    def __init__(self, symbol_to_source):
+    def __init__(self, symbol_to_source, source_name_to_debug_name):
         super().__init__()
         self.symbol_to_source = symbol_to_source
+        self.source_name_to_debug_name = source_name_to_debug_name
 
     def print_source(self, source) -> str:
+        if self.source_name_to_debug_name:
+            return source.name()
         return f"dynamic_dim({source.base.name()}, {source.idx})"
 
     def _print_Symbol(self, expr) -> str:
@@ -1719,7 +1752,7 @@ class DimConstraints:
     Solutions are "static" values or simplified "dynamic" constraints.
     """
 
-    def __init__(self, symbol_to_source, var_to_val, marked_dynamic):
+    def __init__(self, symbol_to_source, var_to_val, marked_dynamic, source_name_to_debug_name):
         # We try to solve systems of inequalities with 1 free variable.
         self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
@@ -1753,7 +1786,7 @@ class DimConstraints:
         self._dynamic_results: Set[str] = set()
 
         # printer for solutions
-        self._dcp = DynamicDimConstraintPrinter(symbol_to_source)
+        self._dcp = DynamicDimConstraintPrinter(symbol_to_source, source_name_to_debug_name)
 
         # inconsistencies found on substituting with concrete values / static solutions
         self._inconsistencies: List[str] = []
@@ -2011,16 +2044,19 @@ class DimConstraints:
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
 
-
     def forced_specializations(self):
-        return "\n".join([
-            (
-                f"\t{self._dcp.symbol_to_source[s][0].name()}, which was marked dynamic, "
-                f"must be specialized to {val}."
-            )
+        def debug_name(src):
+            name = src.name()
+            if self._dcp.source_name_to_debug_name:
+                return f"{self._dcp.source_name_to_debug_name[name]} = {name}"
+            else:
+                return name
+
+        return {
+            debug_name(self._dcp.symbol_to_source[s][0]): val
             for s, val in self._substitutions.items()
             if s in self._marked_dynamic
-        ])
+        }
 
     def remove_redundant_dynamic_results(self):
         candidates_for_removal = []
@@ -2044,7 +2080,107 @@ class DimConstraints:
                 dynamic_results.add(dc)
         self._dynamic_results = dynamic_results
 
-    def prettify_results(self, original_signature: inspect.Signature):
+    def prettify_results(
+        self,
+        original_signature: inspect.Signature,
+        constraint_violation_error=None,
+        forced_specializations=None,
+    ):
+        if self._dcp.source_name_to_debug_name:
+            def transform(s):
+                for k, v in self._dcp.source_name_to_debug_name.items():
+                    s = s.replace(k, v)
+                return s
+
+            results = defaultdict(dict)
+
+            def flip(op):
+                if op == "<=":
+                    return ">="
+                if op == ">=":
+                    return "<="
+                if op == "<":
+                    return ">"
+                if op == ">":
+                    return "<"
+                assert op == "=="
+                return op
+
+            def relation_with_digit(expr, op, digit):
+                if op == "<=":
+                    results[expr]["max"] = digit
+                elif op == "<":
+                    results[expr]["max"] = digit - 1
+                elif op == ">=":
+                    results[expr]["min"] = digit
+                elif op == ">":
+                    results[expr]["min"] = digit + 1
+                else:
+                    assert op == "=="
+                    results[expr]["eq"] = digit
+
+            for s in self._static_results.union(self._dynamic_results):
+                t = transform(s)
+                if t == s:
+                    continue
+                left, op, right = t.split(" ")
+                if op == "==" and left == right:
+                    continue
+                if right.isdigit():
+                    relation_with_digit(left, op, int(right))
+                elif left.isdigit():
+                    relation_with_digit(right, flip(op), int(left))
+                else:
+                    assert op == "=="
+                    results[left]["eq"] = right
+
+            buf = ""
+            debug_names = set()
+            if forced_specializations:
+                debug_names.update(k.split(" = ")[0] for k in forced_specializations.keys())
+                buf += (
+                    f"Specializations unexpectedly required ({'n'.join(debug_names)})! "
+                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                )
+                for s, val in forced_specializations.items():
+                    buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
+
+            dims = []
+            others = []
+            match = None
+            if constraint_violation_error:
+                match = re.search(r"Constraints violated \((.*)\)", constraint_violation_error.args[0])
+            if match is not None:
+                debug_names.update(match.expand(r'\1').split(', '))
+
+            for k, c in results.items():
+                if k not in debug_names:
+                    continue
+                if "eq" in c:
+                    other = c["eq"]
+                    if isinstance(other, int):
+                        others.append(f"{k} = None  # {other}")
+                    else:
+                        others.append(f"{k} = {other}")
+                else:
+                    min_ = c.get("min", None)
+                    if min_ == 2:
+                        min_ = None
+                    max_ = c.get("max", None)
+                    if min_ is not None and max_ is not None:
+                        dims.append(f"{k} = Dim('{k}', min={min_}, max={max_})")
+                    elif min_ is not None:
+                        dims.append(f"{k} = Dim('{k}', min={min_})")
+                    elif max_ is not None:
+                        dims.append(f"{k} = Dim('{k}', max={max_})")
+                    else:
+                        dims.append(f"{k} = Dim('{k}')")
+
+            buf += "\nSuggested fixes:\n  "
+            buf += "\n  ".join(dims + others)
+
+            return buf
+
         # Note: Model inputs are wrapped as LocalSource in dynamo.
         # LocalSource.name() wraps the name with L[""]. We use regular
         # expression to do the replacement to avoid traversing up
@@ -2099,6 +2235,13 @@ class DimConstraints:
                     buf += f"\n{indent}{result_fn(result)}"
 
         buf = ""
+        if forced_specializations:
+            buf += (
+                "Some dynamic dimensions need to be specialized because "
+                "the constraints inferred for them are too complex to specify.\n"
+            )
+            for s, val in forced_specializations.items():
+                buf += f"  - {s}, which was marked dynamic, must be specialized to {val}.\n"
         indent = 4 * " "
         if self._static_results:
             grouped_static_results = group(self._static_results, args_index)
@@ -2217,6 +2360,7 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict[sympy.Symbol, ValueRanges] = {}
+        self.source_name_to_debug_name: Dict[str, str] = {}
         # Maps symbolic ints to their min/max range for runtime checks.
         # This is because we assume a graph generated with N=2 is general enough
         # for N < 2. Therefore, it will be too strict to assert N=2 at runtime.
@@ -2540,7 +2684,7 @@ class ShapeEnv:
                                           dynamic_dims: DimList[DimDynamic],
                                           constraint_dims: List[DimConstraint]
                                           ) -> List[sympy.Expr]:
-        assert all(isinstance(val, int) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
+        assert all(not is_symbolic(val) for val in tensor_size), f"Expect size to be a plain tuple of ints but got {tensor_size}"
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(tensor_size):
@@ -2790,6 +2934,9 @@ class ShapeEnv:
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
+    def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
+        return str(symbol).startswith("i")
+
     @record_shapeenv_event()
     def create_unbacked_symbool(self):
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
@@ -2862,13 +3009,11 @@ class ShapeEnv:
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=positive, integer=True)
-            self.log.info("create_symbol %s = %s for %s", sympy_expr, val, source.name())
-            self.counter["create_symbol"] += 1
             # We always associate vars to vals
             if isinstance(val, int):
                 self.var_to_val[sympy_expr] = sympy.Integer(val)
             else:
-                self.var_to_val[sympy_expr] = _SingletonInt(str(val))
+                self.var_to_val[sympy_expr] = _SingletonInt(val.node.singleton_int(), val.node.factor())
 
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
@@ -2899,7 +3044,14 @@ class ShapeEnv:
                 if val not in vr:
                     raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
 
+            # Initialize default runtime range to match compile time range,
+            # for backed SymInts (this is allowed to diverge for unbacked)
+            self.runtime_var_to_range[sympy_expr] = vr
+
             r = sympy_expr
+
+            self.log.info("create_symbol %s = %s for %s [%s, %s]", sympy_expr, val, source.name(), vr.lower, vr.upper)
+            self.counter["create_symbol"] += 1
         else:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
@@ -2911,6 +3063,10 @@ class ShapeEnv:
 
         return r
 
+    def debug_name(self, source):
+        src_name = source.name()
+        return self.source_name_to_debug_name.get(src_name, src_name)
+
     def render_range_for_constraint_violation(self, source, c):
         if isinstance(c, StrictMinMaxConstraint):
             lower, upper = c.vr.lower, c.vr.upper
@@ -2919,13 +3075,13 @@ class ShapeEnv:
                 lower = None
             if upper >= default.upper:
                 upper = None
-            c_render = f"{source.name()} in the specified range"
+            c_render = f"{self.debug_name(source)} = {source.name()} in the specified range"
             if lower is not None and upper is not None:
-                c_render += f" {lower} <= {source.name()} <= {upper}"
+                c_render += f" {lower} <= {self.debug_name(source)} <= {upper}"
             elif lower is None and upper is not None:
-                c_render += f" {source.name()} <= {upper}"
+                c_render += f" {self.debug_name(source)} <= {upper}"
             elif lower is not None and upper is None:
-                c_render += f" {lower} <= {source.name()}"
+                c_render += f" {lower} <= {self.debug_name(source)}"
             return c_render
         return c.render(source)
 
@@ -3062,12 +3218,12 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
-        symbol_to_constraints = collections.defaultdict(list)
+        symbol_to_constraints = collections.defaultdict(set)
         constraint_violations : List[Tuple[bool, Callable[[], str]]] = []
 
-        def record_constraint_violation(warn_only, msg, hint=None):
+        def record_constraint_violation(warn_only, debug_name, msg, hint=None):
             constraint_violations.append(
-                (warn_only, lambda: f"{msg}{hint()}" if hint else msg)
+                (warn_only, debug_name, lambda: f"{msg}{hint()}" if hint else msg)
             )
 
         def is_dim(src):
@@ -3116,7 +3272,7 @@ class ShapeEnv:
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
-                        symbol_to_constraints[s].append(constraint)
+                        symbol_to_constraints[s].add(constraint)
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(NegateSource(source))
                 else:
@@ -3137,18 +3293,16 @@ class ShapeEnv:
                     if constraint_violated:
                         def hint(s):
                             sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(s)
-                            return (
-                                f"{sexpr}. For more information about this inference, "
-                                "run with TORCH_LOGS=dynamic."
-                            )
+                            return f"{sexpr}."
 
                         var_with_range = self.render_range_for_constraint_violation(source, constraint)
                         msg = (
                             f"Not all values of {var_with_range} are valid because "
-                            f"{source.name()} was inferred to be equal to "
+                            f"{self.debug_name(source)} was inferred to be equal to "
                         )
                         record_constraint_violation(
                             constraint.warn_only,
+                            self.debug_name(source),
                             msg,
                             hint=functools.partial(hint, s),
                         )
@@ -3169,11 +3323,9 @@ class ShapeEnv:
                     var_with_range = self.render_range_for_constraint_violation(source, constraint)
                     msg = (
                         f"Not all values of {var_with_range} are valid because "
-                        f"{source.name()} was inferred to be a constant ({val}). "
-                        "For more information about why it is constant, "
-                        "run with TORCH_LOGS=dynamic."
+                        f"{self.debug_name(source)} was inferred to be a constant ({val})."
                     )
-                    record_constraint_violation(constraint.warn_only, msg)
+                    record_constraint_violation(constraint.warn_only, self.debug_name(source), msg)
 
         for t, source, constraint in zip(placeholders, sources, constraint_inputs):
             if isinstance(source, str):
@@ -3218,6 +3370,7 @@ class ShapeEnv:
             symbol_to_source,
             self.var_to_val,
             set(symbol_to_constraints.keys()),
+            self.source_name_to_debug_name,
         )
 
         if not _simplified:
@@ -3258,10 +3411,11 @@ class ShapeEnv:
                     not equalities_inputs.is_equal(source, symbol_to_source[expr][0])
                 ):
                     msg = (
-                        f"The specified set of equalities {equalities_inputs.render()} "
-                        f"is not sufficient; please also specify {source_ref(source)} == {sexpr}."
+                        f"The values of {self.debug_name(source)} = {source.name()} and "
+                        f"{self.debug_name(symbol_to_source[expr][0])} = {symbol_to_source[expr][0].name()} "
+                        "must always be equal."
                     )
-                    record_constraint_violation(equalities_inputs.warn_only, msg)
+                    record_constraint_violation(equalities_inputs.warn_only, self.debug_name(source), msg)
                 # NB: Not necessary to report constraint violations here:
                 # constraints are guaranteed to be on symbols (we've already
                 # caught constants and non-atomic expressions), so we only
@@ -3299,11 +3453,9 @@ class ShapeEnv:
                             var_with_range = self.render_range_for_constraint_violation(source, c)
                             msg = (
                                 f"Not all values of {var_with_range} "
-                                f"satisfy the generated guard {guard_expr}. "
-                                "For more information about why this guard was generated, "
-                                "run with TORCH_LOGS=dynamic."
+                                f"satisfy the generated guard {guard_expr}."
                             )
-                            record_constraint_violation(c.warn_only, msg)
+                            record_constraint_violation(c.warn_only, self.debug_name(source), msg)
                         elif isinstance(c, RelaxedUnspecConstraint):
                             # This is fine, we allow guards here as long as it
                             # didn't constrain it to one value  (we don't
@@ -3369,16 +3521,23 @@ class ShapeEnv:
         if constraint_violations:
             warn_msgs = []
             error_msgs = []
-            for warn_only, msg in constraint_violations:
+            debug_names = set()
+            for warn_only, debug_name, msg in constraint_violations:
                 if warn_only:
                     msg = f"  {len(warn_msgs) + 1}. {msg()}"
                     warn_msgs.append(msg)
                 else:
-                    msg = f"  {len(error_msgs) + 1}. {msg()}"
+                    msg = f"  - {msg()}"
                     error_msgs.append(msg)
+                    debug_names.add(debug_name)
             if len(error_msgs) > 0:
+                debug_names = ', '.join(debug_names)
                 err = '\n'.join(error_msgs)
-                raise ConstraintViolationError(f"Constraints violated!\n{err}")
+                raise ConstraintViolationError(
+                    f"Constraints violated ({debug_names})! "
+                    "For more information, run with TORCH_LOGS=dynamic.\n"
+                    f"{err}"
+                )
             elif len(warn_msgs) > 0:
                 log.debug("%s Warning only constraints violated", len(warn_msgs))
 
