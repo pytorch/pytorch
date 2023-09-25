@@ -171,6 +171,13 @@ def mps_ops_grad_modifier(ops):
 
     XPASSLIST_GRAD = {
         'nn.functional.pairwise_distance': [torch.float16],
+        # failed assertion `destination datatype must be fp32'
+        'nn.functional.conv1d': [torch.float16],
+        'nn.functional.conv2d': [torch.float16],
+        'nn.functional.conv3d': [torch.float16],
+        'nn.functional.conv_transpose1d': [torch.float16],
+        'nn.functional.conv_transpose2d': [torch.float16],
+        'nn.functional.conv_transpose3d': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -579,7 +586,6 @@ def mps_ops_modifier(ops):
         'nn.functional.max_unpool1d': None,
         'nn.functional.max_unpool2d': None,
         'nn.functional.max_unpool3d': None,
-        'nn.functional.mish': None,
         'nn.functional.multi_margin_loss': None,
         'nn.functional.multilabel_margin_loss': None,
         'nn.functional.pdist': None,
@@ -2537,6 +2543,86 @@ class TestMPS(TestCaseMPS):
                                track_running_stats=track_running_stats, test_module=test_module)
                         helper(shape, eps=3, momentum=0.67, wts=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
+
+    def test_weight_norm(self):
+        def helper(dim, layer='linear', dtype=torch.float32):
+            # linear layer
+            if layer == 'linear':
+                cpu_x = torch.randn((2, 5), device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+                cpu_weight = torch.randn(10, 5, device='cpu', dtype=dtype, requires_grad=True)
+                weight = cpu_weight.detach().clone().to('mps').requires_grad_()
+
+                cpu_bias = torch.randn(10, device='cpu', dtype=dtype, requires_grad=True)
+                bias = cpu_bias.detach().clone().to('mps').requires_grad_()
+
+                cpu_linear = torch.nn.Linear(5, 10, device='cpu')
+                linear = torch.nn.Linear(5, 10, device='mps')
+
+                with torch.no_grad():
+                    cpu_linear.weight.copy_(cpu_weight)
+                    cpu_linear.bias.copy_(cpu_bias)
+                    linear.weight.copy_(weight)
+                    linear.bias.copy_(bias)
+
+                cpu_norm = torch.nn.utils.weight_norm(cpu_linear, dim=dim)
+                norm = torch.nn.utils.weight_norm(linear, dim=dim)
+
+                cpu_out = cpu_norm(cpu_x)
+                out = norm(x)
+
+                self.assertEqual(cpu_out, out)
+
+                cpu_grad = torch.randn(cpu_out.shape)
+                grad = cpu_grad.to('mps')
+                cpu_out.backward(gradient=cpu_grad)
+                out.backward(gradient=grad)
+
+                self.assertEqual(cpu_linear.weight_g.grad, linear.weight_g.grad)
+                self.assertEqual(cpu_linear.weight_v.grad, linear.weight_v.grad)
+
+                self.assertEqual(x.grad, cpu_x.grad)
+
+            # conv layer
+            if layer == 'conv':
+                cpu_x = torch.randn((3, 5, 5), device='cpu', dtype=dtype, requires_grad=True)
+                x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+                cpu_conv = torch.nn.Conv2d(3, 3, 3, device='cpu')
+                conv = torch.nn.Conv2d(3, 3, 3, device='mps')
+
+                with torch.no_grad():
+                    conv.weight.copy_(cpu_conv.weight)
+                    conv.bias.copy_(cpu_conv.bias)
+
+                cpu_norm = torch.nn.utils.weight_norm(cpu_conv, dim=dim)
+                norm = torch.nn.utils.weight_norm(conv, dim=dim)
+
+                cpu_out = cpu_conv(cpu_x)
+                out = conv(x)
+
+                self.assertEqual(cpu_out, out)
+
+                cpu_grad = torch.randn(cpu_out.shape)
+                grad = cpu_grad.to('mps')
+                cpu_out.backward(gradient=cpu_grad)
+                out.backward(gradient=grad)
+
+                self.assertEqual(cpu_conv.weight_g.grad, conv.weight_g.grad)
+                self.assertEqual(cpu_conv.weight_v.grad, conv.weight_v.grad)
+
+                self.assertEqual(x.grad, cpu_x.grad)
+
+        helper(0, layer='linear')
+        helper(1, layer='linear')
+        helper(-1, layer='linear')
+
+        helper(0, layer='conv')
+        helper(1, layer='conv')
+        helper(2, layer='conv')
+        helper(3, layer='conv')
+        helper(-1, layer='conv')
 
     # Test conv2d
     def test_conv2d_unit(self):
@@ -10816,10 +10902,14 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.normalize',
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
+        'nn.functional.batch_norm',
+        'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',
+        '_native_batch_norm_legit',
+        'native_batch_norm',
 
         # for macOS 12
         'masked.normalize', 'masked.sum', 'masked.var',
@@ -10877,6 +10967,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                atol = 5e-2
+                rtol = 5e-2
             elif op.name == "masked.mean":
                 atol = 7e-4
                 rtol = 2e-3
@@ -10927,6 +11022,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                atol = 5e-2
+                rtol = 5e-2
             elif (op.name == "masked.mean"):
                 atol = 7e-4
                 rtol = 2e-3

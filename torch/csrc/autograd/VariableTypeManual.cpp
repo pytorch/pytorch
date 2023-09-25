@@ -97,7 +97,7 @@ Tensor unpack_opt(const Tensor& t, const char* name, int pos) {
 }
 
 std::vector<at::Tensor> unpack(
-    at::ITensorListRef tl,
+    const at::ITensorListRef& tl,
     const char* name,
     int pos) {
   std::vector<at::Tensor> ret;
@@ -447,13 +447,12 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   // NB: we can't make detach() a normal view operator because the codegen
   // generates allow_tensor_metadata_change = True for them. In the future we
   // should have an option for this in the codegen.
-  std::function<at::Tensor(const at::Tensor&)> func = nullptr;
   auto result = as_view(
       /* base */ self,
       /* output */ out,
       /* is_bw_differentiable */ false,
       /* is_fw_differentiable */ false,
-      /* view_func */ std::move(func),
+      /* view_func */ nullptr,
       /* creation_meta */ CreationMeta::DEFAULT,
       /*allow_tensor_metadata_change=*/false);
 
