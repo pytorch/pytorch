@@ -655,7 +655,7 @@ static PyObject* NNModuleGuard_repr(PyObject* self) {
   // Prints versions of the module and the attributes.
   NNModuleGuard* guard = (NNModuleGuard*)self;
   std::ostringstream oss;
-  oss << "versions(mod=" << guard->version_tag;
+  oss << "versions(mod=" << guard->dict_version_tag;
 
   for (size_t index = 0;
        index < sizeof(module_guard_attrs) / sizeof(module_guard_attrs[0]);
