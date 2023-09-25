@@ -253,7 +253,9 @@ class AggregatedHeuristics:
         }
 
         # Get baseline metrics assuming we didn't have any TD heuristics
-        baseline_priorities = TestPrioritizations(tests_being_ranked=self.unranked_tests)
+        baseline_priorities = TestPrioritizations(
+            tests_being_ranked=self.unranked_tests
+        )
         baseline_stats = baseline_priorities.get_priority_info_for_test(test)
         baseline_stats["heuristic_name"] = "baseline"
         stats["without_heuristics"] = baseline_stats
