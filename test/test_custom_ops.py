@@ -17,7 +17,7 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
 from torch._utils_internal import get_file_path_2
-from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.custom_op_db import custom_op_db
 from typing import *  # noqa: F403
 
@@ -155,7 +155,8 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         x = torch.tensor(3.14159 / 3, requires_grad=True)
         with self.assertRaisesRegex(
-            optests.OpCheckError, "Argument x is not defined to alias output but was aliasing"
+            optests.OpCheckError,
+            "Argument x is not defined to alias output but was aliasing",
         ):
             optests.opcheck(op, (x,), {})
 
@@ -281,7 +282,10 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         x = torch.randn([], requires_grad=True)
 
-        with self.assertRaisesRegex(torch.testing._internal.optests.OpCheckError, "does not have an autograd kernel"):
+        with self.assertRaisesRegex(
+            torch.testing._internal.optests.OpCheckError,
+            "does not have an autograd kernel",
+        ):
             optests.opcheck(op, (x,), {})
 
         # I'm not sure why this is necessary
@@ -307,25 +311,31 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "CompositeImplicitAutograd")
 
         x = torch.tensor(3.14159 / 3, requires_grad=True)
-        with self.assertRaisesRegex(optests.OpCheckError, "eager-mode PyTorch vs AOTAutograd"):
+        with self.assertRaisesRegex(
+            optests.OpCheckError, "eager-mode PyTorch vs AOTAutograd"
+        ):
             optests.opcheck(op, (x,), {})
 
-    @unittest.skipIf(
-        TEST_CUDA and not SM70OrLater,
-        "Triton only supports devices of CUDA Capability >= 7.0",
-    )
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
-    def test_opcheck_fails_basic(self, device, dtype, op):
+    def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            optests.opcheck(
-                op.op,
-                args,
-                kwargs,
-            )
+            if op.op in (
+                torch.ops._torch_testing.numpy_nonzero,
+                torch.ops._torch_testing.numpy_nms,
+            ):
+                ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
+            else:
+                ctx = contextlib.nullcontext()
+            with ctx:
+                optests.opcheck(
+                    op.op,
+                    args,
+                    kwargs,
+                )
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
@@ -341,9 +351,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         with self.assertRaisesRegex(
             optests.OpCheckError, "Autograd has not been implemented for operator"
         ):
-            optests.opcheck(
-                self.get_op(f"{self.test_ns}::foo"), (x,), {}
-            )
+            optests.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
 
     def test_autograd_registration_check_autograd_kernel(self, device):
         lib = self.lib()
