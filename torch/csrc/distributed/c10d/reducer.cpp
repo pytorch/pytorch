@@ -5,6 +5,7 @@
 
 #include <functional>
 
+#include <ATen/NativeFunctions.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/StreamGuard.h>

@@ -48,7 +48,7 @@ if [[ "$SHARD_NUMBER" == "2" ]]; then
   xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 fi
 
-if [[ "$SHARD_NUMER" == "2" ]]; then
+if [[ "$SHARD_NUMBER" == "2" ]]; then
   # Sanity check on torchbench w/ onnx
   log_folder="test/.torchbench_logs"
   device="cpu"

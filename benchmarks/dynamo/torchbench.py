@@ -248,6 +248,7 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
+    "clip",  # torchbench removed torchtext dependency
 }
 
 ONLY_MULTIPROCESS = {
