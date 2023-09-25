@@ -360,11 +360,11 @@ def arange(
     # the dtype of the result
     if dtype is None:
         dtype = _dtypes_impl.default_dtypes().int_dtype
-    # XXX: default values do not get normalized
-    start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
-
-    dummy = torch.empty(1, dtype=dtype)
-    target_dtype = _dtypes_impl.result_type_impl(start, stop, step, dummy)
+        # XXX: default values do not get normalized
+        start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
+        target_dtype = _dtypes_impl.result_type_impl(start, stop, step)
+    else:
+        target_dtype = dtype
 
     # work around RuntimeError: "arange_cpu" not implemented for 'ComplexFloat'
     work_dtype = torch.float64 if target_dtype.is_complex else target_dtype

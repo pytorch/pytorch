@@ -6831,6 +6831,10 @@ class TestArange(TestCase):
             # Fails discovering start dtype
             np.arange(*args)
 
+    @parametrize("dt", [np.float32, np.uint8, complex])
+    def test_explicit_dtype(self, dt):
+        assert np.arange(5.0, dtype=dt).dtype == dt
+
 
 class TestRichcompareScalar(TestCase):
     @xfail  # (reason="comparison: builtin.bools or...?")
