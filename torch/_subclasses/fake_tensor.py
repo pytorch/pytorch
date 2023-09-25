@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 import os
+import sys
 import traceback
 import weakref
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from torch._prims_common import (
 from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     free_symbols,
@@ -200,8 +202,10 @@ def maybe_get_fake_mode(t):
     if isinstance(t, FakeTensor):
         return t.fake_mode
     if is_traceable_wrapper_subclass(t):
-        inner_tensors, _ = t.__tensor_flatten__()
-        modes = [maybe_get_fake_mode(x) for x in inner_tensors]
+        inner_tensor_names, _ = t.__tensor_flatten__()
+        modes = [
+            maybe_get_fake_mode(getattr(t, t_name)) for t_name in inner_tensor_names
+        ]
         m = modes[0]
         assert all(m is x for x in modes)
         return m
@@ -525,7 +529,15 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
 @register_op_impl(lambda func: func is aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
-        raise DynamicOutputShapeException(func)
+        if (
+            fake_mode.shape_env is None
+            or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+        ):
+            raise DynamicOutputShapeException(func)
+
+        output_size = fake_mode.shape_env.create_unbacked_symint()
+        _constrain_range_for_size(output_size)
+        # TODO: consider a memo
     return repeats.new_empty(output_size)
 
 
@@ -554,10 +566,6 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
-        import sys
-
-        from torch.fx.experimental.symbolic_shapes import constrain_range
-
         nnz = fake_mode.shape_env.create_unbacked_symint()
 
         # This is unsound, but it works well in practice
@@ -577,7 +585,7 @@ def nonzero(fake_mode, func, arg):
             if arg.numel() >= 2:
                 maxval = int(arg.numel())
 
-        constrain_range(nnz, min=2, max=maxval)
+        _constrain_range_for_size(nnz, max=maxval)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
@@ -1013,6 +1021,9 @@ class FakeTensor(torch.Tensor):
     # thread-local dispatch include set to hit the meta kernel
     # instead of the kernel of the BackendComponent for the fake device.
     # The `device_for_backend_keys` does that below
+    # NOTE: this probably will not do the right thing for backends
+    # that have dispatch keys which are higher than the "meta" key:
+    # https://github.com/pytorch/pytorch/blob/main/c10/core/DispatchKey.h#L189
 
     @staticmethod
     def __new__(cls, fake_mode, elem, device, constant=None):
@@ -1220,10 +1231,15 @@ class FakeTensorMode(TorchDispatchMode):
         allow_fallback_kernels=True,
         allow_non_fake_inputs=False,
         shape_env=None,
+        static_shapes=None,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
+        if static_shapes is not None:
+            self.static_shapes = static_shapes
+        else:
+            self.static_shapes = shape_env is None
 
         import torch._functorch.config
 
@@ -1309,6 +1325,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def dispatch(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
+        log.debug("%s %s %s", func, args, kwargs)
 
         if func == torch.ops.prim.device.default:
             # NB: Don't use is_our_fake, just serve the fake information
@@ -1365,7 +1382,7 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
-            ), "f{func} should not have fake inputs without constants"
+            ), f"{func} should not have fake inputs without constants"
             const_args, const_kwargs = pytree.tree_map_only(
                 FakeTensor,
                 lambda t: t.constant if self.is_our_fake(t) else t,
@@ -1511,13 +1528,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        if func.name() in torch._custom_op.impl.global_registry:
-            custom_op = torch._custom_op.impl.global_registry[func.name()]
-            if custom_op is not None and custom_op._has_impl("abstract"):
-                ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
-                with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
-                    result = custom_op._get_impl("abstract").func(*args, **kwargs)
-                    return result
+        maybe_abstract_impl = torch._custom_op.impl.get_abstract_impl(func.name())
+        if maybe_abstract_impl:
+            ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
+            with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
+                result = maybe_abstract_impl(*args, **kwargs)
+                return result
 
         # special handling for funcs registered through `register_op_impl`,
         # e.g., manipulating args on constructor calls to construct meta tensors
@@ -1743,7 +1759,7 @@ class FakeTensorMode(TorchDispatchMode):
         self,
         tensor,
         *,
-        static_shapes=False,
+        static_shapes=None,
         ignore_subclass=False,
         source: Optional[Source] = None,
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
@@ -1753,6 +1769,8 @@ class FakeTensorMode(TorchDispatchMode):
         memoized_only=False,
     ):
         shape_env = self.shape_env
+        if static_shapes is None:
+            static_shapes = self.static_shapes
         if static_shapes:
             assert (
                 dynamic_dims is None

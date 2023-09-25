@@ -1,4 +1,5 @@
 import functools
+import numbers
 import operator
 import sys
 from enum import Enum
@@ -12,6 +13,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
+from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
@@ -1178,7 +1180,7 @@ def prod(x: List[int]):
     return r
 
 
-@register_decomposition([aten.split_with_sizes, aten.unsafe_split_with_sizes])
+@register_decomposition(aten.split_with_sizes)
 def split_with_sizes(
     self: Tensor, split_sizes: List[int], dim: int = 0
 ) -> List[Tensor]:
@@ -1192,8 +1194,8 @@ def split_with_sizes(
     start_idx = 0
     for i in range(num_splits):
         length = split_sizes[i]
-        torch._check(
-            length >= 0,
+        torch._check_is_size(
+            length,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
         # We know this is true thanks to the sum, but this assertion helps
@@ -1204,7 +1206,19 @@ def split_with_sizes(
     return splits
 
 
-@register_decomposition([aten.split.Tensor, aten.unsafe_split.Tensor])
+@register_decomposition(aten.unsafe_split.Tensor)
+def unsafe_split(input: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
+    return aten.split.Tensor(input, split_size, dim)
+
+
+@register_decomposition(aten.unsafe_split_with_sizes.default)
+def unsafe_split_with_sizes(
+    input: Tensor, split_sizes: List[int], dim: int = 0
+) -> Tuple[Tensor, ...]:
+    return aten.split_with_sizes.default(input, split_sizes, dim)
+
+
+@register_decomposition(aten.split.Tensor)
 def split(self: Tensor, split_size: int, dim: int = 0) -> Tuple[Tensor, ...]:
     input_sizes = self.shape
     dim_size = input_sizes[dim]
@@ -1297,7 +1311,7 @@ def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1
     return out + beta * self
 
 
-@register_decomposition(aten.native_group_norm_backward)
+@register_decomposition(aten.native_group_norm_backward.default)
 @pw_cast_for_opmath
 def native_group_norm_backward(
     grad_output: Tensor,
@@ -1385,6 +1399,36 @@ def native_group_norm_backward(
     return (d_input, d_gamma, d_bias)
 
 
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_group_norm_backward.out)
+def native_group_norm_backward_out(
+    grad_output: Tensor,
+    input: Tensor,
+    mean: Tensor,
+    rstd: Tensor,
+    gamma: Optional[Tensor],
+    N: int,
+    C: int,
+    HxW: int,
+    group: int,
+    output_mask: List[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    result = native_group_norm_backward(
+        grad_output, input, mean, rstd, gamma, N, C, HxW, group, output_mask
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
+
+
 def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
     if x is not None:
         return x.to(dtype)
@@ -1392,7 +1436,7 @@ def _maybe_cast(x: Optional[Tensor], dtype) -> Optional[Tensor]:
 
 
 # TODO: Take a closer look at the type promotion semantics
-@register_decomposition(aten.native_layer_norm_backward)
+@register_decomposition(aten.native_layer_norm_backward.default)
 def native_layer_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -1431,7 +1475,8 @@ def native_layer_norm_backward(
             input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
             input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
         )
-
+    mean = _unsqueeze_to_dim(mean, input_cast.dim())  # type: ignore[union-attr]
+    rstd = _unsqueeze_to_dim(rstd, input_cast.dim())  # type: ignore[union-attr]
     x_hat = (input_cast - mean) * rstd
     if weight_cast is not None:
         grad_x_hat = grad_out_cast * weight_cast
@@ -1467,6 +1512,34 @@ def native_layer_norm_backward(
         _maybe_cast(d_weight, input.dtype),
         _maybe_cast(d_bias, input.dtype),
     )
+
+
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_layer_norm_backward.out)
+def native_layer_norm_backward_out(
+    grad_out: Tensor,
+    input: Tensor,
+    normalized_shape: List[int],
+    mean: Tensor,
+    rstd: Tensor,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    output_mask: List[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+    result = native_layer_norm_backward(
+        grad_out, input, normalized_shape, mean, rstd, weight, bias, output_mask
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
 
 
 def native_batch_norm_helper(
@@ -1820,7 +1893,7 @@ def _broadcast_batch_norm_backward(x, broadcast_mask):
     return x
 
 
-@register_decomposition(aten.native_batch_norm_backward)
+@register_decomposition(aten.native_batch_norm_backward.default)
 def native_batch_norm_backward(
     grad_out: Tensor,
     input: Tensor,
@@ -1918,6 +1991,45 @@ def native_batch_norm_backward(
         _maybe_cast(grad_weight, weight_dtype),
         _maybe_cast(grad_bias, weight_dtype),
     )
+
+
+# out_wrapper currently does not allow optional outputs
+@register_decomposition(aten.native_batch_norm_backward.out)
+def native_batch_norm_backward_out(
+    grad_out: Tensor,
+    input: Tensor,
+    weight: Optional[Tensor],
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_invstd: Optional[Tensor],
+    train: bool,
+    eps: float,
+    output_mask: List[bool],
+    *,
+    out0: torch.Tensor,
+    out1: torch.Tensor,
+    out2: torch.Tensor,
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+    result = native_batch_norm_backward(
+        grad_out,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_invstd,
+        train,
+        eps,
+        output_mask,
+    )
+    grad_input = (out0, out1, out2)
+    for i, r in enumerate(result):
+        if r is not None:
+            _maybe_resize_out(grad_input[i], r.shape)
+            _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
+
+    return grad_input
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)
@@ -2092,6 +2204,12 @@ def _index_add(
     torch._check(
         index.ndim <= 1,
         lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    index_size = index.size(0) if index.ndim == 1 else 1
+    tensor_size = tensor.size(dim) if tensor.ndim > 0 else 1
+    torch._check(
+        tensor_size == index_size,
+        lambda: f"Number of indices ({index_size}) should be equal to tensor.size(dim) ({tensor_size}), for {dim=}",
     )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
@@ -3494,39 +3612,6 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot)
-@out_wrapper()
-@pw_cast_for_opmath
-def dot(self, other):
-    if self.is_complex():
-        if self.is_conj():
-            if other.is_conj():
-                return torch.dot(self.conj(), other.conj()).conj()
-            else:
-                return torch.vdot(self.conj(), other)
-        elif other.is_conj():
-            return torch.vdot(other.conj(), self)
-
-    torch._check(
-        self.dim() == 1 and other.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
-    )
-    torch._check(
-        self.dtype == other.dtype,
-        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
-    )
-
-    def numel_error():
-        return (
-            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
-            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
-        )
-
-    torch._check(self.numel() == other.numel(), numel_error)
-
-    return (self * other).sum()
-
-
 @register_decomposition(aten.binary_cross_entropy_with_logits)
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
@@ -3828,6 +3913,13 @@ def arange_start(
     )
 
 
+@register_decomposition(out_dtype)
+def out_dtype_decomp(*args, **kwargs):
+    from torch._higher_order_ops.out_dtype import out_dtype_dense
+
+    return out_dtype_dense(*args, **kwargs)
+
+
 @register_decomposition(aten.multi_margin_loss)
 @aten.multi_margin_loss.default.py_impl(DispatchKey.Autograd)
 @out_wrapper()
@@ -3926,6 +4018,124 @@ def multilabel_margin_loss_forward(
     return z, is_target
 
 
+# scaled_dot_product_attention used to be decomposed in pre-autograd, given that
+# it calls _scaled_dot_product_attention_math and
+# _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
+# kernel. As a result it's decomposed into ops with finer granularity.
+# However recent PRs (#103826 #105131) added new logic in
+# scaled_dot_product_attention and now it calls
+# _scaled_dot_product_flash_attention which contains a CPU kernel. This results
+# in _scaled_dot_product_flash_attention showing up in torch.export().
+# This decomposition ensures scaled_dot_product_attention is still decomposed
+# the same way as before, i.e., going through
+# _scaled_dot_product_attention_math. Notice that this decomp rule should be
+# excluded by inductor.
+@register_decomposition(aten._scaled_dot_product_flash_attention.default)
+def scaled_dot_product_flash_attention(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    attn_mask: Optional[Tensor] = None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    return_debug_mask: bool = False,
+    *,
+    scale: Optional[float] = None,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, int, int, Tensor, Tensor, Tensor]:
+    dtype = query.dtype
+    batchSize, num_head, qSize, headSize = (
+        query.shape[0],
+        query.shape[1],
+        query.shape[2],
+        query.shape[3],
+    )
+
+    torch._check(
+        torch.is_floating_point(query) and dtype is not torch.half,
+        lambda: f"query must be FP32, FP64, BF16 but got {query.dtype}",
+    )
+    torch._check(
+        query.dim() == 4 and key.dim() == 4 and value.dim() == 4,
+        lambda: "q, k, v must be a 4 dimensional tensor",
+    )
+    torch._check(dropout_p == 0.0, lambda: "dropout probability must be zero")
+    torch._check(
+        query.shape[3] == value.shape[3] and key.shape[3] == value.shape[3],
+        lambda: "q, k, v should have the same head size",
+    )
+    torch._check(
+        return_debug_mask is False, lambda: "return_debug_mask is not supported."
+    )
+
+    logsumexp = torch.empty([batchSize, qSize, num_head, headSize], dtype=torch.float)
+    cum_seq_q, cum_seq_k = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    max_q, max_k = 0, 0
+    philox_seed, philox_offset = torch.empty([], dtype=torch.long), torch.empty(
+        [], dtype=torch.long
+    )
+    debug_attn_mask = torch.empty(
+        [],
+        dtype=query.dtype,
+        device=query.device,
+        requires_grad=query.requires_grad,
+    )
+    output, _ = aten._scaled_dot_product_attention_math.default(
+        query, key, value, attn_mask, dropout_p, is_causal, None, scale=scale
+    )
+    # Why this change?
+    # In pre-dispatch export scaled_dot_product_attention is executed via
+    # * flash_attention.
+    # flash_attention allocates output tensor as (N, L, H, E)
+    #   it then tranposes that to get (N, H, L, E) which is supposed to be the return
+    # tensor dim for scaled_dot_product_attention
+    # assume x: [N, H, L, E] is the output sdpa
+    # In MHA code, this output is then permuted via (2, 0, 1, 3) to get
+    # (L, N, H, E) dim tensor
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+    # During pre autograd dispatch call to contiguous is not traced because
+    # flash_attention output after the x.permute is already contiguous
+    # on which the view is valid
+    # However, during 2nd stage export, post-dispatch, we run _match variant
+    # instead of flash* to get the decomposition. _match variant returns
+    # x: [N, H, L, E] applying x.permute(2, 0, 1, 3) returns
+    # x: [L, N, H, E] and without converting this to contiguous tensor
+    # subsequent view is not valid and the export fails
+    # solution is to maintain the return tensor view from the decomp to be
+    # exactly same as *flash* variant.
+    # flash variants output is contiguous as [N, L, H, E]
+    # _match variant out is contiguous as [N, H, L, E]
+    # out = out.tranpose(1, 2).contiguous gets output as contiguous
+    # in [N, L, H, E].
+    # Subsrequent tranpose(1, 2) then returns a view on which
+    # aforementioned code snippet, as showm below, is valid
+    # x = x.permute(2, 0, 1, 3).contiguous() and the viewed via
+    # x = x.view(L * N, H * E)
+
+    # Really the invairant you want to maintain is:
+    # pre-dispatch op-output and its decomposed representation must
+    # return tensor with same view and dims
+    output = output.transpose(1, 2).contiguous(memory_format=torch.contiguous_format)
+    return (
+        output.transpose(1, 2),
+        logsumexp,
+        cum_seq_q,
+        cum_seq_k,
+        max_q,
+        max_k,
+        philox_seed,
+        philox_offset,
+        debug_attn_mask,
+    )
+
+
+@register_decomposition([aten.trunc])
+def trunc(self: Tensor, **kwargs) -> Tensor:
+    return torch.where(self > 0, torch.floor(self), torch.ceil(self))
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -3933,6 +4143,23 @@ def register_inplace(aten_op, outplace_op):
         return args[0].copy_(out)
 
     return inplace_op
+
+
+@out_wrapper()
+@pw_cast_for_opmath
+@register_decomposition([aten.baddbmm])
+def baddbmm(self, batch1, batch2, beta=1, alpha=1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    result = torch.bmm(batch1, batch2)
+    if not isinstance(alpha, numbers.Number) or alpha != 1:
+        result = result * alpha
+    if beta == 0:
+        return result
+    if not isinstance(beta, numbers.Number) or beta != 1:
+        self = self * beta
+    return self + result
 
 
 register_inplace(aten.addbmm_, aten.addbmm)

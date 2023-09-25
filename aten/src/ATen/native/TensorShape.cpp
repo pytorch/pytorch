@@ -1601,6 +1601,29 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+// specialization for symbolic shapes and strides.
+// SymIntArrayRef/ArrayRef<c10::SymInt> and SmallVector<c10::SymInt>/SymDimVector
+template <template <typename...> typename Container>
+Tensor alias_with_sizes_and_strides(
+    const Tensor& self,
+    const Container<c10::SymInt>& sizes,
+    const Container<c10::SymInt>& strides) {
+  //caller should make sure that sizes and strides are valid for self
+  //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
+  Tensor self_;
+  if (self.is_quantized()) {
+    self_ = at::detail::make_tensor<QTensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype(), get_qtensorimpl(self)->quantizer());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  } else {
+    self_ = at::detail::make_tensor<TensorImpl>(
+    c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  }
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
+
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -3686,7 +3709,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+  return alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
 }
 
 Tensor detach(const Tensor& self) {
