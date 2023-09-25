@@ -2282,9 +2282,7 @@ class TritonScheduling(BaseScheduling):
                     if (
                         node not in done
                         and fits_in_main_body(other_node)
-                        and not (
-                            current_loop_writes & other_node.ancestors
-                        )
+                        and not (current_loop_writes & other_node.ancestors)
                     ):
                         done.add(node)
                         current_loop_writes.add(node.get_name())

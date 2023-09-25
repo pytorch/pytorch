@@ -1434,21 +1434,29 @@ class Scheduler:
 
     def will_fusion_create_cycle(self, node1, node2):
         """
-        Finds whether there's a path from fusion(node1, node2) to itself
-        caused indirectly by fusion
+        Finds whether there's a path from node1 to node2 (or vice-versa)
+        caused indirectly by other fusions.
         """
 
-        def check_backedge(node):
+        def found_path(node):
+            # only fused nodes can introduce new ancestors.
             if isinstance(node, FusedSchedulerNode) and node not in visited:
                 visited.add(node)
-                if bool(combined_names & node.ancestors):
-                    return True
-                elif node.get_names().issubset(combined_ancestors):
-                    # their ancestors will be checked anyway
+                if node.get_names().issubset(combined_ancestors):
+                    # All fusion outputs are in ancestors of node1 and node2, thus
+                    # cannot introduce new path:
+                    #
+                    # 1. if output is neither descendent of node1 or node2, the
+                    #        output cannot introduce a path
+                    # 2. due to [can_fuse]: if WLOG output is descendent of node1, it cannot be
+                    #        on path(node1->node2), hence it cannot be ancestor of node2
+                    # 3. due to [acyclic]: if WLOG output is descendent of node1, it cannot be
+                    #        ancestor of node1
                     return False
                 else:
-                    return any(
-                        check_backedge(self.name_to_fused_node[n])
+                    # continue DFS of new ancestors introduced by the fusion
+                    return bool(combined_names & node.ancestors) or any(
+                        found_path(self.name_to_fused_node[n])
                         for n in node.ancestors - combined_ancestors
                     )
             return False
@@ -1456,9 +1464,7 @@ class Scheduler:
         visited = set()
         combined_names = node1.get_names() | node2.get_names()
         combined_ancestors = (node1.ancestors | node2.ancestors) - combined_names
-        return any(
-            check_backedge(self.name_to_fused_node[n]) for n in combined_ancestors
-        )
+        return any(found_path(self.name_to_fused_node[n]) for n in combined_ancestors)
 
     def can_fusion_increase_peak_memory(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -1510,7 +1516,7 @@ class Scheduler:
             return ForeachKernelSchedulerNode.can_fuse(node1, node2)
 
         if node2.get_names() & node1.ancestors:
-            return False  # node2 must go before node1
+            return False  # node1 must go before node2
 
         if (
             isinstance(node1, (FusedSchedulerNode, SchedulerNode))
