@@ -3065,6 +3065,31 @@ class TestSDPACudaOnly(NNTestCase):
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
     @skipIfRocm  # Nested Tensor
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    def test_flash_gqa(self, device):
+        rand_query = torch.rand(8, 8, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+        rand_key = torch.rand(8, 2, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+        rand_value = torch.rand(8, 2, 64, 64, device=device, dtype=torch.float16, requires_grad=True)
+
+        query_ref, key_ref, value_ref = self.query_key_value_clones(rand_query, rand_key, rand_value, dtype=rand_query.dtype)
+
+        with sdp_kernel(**backend_map[SDPBackend.FLASH_ATTENTION]):
+            out = F.scaled_dot_product_attention(rand_query, rand_key, rand_value, dropout_p=0.0, is_causal=False)
+
+        with sdp_kernel(**backend_map[SDPBackend.MATH]):
+            out_math = F.scaled_dot_product_attention(query_ref, key_ref, value_ref, dropout_p=0.0, is_causal=False)
+
+        upstream_grad = torch.rand_like(out, requires_grad=False)
+
+        out.backward(upstream_grad)
+        out_math.backward(upstream_grad)
+
+        torch.testing.assert_allclose(out, out_math, atol=1e-3, rtol=1e-2)
+        torch.testing.assert_allclose(rand_query.grad, query_ref.grad, atol=1e-3, rtol=1e-2)
+        torch.testing.assert_allclose(rand_key.grad, key_ref.grad, atol=1e-3, rtol=1e-2)
+        torch.testing.assert_allclose(rand_value.grad, value_ref.grad, atol=1e-3, rtol=1e-2)
+
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])

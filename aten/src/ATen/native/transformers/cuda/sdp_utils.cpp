@@ -462,6 +462,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_runtime_disabled_flash,
       check_all_tensors_on_device,
       check_tensor_shapes,
+      check_batch_size_and_num_heads<true>, // supports_grouped_query_attention = true,
       check_for_attn_mask,
       check_head_dim_size_flash,
       check_flash_attention_hardware_support,
