@@ -1,9 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
-
-from unittest import expectedFailure as xfail, skipIf as skipif
-
 import pytest
 
 import torch._numpy as np
@@ -21,20 +17,11 @@ from torch._numpy import (
     vstack,
 )
 from torch._numpy.testing import assert_, assert_array_equal, assert_equal
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
-
-skip = functools.partial(skipif, True)
-
 
 IS_PYPY = False
 
 
-class TestAtleast1d(TestCase):
+class TestAtleast1d:
     def test_0D_array(self):
         a = array(1)
         b = array(2)
@@ -73,7 +60,7 @@ class TestAtleast1d(TestCase):
         assert atleast_1d([[2, 3], [4, 5]]).shape == (2, 2)
 
 
-class TestAtleast2d(TestCase):
+class TestAtleast2d:
     def test_0D_array(self):
         a = array(1)
         b = array(2)
@@ -111,7 +98,7 @@ class TestAtleast2d(TestCase):
         assert atleast_2d([[[3, 1], [4, 5]], [[3, 5], [1, 2]]]).shape == (2, 2, 2)
 
 
-class TestAtleast3d(TestCase):
+class TestAtleast3d:
     def test_0D_array(self):
         a = array(1)
         b = array(2)
@@ -143,7 +130,7 @@ class TestAtleast3d(TestCase):
         assert_array_equal(res, desired)
 
 
-class TestHstack(TestCase):
+class TestHstack:
     def test_non_iterable(self):
         assert_raises(TypeError, hstack, 1)
 
@@ -192,7 +179,7 @@ class TestHstack(TestCase):
             hstack((a, b), casting="safe", dtype=np.int64)
 
 
-class TestVstack(TestCase):
+class TestVstack:
     def test_non_iterable(self):
         assert_raises(TypeError, vstack, 1)
 
@@ -227,7 +214,7 @@ class TestVstack(TestCase):
         desired = array([[1, 2], [1, 2]])
         assert_array_equal(res, desired)
 
-    @xfail  # (reason="vstack w/generators")
+    @pytest.mark.xfail(reason="vstack w/generators")
     def test_generator(self):
         with pytest.raises(TypeError, match="arrays to stack must be"):
             vstack(np.arange(3) for _ in range(2))
@@ -246,8 +233,7 @@ class TestVstack(TestCase):
             vstack((a, b), casting="safe", dtype=np.int64)
 
 
-@instantiate_parametrized_tests
-class TestConcatenate(TestCase):
+class TestConcatenate:
     def test_out_and_dtype_simple(self):
         # numpy raises TypeError on both out=... and dtype=...
         a, b, out = np.ones(3), np.ones(4), np.ones(3 + 4)
@@ -332,7 +318,7 @@ class TestConcatenate(TestCase):
         assert out is rout
         assert np.all(r == rout)
 
-    @xfail  # (reason="concatenate(x, axis=None) relies on x being a sequence")
+    @pytest.mark.xfail(reason="concatenate(x, axis=None) relies on x being a sequence")
     def test_large_concatenate_axis_None(self):
         # When no axis is given, concatenate uses flattened versions.
         # This also had a bug with many arrays (see gh-5979).
@@ -388,8 +374,10 @@ class TestConcatenate(TestCase):
         assert_(out is rout)
         assert_equal(res, rout)
 
-    @skip(reason="concat, arrays, sequence")
-    @skipif(IS_PYPY, reason="PYPY handles sq_concat, nb_add differently than cpython")
+    @pytest.mark.skipif(reason="concat, arrays, sequence")
+    @pytest.mark.skipif(
+        IS_PYPY, reason="PYPY handles sq_concat, nb_add differently than cpython"
+    )
     def test_operator_concat(self):
         import operator
 
@@ -412,11 +400,11 @@ class TestConcatenate(TestCase):
         assert_raises(ValueError, concatenate, (a, b), out=np.empty((1, 4)))
         concatenate((a, b), out=np.empty(4))
 
-    @parametrize("axis", [None, 0])
-    @parametrize(
+    @pytest.mark.parametrize("axis", [None, 0])
+    @pytest.mark.parametrize(
         "out_dtype", ["c8", "f4", "f8", "i8"]
     )  # torch does not have ">f8", "S4"
-    @parametrize("casting", ["no", "equiv", "safe", "same_kind", "unsafe"])
+    @pytest.mark.parametrize("casting", ["no", "equiv", "safe", "same_kind", "unsafe"])
     def test_out_and_dtype(self, axis, out_dtype, casting):
         # Compare usage of `out=out` with `dtype=out.dtype`
         out = np.empty(4, dtype=out_dtype)
@@ -440,114 +428,114 @@ class TestConcatenate(TestCase):
             concatenate(to_concat, out=out, dtype=out_dtype, axis=axis)
 
 
-@instantiate_parametrized_tests
-class TestStackMisc(TestCase):
-    def test_stack(self):
-        # non-iterable input
-        assert_raises(TypeError, stack, 1)
+def test_stack():
+    # non-iterable input
+    assert_raises(TypeError, stack, 1)
 
-        # 0d input
-        for input_ in [
-            (1, 2, 3),
-            [np.int32(1), np.int32(2), np.int32(3)],
-            [np.array(1), np.array(2), np.array(3)],
-        ]:
-            assert_array_equal(stack(input_), [1, 2, 3])
-        # 1d input examples
-        a = np.array([1, 2, 3])
-        b = np.array([4, 5, 6])
-        r1 = array([[1, 2, 3], [4, 5, 6]])
-        assert_array_equal(np.stack((a, b)), r1)
-        assert_array_equal(np.stack((a, b), axis=1), r1.T)
-        # all input types
-        assert_array_equal(np.stack([a, b]), r1)
-        assert_array_equal(np.stack(array([a, b])), r1)
-        # all shapes for 1d input
-        arrays = [np.random.randn(3) for _ in range(10)]
-        axes = [0, 1, -1, -2]
-        expected_shapes = [(10, 3), (3, 10), (3, 10), (10, 3)]
-        for axis, expected_shape in zip(axes, expected_shapes):
-            assert_equal(np.stack(arrays, axis).shape, expected_shape)
+    # 0d input
+    for input_ in [
+        (1, 2, 3),
+        [np.int32(1), np.int32(2), np.int32(3)],
+        [np.array(1), np.array(2), np.array(3)],
+    ]:
+        assert_array_equal(stack(input_), [1, 2, 3])
+    # 1d input examples
+    a = np.array([1, 2, 3])
+    b = np.array([4, 5, 6])
+    r1 = array([[1, 2, 3], [4, 5, 6]])
+    assert_array_equal(np.stack((a, b)), r1)
+    assert_array_equal(np.stack((a, b), axis=1), r1.T)
+    # all input types
+    assert_array_equal(np.stack([a, b]), r1)
+    assert_array_equal(np.stack(array([a, b])), r1)
+    # all shapes for 1d input
+    arrays = [np.random.randn(3) for _ in range(10)]
+    axes = [0, 1, -1, -2]
+    expected_shapes = [(10, 3), (3, 10), (3, 10), (10, 3)]
+    for axis, expected_shape in zip(axes, expected_shapes):
+        assert_equal(np.stack(arrays, axis).shape, expected_shape)
 
-        assert_raises(AxisError, stack, arrays, axis=2)
-        assert_raises(AxisError, stack, arrays, axis=-3)
+    assert_raises(AxisError, stack, arrays, axis=2)
+    assert_raises(AxisError, stack, arrays, axis=-3)
 
-        # all shapes for 2d input
-        arrays = [np.random.randn(3, 4) for _ in range(10)]
-        axes = [0, 1, 2, -1, -2, -3]
-        expected_shapes = [
-            (10, 3, 4),
-            (3, 10, 4),
-            (3, 4, 10),
-            (3, 4, 10),
-            (3, 10, 4),
-            (10, 3, 4),
-        ]
-        for axis, expected_shape in zip(axes, expected_shapes):
-            assert_equal(np.stack(arrays, axis).shape, expected_shape)
+    # all shapes for 2d input
+    arrays = [np.random.randn(3, 4) for _ in range(10)]
+    axes = [0, 1, 2, -1, -2, -3]
+    expected_shapes = [
+        (10, 3, 4),
+        (3, 10, 4),
+        (3, 4, 10),
+        (3, 4, 10),
+        (3, 10, 4),
+        (10, 3, 4),
+    ]
+    for axis, expected_shape in zip(axes, expected_shapes):
+        assert_equal(np.stack(arrays, axis).shape, expected_shape)
 
-        # empty arrays
-        assert stack([[], [], []]).shape == (3, 0)
-        assert stack([[], [], []], axis=1).shape == (0, 3)
+    # empty arrays
+    assert stack([[], [], []]).shape == (3, 0)
+    assert stack([[], [], []], axis=1).shape == (0, 3)
 
-        # out
-        out = np.zeros_like(r1)
-        np.stack((a, b), out=out)
-        assert_array_equal(out, r1)
+    # out
+    out = np.zeros_like(r1)
+    np.stack((a, b), out=out)
+    assert_array_equal(out, r1)
 
-        # edge cases
-        assert_raises(ValueError, stack, [])
-        assert_raises(ValueError, stack, [])
-        assert_raises((RuntimeError, ValueError), stack, [1, np.arange(3)])
-        assert_raises((RuntimeError, ValueError), stack, [np.arange(3), 1])
-        assert_raises((RuntimeError, ValueError), stack, [np.arange(3), 1], axis=1)
-        assert_raises(
-            (RuntimeError, ValueError), stack, [np.zeros((3, 3)), np.zeros(3)], axis=1
-        )
-        assert_raises((RuntimeError, ValueError), stack, [np.arange(2), np.arange(3)])
+    # edge cases
+    assert_raises(ValueError, stack, [])
+    assert_raises(ValueError, stack, [])
+    assert_raises((RuntimeError, ValueError), stack, [1, np.arange(3)])
+    assert_raises((RuntimeError, ValueError), stack, [np.arange(3), 1])
+    assert_raises((RuntimeError, ValueError), stack, [np.arange(3), 1], axis=1)
+    assert_raises(
+        (RuntimeError, ValueError), stack, [np.zeros((3, 3)), np.zeros(3)], axis=1
+    )
+    assert_raises((RuntimeError, ValueError), stack, [np.arange(2), np.arange(3)])
 
-        # generator is deprecated: numpy 1.24 emits a warning but we don't
-        # with assert_warns(FutureWarning):
-        result = stack(x for x in range(3))
+    # generator is deprecated: numpy 1.24 emits a warning but we don't
+    # with assert_warns(FutureWarning):
+    result = stack(x for x in range(3))
 
-        assert_array_equal(result, np.array([0, 1, 2]))
+    assert_array_equal(result, np.array([0, 1, 2]))
 
-        # casting and dtype test
-        a = np.array([1, 2, 3])
-        b = np.array([2.5, 3.5, 4.5])
-        res = np.stack((a, b), axis=1, casting="unsafe", dtype=np.int64)
-        expected_res = np.array([[1, 2], [2, 3], [3, 4]])
-        assert_array_equal(res, expected_res)
+    # casting and dtype test
+    a = np.array([1, 2, 3])
+    b = np.array([2.5, 3.5, 4.5])
+    res = np.stack((a, b), axis=1, casting="unsafe", dtype=np.int64)
+    expected_res = np.array([[1, 2], [2, 3], [3, 4]])
+    assert_array_equal(res, expected_res)
 
-        # casting and dtype with TypeError
+    # casting and dtype with TypeError
+    with assert_raises(TypeError):
+        stack((a, b), dtype=np.int64, axis=1, casting="safe")
+
+
+@pytest.mark.parametrize("axis", [0])
+@pytest.mark.parametrize(
+    "out_dtype", ["c8", "f4", "f8", "i8"]
+)  # torch does not have ">f8",
+@pytest.mark.parametrize("casting", ["no", "equiv", "safe", "same_kind", "unsafe"])
+def test_stack_out_and_dtype(axis, out_dtype, casting):
+    to_concat = (array([1, 2]), array([3, 4]))
+    res = array([[1, 2], [3, 4]])
+    out = np.zeros_like(res)
+
+    if not np.can_cast(to_concat[0], out_dtype, casting=casting):
         with assert_raises(TypeError):
-            stack((a, b), dtype=np.int64, axis=1, casting="safe")
+            stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
+    else:
+        res_out = stack(to_concat, out=out, axis=axis, casting=casting)
+        res_dtype = stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
+        assert res_out is out
+        assert_array_equal(out, res_dtype)
+        assert res_dtype.dtype == out_dtype
 
-    @parametrize("axis", [0])
-    @parametrize("out_dtype", ["c8", "f4", "f8", "i8"])  # torch does not have ">f8",
-    @parametrize("casting", ["no", "equiv", "safe", "same_kind", "unsafe"])
-    def test_stack_out_and_dtype(self, axis, out_dtype, casting):
-        to_concat = (array([1, 2]), array([3, 4]))
-        res = array([[1, 2], [3, 4]])
-        out = np.zeros_like(res)
-
-        if not np.can_cast(to_concat[0], out_dtype, casting=casting):
-            with assert_raises(TypeError):
-                stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
-        else:
-            res_out = stack(to_concat, out=out, axis=axis, casting=casting)
-            res_dtype = stack(to_concat, dtype=out_dtype, axis=axis, casting=casting)
-            assert res_out is out
-            assert_array_equal(out, res_dtype)
-            assert res_dtype.dtype == out_dtype
-
-        with assert_raises(TypeError):
-            stack(to_concat, out=out, dtype=out_dtype, axis=axis)
+    with assert_raises(TypeError):
+        stack(to_concat, out=out, dtype=out_dtype, axis=axis)
 
 
-@xfail  # (reason="TODO: implement block(...)")
-@instantiate_parametrized_tests
-class TestBlock(TestCase):
+@pytest.mark.xfail(reason="TODO: implement block(...)")
+class TestBlock:
     @pytest.fixture(params=["block", "force_concatenate", "force_slicing"])
     def block(self, request):
         # blocking small arrays and large arrays go through different paths.
@@ -835,4 +823,6 @@ class TestBlock(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()
