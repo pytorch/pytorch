@@ -2169,6 +2169,41 @@ torch.cuda.synchronize()
         self.assertTrue(b.sum().item() == 11000.)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_graph_capture_reset_recapture(self):
+        s = torch.cuda.Stream()
+
+        with torch.cuda.stream(s):
+            a = torch.full((1000,), 1, device="cuda")
+            g = torch.cuda.CUDAGraph()
+            torch.cuda.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertTrue(b.sum().item() == 11000.)
+
+        g.reset()
+
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            b.fill_(2.0)
+            for _ in range(10):
+                b = b + 2
+            g.capture_end()
+        torch.cuda.current_stream().wait_stream(s)
+
+        g.replay()
+        self.assertTrue(b.sum().item() == 22000.)
+
+        g.reset()
+        del g
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_error(self):
         # We need to run this test in a separate thread as the error we trigger
         # puts the cuda context in a bad state
@@ -3060,7 +3095,11 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
+        ] + [
+            (torch.optim.ASGD, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
+            for maximize, weight_decay in product((False, True), (0.0, 0.1))
         ]
+
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
@@ -3185,6 +3224,61 @@ exit(2)
 
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_cuda_graph_error_options(self):
+        def fn():
+            x = torch.zeros([2000], device="cuda")
+            y = x + x + x
+            return y
+
+        mem = None
+
+        def raw_malloc():
+            global mem
+            mem = None
+            stream = torch.cuda.Stream()
+            try:
+                with torch.cuda.stream(stream):
+                    mem = torch.cuda.caching_allocator_alloc(1024)
+            except BaseException:
+                if mem is None:
+                    return
+            try:
+                torch.cuda.caching_allocator_delete(mem)
+                mem = None
+                return None
+            except BaseException:
+                pass
+
+        def throws_on_cuda_event(capture_error_mode):
+            graph = torch.cuda.CUDAGraph()
+            torch.cuda.synchronize()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                fn()
+            stream.synchronize()
+            torch.cuda.current_stream().wait_stream(stream)
+            torch.cuda.synchronize()
+            try:
+                with torch.cuda.graph(graph, stream=stream, capture_error_mode=capture_error_mode):
+                    out = fn()
+                    thread = threading.Thread(target=raw_malloc)
+                    thread.start()
+                    thread.join()
+            except Exception:
+                if mem is not None:
+                    torch.cuda.caching_allocator_delete(mem)
+                return True
+
+            return False
+
+        self.assertFalse(throws_on_cuda_event("thread_local"))
+        self.assertFalse(throws_on_cuda_event("relaxed"))
+
+        # Exception would Corrupt Process and make other tests fail
+        # self.assertTrue(throws_on_cuda_event("global"))
 
     def test_batch_norm_gather_stats(self):
         input = torch.randn(1, 3, 3, 3, device='cuda')
@@ -3564,6 +3658,13 @@ class TestCudaMallocAsync(TestCase):
             # not supported with the cudaMallocAsync backend
             self.assertTrue(pow2_div2_mem - start_mem == power2_div(nbytes_big, 2))
 
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:True")
+        start_mem = torch.cuda.memory_stats()[key_allocated]
+        w = torch.rand(nelems, device='cuda')
+        reg_mem = torch.cuda.memory_stats()[key_allocated]
+        self.assertTrue(reg_mem - start_mem == nbytes)
+
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
@@ -3572,6 +3673,9 @@ class TestCudaMallocAsync(TestCase):
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:none")
 
 
     def test_raises_oom(self):

@@ -36,6 +36,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMP
                                                   IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
                                                   IS_MACOS, TEST_CUDA)
+import functools
+import operator
 
 
 try:
@@ -1337,7 +1339,7 @@ except RuntimeError as e:
         # [no auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1396,7 +1398,7 @@ except RuntimeError as e:
         # [auto-batching] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
@@ -1432,7 +1434,7 @@ except RuntimeError as e:
         # [auto-batching & drop_last] multiprocessing loading
         num_workers = 3
         sizes_for_all_workers = [0, 4, 20]
-        expected = sorted(sum((list(range(s)) for s in sizes_for_all_workers), []))
+        expected = sorted(functools.reduce(operator.iadd, (list(range(s)) for s in sizes_for_all_workers), []))
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)

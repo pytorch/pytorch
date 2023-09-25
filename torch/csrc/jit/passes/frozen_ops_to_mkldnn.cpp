@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/core/symbol.h>
 #include <ATen/native/layer_norm.h>
@@ -110,7 +111,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 
   // CALCULATE ALIASING SETS
 
-  auto aliasDb = torch::make_unique<AliasDb>(graph);
+  auto aliasDb = std::make_unique<AliasDb>(graph);
 
   // map from Value to its Aliasing Set
   std::unordered_map<Value*, ValueSetPtr> alias_mapping;

@@ -25,11 +25,13 @@ immutable_list = _create_immutable_container(list,
                                              ['__delitem__', '__iadd__', '__imul__', '__setitem__', 'append',
                                               'clear', 'extend', 'insert', 'pop', 'remove'])
 immutable_list.__reduce__ = lambda self: (immutable_list, (tuple(iter(self)),))
+immutable_list.__hash__ = lambda self: hash(tuple(self))
 
 compatibility(is_backward_compatible=True)(immutable_list)
 
 immutable_dict = _create_immutable_container(dict, ['__delitem__', '__setitem__', 'clear', 'pop', 'popitem', 'update'])
 immutable_dict.__reduce__ = lambda self: (immutable_dict, (iter(self.items()),))
+immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
 compatibility(is_backward_compatible=True)(immutable_dict)
 
 

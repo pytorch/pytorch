@@ -217,7 +217,7 @@ def _fill_tensor_shape_type(
     expected_values: Union[
         fx_type_utils.META_VALUE_TYPE,
         List[fx_type_utils.META_VALUE_TYPE],
-        Tuple[fx_type_utils.META_VALUE_TYPE, ...],
+        Tuple[Optional[fx_type_utils.META_VALUE_TYPE], ...],
     ],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
@@ -234,10 +234,15 @@ def _fill_tensor_shape_type(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # aten::sym_size output is a int, not a tensor, which stands
-        # for the size of one dim. We treat it as 0-D tensor.
-        # TODO(titaiwang): set shape?
-        if isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        if expected_value is None:
+            # There is no shape/type from None.
+            # NOTE: according to https://github.com/pytorch/pytorch/blob/main/torch/_meta_registrations.py,
+            # None could be a valid value for return type, so we need to handle it.
+            # e.g. the function: meta__scaled_dot_product_flash() in cpu mode.
+            continue
+        elif isinstance(expected_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+            # aten::sym_size output is a int, not a tensor, which stands
+            # for the size of one dim. We treat it as 0-D tensor.
             onnxscript_value.dtype = fx_type_utils.from_sym_value_to_torch_dtype(
                 expected_value
             )
@@ -806,6 +811,11 @@ class FxOnnxInterpreter:
         ],
         fx_graph_module: torch.fx.GraphModule,
     ):
+        # TODO: Constant tensors and buffer/weights are both categorized into `get_attr`,
+        # but they are different to ONNX. We need to distinguish them.
+        # Constant tensors should become ONNX constants in the graph, while buffers/weights ONNX initializers.
+        # For now they are all converted to ONNX initializers.
+
         assert isinstance(node.target, str), f"node.target {node.target} is not a str."
         attr_tensor = getattr(fx_graph_module, node.target)
         assert isinstance(attr_tensor, torch.Tensor), f"{attr_tensor} is not a tensor."
@@ -813,7 +823,8 @@ class FxOnnxInterpreter:
         # Parameter/buffer name cannot contain "."
         # Revert from "/" to restore namespace formatting.
         input_ = onnxscript_graph.add_initializer(
-            node.target.replace("/", "."), attr_tensor
+            name=node.target.replace("/", "."),
+            value=attr_tensor,
         )
 
         assert isinstance(input_, onnxscript_graph_building.TorchScriptTensor)
