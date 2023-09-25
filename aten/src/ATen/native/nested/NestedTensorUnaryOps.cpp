@@ -124,5 +124,13 @@ Tensor& NestedTensor_silu_(Tensor& self){
   return self;
 }
 
+Tensor sin_nested(const Tensor& self) {
+  return map_nt(self, at::sin);
+}
+
+Tensor cos_nested(const Tensor& self) {
+  return map_nt(self, at::cos);
+}
+
 } // namespace native
 } // namespace at

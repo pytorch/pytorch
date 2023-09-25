@@ -137,9 +137,10 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm}\textbf{if} \: \lambda \neq 0
+            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1}                                       \\
+            &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
-            &\hspace{15mm} \theta_t \leftarrow \theta_t - \gamma \lambda \theta_{t-1}                    \\
+            &\hspace{15mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}                    \\
             &\hspace{10mm}\textbf{else}                                                          \\
             &\hspace{15mm} g_t \leftarrow g_t + \lambda \theta_{t-1}                             \\
             &\hspace{5mm} \mu_t \leftarrow \beta_1 \big(1 - \frac{1}{2}  0.96^{t \psi} \big)     \\
@@ -149,7 +150,7 @@ NAdam.__doc__ = r"""Implements NAdam algorithm.
             &\hspace{5mm}\widehat{m_t} \leftarrow \mu_{t+1} m_t/(1-\prod_{i=1}^{t+1}\mu_i)\\[-1.ex]
             & \hspace{11mm} + (1-\mu_t) g_t /(1-\prod_{i=1}^{t} \mu_{i})                         \\
             &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
-            &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{5mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]

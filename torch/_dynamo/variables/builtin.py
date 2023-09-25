@@ -21,7 +21,13 @@ from ..exc import (
 )
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource, is_constant_source, SuperSource, TypeSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    is_constant_source,
+    SuperSource,
+    TypeSource,
+)
 from ..utils import (
     build_checkpoint_variable,
     check_constant_args,
@@ -467,6 +473,7 @@ class BuiltinVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from . import UserFunctionVariable
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
 
         constant_args = check_constant_args(args, kwargs)
@@ -509,7 +516,7 @@ class BuiltinVariable(VariableTracker):
                     # trace fine
                     fn, args = torch.select, [
                         args[0],
-                        variables.ConstantVariable(0),
+                        variables.ConstantVariable.create(0),
                         args[1],
                     ]
 
@@ -588,6 +595,10 @@ class BuiltinVariable(VariableTracker):
             )
             return out
 
+        # Handle `str` on a user defined function
+        if self.fn == str and args and isinstance(args[0], (UserFunctionVariable)):
+            return variables.ConstantVariable.create(value=str(args[0].fn))
+
         # Handle binary ops (e.g. __add__ / __radd__, __iadd__, etc.)
         # NB: Tensor args are handled above and not here
         if len(kwargs) == 0 and len(args) == 2:
@@ -627,7 +638,7 @@ class BuiltinVariable(VariableTracker):
         if has_constant_handler:
             args, kwargs = specialize_args_kwargs(tx, args, kwargs)
             # constant fold
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 self.as_python_constant()(
                     *[x.as_python_constant() for x in args],
                     **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -745,9 +756,9 @@ class BuiltinVariable(VariableTracker):
             b, variables.ConstantVariable
         ):
             if self.fn is max:
-                return variables.ConstantVariable(max(a.value, b.value))
+                return variables.ConstantVariable.create(max(a.value, b.value))
             else:
-                return variables.ConstantVariable(min(a.value, b.value))
+                return variables.ConstantVariable.create(min(a.value, b.value))
         elif isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
             proxy = tx.output.create_proxy(
                 "call_function", self.fn, *proxy_args_kwargs([a, b], {})
@@ -764,7 +775,9 @@ class BuiltinVariable(VariableTracker):
             args, _ = specialize_args_kwargs(tx, args, {})
             return variables.RangeVariable(args)
         elif self._dynamic_args(*args):
-            args = [variables.ConstantVariable(guard_if_dyn(arg)) for arg in args]
+            args = [
+                variables.ConstantVariable.create(guard_if_dyn(arg)) for arg in args
+            ]
             return variables.RangeVariable(args)
         # None no-ops this handler and lets the driving function proceed
         return None
@@ -861,7 +874,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             arg, (variables.UserDefinedClassVariable, BaseUserFunctionVariable)
         ):
-            return variables.ConstantVariable(True).add_options(arg)
+            return variables.ConstantVariable.create(True).add_options(arg)
 
     @staticmethod
     def call_dict_helper(tx, user_cls, arg, **options):
@@ -934,7 +947,7 @@ class BuiltinVariable(VariableTracker):
         if args[0].has_unpack_var_sequence(tx):
             items = [
                 variables.TupleVariable(
-                    [variables.ConstantVariable(idx, **options), var],
+                    [variables.ConstantVariable.create(idx, **options), var],
                     **options,
                 )
                 for idx, var in enumerate(args[0].unpack_var_sequence(tx), start)
@@ -955,7 +968,9 @@ class BuiltinVariable(VariableTracker):
         isinstance_type = isinstance_type.as_python_constant()
 
         if isinstance(arg, variables.TensorVariable) and arg.dtype is not None:
-            return variables.ConstantVariable(arg.call_isinstance(isinstance_type))
+            return variables.ConstantVariable.create(
+                arg.call_isinstance(isinstance_type)
+            )
         # UserDefinedObject with C extensions can have torch.Tensor attributes,
         # so break graph.
         if isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
@@ -969,7 +984,7 @@ class BuiltinVariable(VariableTracker):
             isinstance(arg, variables.UserDefinedObjectVariable)
             and "__instancecheck__" in isinstance_type.__class__.__dict__
         ):
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 isinstance_type.__class__.__instancecheck__(isinstance_type, arg.value)
             )
 
@@ -977,7 +992,7 @@ class BuiltinVariable(VariableTracker):
             val = issubclass(arg_type, isinstance_type)
         except TypeError:
             val = arg_type is isinstance_type
-        return variables.ConstantVariable(val)
+        return variables.ConstantVariable.create(val)
 
     def call_super(self, tx, a, b):
         source = (
@@ -1017,10 +1032,10 @@ class BuiltinVariable(VariableTracker):
             and not kwargs
         ):
             new_list = [x.value for x in seq.items]
-            return variables.ConstantVariable(sum(new_list))
+            return variables.ConstantVariable.create(sum(new_list))
         if seq.has_unpack_var_sequence(tx):
             start = kwargs.pop(
-                "start", variables.ConstantVariable(0)
+                "start", variables.ConstantVariable.create(0)
             ).as_python_constant()
             assert not kwargs
             items = seq.unpack_var_sequence(tx)[start:]
@@ -1029,7 +1044,7 @@ class BuiltinVariable(VariableTracker):
                 [
                     BuiltinVariable(operator.add),
                     variables.TupleVariable(items),
-                    variables.ConstantVariable(0).add_options(self, seq),
+                    variables.ConstantVariable.create(0).add_options(self, seq),
                 ],
                 {},
             )
@@ -1055,7 +1070,7 @@ class BuiltinVariable(VariableTracker):
             TorchVariable,
             UserFunctionVariable,
         )
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder, VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)
         guards = options["guards"]
@@ -1083,6 +1098,27 @@ class BuiltinVariable(VariableTracker):
             options["source"] = source
         else:
             source = None
+
+        if name == "__bases__":
+            try:
+                value = obj.as_python_constant()
+                if isinstance(value, type):
+                    bases = value.__bases__
+                    if source is not None:
+                        tuple_args = [
+                            VariableBuilder(tx, GetItemSource(source, i))(b)
+                            for i, b in enumerate(bases)
+                        ]
+                    elif len(bases) == 1 and (
+                        bases[0] is object or bases[0] is torch._C._TensorBase
+                    ):
+                        tuple_args = [SourcelessBuilder()(tx, bases[0])]
+                    else:
+                        unimplemented(f"unexpected sourceless type bases: {bases}")
+
+                    return variables.TupleVariable(tuple_args, **options)
+            except NotImplementedError:
+                pass
 
         if isinstance(obj, variables.NNModuleVariable):
             return obj.var_getattr(tx, name).add_options(options)
@@ -1125,7 +1161,7 @@ class BuiltinVariable(VariableTracker):
             elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
-                return ConstantVariable(member, **options)
+                return ConstantVariable.create(member, **options)
             else:
                 return VariableBuilder(tx, source)(member).add_guards(guards)
         elif isinstance(obj, (PythonModuleVariable, DummyModule)):
@@ -1136,7 +1172,7 @@ class BuiltinVariable(VariableTracker):
 
             return VariableBuilder(tx, source)(member).add_guards(guards)
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
-            return ConstantVariable(
+            return ConstantVariable.create(
                 getattr(obj.fn, name), **VariableTracker.propagate(obj)
             )
         else:
@@ -1152,7 +1188,14 @@ class BuiltinVariable(VariableTracker):
     ):
         from .distributed import PlacementVariable
 
-        if isinstance(obj, (variables.DataClassVariable, PlacementVariable)):
+        if isinstance(
+            obj,
+            (
+                variables.DataClassVariable,
+                variables.CustomizedDictVariable,
+                PlacementVariable,
+            ),
+        ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
             tx.output.side_effects.is_attribute_mutation(obj)
@@ -1174,21 +1217,27 @@ class BuiltinVariable(VariableTracker):
             ):
                 assigning_fake_val = get_fake_value(val.as_proxy().node, tx)
 
-                getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+                try:
+                    getattr_var = obj.var_getattr(tx, name_var.as_python_constant())
+                except AttributeError:
+                    getattr_var = None
 
-                # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
-                existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
-                existing_fake_attr = variables.builder.wrap_to_fake_tensor_and_record(
-                    existing_attr, tx, source=getattr_var.source, is_tensor=True
-                )
+                if isinstance(getattr_var, variables.TensorVariable):
+                    # get_fake_val will return a real tensor here because it's an attribute on the module (get_attr node)
+                    existing_attr = get_fake_value(getattr_var.as_proxy().node, tx)
+                    existing_fake_attr = (
+                        variables.builder.wrap_to_fake_tensor_and_record(
+                            existing_attr, tx, source=getattr_var.source, is_tensor=True
+                        )
+                    )
 
-                # same tensor identiy, setattr is a no-op
-                mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
-                if (
-                    existing_fake_attr is assigning_fake_val
-                    and mod_setattr is torch.nn.Module.__setattr__
-                ):
-                    return getattr_var
+                    # same tensor identiy, setattr is a no-op
+                    mod_setattr = inspect.getattr_static(obj.module_type, "__setattr__")
+                    if (
+                        existing_fake_attr is assigning_fake_val
+                        and mod_setattr is torch.nn.Module.__setattr__
+                    ):
+                        return getattr_var
 
             obj.convert_to_unspecialized(tx)
 
@@ -1211,9 +1260,12 @@ class BuiltinVariable(VariableTracker):
                 self, obj
             )
 
+        if py_type is not None:
+            return ConstantVariable.create(py_type)
+
         raise UserError(
             UserErrorType.ANTI_PATTERN,
-            "Can't call type() on generated custom object. "
+            f"Can't call type() on generated custom object {obj}. "
             "Please use __class__ instead",
         )
 
@@ -1232,7 +1284,7 @@ class BuiltinVariable(VariableTracker):
         ):
             function = kwargs.pop("key", None)
             reverse = kwargs.pop(
-                "reverse", ConstantVariable(False)
+                "reverse", ConstantVariable.create(False)
             ).as_python_constant()
             assert len(kwargs) == 0
             if function:
@@ -1286,7 +1338,7 @@ class BuiltinVariable(VariableTracker):
         if len(args) > 0 and isinstance(args[0], variables.NNModuleVariable):
             nn_mod_variable = args[0]
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
-            return variables.ConstantVariable(id(mod))
+            return variables.ConstantVariable.create(id(mod))
         else:
             unimplemented(f"call_id with args {args}")
 
@@ -1331,14 +1383,14 @@ class BuiltinVariable(VariableTracker):
                 if isinstance(right, NNModuleVariable)
                 else right.as_python_constant()
             )
-            return ConstantVariable(op(left, right))
+            return ConstantVariable.create(op(left, right))
 
         if isinstance(left, UserFunctionVariable):
             if op not in supported_const_comparison_ops.values():
                 _unimplemented()
             if not isinstance(right, UserFunctionVariable):
                 _unimplemented()
-            return ConstantVariable(op(left.fn, right.fn))
+            return ConstantVariable.create(op(left.fn, right.fn))
 
         # Note, we have a rare BaseListVariable subtype mismatch with valid comparison
         # x = torch.randn([3, 3])
@@ -1357,13 +1409,25 @@ class BuiltinVariable(VariableTracker):
         if isinstance(left, SetVariable):
             if not type(left) == type(right):  # Mismatch in BaseListVariable subclasses
                 _unimplemented()
-            return ConstantVariable(op(left._underlying_items, right._underlying_items))
+            return ConstantVariable.create(
+                op(left._underlying_items, right._underlying_items)
+            )
 
         if isinstance(left, TensorVariable):
             from .builder import wrap_fx_proxy_cls
 
             if op not in supported_tensor_comparison_ops.values():
                 _unimplemented()
+            if (
+                isinstance(right, TensorVariable)
+                and (left.size and right.size) is not None
+                and left.size != right.size
+            ):
+                try:
+                    torch.broadcast_shapes(left.size, right.size)
+                except RuntimeError:
+                    # not broadcastable, can't be compared
+                    _unimplemented()
             return wrap_fx_proxy_cls(
                 type(left),  # handle Ndarrays and Tensors
                 tx,
@@ -1381,17 +1445,17 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(left, ConstantVariable) and isinstance(right, ConstantVariable):
-            return ConstantVariable(op(left.value, right.value))
+            return ConstantVariable.create(op(left.value, right.value))
 
         if isinstance(left, UserDefinedObjectVariable) and isinstance(
             right, UserDefinedObjectVariable
         ):
-            return ConstantVariable(op(left.value, right.value))
+            return ConstantVariable.create(op(left.value, right.value))
 
         if op.__name__ == "is_":
             # If the two objects are of different type, we can safely return False
             if type(left) is not type(right):
-                return ConstantVariable(False)
+                return ConstantVariable.create(False)
 
         _unimplemented()
 
@@ -1436,7 +1500,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(a, ListVariable):
-            return ConstantVariable(len(a.items) == 0).add_options(self, a)
+            return ConstantVariable.create(len(a.items) == 0).add_options(self, a)
 
         return None
 

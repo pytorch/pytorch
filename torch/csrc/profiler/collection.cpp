@@ -157,7 +157,7 @@ bool InputOutputEncoder::isSupportedScalarList(
     return false;
   }
   auto list_ref = list_candidate.toListRef();
-  if (C10_UNLIKELY(list_ref.size() == 0)) {
+  if (C10_UNLIKELY(list_ref.empty())) {
     return true;
   }
   if (C10_UNLIKELY(!list_ref[0].isScalar())) {
@@ -203,7 +203,7 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       if (io_type == tagToIOType(tag)) {
         out.push_back(std::move(input));
       } else {
-        out.push_back(c10::nullopt);
+        out.emplace_back(c10::nullopt);
       }
     };
 
@@ -307,8 +307,8 @@ uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
 // ---------------------------------
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     const at::RecordFunction& fn) {
-  KinetoObserverContext::Event* event;
-  uint64_t corr_id;
+  KinetoObserverContext::Event* event = nullptr;
+  uint64_t corr_id = 0;
   std::tie(event, corr_id) = torch_ops_.op_events_.emplace_back(
       fn.seqNr(),
       fn.forwardThreadId(),
@@ -1358,7 +1358,7 @@ RecordQueue::getRecords(
     auto& queue = *subqueue_it.second;
     auto materialize = [&](auto& events) {
       for (auto& i : events) {
-        time_t start_time_ns;
+        time_t start_time_ns = 0;
         if constexpr (std::is_same_v<
                           std::remove_reference_t<decltype(i)>,
                           ExtraFields<EventType::Backend>>) {
