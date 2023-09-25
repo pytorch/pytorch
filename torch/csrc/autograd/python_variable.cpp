@@ -1690,7 +1690,7 @@ PyTypeObject THPVariableMetaType = {
 PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(
         &THPVariableMetaType,
-        0) "torch._C._TensorBase", /* tp_name */
+        0) "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     // This is unspecified, because it is illegal to create a THPVariableType
@@ -1743,7 +1743,7 @@ PyObject* THPVariable_pynew(
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       type != &THPVariableType,
-      "Cannot directly construct _TensorBase; subclass it and then construct that");
+      "Cannot directly construct TensorBase; subclass it and then construct that");
   jit::tracer::warn("torch.Tensor", jit::tracer::WARN_CONSTRUCTOR);
   auto tensor = torch::utils::base_tensor_ctor(args, kwargs);
   // WARNING: tensor is NOT guaranteed to be a fresh tensor; e.g., if it was
@@ -2193,6 +2193,7 @@ bool THPVariable_initModule(PyObject* module) {
   if (PyType_Ready(&THPVariableType) < 0)
     return false;
   Py_INCREF(&THPVariableType);
+  PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);
