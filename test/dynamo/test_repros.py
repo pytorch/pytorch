@@ -1191,7 +1191,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         before, after = opt_fn()
         self.assertTrue(same(before, after))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 3)  # rand, rand
+        self.assertEqual(cnt.op_count, 2)  # rand, rand
         try:
             graph, _ = torch._dynamo.export(fn)()
             # See https://github.com/pytorch/pytorch/pull/87490
@@ -3457,6 +3457,17 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         counter = CompileCounter()
         compiled_fn = torch._dynamo.optimize(counter)(fn)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
+
+    def test_graph_break_on_jit_isinstance(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            if torch.jit.isinstance(x, List[str]):
+                return x * 2
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.rand(4)
+        self.assertTrue(same(fn(x), opt_fn(x)))
 
 
 if __name__ == "__main__":

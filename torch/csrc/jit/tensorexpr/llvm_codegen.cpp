@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -742,7 +743,9 @@ void LLVMCodeGenImpl::emitKernel(
       PM,
       asmStream,
       nullptr,
-#if LLVM_VERSION_MAJOR >= 10
+#if LLVM_VERSION_MAJOR >= 18
+      llvm::CodeGenFileType::AssemblyFile);
+#elif LLVM_VERSION_MAJOR >= 10
       llvm::CodeGenFileType::CGFT_AssemblyFile);
 #else
       llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);

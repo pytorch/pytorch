@@ -5,6 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 
 namespace at { namespace functorch {
