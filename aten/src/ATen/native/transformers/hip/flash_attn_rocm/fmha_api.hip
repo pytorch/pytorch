@@ -98,7 +98,6 @@ void set_params_fprop(
     params.host_seqlens_q = std::vector<int>(params.b + 1);
     params.host_seqlens_k = std::vector<int>(params.b + 1);
 
-    at::hip::HIPStreamCaptureModeGuard guard{hipStreamCaptureModeRelaxed};
     AT_CUDA_CHECK(hipMemcpyAsync(
         params.host_seqlens_q.data(),
         cu_seqlens_q.data_ptr(),
@@ -228,7 +227,6 @@ void set_params_dgrad(
     params.host_seqlens_q = std::vector<int>(params.b + 1);
     params.host_seqlens_k = std::vector<int>(params.b + 1);
 
-    at::hip::HIPStreamCaptureModeGuard guard{hipStreamCaptureModeRelaxed};
     AT_CUDA_CHECK(hipMemcpyAsync(
         params.host_seqlens_q.data(),
         cu_seqlens_q.data_ptr(),

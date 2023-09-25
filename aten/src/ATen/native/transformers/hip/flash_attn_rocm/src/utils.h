@@ -27,6 +27,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/hip/HIPContext.h>
+#include <ATen/hip/HIPGraphsUtils.cuh>
 #include <ATen/hip/HIPGeneratorImpl.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/hip/sdp_utils.h>
@@ -146,18 +147,30 @@ class SimpleDeviceMem {
  public:
   SimpleDeviceMem() = delete;
   explicit SimpleDeviceMem(std::size_t mem_size) : p_mem_{} {
-    (void)hipMalloc(static_cast<void**>(&p_mem_), mem_size);
+    is_not_capturing_ = (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None);
+    if (is_not_capturing_) {
+      AT_CUDA_CHECK(hipMalloc(&p_mem_, mem_size));
+    } else {
+      hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+      AT_CUDA_CHECK(hipMallocAsync(&p_mem_, mem_size, stream));
+    }
   }
 
   void* GetDeviceBuffer() const {
     return p_mem_;
   }
   ~SimpleDeviceMem() {
-    (void)hipFree(p_mem_);
+    if (is_not_capturing_) {
+      AT_CUDA_CHECK(hipFree(p_mem_));
+    } else {
+      hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
+      AT_CUDA_CHECK(hipFreeAsync(p_mem_, stream));
+    }
   }
 
  private:
   void* p_mem_;
+  bool is_not_capturing_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
