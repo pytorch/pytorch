@@ -96,6 +96,10 @@ def convert_pt2e(
     use_reference_representation: boolean flag to indicate whether to produce referece representation or not
     fold_quantize: boolean flag to indicate whether fold the quantize op or not
 
+    Note: please set `fold_quantize` to True whenever you can, we'll deprecate this flag and
+    make True the default option in the future, to make sure the change doesn't break BC for you, it's
+    better to set the flag to True now.
+
     Returns:
     quantized model, either in q/dq representation or reference representation
     """
