@@ -17,9 +17,9 @@ from typing import Any, Callable, List, Optional, Set, Tuple
 import torch
 
 import torch.autograd.profiler as autograd_profiler
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import dynamo_timed
-from torch._inductor import cuda_properties
-from torch.utils._triton import has_triton
+from torch.utils._triton import has_triton, has_triton_package
 
 from . import config
 from .codecache import cache_dir, CudaKernelParamCache
@@ -39,15 +39,19 @@ from .utils import (
 
 log = logging.getLogger(__name__)
 
-if has_triton():
+if has_triton_package():
     import triton
     from triton import Config
-    from triton.runtime.jit import get_cuda_stream, KernelInterface
+    from triton.runtime.jit import KernelInterface
 else:
     Config = object
-    get_cuda_stream = None
-    KernelInterface = object
     triton = None
+    KernelInterface = object
+
+if has_triton():
+    from triton.runtime.jit import get_cuda_stream
+else:
+    get_cuda_stream = None
 
 
 _NUM_THREADS_PER_WARP = 32
@@ -183,7 +187,10 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = cuda_properties.get_device_properties(self.meta["device"])
+            device_interface = get_interface_for_device("cuda")
+            device_prop = device_interface.Worker.get_device_properties(
+                self.meta["device"]
+            )
             if (
                 config.dynamic_scale_rblock
                 and self.heuristic_type == HeuristicType.REDUCTION

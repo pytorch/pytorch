@@ -1670,6 +1670,39 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         assert r2 in ("L", "U")
 
+    def test_dtypes_no_graphbreaks(self):
+        # cache size limit needs to be larger than the `dtypes` list size
+        torch._dynamo.config.cache_size_limit = 12
+
+        dtypes = [
+            # floats
+            float,
+            np.float64,
+            "float64",
+            np.float32,
+            "float32",
+            # np.dtype('float64')   # XXX: this is not supported, yet
+            # integers
+            int,
+            "int",
+            np.intp,
+            np.int32,
+            np.uint8
+            # np.dtype('int')       # XXX: as above
+        ]
+
+        def fn(dt):
+            return np.arange(5, dtype=dt)
+
+        for dtyp in dtypes:
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+            val = fn(dtyp)
+            opt_val = opt_fn(dtyp)
+
+            self.assertEqual(cnts.frame_count, 1)  # no graph break
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -1755,6 +1788,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertFalse("super() nn.Module.__init__" in counters["graph_break"])
+
+    def test_class_duner_mro(self):
+        class ModuleA(torch.nn.Module):
+            pass
+
+        class ModuleB(ModuleA):
+            pass
+
+        def fn(x, mod):
+            if ModuleA in type(mod).__mro__:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(2, 3)
+        mod = ModuleB()
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        ref = fn(x, mod)
+        res = opt_fn(x, mod)
+        self.assertTrue(same(ref, res))
 
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
