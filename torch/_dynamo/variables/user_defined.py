@@ -68,10 +68,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 obj.__func__, self, source=source, **options
             )
-        elif source and inspect.ismemberdescriptor(obj):
-            return VariableBuilder(tx, source)(obj.__get__(self.value)).add_options(
-                options
-            )
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
