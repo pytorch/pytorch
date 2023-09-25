@@ -17,9 +17,8 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp
 from torch._utils_internal import get_file_path_2
-from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.custom_op_db import custom_op_db
-from torch.testing._internal.optests.compile_check import operator_compile_check
 from typing import *  # noqa: F403
 
 
@@ -119,17 +118,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
 
-        def f(x):
-            x = x.clone()
-            v = x.view_as(x)
-            y = op(v)
-            return x
-
         x = torch.tensor(3.14159 / 3, requires_grad=True, device=device)
         with self.assertRaisesRegex(
-            RuntimeError, "Argument x is not defined as mutable but was mutated"
+            optests.OpCheckError, "Argument x is not defined as mutable but was mutated"
         ):
-            operator_compile_check(f, (x,), {})
+            optests.opcheck(op, (x,), {})
 
     def test_incorrect_schema_view(self, device):
         lib = self.lib()
@@ -160,17 +153,12 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_meta, "Meta")
 
-        def f(x):
-            x = x.clone()
-            y = op(x)
-            x.sin_()
-            return y
-
         x = torch.tensor(3.14159 / 3, requires_grad=True)
         with self.assertRaisesRegex(
-            RuntimeError, "Argument x is not defined to alias output but was aliasing"
+            optests.OpCheckError,
+            "Argument x is not defined to alias output but was aliasing",
         ):
-            operator_compile_check(f, (x,), {})
+            optests.opcheck(op, (x,), {})
 
     def test_missing_abstract_impl(self, device):
         lib = self.lib()
@@ -194,16 +182,12 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", foo_impl, "CPU")
         lib.impl("foo", foo_impl, "CUDA")
 
-        def f(x):
-            y = op(x)
-            return y.sum(0)
-
         x = torch.tensor([0, 1.0], requires_grad=True)
         with self.assertRaisesRegex(
-            torch._subclasses.fake_tensor.UnsupportedOperatorException,
+            optests.OpCheckError,
             "_test_custom_op.foo.default",
         ):
-            operator_compile_check(f, (x,), {})
+            optests.opcheck(op, (x,), {})
 
     def test_incorrect_abstract_impl(self, device):
         lib = self.lib()
@@ -239,13 +223,9 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", foo_impl, "CUDA")
         lib.impl("foo", foo_meta, "Meta")
 
-        def f(x):
-            y = op(x)
-            return y.sum(0)
-
         x = torch.tensor([0, 1.0], requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "Shapes .* are not equal"):
-            operator_compile_check(f, (x,), {})
+        with self.assertRaisesRegex(optests.OpCheckError, "Shapes .* are not equal"):
+            optests.opcheck(op, (x,), {})
 
     def test_missing_functionalization(self, device):
         lib = self.lib()
@@ -274,17 +254,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", foo_impl, "CUDA")
         lib.impl("foo", foo_meta, "Meta")
 
-        def f(x):
-            x = x.clone()
-            y = op(x)
-            return y.sum(0)
-
-        x = torch.tensor([0, 1.0], requires_grad=True)
+        x = torch.tensor([0, 1.0])
+        y = x.clone()
         with self.assertRaisesRegex(
-            RuntimeError,
+            optests.OpCheckError,
             "Getting these operators to work with functionalization requires some extra work",
         ):
-            operator_compile_check(f, (x,), {})
+            optests.opcheck(op, (y,), {})
 
     def test_autograd_registered_at_backend(self, device):
         lib = self.lib()
@@ -304,14 +280,13 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         lib.impl("foo", Foo.apply, "CUDA")
         lib.impl("foo", lambda x: x.clone(), "Meta")
 
-        def f(x):
-            y = op(x)
-            return x + y
-
         x = torch.randn([], requires_grad=True)
 
-        with self.assertRaisesRegex(AssertionError, "mismatched requires_grad-ness"):
-            operator_compile_check(f, (x,), {})
+        with self.assertRaisesRegex(
+            torch.testing._internal.optests.OpCheckError,
+            "does not have an autograd kernel",
+        ):
+            optests.opcheck(op, (x,), {})
 
         # I'm not sure why this is necessary
         del lib
@@ -335,33 +310,34 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
         lib.impl("foo", Foo.apply, "CompositeImplicitAutograd")
 
-        def f(x):
-            return op(x)
-
         x = torch.tensor(3.14159 / 3, requires_grad=True)
-        with self.assertRaisesRegex(AssertionError, "not completely traceable"):
-            operator_compile_check(f, (x,), {})
+        with self.assertRaisesRegex(
+            optests.OpCheckError, "eager-mode PyTorch vs AOTAutograd"
+        ):
+            optests.opcheck(op, (x,), {})
 
-    @unittest.skipIf(
-        TEST_CUDA and not SM70OrLater,
-        "Triton only supports devices of CUDA Capability >= 7.0",
-    )
     @ops(custom_op_db, dtypes=OpDTypes.any_one)
-    def test_operator_compile_check_op(self, device, dtype, op):
+    def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            operator_compile_check(
-                op.op,
-                args,
-                kwargs,
-                supports_autograd=op.supports_autograd,
-                fullgraph=False,  # Dynamo graph breaks on CustomOp today
-            )
+            if op.op in (
+                torch.ops._torch_testing.numpy_nonzero,
+                torch.ops._torch_testing.numpy_nms,
+            ):
+                ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
+            else:
+                ctx = contextlib.nullcontext()
+            with ctx:
+                optests.opcheck(
+                    op.op,
+                    args,
+                    kwargs,
+                )
 
-    def test_operator_compile_check_fails_basic(self, device):
+    def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
             ...
@@ -373,11 +349,9 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         x = torch.randn(3, device=device, requires_grad=True)
         # Triggers the CustomOp autograd NYI error
         with self.assertRaisesRegex(
-            RuntimeError, "Autograd has not been implemented for operator"
+            optests.OpCheckError, "Autograd has not been implemented for operator"
         ):
-            operator_compile_check(
-                lambda x: self.get_op(f"{self.test_ns}::foo")(x), (x,), {}
-            )
+            optests.opcheck(self.get_op(f"{self.test_ns}::foo"), (x,), {})
 
     def test_autograd_registration_check_autograd_kernel(self, device):
         lib = self.lib()
