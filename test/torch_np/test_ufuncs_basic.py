@@ -13,15 +13,22 @@ import operator
 
 from unittest import skipIf as skip, SkipTest
 
-import torch._numpy as np
 from pytest import raises as assert_raises
-from torch._numpy.testing import assert_equal
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
+    TEST_WITH_TORCHDYNAMO
 )
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import assert_equal
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import assert_equal
+
 
 
 parametrize_unary_ufuncs = parametrize("ufunc", [np.sin])

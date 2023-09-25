@@ -22,22 +22,8 @@ from unittest import expectedFailure as xfail, skipIf as skipif
 
 import pytest
 
-import torch._numpy as np
 from pytest import raises as assert_raises
 
-from torch._numpy.testing import (
-    assert_,
-    assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
-    assert_almost_equal,
-    assert_array_almost_equal,
-    assert_array_equal,
-    assert_array_less,
-    assert_equal,
-    assert_raises_regex,
-    assert_warns,
-    # runstring, temppath,
-    suppress_warnings,  # break_cycles,
-)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -45,7 +31,42 @@ from torch.testing._internal.common_utils import (
     slowTest as slow,
     subtest,
     TestCase,
+    TEST_WITH_TORCHDYNAMO
 )
+
+
+if TEST_WITH_TORCHDYNAMO:
+    import numpy as np
+    from numpy.testing import (
+        assert_,
+        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_array_less,
+        assert_equal,
+        assert_raises_regex,
+        assert_warns,
+        # runstring, temppath,
+        suppress_warnings,  # break_cycles,
+    )
+
+else:
+    import torch._numpy as np
+    from torch._numpy.testing import (
+        assert_,
+        assert_allclose,  # IS_PYPY, IS_PYSTON, HAS_REFCOUNT,
+        assert_almost_equal,
+        assert_array_almost_equal,
+        assert_array_equal,
+        assert_array_less,
+        assert_equal,
+        assert_raises_regex,
+        assert_warns,
+        # runstring, temppath,
+        suppress_warnings,  # break_cycles,
+    )
+
 
 skip = functools.partial(skipif, True)
 
@@ -1804,9 +1825,9 @@ class TestMethods(TestCase):
     @parametrize(
         "a",
         [
-            np.array([0, 1, np.nan], dtype=np.float16),
-            np.array([0, 1, np.nan], dtype=np.float32),
-            np.array([0, 1, np.nan]),
+            subtest(np.array([0, 1, np.nan], dtype=np.float16), name='f16'),
+            subtest(np.array([0, 1, np.nan], dtype=np.float32), name='f32'),
+            subtest(np.array([0, 1, np.nan]), name='default_dtype')
         ],
     )
     def test_searchsorted_floats(self, a):
@@ -2943,10 +2964,10 @@ class TestMethods(TestCase):
         ]
         for dt in dtypes:
             a = np.array([1, 2, 3], dtype=dt)
-            assert_raises(ValueError, complex, a)
+            assert_raises((TypeError, ValueError), complex, a)
 
         c = np.array([(1.0, 3), (2e-3, 7)], dtype=dt)
-        assert_raises(ValueError, complex, c)
+        assert_raises((TypeError, ValueError), complex, c)
 
 
 class TestCequenceMethods(TestCase):
