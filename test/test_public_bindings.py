@@ -199,7 +199,6 @@ class TestPublicBindings(TestCase):
             "SUM",
             "SymFloat",
             "SymInt",
-            "TensorBase",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -220,6 +219,12 @@ class TestPublicBindings(TestCase):
             "is_autocast_xla_enabled",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
+
+        # torch.TensorBase is explicitly removed in torch/__init__.py, so included here (#109940)
+        explicitly_removed_torch_C_bindings = {
+            "TensorBase",
+        }
+        torch_C_bindings = torch_C_bindings - explicitly_removed_torch_C_bindings
 
         # Check that the torch._C bindings are all in the allowlist. Since
         # bindings can change based on how PyTorch was compiled (e.g. with/without

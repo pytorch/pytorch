@@ -472,7 +472,7 @@ for name in dir(_C):
                 # TODO: fix their module from C++ side
                 if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
                     obj.__module__ = 'torch'
-    elif name[0] != '_' and name.endswith('Base'):
+    elif name == 'TensorBase':
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
         delattr(sys.modules[__name__], name)
 
