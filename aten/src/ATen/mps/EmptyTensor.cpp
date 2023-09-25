@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <torch/library.h>
