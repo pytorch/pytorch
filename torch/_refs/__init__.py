@@ -1934,6 +1934,7 @@ def where(
 # Data Movement References
 #
 @register_decomposition(aten.clone)
+@out_wrapper()
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -2506,6 +2507,7 @@ def mean(
 
 
 @register_decomposition(aten.std_mean)
+@out_wrapper("out0", "out1")
 def std_mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -2531,6 +2533,7 @@ def std_mean(
 
 
 @register_decomposition(aten.var_mean)
+@out_wrapper("out0", "out1")
 def var_mean(
     a: TensorLikeType,
     dim: Optional[DimsType] = None,
@@ -2668,6 +2671,7 @@ def as_strided(
 
 
 @register_decomposition(aten.as_strided_scatter)
+@out_wrapper()
 def as_strided_scatter(
     input: TensorLikeType,
     src: TensorLikeType,
@@ -2777,6 +2781,7 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 
 # This replicates at::constant_pad_nd, defined in ATen/native/PadNd.cpp
 @register_decomposition(aten.constant_pad_nd)
+@out_wrapper()
 def constant_pad_nd(
     input: TensorLikeType, pad: List[int], value: NumberType = 0
 ) -> TensorLikeType:
@@ -2954,6 +2959,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
 
 @register_decomposition(aten.flip)
+@out_wrapper()
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     if not isinstance(dims, tuple) and not isinstance(dims, list):
         raise ValueError("dims has to be a sequence of ints")
@@ -3103,6 +3109,7 @@ def native_group_norm(
 
 
 @register_decomposition(aten.native_layer_norm)
+@out_wrapper("out0", "out1", "out2")
 def native_layer_norm(
     input: Tensor,
     normalized_shape: ShapeType,
@@ -3514,6 +3521,7 @@ def _get_unfold_shape_stride(
 
 
 @register_decomposition(aten.repeat)
+@out_wrapper()
 def repeat(a: Tensor, *repeat_shape) -> Tensor:
     repeat_shape = utils.extract_shape_from_varargs(repeat_shape, validate=False)
     torch._check(
@@ -3692,6 +3700,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 
 
 @register_decomposition(aten.roll)
+@out_wrapper()
 def roll(
     a: TensorLikeType, shifts: DimsType, dims: DimsType = tuple()
 ) -> TensorLikeType:
@@ -3743,6 +3752,7 @@ def roll(
 
 
 @register_decomposition(aten.rot90)
+@out_wrapper()
 def rot90(
     a: TensorLikeType, k: int = 1, dims: DimsSequenceType = (0, 1)
 ) -> TensorLikeType:
@@ -3880,6 +3890,7 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 
 
 @register_decomposition(aten.index_fill)
+@out_wrapper()
 def index_fill(
     x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
 ):
@@ -4553,6 +4564,7 @@ def empty_permuted(
 
 
 @register_decomposition(aten.new_empty)
+@out_wrapper()
 def new_empty(
     a: TensorLikeType,
     size: ShapeType,
@@ -4576,6 +4588,7 @@ def new_empty(
 
 
 @register_decomposition(aten.new_empty_strided)
+@out_wrapper()
 def new_empty_strided(
     a: TensorLikeType,
     size: ShapeType,
@@ -4631,6 +4644,7 @@ def zeros(
 
 
 @register_decomposition(aten.new_zeros)
+@out_wrapper()
 def new_zeros(
     a: TensorLikeType,
     size: ShapeType,
@@ -4683,6 +4697,7 @@ def ones(
 
 
 @register_decomposition(aten.new_ones)
+@out_wrapper()
 def new_ones(
     a: TensorLikeType,
     size: ShapeType,
@@ -4709,6 +4724,7 @@ def new_ones(
 
 
 @register_decomposition(aten.new_full)
+@out_wrapper()
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
@@ -4734,6 +4750,7 @@ def new_full(
 
 
 @register_decomposition(aten.empty_like)
+@out_wrapper()
 def empty_like(
     a: TensorLikeType,
     *,
@@ -5188,6 +5205,7 @@ def movedim(
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 @register_decomposition(aten.empty_strided)
+@out_wrapper()
 def empty_strided(
     shape: Union[ShapeType, Tuple[ShapeType]],
     strides: StrideType,
@@ -5257,7 +5275,7 @@ def eye(
     # result.requires_grad_(requires_grad)
 
 
-@register_decomposition(aten.full)
+@register_decomposition([aten.full.default, aten.full.out])
 @out_wrapper()
 def full(
     shape: ShapeType,
@@ -5310,6 +5328,7 @@ def full_like(
 
 
 @register_decomposition(aten.zeros_like)
+@out_wrapper()
 def zeros_like(
     a: TensorLikeType,
     *,
@@ -5333,6 +5352,7 @@ def zeros_like(
 
 
 @register_decomposition(aten.ones_like)
+@out_wrapper()
 def ones_like(
     a: TensorLikeType,
     *,
@@ -5424,6 +5444,7 @@ def _uniform_helper(
 
 
 @register_decomposition(aten.masked_fill)
+@out_wrapper()
 def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
     python_type = utils.dtype_to_type(a.dtype)
     if isinstance(value, Number):
@@ -5636,6 +5657,7 @@ def _trilu_checks(
 
 # This is based on tril_indices_cuda in aten/src/ATen/native/cuda/TensorFactories.cu
 @register_decomposition(aten.tril_indices)
+@out_wrapper()
 def tril_indices(
     row: int,
     col: int,
@@ -5695,6 +5717,7 @@ def _get_triu_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
 
 
 @register_decomposition(aten.triu_indices)
+@out_wrapper()
 def triu_indices(
     row: int,
     col: int,
@@ -5970,6 +5993,7 @@ def deg2rad(self: TensorLikeType):
 
 
 @register_decomposition(aten.count_nonzero)
+@out_wrapper()
 def count_nonzero(self, dim: Optional[DimsType] = None):
     return (self != 0).sum(dim)
 
