@@ -1514,12 +1514,6 @@ class BuiltinVariable(VariableTracker):
     call_is_not = _comparison
 
     def call_all(self, tx, it):
-        def all_impl(iterator):
-            for elem in iterator:
-                if not bool(elem):
-                    return False
-                return True
-
         if isinstance(it, ListIteratorVariable):
             try:
                 # Constant fold
@@ -1528,7 +1522,7 @@ class BuiltinVariable(VariableTracker):
                 return SymNodeVariable.create(
                     tx,
                     tx.output.create_proxy(
-                        "call_function", all_impl, *proxy_args_kwargs([it], {})
+                        "call_function", all, *proxy_args_kwargs([it], {})
                     ),
                     sym_num=None,
                 )
