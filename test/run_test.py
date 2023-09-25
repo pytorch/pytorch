@@ -931,10 +931,8 @@ def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
     if not failed and not verbose:
         # If not verbose + success, print only what tests ran, rename the log
         # file so it doesn't get printed later, and do not remove logs.
-        new_file = (
-            "test"
-            / "test-reports"
-            / sanitize_file_name(f"{str(test)}_{os.urandom(8).hex()}_.log")
+        new_file = "test/test-reports/" + sanitize_file_name(
+            f"{test}_{os.urandom(8).hex()}_.log"
         )
         os.rename(file_path, REPO_ROOT / new_file)
         print(
