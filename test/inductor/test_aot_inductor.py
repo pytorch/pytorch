@@ -545,7 +545,7 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, q, k, v):
-                return torch.ops.aten._scaled_dot_product_flash_attention(q, k, v)[0]
+                return torch.nn.functional.scaled_dot_product_attention(q, k, v)[0]
 
         example_inputs = (
             torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
@@ -560,7 +560,7 @@ class AOTInductorTestsTemplate:
                 super().__init__()
 
             def forward(self, q, k, v, x):
-                t = torch.ops.aten._scaled_dot_product_flash_attention(
+                t = torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, is_causal=True
                 )[0]
                 return x + t

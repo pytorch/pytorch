@@ -153,6 +153,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
 );
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    double scale,
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
@@ -161,12 +168,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
     int64_t* ret5,
     AtenTensorHandle* ret6, // returns new reference
     AtenTensorHandle* ret7, // returns new reference
-    AtenTensorHandle* ret8, // returns new reference
-    int32_t num_inputs,
-    AtenTensorHandle query,
-    AtenTensorHandle key,
-    AtenTensorHandle value,
-    ...);
+    AtenTensorHandle* ret8 // returns new reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);

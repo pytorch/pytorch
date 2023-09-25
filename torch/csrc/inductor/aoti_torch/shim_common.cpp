@@ -185,7 +185,14 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
   });
 }
 
-static AOTITorchError aoti_torch__scaled_dot_product_flash_attention_internal(
+AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    double scale,
     AtenTensorHandle* ret0, // returns new reference
     AtenTensorHandle* ret1, // returns new reference
     AtenTensorHandle* ret2, // returns new reference
@@ -194,175 +201,44 @@ static AOTITorchError aoti_torch__scaled_dot_product_flash_attention_internal(
     int64_t* ret5,
     AtenTensorHandle* ret6, // returns new reference
     AtenTensorHandle* ret7, // returns new reference
-    AtenTensorHandle* ret8, // returns new reference
-    AtenTensorHandle query,
-    AtenTensorHandle key,
-    AtenTensorHandle value,
-    double dropout_p = 0.0,
-    bool is_causal = false,
-    bool return_debug_mask = false,
-    c10::optional<double> scale = c10::nullopt) {
+    AtenTensorHandle* ret8 // returns new reference
+) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* query_tensor = tensor_handle_to_tensor_pointer(query);
     at::Tensor* key_tensor = tensor_handle_to_tensor_pointer(key);
     at::Tensor* value_tensor = tensor_handle_to_tensor_pointer(value);
-    auto ret = at::_scaled_dot_product_flash_attention(
-        *query_tensor,
-        *key_tensor,
-        *value_tensor,
-        dropout_p,
-        is_causal,
-        return_debug_mask,
-        scale);
+    auto [r0, r1, r2, r3, r4, r5, r6, r7, r8] =
+        at::_scaled_dot_product_flash_attention(
+            *query_tensor,
+            *key_tensor,
+            *value_tensor,
+            dropout_p,
+            is_causal,
+            return_debug_mask,
+            scale);
 
-    at::Tensor* ret0_tensor = new at::Tensor(std::move(std::get<0>(ret)));
+    at::Tensor* ret0_tensor = new at::Tensor(std::move(r0));
     *ret0 = tensor_pointer_to_tensor_handle(ret0_tensor);
-    at::Tensor* ret1_tensor = new at::Tensor(std::move(std::get<1>(ret)));
+    at::Tensor* ret1_tensor = new at::Tensor(std::move(r1));
     *ret1 = tensor_pointer_to_tensor_handle(ret1_tensor);
     // ret2 and ret3 may be null
     if (ret2) {
-      at::Tensor* ret2_tensor = new at::Tensor(std::move(std::get<2>(ret)));
+      at::Tensor* ret2_tensor = new at::Tensor(std::move(r2));
       *ret2 = tensor_pointer_to_tensor_handle(ret2_tensor);
     }
     if (ret3) {
-      at::Tensor* ret3_tensor = new at::Tensor(std::move(std::get<3>(ret)));
+      at::Tensor* ret3_tensor = new at::Tensor(std::move(r3));
       *ret3 = tensor_pointer_to_tensor_handle(ret3_tensor);
     }
-    *ret4 = std::get<4>(ret);
-    *ret5 = std::get<5>(ret);
-    at::Tensor* ret6_tensor = new at::Tensor(std::move(std::get<6>(ret)));
+    *ret4 = r4;
+    *ret5 = r5;
+    at::Tensor* ret6_tensor = new at::Tensor(std::move(r6));
     *ret6 = tensor_pointer_to_tensor_handle(ret6_tensor);
-    at::Tensor* ret7_tensor = new at::Tensor(std::move(std::get<7>(ret)));
+    at::Tensor* ret7_tensor = new at::Tensor(std::move(r7));
     *ret7 = tensor_pointer_to_tensor_handle(ret7_tensor);
-    at::Tensor* ret8_tensor = new at::Tensor(std::move(std::get<8>(ret)));
+    at::Tensor* ret8_tensor = new at::Tensor(std::move(r8));
     *ret8 = tensor_pointer_to_tensor_handle(ret8_tensor);
   });
-}
-
-AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
-    AtenTensorHandle* ret0, // returns new reference
-    AtenTensorHandle* ret1, // returns new reference
-    AtenTensorHandle* ret2, // returns new reference
-    AtenTensorHandle* ret3, // returns new reference
-    int64_t* ret4,
-    int64_t* ret5,
-    AtenTensorHandle* ret6, // returns new reference
-    AtenTensorHandle* ret7, // returns new reference
-    AtenTensorHandle* ret8, // returns new reference
-    int32_t num_inputs,
-    AtenTensorHandle query,
-    AtenTensorHandle key,
-    AtenTensorHandle value,
-    ...) {
-  if (num_inputs < 3 || num_inputs > 7) {
-    return AOTI_TORCH_FAILURE;
-  }
-  if (num_inputs == 3) {
-    return aoti_torch__scaled_dot_product_flash_attention_internal(
-        ret0,
-        ret1,
-        ret2,
-        ret3,
-        ret4,
-        ret5,
-        ret6,
-        ret7,
-        ret8,
-        query,
-        key,
-        value);
-  }
-
-  AOTITorchError ret = AOTI_TORCH_FAILURE;
-  va_list args;
-  va_start(args, value);
-
-  double dropout_p = 0.0;
-  if (num_inputs >= 4) {
-    dropout_p = va_arg(args, double);
-    ret = aoti_torch__scaled_dot_product_flash_attention_internal(
-        ret0,
-        ret1,
-        ret2,
-        ret3,
-        ret4,
-        ret5,
-        ret6,
-        ret7,
-        ret8,
-        query,
-        key,
-        value,
-        dropout_p);
-  }
-
-  bool is_causal = false;
-  if (num_inputs >= 5) {
-    int32_t is_causal_i = va_arg(args, int32_t);
-    is_causal = is_causal_i != 0;
-    ret = aoti_torch__scaled_dot_product_flash_attention_internal(
-        ret0,
-        ret1,
-        ret2,
-        ret3,
-        ret4,
-        ret5,
-        ret6,
-        ret7,
-        ret8,
-        query,
-        key,
-        value,
-        dropout_p,
-        is_causal);
-  }
-
-  bool return_debug_mask = false;
-  if (num_inputs >= 6) {
-    int32_t return_debug_mask_i = va_arg(args, int32_t);
-    return_debug_mask = return_debug_mask_i != 0;
-    ret = aoti_torch__scaled_dot_product_flash_attention_internal(
-        ret0,
-        ret1,
-        ret2,
-        ret3,
-        ret4,
-        ret5,
-        ret6,
-        ret7,
-        ret8,
-        query,
-        key,
-        value,
-        dropout_p,
-        is_causal,
-        return_debug_mask);
-  }
-
-  double scale;
-  if (num_inputs >= 7) {
-    scale = va_arg(args, double);
-    ret = aoti_torch__scaled_dot_product_flash_attention_internal(
-        ret0,
-        ret1,
-        ret2,
-        ret3,
-        ret4,
-        ret5,
-        ret6,
-        ret7,
-        ret8,
-        query,
-        key,
-        value,
-        dropout_p,
-        is_causal,
-        return_debug_mask,
-        scale);
-  }
-
-  va_end(args);
-  return ret;
 }
 
 // TODO: implement a more efficient version instead of calling into aten

@@ -290,6 +290,10 @@ class WrapperCodeGen(CodeGen):
         self.first_device_guard = True
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
+        # Not all the dynamic symbols will be used in the generated code. This
+        # set contains those actually being defined by something like
+        # "{self.declare_shape} s0 = ...". It ensures that we are not going to
+        # emit queries for undefined symbols.
         self.defined_symbols = set()
 
         self.write_header()
@@ -1413,11 +1417,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         kernel = "aoti_torch_" + kernel.split("::")[-1]
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
-    def generate_c_shim_fallback_kernel_call(self, fallback_kernel, args):
+    def generate_c_shim_extern_kernel_alloc_call(self, extern_kernel, args):
         output_args = []
         output_raii_handles = []
-        output_name_base = fallback_kernel.get_name()
-        for idx, output in enumerate(fallback_kernel.outputs):
+        output_name_base = extern_kernel.get_name()
+        for idx, output in enumerate(extern_kernel.outputs):
             if isinstance(output, ir.MultiOutput):
                 name = f"{output.get_name()}"
                 output_handle_name = f"{name}_handle"
@@ -1437,29 +1441,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 output_args.append("nullptr")
             else:
                 raise NotImplementedError("unsupported type of {output=}")
-        num_inputs = len(args)
-        args = output_args + [f"{num_inputs}"] + args
-        self.generate_c_shim_extern_kernel_call(fallback_kernel.kernel, args)
+        args = args + output_args
+        self.generate_c_shim_extern_kernel_call(extern_kernel.kernel, args)
         for raii_handle in output_raii_handles:
             self.writeline(raii_handle)
 
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
-            if isinstance(extern_kernel, ir.FallbackKernel):
-                self.generate_c_shim_fallback_kernel_call(extern_kernel, args)
-            else:
-                output_name = extern_kernel.get_name()
-                self.writeline(f"AtenTensorHandle {output_name};")
-                kernel = extern_kernel.kernel
-                size = self.codegen_shape_tuple(tuple(extern_kernel.get_size()))
-                stride = self.codegen_shape_tuple(tuple(extern_kernel.get_stride()))
-                args = [
-                    f"&{output_name}",
-                    str(len(extern_kernel.get_size())),  # ndim
-                    self.codegen_int_array_var(size),
-                    self.codegen_int_array_var(stride),
-                ] + args
-                self.generate_c_shim_extern_kernel_call(kernel, args)
+            self.generate_c_shim_extern_kernel_alloc_call(extern_kernel, args)
         else:
             super().generate_extern_kernel_alloc(extern_kernel, args)
 
