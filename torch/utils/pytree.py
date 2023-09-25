@@ -13,7 +13,6 @@ collection support for PyTorch APIs.
 """
 
 import functools
-import pickle
 from typing import (
     Any,
     Callable,
@@ -775,24 +774,32 @@ def _broadcast_to_and_flatten(
         return None
 
 
-def treespec_dumps(treespec: PyTreeSpec) -> bytes:
-    """Serialize a treespec to bytes."""
+def treespec_dumps(treespec: PyTreeSpec) -> str:
+    """Serialize a treespec to a JSON string."""
     if not isinstance(treespec, PyTreeSpec):
         raise TypeError(
             f"treespec_dumps(spec): Expected `spec` to be instance of "
             f"PyTreeSpec but got item of type {type(treespec)}."
         )
-    return pickle.dumps(treespec)
+    from ._pytree import (
+        tree_structure as _tree_structure,
+        treespec_dumps as _treespec_dumps,
+    )
+
+    orig_treespec = _tree_structure(tree_unflatten([0] * treespec.num_leaves, treespec))
+    return _treespec_dumps(orig_treespec)
 
 
-def treespec_loads(serialized: bytes) -> PyTreeSpec:
-    """Deserialize a treespec from bytes."""
-    treespec = pickle.loads(serialized)
-    if not isinstance(treespec, PyTreeSpec):
-        raise TypeError(
-            f"treespec_loads(serialized): Expected to return an instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
+def treespec_loads(serialized: str) -> PyTreeSpec:
+    """Deserialize a treespec from a JSON string."""
+    from ._pytree import (
+        tree_unflatten as _tree_unflatten,
+        treespec_loads as _treespec_loads,
+    )
+
+    orig_treespec = _treespec_loads(serialized)
+    dummy_tree = _tree_unflatten([0] * orig_treespec.num_leaves, orig_treespec)
+    treespec = tree_structure(dummy_tree)
     return treespec
 
 

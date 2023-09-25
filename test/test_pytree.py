@@ -772,7 +772,7 @@ class TestCxxPytree(TestCase):
     )
     def test_pytree_serialize(self, spec):
         serialized_spec = cxx_pytree.treespec_dumps(spec)
-        self.assertTrue(isinstance(serialized_spec, bytes))
+        self.assertTrue(isinstance(serialized_spec, str))
         self.assertTrue(spec == cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
