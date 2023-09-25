@@ -1530,8 +1530,8 @@ class FakeTensorMode(TorchDispatchMode):
         # Call them if they exist.
         maybe_abstract_impl = torch._custom_op.impl.get_abstract_impl(func.name())
         if maybe_abstract_impl:
-            ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
-            with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
                 result = maybe_abstract_impl(*args, **kwargs)
                 return result
 
