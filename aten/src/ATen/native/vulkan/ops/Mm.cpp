@@ -86,7 +86,8 @@ vTensor pack_weights(const Tensor& weight_arg, const bool use_batch = false) {
 
 vTensor pack_biases(
     const Tensor& weight_arg,
-    const c10::optional<Tensor>& bias_arg) {
+    const c10::optional<Tensor>& bias_arg,
+    const bool use_batch = false) {
   if (bias_arg && bias_arg->is_vulkan()) {
     return convert(*bias_arg);
   }
@@ -99,23 +100,47 @@ vTensor pack_biases(
     const float* const src_bias_ptr = bias.data_ptr<float>();
 
     /* Source */
-    int64_t src_kw_sz, src_kh_sz;
-    if (bias.sizes().size() == 2) {
-      src_kw_sz = b_sizes[Layout::Parameter::width];
-      src_kh_sz = b_sizes[Layout::Parameter::height];
+    int64_t src_kb_sz = 0;
+    int64_t src_kw_sz = 0;
+    int64_t src_kh_sz = 0;
+    if (use_batch) {
+      if (bias.sizes().size() == 3) {
+        src_kb_sz = b_sizes[Layout::BatchMatrices::batch];
+        src_kw_sz = b_sizes[Layout::BatchMatrices::width];
+        src_kh_sz = b_sizes[Layout::BatchMatrices::height];
+      } else if (bias.sizes().size() == 2) {
+        // skip batch dim for boardcasting; index -1
+        src_kb_sz = 1;
+        src_kw_sz = b_sizes[Layout::BatchMatrices::height];
+        src_kh_sz = b_sizes[Layout::BatchMatrices::batch];
+      } else {
+        // skip batch & height dim for boardcasting; index -2
+        src_kb_sz = 1;
+        src_kw_sz = b_sizes[Layout::BatchMatrices::batch];
+        src_kh_sz = 1;
+      }
     } else {
-      src_kw_sz = b_sizes[Layout::Parameter::height];
-      src_kh_sz = 1;
+      src_kb_sz = 1;
+      if (bias.sizes().size() == 2) {
+        src_kw_sz = b_sizes[Layout::Parameter::width];
+        src_kh_sz = b_sizes[Layout::Parameter::height];
+      } else {
+        src_kw_sz = b_sizes[Layout::Parameter::height];
+        src_kh_sz = 1;
+      }
     }
+    const int64_t src_matrix_sz = src_kw_sz * src_kh_sz;
 
     /* Destination */
     const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
     const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
     const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+    const int64_t dst_matrix_sz = dst_plane_sz * 4;
 
     vTensor v_bias{
         context,
         {
+            src_kb_sz,
             4,
             dst_kh_sz,
             dst_kw_sz,
@@ -131,14 +156,20 @@ vTensor pack_biases(
 
       memset(dst_bias_ptr, 0, v_bias.nbytes());
 
-      for (const auto src_h : c10::irange(src_kh_sz == 1 ? 2 : src_kh_sz)) {
-        for (const auto src_w : c10::irange(src_kw_sz)) {
-          int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
-          int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
-          memcpy(
-              dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
-              src_bias_ptr + (src_kh_sz == 1 ? 0 : src_h * src_kw_sz) + src_w,
-              sizeof(float));
+      for (const auto src_b : c10::irange(src_kb_sz)) {
+        for (const auto src_h : c10::irange(src_kh_sz == 1 ? 2 : src_kh_sz)) {
+          for (const auto src_w :
+               c10::irange((use_batch && src_kw_sz == 1) ? 2 : src_kw_sz)) {
+            int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
+            int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
+            memcpy(
+                dst_bias_ptr + src_b * dst_matrix_sz +
+                    dst_plane * dst_plane_sz + dst_index,
+                src_bias_ptr + src_b * src_matrix_sz +
+                    (src_kh_sz == 1 ? 0 : src_h * src_kw_sz) +
+                    ((use_batch && src_kw_sz == 1) ? 0 : src_w),
+                sizeof(float));
+          }
         }
       }
     }
@@ -172,15 +203,58 @@ vTensor pack_biases(
   }
 }
 
-bool available_check_with_batch(const Tensor& weight) {
-  const bool check_weight = (3 == weight.ndimension()) &&
+bool available_check_with_batch(
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias) {
+  const bool weight_available = (3 == weight.ndimension()) &&
       (weight.size(Layout::BatchMatrices::batch) > 0) &&
       (weight.size(Layout::BatchMatrices::height) > 0) &&
       (weight.size(Layout::BatchMatrices::width) > 0) &&
       ((weight.device().is_cpu()) ||
        (c10::DeviceType::Vulkan == weight.device().type())) &&
       (kFloat == weight.scalar_type()) && !weight.requires_grad();
-  return check_weight;
+  if (!weight_available) {
+    return false;
+  }
+
+  if (!bias || !bias->defined()) {
+    // no need to check bias since it is not used.
+    return true;
+  }
+
+  bool bias_available = true;
+  bias_available &= (bias->ndimension() > 0);
+  bias_available &=
+      ((bias->device().is_cpu()) ||
+       (c10::DeviceType::Vulkan == bias->device().type()));
+  bias_available &= (kFloat == bias->scalar_type());
+  // Only check the consistency of batch and width dimension. The height
+  // dimension consistency is unchecked, due to the 2nd input which determines
+  // the height is not passed into LinearPackedContext.
+  if (bias->ndimension() == 3) {
+    bias_available &=
+        (bias->size(Layout::BatchMatrices::width) ==
+             weight.size(Layout::BatchMatrices::width) ||
+         bias->size(Layout::BatchMatrices::width) == 1);
+    bias_available &=
+        (bias->size(Layout::BatchMatrices::batch) ==
+             weight.size(Layout::BatchMatrices::batch) ||
+         bias->size(Layout::BatchMatrices::batch) == 1);
+  } else if (bias->ndimension() == 2) {
+    // skip batch dim for boardcasting; index -1
+    bias_available &=
+        (bias->size(Layout::BatchMatrices::height) ==
+             weight.size(Layout::BatchMatrices::width) ||
+         bias->size(Layout::BatchMatrices::height) == 1);
+  } else {
+    // skip batch & height dim for boardcasting; index -2
+    bias_available &=
+        (bias->size(Layout::BatchMatrices::batch) ==
+             weight.size(Layout::BatchMatrices::width) ||
+         bias->size(Layout::BatchMatrices::batch) == 1);
+  }
+  bias_available &= !bias->requires_grad();
+  return bias_available;
 }
 
 bool available(
@@ -192,7 +266,7 @@ bool available(
   }
 
   if (use_batch) {
-    return available_check_with_batch(weight);
+    return available_check_with_batch(weight, bias);
   }
 
   const bool weight_available = (2 == weight.ndimension()) &&
@@ -403,8 +477,8 @@ Tensor run_addmm_context(
 
 Tensor run_baddbmm_context(
     const Tensor& input_arg,
-    const float /* not implemented */,
-    const float /* not implemented */,
+    const float alpha,
+    const float beta,
     const c10::intrusive_ptr<LinearPackedContext>& linear_context) {
   api::Context* const context = api::context();
 
@@ -418,6 +492,8 @@ Tensor run_baddbmm_context(
 
   const vTensor& packed_v_weight = convert(
       linear_context->get_val(LinearPackedContext::Packed::Weight).toTensor());
+  const vTensor& packed_v_bias = convert(
+      linear_context->get_val(LinearPackedContext::Packed::Bias).toTensor());
   const std::vector<int64_t> unpacked_weight_sizes =
       linear_context->get_val(LinearPackedContext::Packed::WeightSizes)
           .toIntVector();
@@ -442,50 +518,99 @@ Tensor run_baddbmm_context(
       input_arg.scalar_type(),
   };
 
-  TORCH_CHECK(
-      bias_defined == false,
-      "Vulkan does not support ops baddbmm!"
-      "Reason: This codepath should not be reached since it’s not implemented yet.");
+  if (bias_defined) {
+    const struct {
+      uvec3 size;
+      int32_t k;
+      uvec3 bias_size;
+      int32_t _;
+      vec2 multiplier;
+    } block{
+        v_output.extents(),
+        safe_downcast<int32_t>(
+            div_up(v_input.sizes()[Layout::BatchMatrices::width], INT64_C(2))),
+        packed_v_bias.extents(),
+        0,
+        {
+            alpha,
+            beta,
+        },
+    };
 
-  const struct {
-    uvec3 size;
-    int32_t k;
-  } block_no_bias{
-      v_output.extents(),
-      safe_downcast<int32_t>(
-          div_up(v_input.sizes()[Layout::BatchMatrices::width], INT64_C(2))),
-  };
+    api::UniformParamsBuffer params(context, block);
+    api::PipelineBarrier pipeline_barrier{};
 
-  api::UniformParamsBuffer params(context, block_no_bias);
-  api::PipelineBarrier pipeline_barrier{};
+    context->submit_compute_job(
+        // shader descriptor
+        VK_KERNEL(baddbmm),
+        // pipeline barrier
+        pipeline_barrier,
+        // global work group size
+        {
+            safe_downcast<uint32_t>(div_up(
+                unpacked_weight_sizes[Layout::BatchMatrices::width],
+                INT64_C(2))),
+            safe_downcast<uint32_t>(div_up(
+                v_input.sizes()[Layout::BatchMatrices::height], INT64_C(2))),
+            safe_downcast<uint32_t>(div_up(
+                v_input.sizes()[Layout::BatchMatrices::batch], INT64_C(4))),
+        },
+        // local work group size
+        {8, 8, 1},
+        // fence handle
+        VK_NULL_HANDLE,
+        // shader arguments
+        v_output.image(
+            pipeline_barrier,
+            api::PipelineStage::COMPUTE,
+            api::MemoryAccessType::WRITE),
+        v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        packed_v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        packed_v_bias.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        // params buffer
+        params.buffer());
+  } else {
+    const struct {
+      uvec3 size;
+      int32_t k;
+    } block_no_bias{
+        v_output.extents(),
+        safe_downcast<int32_t>(
+            div_up(v_input.sizes()[Layout::BatchMatrices::width], INT64_C(2))),
+    };
 
-  context->submit_compute_job(
-      // shader descriptor
-      VK_KERNEL(bmm),
-      // pipeline barrier
-      pipeline_barrier,
-      // global work group size
-      {
-          safe_downcast<uint32_t>(div_up(
-              unpacked_weight_sizes[Layout::BatchMatrices::width], INT64_C(2))),
-          safe_downcast<uint32_t>(div_up(
-              v_input.sizes()[Layout::BatchMatrices::height], INT64_C(2))),
-          safe_downcast<uint32_t>(div_up(
-              v_input.sizes()[Layout::BatchMatrices::batch], INT64_C(4))),
-      },
-      // local work group size
-      {8, 8, 1},
-      // fence handle
-      VK_NULL_HANDLE,
-      // shader arguments
-      v_output.image(
-          pipeline_barrier,
-          api::PipelineStage::COMPUTE,
-          api::MemoryAccessType::WRITE),
-      v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      packed_v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
-      // params buffer
-      params.buffer());
+    api::UniformParamsBuffer params(context, block_no_bias);
+    api::PipelineBarrier pipeline_barrier{};
+
+    context->submit_compute_job(
+        // shader descriptor
+        VK_KERNEL(bmm),
+        // pipeline barrier
+        pipeline_barrier,
+        // global work group size
+        {
+            safe_downcast<uint32_t>(div_up(
+                unpacked_weight_sizes[Layout::BatchMatrices::width],
+                INT64_C(2))),
+            safe_downcast<uint32_t>(div_up(
+                v_input.sizes()[Layout::BatchMatrices::height], INT64_C(2))),
+            safe_downcast<uint32_t>(div_up(
+                v_input.sizes()[Layout::BatchMatrices::batch], INT64_C(4))),
+        },
+        // local work group size
+        {8, 8, 1},
+        // fence handle
+        VK_NULL_HANDLE,
+        // shader arguments
+        v_output.image(
+            pipeline_barrier,
+            api::PipelineStage::COMPUTE,
+            api::MemoryAccessType::WRITE),
+        v_input.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        packed_v_weight.image(pipeline_barrier, api::PipelineStage::COMPUTE),
+        // params buffer
+        params.buffer());
+  }
 
   Tensor output = convert(v_output);
   std::vector<int64_t> shape;
@@ -528,12 +653,27 @@ Tensor bmm(const Tensor& mat1_arg, const Tensor& mat2_arg) {
           mat2_arg, c10::optional<Tensor>(), true /*use batch*/)));
 }
 
+Tensor baddbmm(
+    const Tensor& bias,
+    const Tensor& input,
+    const Tensor& weight,
+    const Scalar& beta,
+    const Scalar& alpha) {
+  return run_baddbmm_context(
+      input,
+      alpha.to<float>(),
+      beta.to<float>(),
+      c10::make_intrusive<LinearPackedContext>(
+          LinearPackedContext(weight, bias, true /*use batch*/)));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::addmm"), TORCH_FN(addmm));
   m.impl(TORCH_SELECTIVE_NAME("aten::mm"), TORCH_FN(mm));
   m.impl(TORCH_SELECTIVE_NAME("aten::bmm"), TORCH_FN(bmm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::baddbmm"), TORCH_FN(baddbmm));
 }
 
 #endif /* USE_VULKAN_API */
@@ -553,7 +693,7 @@ LinearPackedContext::LinearPackedContext(
 
   packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(convert(pack_weights(weight, use_batch)));
-  packed_.emplace_back(convert(pack_biases(weight, bias)));
+  packed_.emplace_back(convert(pack_biases(weight, bias, use_batch)));
   packed_.emplace_back(weight.sizes());
   packed_.emplace_back(bias && bias->defined());
 
