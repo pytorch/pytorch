@@ -3,7 +3,7 @@ import torch
 class GradScaler(torch.amp.GradScaler):
     r"""
     See :class:`torch.amp.GradScaler`.
-    ``torch.cuda.amp.GradScaler(args...)`` is equivalent to ``torch.amp.GradScaler("cuda", args...)``
+    ``torch.cpu.amp.GradScaler(args...)`` is equivalent to ``torch.amp.GradScaler("cpu", args...)``
     """
     def __init__(
             self,
@@ -13,5 +13,5 @@ class GradScaler(torch.amp.GradScaler):
             growth_interval: int = 2000,
             enabled: bool = True
         ) -> None:
-        super().__init__("cuda", init_scale=init_scale, growth_factor=growth_factor, backoff_factor=backoff_factor,
+        super().__init__("cpu", init_scale=init_scale, growth_factor=growth_factor, backoff_factor=backoff_factor,
                          growth_interval=growth_interval, enabled=enabled)
