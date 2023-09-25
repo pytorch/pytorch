@@ -7,6 +7,7 @@ from typing import Callable
 @dataclasses.dataclass
 class Kernel:
     """Models a (function, source location)"""
+
     func: Callable
     source: str
 
