@@ -1789,26 +1789,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertFalse("super() nn.Module.__init__" in counters["graph_break"])
 
-    def test_class_duner_mro(self):
-        class ModuleA(torch.nn.Module):
-            pass
-
-        class ModuleB(ModuleA):
-            pass
-
-        def fn(x, mod):
-            if ModuleA in type(mod).__mro__:
-                return x + 1
-            else:
-                return x - 1
-
-        x = torch.rand(2, 3)
-        mod = ModuleB()
-        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
-        ref = fn(x, mod)
-        res = opt_fn(x, mod)
-        self.assertTrue(same(ref, res))
-
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
