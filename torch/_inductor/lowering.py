@@ -499,11 +499,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
 
 def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
-    if x.get_dtype() == dtype:
+    src_dtype = x.get_dtype()
+    if src_dtype == dtype:
         return clone(x) if copy else x
 
     def _to_dtype(x):
-        return ops.to_dtype(x, dtype)
+        return ops.to_dtype(x, dtype, src_dtype=src_dtype)
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
@@ -1486,23 +1487,12 @@ def _warn_complex_not_supported():
     )
 
 
-@functools.lru_cache(None)
-def _warn_float8_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
-    )
-
-
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
-        return True
-    # FP8 Tensors are currently not supported
-    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
-        _warn_float8_not_supported()
         return True
     return False
 
@@ -1871,6 +1861,8 @@ make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.cumsum, require_dense, warn=False)
+make_fallback(aten.cumprod, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
 make_fallback(aten._flash_attention_forward)
@@ -1911,6 +1903,7 @@ make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
 make_fallback(aten.cummax)
 make_fallback(aten.cummin)
+make_fallback(aten.cumprod, warn=False)
 make_fallback(aten.digamma, warn=False)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1989,7 +1982,6 @@ make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
-make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -4185,21 +4177,6 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
     return inner
 
 
-def _make_scan_inner(x, *, axis, dtype):
-    if dtype is not None:
-        x = to_dtype(x, dtype)
-    size = x.get_size()
-    axis = _validate_reduction_axis(x, axis)[0]
-
-    return dict(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=x.make_loader(),
-        size=x.get_size(),
-        axis=axis,
-    )
-
-
 @register_lowering(aten.mean)
 def mean(x, axis=None, keepdim=False, *, dtype=None):
     if dtype is not None:
@@ -4532,38 +4509,6 @@ def sum_(x, axis=None, keepdims=False, *, dtype=None):
     return fn(x, axis, keepdims, dtype=dtype)
 
 
-fallback_cumsum = fallback_handler(aten.cumsum)
-fallback_cumprod = fallback_handler(aten.cumprod)
-
-
-@register_lowering(aten.cumsum)
-def cumsum(x, axis=None, dtype=None):
-    if (
-        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    ) and dtype is None:
-        dtype = torch.int64
-
-    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="sum")
-    if result is None:
-        return fallback_cumsum(x, dim=axis, dtype=dtype)
-    return result
-
-
-@register_lowering(aten.cumprod)
-def cumprod(x, axis=None, dtype=None):
-    if (
-        is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
-    ) and dtype is None:
-        dtype = torch.int64
-
-    kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    result = ir.Scan.create(**kwargs, scan_op="prod")
-    if result is None:
-        return fallback_cumprod(x, dim=axis, dtype=dtype)
-    return result
-
-
 @register_lowering(aten.prod)
 def prod(x, axis=None, keepdims=False, *, dtype=None):
     if (
@@ -4581,7 +4526,7 @@ def reduce_any(x, dim=None, keepdim=False):
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
 
 
-@register_lowering(aten.max)
+@register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
         return (
@@ -4592,7 +4537,7 @@ def reduce_max(x, dim=None, keepdim=False):
     return reduce_amax(x, axis=None, keepdims=keepdim)
 
 
-@register_lowering(aten.min)
+@register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
         return (

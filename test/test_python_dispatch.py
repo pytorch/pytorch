@@ -2249,6 +2249,22 @@ class TestWrapperSubclassAliasing(TestCase):
         kwargs = sample.kwargs
         self._test_wrapper_subclass_aliasing(op, args, kwargs)
 
+    def test_wrapper_subclass_aliasing_conv2d(self, device):
+        args = (torch.randn(4, 4, 4, 4), torch.randn(4, 4, 4, 4))
+        kwargs = {}
+        # conv2d has a default arg 'int[2] strides=0',
+        # which torchscript expands into 'int[2] strides=[0, 0]'
+        # Make sure that _return_and_correct_aliasing can handle this case
+        # (I'm using inference_mode to make sure conv2d doesn't decompose and goes to torch_dispatch)
+        with torch.inference_mode():
+            self._test_wrapper_subclass_aliasing(torch.ops.aten.conv2d.default, args, kwargs)
+
+    def test_wrapper_subclass_aliasing_out_op(self, device):
+        # Make sure that _return_and_correct_aliasing can handle kwargs w mutable tensors
+        args = (torch.ones(4), torch.ones(4))
+        kwargs = {'out': torch.empty(4)}
+        self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
+
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())
 
 if __name__ == '__main__':
