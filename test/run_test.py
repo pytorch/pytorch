@@ -171,7 +171,6 @@ TESTS = discover_tests(
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
-        "_nvfuser",  # executed by test_jit_cuda_fuser.py, test_nvfuser_dynamo.py, and test_nvfuser_frontend.py
     ],
     blocklisted_tests=[
         "test_bundled_images",
@@ -322,7 +321,6 @@ CI_SERIAL_LIST = [
     "test_reductions",
     "test_cuda",
     "test_cuda_expandable_segments",
-    "test_jit_cuda_fuser",  # OOM on test_issue_1785, also profiling?
     "test_indexing",
     "test_fx_backends",
     "test_linalg",
@@ -343,7 +341,6 @@ CI_SERIAL_LIST = [
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
     "test_serialization",  # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
-    "_nvfuser/test_torchscript",  # OOM on test_issue_1785
     "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
