@@ -35,6 +35,7 @@ from torch._C._distributed_c10d import (
 from .constants import default_pg_timeout
 from .c10d_logger import _exception_logger, _time_logger
 from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
+DistStoreError = torch._C._DistStoreError
 
 __all__ = [
     'Backend', 'BackendConfig', 'GroupMember', 'P2POp', 'all_gather', 'all_gather_coalesced',
@@ -182,7 +183,7 @@ class Backend:
         GLOO : ["cpu", "cuda"],
         NCCL : ["cuda"],
         UCC : ["cpu", "cuda"],
-        MPI : ["cpu"],
+        MPI : ["cpu", "cuda"],
     }
 
     backend_type_map: Dict[str, ProcessGroup.BackendType] = {
@@ -658,6 +659,10 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
     if worker_count == world_size:
         store.set(last_worker_key, "1")
 
+    # adjust the timeout to be at least 10secs + 1sec per thousand ranks to reduce the odds of timeout
+    # this value was empirically found while scale testing.
+    logging_interval = max(logging_interval, timedelta(seconds=10 + world_size / 1000))
+
     start = time.time()
     while True:
         try:
@@ -675,7 +680,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
-                raise RuntimeError(
+                raise DistStoreError(
                     "Timed out initializing process group in store based barrier on "
                     "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
                         rank, store_key, world_size, worker_count, timeout
@@ -722,10 +727,10 @@ def get_group_rank(group: ProcessGroup, global_rank: int) -> int:
     if group is GroupMember.WORLD:
         return global_rank
     if group not in _world.pg_group_ranks:
-        raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
+        raise ValueError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
     group_ranks = _world.pg_group_ranks[group]
     if global_rank not in group_ranks:
-        raise RuntimeError(f"Global rank {global_rank} is not part of group {group}")
+        raise ValueError(f"Global rank {global_rank} is not part of group {group}")
 
     return group_ranks[global_rank]
 
@@ -747,11 +752,11 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
     if group is GroupMember.WORLD:
         return group_rank
     if group not in _world.pg_group_ranks:
-        raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
+        raise ValueError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
     for rank, grp_rank in _world.pg_group_ranks[group].items():
         if grp_rank == group_rank:
             return rank
-    raise RuntimeError(f"Group rank {group_rank} is not part of group {group}")
+    raise ValueError(f"Group rank {group_rank} is not part of group {group}")
 
 # TODO: remove this once the ecosystem moves away from it.
 def _get_global_rank(group, rank):
@@ -792,7 +797,7 @@ def _check_single_tensor(param, param_name):
     Helper to check that the parameter ``param_name`` is a single tensor.
     """
     if not isinstance(param, torch.Tensor):
-        raise RuntimeError(
+        raise TypeError(
             f"Invalid function argument. Expected parameter `{param_name}` to be of type torch.Tensor."
         )
 
@@ -804,7 +809,7 @@ def _check_tensor_list(param, param_name):
     if not isinstance(param, list) or not all(
         isinstance(p, torch.Tensor) for p in param
     ):
-        raise RuntimeError(
+        raise TypeError(
             f"Invalid function argument. Expected parameter `{param_name}` to be of type List[torch.Tensor]."
         )
 
@@ -823,7 +828,7 @@ def _ensure_all_tensors_same_dtype(*tensors) -> None:
             last_dtype = tensor_dtype
         else:
             if last_dtype != tensor_dtype:
-                raise RuntimeError(
+                raise ValueError(
                     "Invalid usage of tensors with different dtypes"
                     f"Found {last_dtype} and  {tensor.dtype}"
                 )
@@ -834,7 +839,7 @@ def _check_op(op):
     Helper to check that the ``op`` is either isend or irecv.
     """
     if op not in [isend, irecv]:
-        raise RuntimeError(
+        raise ValueError(
             "Invalid ``op``. Expected ``op`` "
             "to be of type ``torch.distributed.isend`` or "
             "``torch.distributed.irecv``."
@@ -849,14 +854,14 @@ def _check_p2p_op_list(p2p_op_list):
     if not isinstance(p2p_op_list, list) or not all(
         isinstance(p2p_op, P2POp) for p2p_op in p2p_op_list
     ):
-        raise RuntimeError(
+        raise ValueError(
             "Invalid ``p2p_op_list``. Each op is expected to "
             "to be of type ``torch.distributed.P2POp``."
         )
 
     group = p2p_op_list[0].group
     if not all(group == p2p_op.group for p2p_op in p2p_op_list):
-        raise RuntimeError("All ops need to use the same group.")
+        raise ValueError("All ops need to use the same group.")
 
 
 def is_mpi_available() -> bool:
@@ -937,7 +942,7 @@ def _get_default_group():
     Getting the default process group created by init_process_group
     """
     if not is_initialized():
-        raise RuntimeError(
+        raise ValueError(
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
@@ -949,7 +954,7 @@ def _get_default_store():
     Getting the default store created by init_process_group
     """
     if not is_initialized():
-        raise RuntimeError(
+        raise ValueError(
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
@@ -967,7 +972,7 @@ def get_backend_config(group: Optional[ProcessGroup] = None) -> str:
     else:
         pg = group
     if _rank_not_in_group(pg):
-        raise RuntimeError("Invalid process group specified")
+        raise ValueError("Invalid process group specified")
     backend_config = _world.pg_backend_config.get(pg)
     assert backend_config is not None
     return str(backend_config)
@@ -990,7 +995,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
     else:
         pg = group
     if _rank_not_in_group(pg):
-        raise RuntimeError("Invalid process group specified")
+        raise ValueError("Invalid process group specified")
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     assert pg_store is not None
     return pg_store[0]
@@ -1092,12 +1097,12 @@ def init_process_group(
     global _default_pg_init_method
 
     if not isinstance(timeout, timedelta):
-        raise RuntimeError(
+        raise TypeError(
             "Expected timeout argument to be of type datetime.timedelta"
         )
 
     if GroupMember.WORLD is not None:
-        raise RuntimeError("trying to initialize the default process group twice!")
+        raise ValueError("trying to initialize the default process group twice!")
 
     assert (store is None) or (
         init_method is None
@@ -1123,13 +1128,13 @@ def init_process_group(
     if backend == Backend.MPI:
         if world_size != -1 or rank != -1:
             warnings.warn(
-                "For MPI backend, world_size ({}) and rank ({}) "
+                f"For MPI backend, world_size ({world_size}) and rank ({rank}) "
                 "are ignored since they are assigned by the "
-                "MPI runtime.".format(world_size, rank)
+                "MPI runtime."
             )
 
         default_pg, _ = _new_process_group_helper(
-            -1, -1, [], backend, None, group_name=group_name, timeout=timeout
+            -1, -1, [], backend, None, group_name, timeout=timeout
         )
         _update_default_pg(default_pg)
     else:
@@ -1151,8 +1156,8 @@ def init_process_group(
             [],
             backend,
             store,
+            group_name,
             pg_options=pg_options,
-            group_name=group_name,
             timeout=timeout
         )
         _update_default_pg(default_pg)
@@ -1189,8 +1194,8 @@ def _new_process_group_helper(
     global_ranks_in_group,
     backend,
     store,
+    group_name,
     pg_options=None,
-    group_name=None,
     timeout=default_pg_timeout,
     pg_tag=None
 ):
@@ -1206,13 +1211,13 @@ def _new_process_group_helper(
     global _world
 
     if group_name in _world.pg_names.values():
-        raise RuntimeError(
+        raise ValueError(
             "The specified group name has already been "
             "created, please use a different group name"
         )
 
     if not isinstance(timeout, timedelta):
-        raise RuntimeError(
+        raise TypeError(
             "Expected timeout argument to be of type datetime.timedelta"
         )
 
@@ -1351,8 +1356,11 @@ def _new_process_group_helper(
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
     # update global state
+    assert group_name is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
+    pg._set_group_name(group_name)
+
     _world.pg_backend_config[pg] = str(backend_config)
     # "" is the default tag for user PGs
     if pg_tag in [None, ""]:
@@ -1387,7 +1395,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
 
     assert pg is not None
     if _world.pg_map.get(pg, None) is None:
-        raise RuntimeError("Invalid process group specified")
+        raise ValueError("Invalid process group specified")
 
     # When users register Python onCompletion hooks, those hooks will run on a
     # different thread than the main thread. Today, the ProcessGroup dtor does
@@ -1575,7 +1583,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
     Args:
         tensor (Tensor): Tensor to send.
         dst (int): Destination rank. Destination rank should not be the same
-        as the rank of the current process.
+            as the rank of the current process.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         tag (int, optional): Tag to match send with remote recv
@@ -1647,7 +1655,7 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
 class _IllegalWork(Work):
     def __getattribute__(self, name):
         if name in ["is_success", "exception", "wait", "source_rank", "_source_rank", "result", "synchronize"]:
-            raise RuntimeError(f"Illegal to call {name} on IllegalWork object")
+            raise ValueError(f"Illegal to call {name} on IllegalWork object")
 
 
 class _CoalescingManager:
@@ -1699,7 +1707,7 @@ def _coalescing_manager(
     group = group or _get_default_group()
     op_list = _world.pg_coalesce_state.setdefault(group, [])
     if op_list:
-        raise RuntimeError("ProcessGroup has non-empty op list at the start of coalescing")
+        raise ValueError("ProcessGroup has non-empty op list at the start of coalescing")
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
@@ -2030,7 +2038,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
 
     if tensor.is_complex():
         if not supports_complex(op):
-            raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
+            raise ValueError(f"all_reduce does not support {op} on complex tensors")
         tensor = torch.view_as_real(tensor)
 
     opts = AllreduceOptions()
@@ -2100,7 +2108,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         return
 
     if any(t.is_complex() for t in tensors) and not supports_complex(op):
-        raise RuntimeError(f"all_reduce does not support {op} on complex tensors")
+        raise ValueError(f"all_reduce does not support {op} on complex tensors")
 
     tensors = [t if not t.is_complex() else torch.view_as_real(t) for t in tensors]
 
@@ -2603,8 +2611,13 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     broadcast(object_sizes_tensor, src=src, group=group)
 
     # Concatenate and broadcast serialized object tensors
+    # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
+    # has only one element, we can skip the copy.
     if my_rank == src:
-        object_tensor = torch.cat(tensor_list)
+        if len(tensor_list) == 1:
+            object_tensor = tensor_list[0]
+        else:
+            object_tensor = torch.cat(tensor_list)
     else:
         object_tensor = torch.empty(  # type: ignore[call-overload]
             torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
@@ -2690,7 +2703,7 @@ def scatter_object_list(
         not isinstance(scatter_object_output_list, list)
         or len(scatter_object_output_list) < 1
     ):
-        raise RuntimeError(
+        raise ValueError(
             "Expected argument scatter_object_output_list to be a list of size at least 1."
         )
 
@@ -2987,7 +3000,7 @@ def all_gather_coalesced(
     _check_tensor_list(input_tensor_list, "input_tensor_list")
     _ensure_all_tensors_same_dtype(input_tensor_list)
     if not isinstance(output_tensor_lists, list):
-        raise RuntimeError(
+        raise TypeError(
             "Invalid function argument: output_tensor_lists should be a list"
         )
     for output_tensor_list in output_tensor_lists:
@@ -3682,7 +3695,7 @@ def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
         if isinstance(device_ids, list):
             opts.device_ids = device_ids
         else:
-            raise RuntimeError(
+            raise TypeError(
                 "Invalid function argument: device_ids type should be List[int]"
             )
 
@@ -3755,7 +3768,7 @@ def monitored_barrier(group=GroupMember.WORLD, timeout=None, wait_all_ranks=Fals
         return
 
     if get_backend(group) != Backend.GLOO:
-        raise RuntimeError("monitored_barrier is only implemented for GLOO backend.")
+        raise ValueError("monitored_barrier is only implemented for GLOO backend.")
 
     if timeout is None:
         timeout = default_pg_timeout
@@ -3904,7 +3917,7 @@ def _new_group_with_tag(
     if use_local_synchronization:
         # MPI backend doesn't have have a way for us to perform a partial sync
         if backend == Backend.MPI:
-            raise RuntimeError("MPI backend doesn't support use_local_synchronization=True")
+            raise ValueError("MPI backend doesn't support use_local_synchronization=True")
         if ranks is not None and get_rank() not in ranks:
             return None
 
@@ -3913,7 +3926,7 @@ def _new_group_with_tag(
         ranks = sorted(ranks)
         group_world_size = len(ranks)
         if group_world_size > global_world_size:
-            raise RuntimeError(
+            raise ValueError(
                 "the new group's world size should be less or "
                 "equal to the world size set by "
                 "init_process_group"
@@ -3921,7 +3934,7 @@ def _new_group_with_tag(
         # check ranks' sanity
         for rank in ranks:
             if rank < 0 or rank >= global_world_size:
-                raise RuntimeError(
+                raise ValueError(
                     "The new group's rank should be within the "
                     "the world_size set by init_process_group"
                 )
@@ -3942,7 +3955,7 @@ def _new_group_with_tag(
         ranks,
         backend,
         default_store,
-        group_name=group_name,
+        group_name,
         pg_options=pg_options,
         timeout=timeout,
         pg_tag=pg_tag
@@ -4266,7 +4279,10 @@ def _get_group_tag(pg: ProcessGroup) -> str:
     return tag
 
 def _get_process_group_name(pg: ProcessGroup) -> str:
-    return _world.pg_names[pg]
+    return _world.pg_names.get(pg, "None")
+
+def _get_process_group_store(pg: ProcessGroup) -> Store:
+    return _world.pg_map[pg][1]
 
 # This ops are not friently to TorchDynamo. So, we decide to disallow these ops
 # in FX graph, allowing them to run them on eager, with torch.compile.

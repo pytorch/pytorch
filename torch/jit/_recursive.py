@@ -310,17 +310,17 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 )
 
             warnings.warn(
-                "'{}' was found in ScriptModule constants, "
-                " but it is a non-constant {}. Consider removing it.".format(name, hint)
+                f"'{name}' was found in ScriptModule constants, "
+                f" but it is a non-constant {hint}. Consider removing it."
             )
             continue
         if not hasattr(nn_module, name):
             # TODO: We should really error in this case, but its bc-breaking so
             # we need to warn for at least one release
             warnings.warn(
-                "'{}' was found in ScriptModule constants, "
+                f"'{name}' was found in ScriptModule constants, "
                 "but was not actually set in __init__. "
-                "Consider removing it.".format(name)
+                "Consider removing it."
             )
             continue
         value = getattr(nn_module, name)
@@ -370,8 +370,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 hint = (
                     "(This function exists as an attribute on the Python module, "
                     "but we failed to compile it to a TorchScript function. "
-                    "\nThe error stack is reproduced here:\n{}"
-                ).format(e)
+                    f"\nThe error stack is reproduced here:\n{e}"
+                )
                 concrete_type_builder.add_failed_attribute(name, hint)
                 pass
 
@@ -998,9 +998,9 @@ def try_compile_fn(fn, loc):
 
     if not inspect.isfunction(fn) and not inspect.ismethod(fn):
         raise RuntimeError(
-            "`{}` is not a function. Recursive scripting only supports "
+            f"`{fn}` is not a function. Recursive scripting only supports "
             "Python functions or methods currently.\n"
-            "Consider manually annotating `{}` with @torch.jit.script.".format(fn, fn)
+            f"Consider manually annotating `{fn}` with @torch.jit.script."
         )
 
     # We don't have the actual scope where the function was defined, but we can

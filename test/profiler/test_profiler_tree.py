@@ -28,7 +28,10 @@ PRUNE_FUNCTIONS = {
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
     "<built-in method __exit__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "cudaStreamIsCapturing": PRUNE_ALL,
-    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": PRUNE_ALL,
+
+    # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
+    "cudaGetDeviceCount": PRUNE_ALL,
+    "cudaGetDeviceProperties_v2": PRUNE_ALL,
 }
 
 # ROCTracer is currently not producing events that profiler can extract. We

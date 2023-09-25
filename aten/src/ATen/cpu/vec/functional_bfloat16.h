@@ -406,6 +406,41 @@ inline void map(
 
 template <typename scalar_t, typename Op,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
+inline void map(
+    const Op& vec_fun,
+    scalar_t* output_data,
+    const float* input_data,
+    int64_t size) {
+  using bVec = vec::Vectorized<scalar_t>;
+  using fVec = vec::Vectorized<float>;
+  int64_t d = 0;
+  for (; d < size - (size % bVec::size()); d += bVec::size()) {
+    fVec data_fvec0 = fVec::loadu(input_data + d);
+    fVec data_fvec1 = fVec::loadu(input_data + d + fVec::size());
+    fVec output_fvec0 = vec_fun(data_fvec0);
+    fVec output_fvec1 = vec_fun(data_fvec1);
+    bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
+    output_bvec.store(output_data + d);
+  }
+  if (size - d > 0) {
+    fVec data_fvec0, data_fvec1;
+    if (size - d > fVec::size()) {
+      data_fvec0 = fVec::loadu(input_data + d);
+      data_fvec1 = fVec::loadu(input_data + d + fVec::size(), size - d - fVec::size());
+    } else {
+      // choose to align with behaviour of bVec::loadu(ptr, size),
+      // which leaves data_fvec1 uninitialized
+      data_fvec0 = fVec::loadu(input_data + d, size - d);
+    }
+    fVec output_fvec0 = vec_fun(data_fvec0);
+    fVec output_fvec1 = vec_fun(data_fvec1);
+    bVec output_bvec = convert_from_float<scalar_t>(output_fvec0, output_fvec1);
+    output_bvec.store(output_data + d, size - d);
+  }
+}
+
+template <typename scalar_t, typename Op,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,

@@ -148,8 +148,7 @@ class Sequential(Module):
             return ret
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def pop(self, key: Union[int, slice]) -> Module:
         v = self[key]
@@ -164,8 +163,7 @@ class Sequential(Module):
             return self
         else:
             raise ValueError('add operator supports only objects '
-                             'of Sequential class, but {} is given.'.format(
-                                 str(type(other))))
+                             f'of Sequential class, but {str(type(other))} is given.')
 
     def __mul__(self, other: int) -> 'Sequential':
         if not isinstance(other, int):

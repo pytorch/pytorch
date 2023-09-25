@@ -9,7 +9,10 @@ import threading
 import types
 from typing import Dict, List
 
+import torch._dynamo.config
+
 import torch.nn
+from torch._guards import TracingContext
 
 from .. import variables
 from ..allowed_functions import is_allowed
@@ -65,6 +68,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 obj.__func__, self, source=source, **options
             )
+        elif source and inspect.ismemberdescriptor(obj):
+            return VariableBuilder(tx, source)(obj.__get__(self.value)).add_options(
+                options
+            )
 
         if name in getattr(self.value, "__dict__", {}) or ConstantVariable.is_literal(
             obj
@@ -72,7 +79,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(obj).add_options(options)
             elif ConstantVariable.is_literal(obj):
-                return ConstantVariable(obj, **options)
+                return ConstantVariable.create(obj, **options)
 
         return super().var_getattr(tx, name)
 
@@ -168,11 +175,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 is torch.nn.Module.__init__
             ):
                 tx.output.side_effects.store_attr(
-                    var, "__call_nn_module_init", variables.ConstantVariable(True)
+                    var,
+                    "__call_nn_module_init",
+                    variables.ConstantVariable.create(True),
                 )
                 return var
             else:
                 return var.add_options(var.call_method(tx, "__init__", args, kwargs))
+        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
+            options["mutable_local"] = MutableLocal()
+            return variables.CustomizedDictVariable.create(
+                self.value, args, kwargs, options
+            )
         elif variables.DataClassVariable.is_matching_cls(self.value):
             options["mutable_local"] = MutableLocal()
             return variables.DataClassVariable.create(self.value, args, kwargs, options)
@@ -243,7 +257,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable(None, **options)
+                return ConstantVariable.create(None, **options)
 
             if method is collections.OrderedDict.keys and self.source:
                 # subclass of OrderedDict
@@ -251,7 +265,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 return TupleVariable(
-                    [ConstantVariable(k, **options) for k in keys], **options
+                    [ConstantVariable.create(k, **options) for k in keys], **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
             if (
@@ -262,7 +276,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 in (collections.OrderedDict.keys, dict.keys)
             ):
                 assert not kwargs
-                return ConstantVariable(
+                return ConstantVariable.create(
                     args[0].as_python_constant() in self.value, **options
                 ).add_guard(self.source.make_guard(GuardBuilder.ODICT_KEYS))
 
@@ -364,10 +378,13 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 )
 
-            partial_args = [variables.ConstantVariable(v) for v in self.value.args]
+            partial_args = [
+                variables.ConstantVariable.create(v) for v in self.value.args
+            ]
             partial_args.extend(args)
             partial_kwargs = {
-                k: variables.ConstantVariable(v) for k, v in self.value.keywords.items()
+                k: variables.ConstantVariable.create(v)
+                for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
             if is_utils_checkpoint(self.value.func):
@@ -420,7 +437,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
-                ).call_function(tx, [ConstantVariable(name)], {})
+                ).call_function(tx, [ConstantVariable.create(name)], {})
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
@@ -445,16 +462,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
+            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Static lookup can't tell us it's a method or function correctly,
+            # so we trigger dynamic lookup here to get the correct type.
+            dynamic_subobj = getattr(self.value, name)
+
+            while dynamic_subobj is subobj and hasattr(subobj, "_torchdynamo_inline"):
+                subobj = subobj._torchdynamo_inline
+                dynamic_subobj = subobj
+                source = AttrSource(source, "_torchdynamo_inline") if source else None
+
             if isinstance(subobj, types.MethodType):
+                if dynamic_subobj.__self__ is not self.value:
+                    unimplemented("__self__ mismatch for bound method")
                 func = subobj.__func__
                 source = AttrSource(source, "__func__") if source else None
             else:
                 assert isinstance(subobj, types.FunctionType)
                 func = subobj
-            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
-            # Static lookup can't tell us it's a method or function correctly,
-            # so we trigger dynamic lookup here to get the correct type.
-            dynamic_subobj = getattr(self.value, name)
+
             if inspect.ismethod(dynamic_subobj):
                 return variables.UserMethodVariable(
                     func, self, source=source, **options
@@ -481,7 +507,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if source:
                 return VariableBuilder(tx, source)(subobj).add_options(options)
             elif ConstantVariable.is_literal(subobj):
-                return ConstantVariable(subobj, **options)
+                return ConstantVariable.create(subobj, **options)
 
         if (
             name not in getattr(value, "__dict__", {})
@@ -528,25 +554,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.is_attribute_mutation(self):
             try:
                 result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
-                return variables.ConstantVariable(
+                return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
                 ).add_options(self, result)
             except KeyError:
                 pass
-        if not self.source:
-            unimplemented("hasattr no source")
         options = VariableTracker.propagate(self)
-        options["guards"].add(
-            AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
-        )
+        if self.source:
+            options["guards"].add(
+                AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
+            )
         if self._check_for_getattribute() or self._check_for_getattr():
             unimplemented("hasattr with custom __getattr__")
 
         try:
             self._getattr_static(name)
-            return variables.ConstantVariable(True, **options)
+            return variables.ConstantVariable.create(True, **options)
         except AttributeError:
-            return variables.ConstantVariable(False, **options)
+            return variables.ConstantVariable.create(False, **options)
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
@@ -570,7 +595,7 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     def is_matching_object(obj):
         try:
             from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
-        except ImportError:
+        except (ImportError, AttributeError):
             return False
         else:
             return type(obj) is KeyedJaggedTensor
@@ -581,4 +606,41 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    # TODO Handle getattr for _length_per_key and _offset_per_key properly.
+    def var_getattr(self, tx, name):
+        if (
+            torch._dynamo.config.force_unspec_int_unbacked_size_like_on_torchrec_kjt
+            and self.source is not None
+            and name in ("_length_per_key", "_offset_per_key")
+        ):
+            with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
+                return super().var_getattr(tx, name)
+        return super().var_getattr(tx, name)
+
+
+class RemovableHandleVariable(VariableTracker):
+    def __init__(
+        self,
+        mutable_local=None,
+        # index of the registration in the side_effects owned register_hook/handle list, used during removal.
+        idx=None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.mutable_local = mutable_local
+        self.idx = idx
+
+    def call_method(self, tx, method_name, args, kwargs):
+        if method_name == "remove":
+            tx.output.side_effects.remove_hook(self.idx)
+            return variables.ConstantVariable.create(None)
+        super().call_method(tx, method_name, args, kwargs)
+
+    # This reconstruct is actually pretty unique - it does not construct the object from scratch.
+    # Handles always come from a register_hook call on a tensor, and so, rerunning that for the codegen of a
+    # hook would be incorrect.
+    # Instead, the invariant is that codegen has already produced the handle and stored it at a known name.
+    def reconstruct(self, codegen):
+        if self.user_code_variable_name:
+            # It is an invariant that at this point, a STORE_FAST was executed for this name.
+            return [codegen.create_load(self.user_code_variable_name)]
+        return super().reconstruct(codegen)

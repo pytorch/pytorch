@@ -11,7 +11,7 @@
 #include <cutlass/epilogue/thread/linear_combination.h>
 #include <cutlass/epilogue/thread/linear_combination_relu.h>
 #include <cutlass/epilogue/thread/linear_combination_silu.h>
-#include <ATen/native/sparse/cuda/cutlass/gemm_sparse_row_broadcast.h>
+#include <cutlass/gemm/device/gemm_sparse_row_broadcast.h>
 #endif
 
 #include <type_traits>

@@ -502,7 +502,7 @@ def hip_header_magic(input_string):
 
     # Check if one of the following headers is already included.
     headers = ["hip/hip_runtime.h", "hip/hip_runtime_api.h"]
-    if any(re.search(r'#include ("{0}"|<{0}>)'.format(ext), output_string) for ext in headers):
+    if any(re.search(fr'#include ("{ext}"|<{ext}>)', output_string) for ext in headers):
         return output_string
 
     # Rough logic to detect if we're inside device code

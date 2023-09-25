@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/in_place.h>
 
+#include <memory>
 #include <type_traits>
 
 namespace c10 {

@@ -3503,8 +3503,8 @@ as the input tensor excluding its innermost dimension'):
             expected = np.asarray(expected)  # transform numpy scalars to numpy.ndarray instances
 
             msg = ("Failed to produce expected results! Input tensor was"
-                   " {}, torch result is {}, and reference result is"
-                   " {}.").format(t, actual, expected) if t.numel() < 10 else None
+                   f" {t}, torch result is {actual}, and reference result is"
+                   f" {expected}.") if t.numel() < 10 else None
 
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
