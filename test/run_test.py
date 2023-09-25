@@ -922,7 +922,7 @@ def run_doctests(test_module, test_directory, options):
 
 
 def sanitize_file_name(file: str):
-    return file.replace("\\", "-").replace("/", "-").replace(" ", "_")
+    return file.replace("\\", ".").replace("/", ".").replace(" ", "_")
 
 
 def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
@@ -940,7 +940,7 @@ def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
         )
         with open(REPO_ROOT / new_file, "rb") as f:
             for line in f.readlines():
-                if re.search("Running .* items in this shard:", line):
+                if re.search(b"Running .* items in this shard:", line):
                     print_to_stderr(line.strip())
         return
     # Test failure or verbose logs: print entire file and then remove it
