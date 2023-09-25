@@ -20,7 +20,7 @@
 #include <ATen/native/mkldnn/Matmul.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10/util/variant.h>
+#include <variant>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -3006,13 +3006,13 @@ Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tens
 
 
 // This function helps to dispatch norm computations depending on 'ord' of variant type
-static Tensor _linalg_cond_helper(const Tensor& self, c10::variant<Scalar, c10::string_view> ord_variant) {
+static Tensor _linalg_cond_helper(const Tensor& self, std::variant<Scalar, c10::string_view> ord_variant) {
   Tensor inverse, info;
   std::tie(inverse, info) = at::linalg_inv_ex(self);
   info.unsqueeze_(-1).unsqueeze_(-1);
   inverse.masked_fill_(info > 0, INFINITY);
 
-  return c10::visit([&](auto&& ord) {
+  return std::visit([&](auto&& ord) {
     Tensor norm_self = at::linalg_matrix_norm(self, ord);
     Tensor norm_inverse = at::linalg_matrix_norm(inverse, ord);
     Tensor result = norm_self * norm_inverse;
@@ -3029,14 +3029,14 @@ static Tensor _linalg_cond_empty_matrix(const Tensor& self, c10::ScalarType dtyp
   return at::zeros(result_shape, options);
 }
 
-static void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) {
+static void _linalg_cond_check_ord(std::variant<Scalar, c10::string_view> ord_variant) {
   if (ord_variant.index() == 0) {
-    Scalar* ord = c10::get_if<Scalar>(&ord_variant);
+    Scalar* ord = std::get_if<Scalar>(&ord_variant);
     double abs_ord = std::abs(ord->toDouble());
     TORCH_CHECK(abs_ord == 2.0 || abs_ord == 1.0 || abs_ord == INFINITY,
       "linalg.cond got an invalid norm type: ", ord->toDouble());
   } else if (ord_variant.index() == 1) {
-    c10::string_view* ord = c10::get_if<c10::string_view>(&ord_variant);
+    c10::string_view* ord = std::get_if<c10::string_view>(&ord_variant);
     TORCH_CHECK(*ord == "fro" || *ord == "nuc",
       "linalg.cond got an invalid norm type: ", *ord);
   } else {
@@ -3052,7 +3052,7 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
 
-  c10::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
@@ -3100,7 +3100,7 @@ Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Ten
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
   squareCheckInputs(self, ("linalg.cond(ord=" + std::string(ord) + ")").c_str());
-  c10::variant<Scalar, c10::string_view> ord_variant = ord;
+  std::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
   // NumPy doesn't define the condition number for 0x0 matrices, we return 0.0 for such input
