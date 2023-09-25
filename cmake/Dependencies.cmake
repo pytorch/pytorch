@@ -685,8 +685,6 @@ if(USE_GLOG)
   include(${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake)
   if(TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
-    include_directories(SYSTEM ${GLOG_INCLUDE_DIR})
-    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS glog::glog)
   else()
     message(WARNING
         "glog is not found. Caffe2 will build without glog support but it is "
