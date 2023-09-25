@@ -124,6 +124,10 @@ void multi_tensor_apply(
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (size_t t = 0; t < n_tensors; t++) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
+    if (tensor_lists[0][t].numel() == 0) {
+      continue;
+    }
     tensorListMeta.scalar_vals[loc_tensor_info] = scalars[t].to<scalar_T>();
     tensorListMeta.numel_for_tensor[loc_tensor_info] =
         tensor_lists[0][t].numel();
@@ -211,6 +215,10 @@ void multi_tensor_apply(
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (size_t t = 0; t < n_tensors; t++) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
+    if (tensor_lists[0][t].numel() == 0) {
+      continue;
+    }
     tensorListMeta.numel_for_tensor[loc_tensor_info] =
         tensor_lists[0][t].numel();
     for (int d = 0; d < depth; d++) {
@@ -287,6 +295,10 @@ void multi_tensor_apply_for_fused_optimizer(
   int loc_block_info = 0;
   int loc_tensor_info = 0;
   for (const auto& tensor_index : c10::irange(num_tensors)) {
+    // short-circuit to avoid adding empty tensors to tensorListMeta
+    if (tensor_lists[0][tensor_index].numel() == 0) {
+      continue;
+    }
     tensorListMeta.state_steps_addresses[loc_tensor_info] =
         state_steps[tensor_index].const_data_ptr();
     tensorListMeta.numel_for_tensor[loc_tensor_info] =
