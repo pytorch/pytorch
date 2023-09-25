@@ -36,13 +36,13 @@ from unittest import mock
 import sympy
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 
 from . import config
-from .cuda_properties import current_device
 
 log = logging.getLogger(__name__)
 
@@ -180,8 +180,9 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
         device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
+    if device.type != "cpu" and device.index is None:
+        device_interface = get_interface_for_device(device.type)
+        return torch.device(device.type, index=device_interface.Worker.current_device())
     return device
 
 
@@ -278,26 +279,33 @@ def gen_gm_and_inputs(target, args, kwargs):
     return gm, a_args
 
 
-def synchronize():
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+def synchronize(device: str = "cuda"):
+    if device == "cpu":
+        return
+    device_interface = get_interface_for_device(device)
+    if device_interface.is_available():
+        device_interface.synchronize()
 
 
-def timed(model: Callable[..., Any], example_inputs, times: int = 1) -> float:
-    synchronize()
+def timed(
+    model: Callable[..., Any], example_inputs, times: int = 1, device: str = "cuda"
+) -> float:
+    synchronize(device)
     torch.manual_seed(1337)
     t0 = time.perf_counter()
     for _ in range(times):
         result = model(*example_inputs)
-        synchronize()
+        synchronize(device)
     t1 = time.perf_counter()
     # GC the result after timing
     assert result is not None
     return t1 - t0
 
 
-def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
-    timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
+def print_performance(
+    fn, args=(), times=10, repeat=10, baseline=1.0, device: str = "cuda"
+):
+    timings = torch.tensor([timed(fn, args, times, device) for _ in range(repeat)])
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
     return took
