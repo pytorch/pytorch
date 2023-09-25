@@ -1399,13 +1399,12 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
-            ctx = torch._custom_op.impl.get_ctx()
-            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
-                ctx.create_unbacked_symint(min=1)
-            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
-                ctx.create_unbacked_symint(min=-1)
+            ctx = torch.library.get_ctx()
+            ctx.new_dynamic_size(min=1)
+            with self.assertRaisesRegex(ValueError, "greater than or equal to 0"):
+                ctx.new_dynamic_size(min=-1)
             with self.assertRaisesRegex(ValueError, "SymInt"):
-                ctx.create_unbacked_symint(max=x.numel())
+                ctx.new_dynamic_size(max=x.numel())
             return torch.clone(x)
 
         x = torch.randn(2, 3, device="cpu")

@@ -83,13 +83,11 @@ def construct_meta_kernel(
         def error_on_ctx():
             raise RuntimeError(
                 f"Attempted to call get_ctx() for the meta implementation "
-                f"for {qualname}."
+                f"for {qualname} (implemented at {source})"
                 f"You have presumably called get_ctx() because the operator "
                 f"has a data-dependent output shape; if so, there is no "
                 f"such meta implementation and this error is the correct "
-                f"behavior. Otherwise, please remove the call to get_ctx() "
-                f"in the implementation registered with impl_abstract "
-                f"at {source}"
+                f"behavior."
             )
 
         with set_ctx_getter(error_on_ctx):
@@ -127,11 +125,11 @@ class AbstractImplCtx:
 
     def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
         warnings.warn(
-            "create_unbacked_symint is deprecated, please use create_dynamic_size instead"
+            "create_unbacked_symint is deprecated, please use new_dynamic_size instead"
         )
-        return self.create_dynamic_size(min=min, max=max)
+        return self.new_dynamic_size(min=min, max=max)
 
-    def create_dynamic_size(self, *, min=2, max=None) -> torch.SymInt:
+    def new_dynamic_size(self, *, min=0, max=None) -> torch.SymInt:
         """Constructs a new symint (symbolic int) representing a data-dependent value.
 
         This is useful for writing the abstract implementation (which is necessary
@@ -162,11 +160,11 @@ class AbstractImplCtx:
 
             >>> # Let's assume we've registered an operator,
             >>> # mylibrary::custom_nonzero, with data-dependent output shape
-            >>> @custom_nonzero.impl_abstract():
+            >>> @torch.library.impl_abstract("mylibrary::custom_nonzero"):
             >>> def custom_nonzero_abstract(x):
             >>>     # Number of nonzero-elements is data-dependent
             >>>     ctx = torch.library.get_ctx()
-            >>>     nnz = ctx.create_unbacked_symint()
+            >>>     nnz = ctx.new_dynamic_size()
             >>>     shape = [x.dim(), nnz]
             >>>     result = x.new_empty(shape, dtype=torch.long)
             >>>     return result
@@ -180,18 +178,18 @@ class AbstractImplCtx:
 
         if isinstance(min, torch.SymInt) or isinstance(max, torch.SymInt):
             raise ValueError(
-                f"ctx.create_dynamic_size(min={min}, max={max}): expected "
+                f"ctx.new_dynamic_size(min={min}, max={max}): expected "
                 f"min and max to be statically known ints but got SymInt. "
                 f"This is not supported."
             )
 
-        if min < 2:
+        if min < 0:
             raise ValueError(
-                f"ctx.create_dynamic_size(min={min}, ...): expected min to be "
-                f"greater than or equal to 2. PyTorch only supports new "
-                f"data-dependent sizes of >= 2"
+                f"ctx.new_dynamic_size(min={min}, ...): expected min to be "
+                f"greater than or equal to 0: this API can only create "
+                f"non-negative sizes."
             )
 
         result = self._shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes.constrain_range(result, min=2, max=max)
+        torch.fx.experimental.symbolic_shapes.constrain_range(result, min=0, max=max)
         return result

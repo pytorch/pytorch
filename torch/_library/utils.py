@@ -1,14 +1,14 @@
+import dataclasses
 import inspect
 import sys
 from typing import Callable
 
 
+@dataclasses.dataclass
 class Kernel:
     """Models a (function, source location)"""
-
-    def __init__(self, func: Callable, source: str):
-        self.func: Callable = func
-        self.source: str = source
+    func: Callable
+    source: str
 
     def __call__(self, *args, **kwargs):
         return self.func(*args, **kwargs)

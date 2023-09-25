@@ -236,7 +236,7 @@ def impl_abstract(name, func=None, *, lib=None, _stacklevel=1):
         >>>     # we use the ctx object to construct a new symint that
         >>>     # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
-        >>>     nnz = ctx.create_dynamic_size()
+        >>>     nnz = ctx.new_dynamic_size()
         >>>     shape = [x.dim(), nnz]
         >>>     result = x.new_empty(shape, dtype=torch.long)
         >>>     return result
