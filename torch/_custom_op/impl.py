@@ -1,7 +1,6 @@
 import dataclasses
 import functools
 import inspect
-import sys
 import typing
 import weakref
 
@@ -218,8 +217,7 @@ class CustomOp:
                 f"that already has a {kind} impl registered from Python at "
                 f"{location}. This is not supported."
             )
-        frame = inspect.getframeinfo(sys._getframe(stacklevel))
-        location = f"{frame.filename}:{frame.lineno}"
+        location = torch._library.utils.get_source(stacklevel + 1)
         self._impls[kind] = FuncAndLocation(func, location)
 
     def _get_impl(self, kind):
