@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -590,8 +591,8 @@ def run_test(
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(
         dir=REPO_ROOT / "test" / "test-reports",
-        prefix="{}_".format(test_file.replace("\\", "-").replace("/", "-")),
-        suffix=".log",
+        prefix=f"{sanitize_file_name(str(test_module))}_",
+        suffix="_toprint.log",
     )
     os.close(log_fd)
 
@@ -920,33 +921,38 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
-def print_log_file(test: str, file_path: str, failed: bool) -> None:
-    num_lines = sum(1 for _ in open(file_path, "rb"))
+def sanitize_file_name(file: str):
+    return file.replace("\\", "-").replace("/", "-").replace(" ", "_")
+
+
+def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
+    verbose = "VERBOSE_LOGS=1" in os.environ.get("PR_BODY", "")
+    if not failed and not verbose:
+        # If not verbose + success, print only what tests ran, rename the log
+        # file so it doesn't get printed later, and do not remove logs.
+        new_file = (
+            "test"
+            / "test-reports"
+            / sanitize_file_name(f"{str(test)}_{os.urandom(8).hex()}_.log")
+        )
+        os.rename(file_path, REPO_ROOT / new_file)
+        print(
+            f"{test} was successful, full logs can be found in artifacts with path {new_file}"
+        )
+        with open(REPO_ROOT / new_file, "rb") as f:
+            for line in f.readlines():
+                if re.search("Running .* items in this shard:", line):
+                    print_to_stderr(line.strip())
+        return
+    # Test failure or verbose logs: print entire file and then remove it
     test = str(test)
-    n = 100
     with open(file_path, "rb") as f:
         print_to_stderr("")
-        if failed:
-            if n < num_lines:
-                print_to_stderr(
-                    f"Expand the folded group to see the beginning of the log file of {test}"
-                )
-                print_to_stderr(
-                    f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})"
-                )
-                for _ in range(num_lines - n):
-                    print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
-                print_to_stderr("##[endgroup]")
-            for _ in range(min(n, num_lines)):
-                print_to_stderr(next(f).decode("utf-8", errors="ignore").rstrip())
-            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
-        else:
-            print_to_stderr(f"Expand the folded group to see the log file of {test}")
-            print_to_stderr(f"##[group]PRINTING LOG FILE of {test} ({file_path})")
-            print_to_stderr(f.read().decode("utf-8", errors="ignore"))
-            print_to_stderr("##[endgroup]")
-            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
+        print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
+        print_to_stderr(f.read().decode("utf-8", errors="ignore"))
+        print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         print_to_stderr("")
+        os.remove(file_path)
 
 
 def get_pytest_args(
