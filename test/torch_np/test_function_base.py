@@ -1,13 +1,23 @@
 # Owner(s): ["module: dynamo"]
 
+from unittest import expectedFailure as xfail
+
 import pytest
 
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_array_equal, assert_equal
 
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
-class TestArange:
+
+@instantiate_parametrized_tests
+class TestArange(TestCase):
     def test_infinite(self):
         assert_raises(
             (RuntimeError, ValueError), np.arange, 0, np.inf
@@ -31,7 +41,7 @@ class TestArange:
         assert_raises(TypeError, np.arange, step=3)
         assert_raises(TypeError, np.arange, dtype="int64")
 
-    @pytest.mark.xfail(reason="XXX: arange(start=0, stop, step=1)")
+    @xfail  # (reason="XXX: arange(start=0, stop, step=1)")
     def test_require_range_2(self):
         assert_raises(TypeError, np.arange, start=4)
 
@@ -45,7 +55,7 @@ class TestArange:
         assert len(keyword_start_stop) == 6
         assert_array_equal(keyword_stop, keyword_zerotostop)
 
-    @pytest.mark.xfail(reason="XXX: arange(..., dtype=bool)")
+    @xfail  # (reason="XXX: arange(..., dtype=bool)")
     def test_arange_booleans(self):
         # Arange makes some sense for booleans and works up to length 2.
         # But it is weird since `arange(2, 4, dtype=bool)` works.
@@ -66,7 +76,7 @@ class TestArange:
         with pytest.raises(TypeError):
             np.arange(3, dtype="bool")
 
-    @pytest.mark.parametrize("which", [0, 1, 2])
+    @parametrize("which", [0, 1, 2])
     def test_error_paths_and_promotion(self, which):
         args = [0, 10, 2]  # start, stop, and step
         args[which] = np.float64(2.0)  # should ensure float64 output
@@ -79,7 +89,7 @@ class TestArange:
             np.arange(*args)
 
 
-class TestAppend:
+class TestAppend(TestCase):
     # tests taken from np.append docstring
     def test_basic(self):
         result = np.append([1, 2, 3], [[4, 5, 6], [7, 8, 9]])
@@ -94,6 +104,4 @@ class TestAppend:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
-
     run_tests()

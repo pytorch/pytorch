@@ -145,6 +145,14 @@ class C10_API SymInt {
   // number can be used to diagnose overspecialization.
   int64_t guard_int(const char* file, int64_t line) const;
 
+  // Insert a guard that this SymInt must be size-like, returning true if
+  // the integer actually is >= 0.  Unlike manually performing a >= 0 test,
+  // if the SymInt in question is an unbacked SymInt (or, potentially in the
+  // future, if it contains unbacked SymInts), we will also treat the
+  // unbacked SymInt as statically testing >= 2 (which will prevent us from
+  // choking on, e.g., contiguity chekcs.)
+  bool expect_size(const char* file, int64_t line) const;
+
   // Distinguish actual symbolic values from constants stored on the heap
   bool is_symbolic() const {
     return is_heap_allocated() &&
