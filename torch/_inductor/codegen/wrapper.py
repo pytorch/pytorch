@@ -144,7 +144,7 @@ class MemoryPlanningState:
 @dataclasses.dataclass
 class EnterCudaDeviceContextManagerLine:
     device_idx: int
-    first_time: bool
+    last_seen_device_guard_index: Optional[int]
 
     def codegen(self, code: IndentedBuffer, device_cm_stack: contextlib.ExitStack):
         if V.graph.cpp_wrapper:
@@ -152,19 +152,23 @@ class EnterCudaDeviceContextManagerLine:
             if V.graph.aot_mode:
                 # In AOT mode, we have a stream provided as a param. A stream is
                 # associated with a device, so we never expect the device to change.
-                assert self.first_time
                 # CUDAStreamGuard sets the stream and the device.
-                if config.aot_inductor.abi_compatible:
-                    code.writeline(
-                        "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
-                    )
+                if self.last_seen_device_guard_index is None:
+                    if config.aot_inductor.abi_compatible:
+                        code.writeline(
+                            "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
+                        )
+                    else:
+                        code.writeline(
+                            "at::cuda::CUDAStreamGuard stream_guard("
+                            + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                        )
                 else:
-                    code.writeline(
-                        "at::cuda::CUDAStreamGuard stream_guard("
-                        + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
-                    )
+                    assert (
+                        self.last_seen_device_guard_index == self.device_idx
+                    ), "AOTInductor only supports running on one CUDA device"
             else:
-                if self.first_time:
+                if self.last_seen_device_guard_index is None:
                     code.writeline(
                         f"at::cuda::CUDAGuard device_guard({self.device_idx});"
                     )
@@ -287,7 +291,7 @@ class WrapperCodeGen(CodeGen):
         self.optional_tensor_str = "None"
         self.size = "size()"
         self.stride = "stride()"
-        self.first_device_guard = True
+        self.last_seen_device_guard_index = None
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
 
@@ -416,9 +420,11 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_device_guard_enter(self, device_idx):
         self.writeline(
-            EnterCudaDeviceContextManagerLine(device_idx, self.first_device_guard)
+            EnterCudaDeviceContextManagerLine(
+                device_idx, self.last_seen_device_guard_index
+            )
         )
-        self.first_device_guard = False
+        self.last_seen_device_guard_index = device_idx
 
     def codegen_device_guard_exit(self):
         self.writeline(ExitCudaDeviceContextManagerLine())
@@ -636,6 +642,9 @@ class WrapperCodeGen(CodeGen):
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
         return f"reinterpret_tensor({name}, {size}, {stride}, {offset})"
+
+    def codegen_device_copy(self, src, dst):
+        self.writeline(f"{dst}.copy_({src})")
 
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
@@ -1587,6 +1596,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args = [name, size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
+
+    def codegen_device_copy(self, src, dst):
+        if config.aot_inductor.abi_compatible:
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_tensor_copy_({src}, {dst}));"
+            )
+        else:
+            self.writeline(f"{dst}.copy_({src});")
 
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
