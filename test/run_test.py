@@ -927,6 +927,7 @@ def sanitize_file_name(file: str):
 
 def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
     verbose = "VERBOSE_LOGS=1" in os.environ.get("PR_BODY", "")
+    test = str(test)
     if not failed and not verbose:
         # If not verbose + success, print only what tests ran, rename the log
         # file so it doesn't get printed later, and do not remove logs.
@@ -945,7 +946,6 @@ def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
                     print_to_stderr(line.strip())
         return
     # Test failure or verbose logs: print entire file and then remove it
-    test = str(test)
     with open(file_path, "rb") as f:
         print_to_stderr("")
         print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
