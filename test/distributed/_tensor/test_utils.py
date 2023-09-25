@@ -8,7 +8,7 @@ from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
-from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed._tensor.placement_types import Replicate, Shard
 
 from torch.testing._internal.common_utils import run_tests
@@ -21,7 +21,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 class UtilTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 8
+        return 4
 
     @with_comms
     def test_compute_local_shape_2d_uneven(self):
@@ -78,6 +78,27 @@ class UtilTest(DTensorTestBase):
                 dtensor.to_local(),
                 global_tensor[dim0_start:dim0_end],
             )
+
+    @with_comms
+    def test_compute_local_shape_and_global_offset_1D_uneven(self):
+        one_d_placements = ((Shard(0)),)
+        mesh_shape = (self.world_size,)
+        device_mesh = init_device_mesh(self.device_type, mesh_shape)
+
+        global_tensor = torch.rand(10, 2)
+        global_shape = global_tensor.size()
+
+        dtensor = distribute_tensor(global_tensor, device_mesh, one_d_placements)
+        local_size, global_offset = compute_local_shape_and_global_offset(
+            dtensor.shape, device_mesh, one_d_placements
+        )
+
+        import torch.distributed as dist
+        print(f"rank:{dist.get_rank()}, global_shape:{global_shape}, device_mesh:{device_mesh}, one_d_placements:{one_d_placements}, sizes:{local_size}, offsets:{global_offset}")
+
+
+
+
 
     @with_comms
     def test_compute_local_shape_and_global_offset_2D(self):

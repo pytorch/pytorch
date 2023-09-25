@@ -102,8 +102,8 @@ class DefaultSavePlanner(SavePlanner):
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        if self.dedup_replicated_tensors:
-            all_plans = dedup_tensors(all_plans)
+        # if self.dedup_replicated_tensors:
+        #     all_plans = dedup_tensors(all_plans)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 
@@ -402,6 +402,7 @@ def _validate_global_plan(
     global_plan: List[SavePlan], metadata: Metadata
 ) -> bool:
     all_good = True
+    print(f"global_plan:{global_plan}")
     for key, value in metadata.state_dict_metadata.items():
         if isinstance(value, BytesStorageMetadata):
             continue

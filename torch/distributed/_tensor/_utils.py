@@ -107,6 +107,9 @@ def compute_local_shape_and_global_offset(
                 else:
                     global_offset[shard_dim] += local_offset[shard_dim]
 
+        import torch.distributed as dist
+        # if dist.get_rank() == 3:
+        #     print(f"rank 3: local_shape{local_shape}, global_offset:{global_offset}")
         return tuple(local_shape), tuple(global_offset)
 
 

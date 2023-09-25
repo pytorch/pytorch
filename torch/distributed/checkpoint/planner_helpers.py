@@ -59,9 +59,11 @@ def _sharded_tensor_metadata(
 
 def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
     sizes, offsets = compute_local_shape_and_global_offset(
-        tensor.shape, tensor.device_mesh, tensor.placements
+        tensor.size(), tensor.device_mesh, tensor.placements
     )
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
+    import torch.distributed as dist
+    # print(f"rank:{dist.get_rank()}, tensor.shape:{tensor.shape}, tensor.device_mesh:{tensor.device_mesh}, tensor.placements:{tensor.placements}, sizes:{sizes}, offsets:{offsets}")
 
     return WriteItem(
         index=MetadataIndex(fqn, offsets),
