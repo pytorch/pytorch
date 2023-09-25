@@ -12,6 +12,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/max_pool3d_with_indices_backward_native.h>
 #include <ATen/ops/max_pool3d_with_indices_native.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at {
