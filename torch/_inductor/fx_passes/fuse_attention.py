@@ -345,7 +345,6 @@ def _sfdp_params_check(match):
             or query.device != attn_mask.device
         ):
             return False
-    print("--- pattern match ----", flush=True)
     return True
 
 
