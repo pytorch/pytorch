@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <algorithm>
-#include <clocale>
 #include <cstdlib>
 #include <memory>
 #include <sstream>

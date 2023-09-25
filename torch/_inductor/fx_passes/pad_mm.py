@@ -6,6 +6,7 @@ import torch
 from torch import Tensor
 from torch._inductor import utils
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._triton import has_triton
 
 from ..pattern_matcher import (
     inference_graph,
@@ -219,7 +220,7 @@ def should_pad_bench_key(
 def should_pad_bench(
     mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
-    if not utils.has_triton():
+    if not has_triton():
         return False
 
     do_bench = functools.partial(
