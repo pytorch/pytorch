@@ -56,7 +56,7 @@ from ..source import (
     TupleIteratorGetItemSource,
 )
 
-from ..stream import RuntimeInterfaceObject
+from ..stream import StreamInterfaceObject
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -1506,14 +1506,14 @@ def wrap_fx_proxy_cls(
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, StreamBase)
-    ) or proxy.node.target in RuntimeInterfaceObject.get_all_methods("current_stream"):
+    ) or proxy.node.target in StreamInterfaceObject.get_all_methods("current_stream"):
         proxy.node.meta["example_value"] = example_value
         return StreamVariable(
             proxy, example_value, example_value.device.type, **options
         )
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, EventBase)
-    ) or proxy.node.target in RuntimeInterfaceObject.get_all_methods("create_event"):
+    ) or proxy.node.target in StreamInterfaceObject.get_all_methods("create_event"):
         proxy.node.meta["example_value"] = example_value
         return EventVariable(proxy, example_value, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
