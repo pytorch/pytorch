@@ -110,6 +110,16 @@ def _dtype_for_scalar(py_type):
     }[py_type]
 
 
+def is_float_or_fp_tensor(x):
+    try:
+        # x a python scalar
+        dtyp = _dtype_for_scalar(type(x))
+    except KeyError:
+        # x a tensor
+        dtyp = x.dtype
+    return dtyp.is_floating_point
+
+
 def _category(dtype):
     return {
         torch.bool: 0,

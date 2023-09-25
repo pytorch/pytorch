@@ -339,9 +339,9 @@ def logspace(
 
 
 def arange(
-    start: Optional[ArrayLike] = None,
-    stop: Optional[ArrayLike] = None,
-    step: Optional[ArrayLike] = 1,
+    start: Optional[ArrayLikeOrScalar] = None,
+    stop: Optional[ArrayLikeOrScalar] = None,
+    step: Optional[ArrayLikeOrScalar] = 1,
     dtype: Optional[DTypeLike] = None,
     *,
     like: NotImplementedType = None,
@@ -359,10 +359,11 @@ def arange(
 
     # the dtype of the result
     if dtype is None:
-        dtype = _dtypes_impl.default_dtypes().int_dtype
-        # XXX: default values do not get normalized
-        start, stop, step = (_util._coerce_to_tensor(x) for x in (start, stop, step))
-        target_dtype = _dtypes_impl.result_type_impl(start, stop, step)
+        target_dtype = (
+            _dtypes_impl.default_dtypes().float_dtype
+            if any(_dtypes_impl.is_float_or_fp_tensor(x) for x in (start, stop, step))
+            else _dtypes_impl.default_dtypes().int_dtype
+        )
     else:
         target_dtype = dtype
 
