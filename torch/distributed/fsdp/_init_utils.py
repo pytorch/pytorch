@@ -36,7 +36,6 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
     TrainingState,
 )
-from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -55,7 +54,6 @@ from torch.distributed.fsdp.flat_param import (
     HandleShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import _Policy
-from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
 from torch.utils.hooks import RemovableHandle
 
@@ -509,27 +507,6 @@ def _init_prefetching_state(
 
 
 @no_type_check
-def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
-    # TODO: we need to add additional check once we support FSDP + PiPPy.
-    # This check is currently sufficient, since we only support FSDP + TP.
-    if device_mesh:
-        state._enable_extension = (
-            mesh_resources.get_parent_mesh(state._device_mesh) is not None
-        )
-
-        if state._enable_extension:
-            try:
-                _set_fsdp_extensions(DTensorExtensions())
-            except BaseException as e:
-                warnings.warn(
-                    "PyTorch doesn't have TensorFlattener extension point available"
-                    "2D parallelism won't work with FSDP"
-                    f"exception: {e}"
-                )
-    return state
-
-
-@no_type_check
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
@@ -538,6 +515,12 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
 
+    # TODO: we need to add additional check once we support FSDP + PiPPy.
+    # This check is currently sufficient, since we only support FSDP + TP.
+    if hasattr(state, "_device_mesh"):
+        state._enable_extension = (
+            mesh_resources.get_parent_mesh(state._device_mesh) is not None
+        )
     return state
 
 
