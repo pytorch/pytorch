@@ -248,6 +248,61 @@ inline float flag_to_float_scalar(T src) {
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 
+inline at::vec::Vectorized<float> masked_load(const float* src, at::vec::Vectorized<float> mask) {
+  at::vec::Vectorized<float> zero_vec(0);
+# if defined(CPU_CAPABILITY_AVX512)
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+    return _mm512_mask_loadu_ps(zero_vec, mmask, src);
+# else // AVX2
+    auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+    return _mm256_maskload_ps(src, mmask);
+# endif
+}
+
+template <typename T>
+typename std::enable_if<std::is_same<T, bfloat16>::value || std::is_same<T, half>::value, at::vec::Vectorized<T>>::type
+inline masked_load(const T* src, at::vec::Vectorized<float> mask) {
+# if defined(CPU_CAPABILITY_AVX512)
+  auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+  auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+  auto zero = _mm256_set1_epi16(0);
+  auto temp = _mm256_mask_loadu_epi16(zero, mmask, src);
+  return _mm512_inserti32x8(_mm512_castsi256_si512(temp), zero, 1);
+# else // AVX2
+  auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+  auto mmask_vec = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+  __at_align__ uint32_t mmask[8];
+  _mm256_storeu_si256(reinterpret_cast<__m256i*>(mmask), mmask_vec);
+  __at_align__ uint16_t result[16];
+  for (auto i = 0; i < 8; i++) {
+    result[i] = mmask[i] == 0xFFFFFFFF ? src[i].x: uint16_t(0);
+  }
+  return at::vec::Vectorized<T>::loadu(result);
+# endif
+}
+
+inline at::vec::Vectorized<uint8_t> masked_load(const uint8_t* src, at::vec::Vectorized<float> mask) {
+# if defined(CPU_CAPABILITY_AVX512)
+    auto all_ones = _mm512_set1_epi32(0xFFFFFFFF);
+    auto mmask = _mm512_cmp_epi32_mask(_mm512_castps_si512(mask), all_ones, _MM_CMPINT_EQ);
+    auto zero = _mm_set1_epi8(0);
+    auto temp = _mm_mask_loadu_epi8(zero, mmask, src);
+    return _mm512_inserti64x2(_mm512_set1_epi32(0), temp, 0);
+# else // AVX2
+    auto all_ones = _mm256_set1_epi32(0xFFFFFFFF);
+    auto mmask_vec = _mm256_cmpeq_epi32(_mm256_castps_si256(mask), all_ones);
+    __at_align__ uint32_t mmask[8];
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(mmask), mmask_vec);
+    __at_align__ uint8_t result[32];
+    for (auto i = 0; i < 8; i++) {
+      result[i] = mmask[i] == 0xFFFFFFFF ? src[i]: uint8_t(0);
+    }
+    return at::vec::Vectorized<uint8_t>::loadu(result);
+# endif
+}
+
 template <typename T>
 inline at::vec::Vectorized<float> flag_to_float_vec(const T* src) {
   __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];

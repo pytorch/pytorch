@@ -195,6 +195,10 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         else:
             return True
 
+    if isinstance(desired, str) and isinstance(actual, str):
+        assert actual == desired
+        return
+
     if isinstance(desired, dict):
         if not isinstance(actual, dict):
             raise AssertionError(repr(type(actual)))
@@ -209,6 +213,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         for k in range(len(desired)):
             assert_equal(actual[k], desired[k], f"item={k!r}\n{err_msg}", verbose)
         return
+
     from torch._numpy import imag, iscomplexobj, isscalar, ndarray, real, signbit
 
     if isinstance(actual, ndarray) or isinstance(desired, ndarray):
@@ -509,9 +514,8 @@ def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True
         return
     # Normalized the numbers to be in range (-10.0,10.0)
     # scale = float(pow(10,math.floor(math.log10(0.5*(abs(desired)+abs(actual))))))
-    with np.errstate(invalid="ignore"):
-        scale = 0.5 * (np.abs(desired) + np.abs(actual))
-        scale = np.power(10, np.floor(np.log10(scale)))
+    scale = 0.5 * (np.abs(desired) + np.abs(actual))
+    scale = np.power(10, np.floor(np.log10(scale)))
     try:
         sc_desired = desired / scale
     except ZeroDivisionError:
@@ -1411,8 +1415,8 @@ def assert_array_max_ulp(a, b, maxulp=1, dtype=None):
     ret = nulp_diff(a, b, dtype)
     if not np.all(ret <= maxulp):
         raise AssertionError(
-            "Arrays are not almost equal up to {:g} "
-            "ULP (max difference is {:g} ULP)".format(maxulp, np.max(ret))
+            f"Arrays are not almost equal up to {maxulp:g} "
+            f"ULP (max difference is {np.max(ret):g} ULP)"
         )
     return ret
 

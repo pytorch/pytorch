@@ -524,9 +524,9 @@ private:
 // native function counterparts (at native/SpectralOps.cpp), i.e.,
 // _cufft_get_plan_cache_max_size, _cufft_set_plan_cache_max_size
 // _cufft_get_plan_cache_size, and _cufft_clear_plan_cache.
-int64_t cufft_get_plan_cache_max_size_impl(int64_t device_index);
-void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size);
-int64_t cufft_get_plan_cache_size_impl(int64_t device_index);
-void cufft_clear_plan_cache_impl(int64_t device_index);
+int64_t cufft_get_plan_cache_max_size_impl(DeviceIndex device_index);
+void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_size);
+int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index);
+void cufft_clear_plan_cache_impl(DeviceIndex device_index);
 
 }}} // namespace at::native::detail

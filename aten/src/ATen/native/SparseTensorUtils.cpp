@@ -123,7 +123,8 @@ Tensor zeros_like_with_indices(const Tensor& t) {
       t.sizes(),
       t._indices().clone(),
       at::zeros({1}, t._values().options()).expand_as(t._values()),
-      t.options())._coalesced_(t.is_coalesced());
+      t.options(),
+      t.is_coalesced());
 }
 
 }} // namespace at::sparse

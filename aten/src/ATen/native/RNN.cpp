@@ -91,7 +91,8 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   };
   return input.options().backend() == at::Backend::CPU &&
       is_cpu_backend(params) && is_cpu_backend(hx) &&
-      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16);
+      (input.scalar_type() == kFloat || input.scalar_type() == kBFloat16) &&
+      input.numel() != 0;
 #endif
   return false;
 }
@@ -1551,7 +1552,7 @@ std::tuple<Tensor, Tensor> lstm_cell(
   check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
-  check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 0);
+  check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
   static at::Tensor undefined;
   return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }

@@ -111,23 +111,6 @@ class RandomValueSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
-
-
-@dataclasses.dataclass(frozen=True)
 class GlobalSource(Source):
     global_name: str
 
@@ -256,6 +239,21 @@ class NegateSource(ChainedSource):
     def name(self):
         # NB: use method call so that function stripping regexes work
         return f"{self.base.name()}.__neg__()"
+
+
+@dataclasses.dataclass(frozen=True)
+class ConvertIntSource(ChainedSource):
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        return self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"cast_symbool_to_symint_guardless({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)
