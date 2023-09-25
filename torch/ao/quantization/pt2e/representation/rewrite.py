@@ -85,6 +85,72 @@ def _reference_quantized_linear(
     return out_i8
 
 
+_DYNAMIC_QUANTIZED_LINEAR_EXAMPLE_INPUTS = (
+    torch.randn((2, 5), dtype=torch.float),
+    -128,
+    127,
+    torch.finfo(torch.float32).eps,
+    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+    torch.randn(1, dtype=torch.float),
+    torch.zeros(1, dtype=torch.int),
+    torch.tensor([-127], dtype=torch.int),
+    torch.tensor([127], dtype=torch.int),
+    torch.randn(1, dtype=torch.float),
+)
+
+
+def _qdq_dynamic_quantized_linear(
+    x_fp32, x_quant_min, x_quant_max, x_eps,
+    weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max,
+    bias_fp32,
+):
+    x_scale, x_zero_point = torch.ops.quantized_decomposed.choose_qparams(x_fp32, x_quant_min, x_quant_max, x_eps, torch.int8)
+    x_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
+        x_fp32, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
+    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
+    weight_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(
+        weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max, torch.int8)
+    out_fp32 = torch.ops.aten.linear.default(x_fp32, weight_fp32, bias_fp32)
+    return out_fp32
+
+def _reference_dynamic_quantized_linear(
+    x_fp32, x_quant_min, x_quant_max, x_eps,
+    weight_i8, weight_scale, weight_zero_point, weight_quant_min, weight_quant_max,
+    bias_fp32,
+):
+    x_scale, x_zero_point = torch.ops.quantized_decomposed.choose_qparams(x_fp32, x_quant_min, x_quant_max, x_eps, torch.int8)
+    # decomposed representation for quantize_per_tensor
+    # TODO: use out_dtype(mul, ...) here when the op is ready
+    x_fp32 = x_fp32 / x_scale  # fp32
+    # round modes might be different here
+    # pytorch is rounding to even, which is also common for most of the backends
+    x_fp32 = torch.round(x_fp32)  # fp32
+    x_i32 = x_fp32.to(dtype=torch.int32)  # int32
+    x_i32 = x_i32 + x_zero_point  # int32
+    # clamp works for fp32, int32 and int8 dtypes
+    x_i32 = torch.clamp(x_i32, x_quant_min, x_quant_max)  # int32
+    x_i8 = x_i32.to(dtype=torch.int8)
+
+    weight_i8 = torch.ops.aten.clamp(weight_i8, weight_quant_min, weight_quant_max)
+
+    x_i16 = x_i8.to(torch.int16)
+    weight_i16 = weight_i8.to(torch.int16)
+    # always set bias to None so that the same representation can work for the case
+    # no matter if bias_scale == x_scale * weight_scale or not
+    acc_i32 = out_dtype(
+        torch.ops.aten.linear.default,
+        torch.int32,
+        x_i16 - x_zero_point,
+        weight_i16 - weight_zero_point,
+        None)
+    bias_scale = x_scale * weight_scale
+    bias_i32 = out_dtype(torch.ops.aten.div.Tensor, torch.int32, bias_fp32, bias_scale)
+    acc_i32 = acc_i32 + bias_i32
+    out_fp32 = acc_i32 * (x_scale * weight_scale)
+    return out_fp32
+
+
 _QUANTIZED_CONV2d_EXAMPLE_INPUTS = (
     torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
     torch.randn(1, dtype=torch.float),
@@ -315,38 +381,6 @@ def _reference_quantized_max_pool2d(
     out_i8 = out_fp32.to(torch.int8)
     return out_i8
 
-_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS = (
-    torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
-    torch.randn(1, dtype=torch.float),
-    torch.zeros(1, dtype=torch.int),
-    torch.tensor([-128], dtype=torch.int),
-    torch.tensor([127], dtype=torch.int),
-    torch.randn(1, dtype=torch.float),
-    torch.zeros(1, dtype=torch.int),
-    torch.tensor([-128], dtype=torch.int),
-    torch.tensor([127], dtype=torch.int),
-)
-
-def _qdq_quantized_adaptive_avg_pool2d(
-        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
-    output_size = (3, 3)
-    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
-    out_fp32 = torch.ops.aten.adaptive_avg_pool2d(x_fp32, output_size)
-    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
-        out_fp32, out_scale, out_zero_point, out_quant_min, out_quant_max, torch.int8)
-    return out_i8
-
-def _reference_quantized_adaptive_avg_pool2d(
-        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
-    output_size = (3, 3)
-    x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
-    x_i32 = x_i8.to(torch.int32)
-    out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
-    out_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, out_i32, (x_scale / out_scale)) + out_zero_point
-    out_i32 = torch.clamp(out_i32, out_quant_min, out_quant_max)
-    out_i8 = out_i32.to(torch.int8)
-    return out_i8
-
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
     torch.randn(1, 3, 3, 3, dtype=torch.float),
     torch.randn(1, dtype=torch.float),
@@ -466,6 +500,27 @@ class _RewriteInfo:
 
 _REWRITE_INFO_LIST = [
     _RewriteInfo(
+        _DYNAMIC_QUANTIZED_LINEAR_EXAMPLE_INPUTS,
+        _qdq_dynamic_quantized_linear,
+        _reference_dynamic_quantized_linear,
+        partial(
+            _replace_literals_with_existing_placeholders,
+            literal_to_ph_idx={
+                -128: 1,
+                127: 2,
+                torch.finfo(torch.float32).eps: 3
+            }
+        ),
+        partial(
+            _replace_literals_with_existing_placeholders,
+            literal_to_ph_idx={
+                -128: 1,
+                127: 2,
+                torch.finfo(torch.float32).eps: 3
+            }
+        ),
+    ),
+    _RewriteInfo(
         _QUANTIZED_LINEAR_EXAMPLE_INPUTS,
         _qdq_quantized_linear,
         _reference_quantized_linear,
@@ -493,13 +548,6 @@ _REWRITE_INFO_LIST = [
         _QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS,
         _qdq_quantized_max_pool2d,
         _reference_quantized_max_pool2d,
-        _replace_literals_with_new_placeholders,
-        _replace_literals_with_new_placeholders
-    ),
-    _RewriteInfo(
-        _QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS,
-        _qdq_quantized_adaptive_avg_pool2d,
-        _reference_quantized_adaptive_avg_pool2d,
         _replace_literals_with_new_placeholders,
         _replace_literals_with_new_placeholders
     ),

@@ -20,6 +20,7 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <ATen/dlpack.h>
@@ -123,7 +124,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     return ScalarType::Long;
   }
   if (torch::is_symfloat(obj)) {
-    return ScalarType::Double;
+    return torch::tensors::get_default_scalar_type();
   }
 #ifdef USE_NUMPY
   if (is_numpy_available()) {
@@ -211,7 +212,15 @@ void recursive_store(
     if (is_symfloat) {
       auto new_obj = py::reinterpret_borrow<py::object>(obj);
       auto val = new_obj.cast<c10::SymFloat>();
-      *(double*)data = val.guard_float(__FILE__, __LINE__);
+      const double double_val = val.guard_float(__FILE__, __LINE__);
+      switch (elementSize) {
+        case 8:
+          *reinterpret_cast<double*>(data) = double_val;
+          break;
+        case 4:
+          *reinterpret_cast<float*>(data) = static_cast<float>(double_val);
+          break;
+      }
       return;
     }
     if (is_symint) {
@@ -385,10 +394,9 @@ Tensor internal_new_from_data(
       at::tracer::impl::NoTracerDispatchMode tracer_guard;
 
       if (isStorage(data)) {
-        ScalarType storage_scalar_type{ScalarType::Undefined};
-        bool is_typed_storage = false;
-        Storage storage =
-            createStorageGetType(data, storage_scalar_type, is_typed_storage);
+        auto [storage, storage_scalar_type, is_typed_storage] =
+            createStorageGetType(data);
+
         TORCH_CHECK(
             !is_typed_storage || storage_scalar_type == scalar_type,
             "Expected a Storage of type ",
@@ -1710,7 +1718,9 @@ Tensor asarray(
       if (wrong_device || wrong_dtype) {
         tensor = tensor.to(
             device.value_or(tensor.device()),
-            dtype.value_or(tensor.scalar_type()));
+            dtype.value_or(tensor.scalar_type()),
+            /*non_blocking=*/false,
+            /*copy=*/force_copy);
       } else {
         tensor = tensor.clone();
       }

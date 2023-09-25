@@ -49,7 +49,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64
       DESIRED_PYTHON: "3.8"
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -71,7 +71,7 @@ jobs:
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -109,7 +109,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64
       DESIRED_PYTHON: "3.9"
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -131,7 +131,7 @@ jobs:
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -169,7 +169,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64
       DESIRED_PYTHON: "3.10"
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -191,7 +191,7 @@ jobs:
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -229,7 +229,7 @@ jobs:
       GPU_ARCH_TYPE: cpu-aarch64
       DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64
       DESIRED_PYTHON: "3.11"
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -251,7 +251,7 @@ jobs:
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
-      runs_on: linux.t4g.2xlarge
+      runs_on: linux.arm64.2xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
