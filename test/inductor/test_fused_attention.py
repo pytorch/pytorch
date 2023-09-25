@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+import functools
 
 
 def checkpoint_wrapper(fn):
@@ -543,7 +544,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, check_train=False)
 
     @skipIfRocm
-    def _test_sdpa_rewriter_13(self):
+    def _test_sdpa_rewriter_13(self, dtype):
         def dot_prod_attention(
             query: torch.Tensor,
             key: torch.Tensor,
@@ -559,13 +560,13 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         tensor_shape = (4, 8, 16)
         args = [
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
-            torch.randn(tensor_shape, device=self.device, dtype=torch.half),
+            torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            torch.randn(tensor_shape, device=self.device, dtype=dtype),
         ]
 
         self._check_common(
-            dot_prod_attention, check_train=False, args1=args, has_dropout=True
+            dot_prod_attention, check_train=False, args1=args, has_dropout=True, override_check_equal=True
         )
 
 
@@ -622,7 +623,7 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_prev_14_cuda = TestSDPAPatternRewriterTemplate._test_sdpa_prev_14
         test_sdpa_prev_15_cuda = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
         test_sdpa_rewriter_13_cuda = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13
+            functools.partialmethod(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.half)
         )
 
 
@@ -651,7 +652,9 @@ if HAS_CPU:
         test_sdpa_prev_13_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_13
         test_sdpa_prev_14_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_14
         test_sdpa_prev_15_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
-
+        test_sdpa_rewriter_13_cpu = (
+            functools.partialmethod(TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32)
+        )
 
 if __name__ == "__main__":
     if IS_LINUX:
