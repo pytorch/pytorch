@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from typing import Any, Tuple, cast, Dict, List, NamedTuple, Optional, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import pkg_resources
 
@@ -40,7 +40,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.export_test_times import TEST_TIMES_FILE
-from tools.stats.upload_metrics import emit_metric, add_global_metric
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
     AggregatedHeuristics,
     get_test_prioritizations,
@@ -1432,6 +1432,7 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
         )
         return test_times_file["default"]["default"]
 
+
 def get_sharding_opts(options) -> Tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
@@ -1443,6 +1444,7 @@ def get_sharding_opts(options) -> Tuple[int, int]:
         ), "Selected shard must be less than or equal to total number of shards"
 
     return (which_shard, num_shards)
+
 
 def do_sharding(
     options,

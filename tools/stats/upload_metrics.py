@@ -58,7 +58,9 @@ class EnvVarMetric:
             return self.type_conversion_fn(value)
         return value
 
-global_metrics : Dict[str, Any] = {}
+
+global_metrics: Dict[str, Any] = {}
+
 
 def add_global_metric(metric_name: str, metric_value: Any) -> None:
     """
@@ -67,6 +69,7 @@ def add_global_metric(metric_name: str, metric_value: Any) -> None:
     overwrite this value.
     """
     global_metrics[metric_name] = metric_value
+
 
 def emit_metric(
     metric_name: str,

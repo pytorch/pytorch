@@ -4,7 +4,7 @@ import unittest
 from typing import Any, Dict
 from unittest import mock
 
-from tools.stats.upload_metrics import emit_metric, add_global_metric
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 
 from tools.stats.upload_stats_lib import BATCH_SIZE, upload_to_rockset
 
@@ -123,7 +123,6 @@ class TestUploadStats(unittest.TestCase):
     def test_when_local_and_global_metric_specified_then_global_is_overridden(
         self, mock_resource: Any
     ) -> None:
-
         global_metric_name = "global_metric"
         global_metric_value = "global_value"
         local_override = "local_override"
