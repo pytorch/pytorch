@@ -156,12 +156,12 @@ class EnterCudaDeviceContextManagerLine:
                 # CUDAStreamGuard sets the stream and the device.
                 if config.aot_inductor.abi_compatible:
                     code.writeline(
-                        f"AOTICudaStreamGuard stream_guard(stream, {self.device_idx});"
+                        "AOTICudaStreamGuard stream_guard(stream, this->device_idx_);"
                     )
                 else:
                     code.writeline(
                         "at::cuda::CUDAStreamGuard stream_guard("
-                        + f"at::cuda::getStreamFromExternal(stream, {self.device_idx}));"
+                        + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
                     )
             else:
                 if self.first_time:
@@ -305,8 +305,8 @@ class WrapperCodeGen(CodeGen):
         # maps from reusing buffer to reused buffer
         self.reuses = dict()
 
-        self.write_get_cuda_stream = functools.lru_cache(None)(  # type: ignore[assignment]
-            self.write_get_cuda_stream
+        self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
+            self.write_get_raw_stream
         )
 
         @functools.lru_cache(None)
@@ -405,7 +405,7 @@ class WrapperCodeGen(CodeGen):
             if config.size_asserts:
                 self.codegen_input_size_asserts()
 
-    def write_get_cuda_stream(self, index):
+    def write_get_raw_stream(self, index):
         self.write_triton_header_once()
         name = f"stream{index}"
         self.writeline(f"{name} = get_cuda_stream({index})")
@@ -759,7 +759,7 @@ class WrapperCodeGen(CodeGen):
         """
         if cuda:
             call_args_str = ", ".join(pexpr(item) for item in call_args)
-            stream_name = self.write_get_cuda_stream(
+            stream_name = self.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
             if triton:
@@ -1003,7 +1003,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
                     var_name = f"var_{next(self.arg_var_id)}"
                     self.writeline(f"void *{var_name}{self.ending}")
                     self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(&{var_name}, {arg}));"
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, &{var_name}));"
                     )
                     dtype = V.graph.get_dtype(arg)
                     cpp_dtype = DTYPE_TO_CPP[dtype]
@@ -1039,6 +1039,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             self.header.splice(
                 """
                 #include <ATen/ATen.h>
+                #include <ATen/core/dispatch/Dispatcher.h>
                 #include <ATen/native/BinaryOps.h>
                 #include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
                 #include <torch/csrc/inductor/inductor_ops.h>
@@ -1203,7 +1204,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             code.writeline(f"int64_t* {name}_size;")
             code.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(&{name}_size, {name}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes({name}, &{name}_size));"
             )
         else:
             super().codegen_input_size_var_decl(code, name)
@@ -1212,7 +1213,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             code.writeline(f"int64_t* {name}_stride;")
             code.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(&{name}_stride, {name}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides({name}, &{name}_stride));"
             )
         else:
             super().codegen_input_stride_var_decl(code, name)
@@ -1535,13 +1536,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
         if config.aot_inductor.abi_compatible:
             device_type, device_id = device.split(",")
             args = [
-                f"&{name}_handle",
                 str(len(buffer.get_size())),
                 self.codegen_int_array_var(size, self.wrapper_call),
                 self.codegen_int_array_var(stride, self.wrapper_call),
                 dtype,
                 device_type,
-                device_id,
+                "this->device_idx_" if V.graph.aot_mode else device_id,
+                f"&{name}_handle",
             ]
             self.wrapper_call.writeline(f"AtenTensorHandle {name}_handle;")
             self.wrapper_call.writeline(
@@ -1549,9 +1550,13 @@ class CppWrapperCodeGen(WrapperCodeGen):
             )
             return f"RAIIAtenTensorHandle {name}({name}_handle);"
         else:
+            if V.graph.aot_mode and device.startswith("c10::Device("):
+                tensor_device = f"{device.split(',')[0]}, this->device_idx_)"
+            else:
+                tensor_device = device
             return (
                 f"{self.declare}{name} = {self.namespace}empty_strided("
-                f"{size}, {stride}, at::TensorOptions({device}).dtype({dtype}));"
+                f"{size}, {stride}, at::TensorOptions({tensor_device}).dtype({dtype}));"
             )
 
     def codegen_reinterpret_view(self, name, size, stride, offset, writer) -> str:
@@ -1567,12 +1572,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
             if writer is None:
                 writer = self
             args = [
-                f"&{tmp_name}",
                 f"{name}",
                 dim,
                 self.codegen_int_array_var(size, writer),
                 self.codegen_int_array_var(stride, writer),
                 offset,
+                f"&{tmp_name}",
             ]
             writer.writeline(f"AtenTensorHandle {tmp_name};")
             writer.writeline(
@@ -1895,7 +1900,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
             """
         )
 
-    def write_get_cuda_stream(self, index):
+    def write_get_raw_stream(self, index):
         name = f"stream{index}"
         self.writeline(
             f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
@@ -1973,7 +1978,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
                 if config.aot_inductor.abi_compatible:
                     self.writeline(f"CUdeviceptr {var_name};")
                     self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(reinterpret_cast<void**>(&{var_name}), {arg}));"
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                     )
                 else:
                     self.writeline(
@@ -2023,7 +2028,7 @@ class CudaWrapperCodeGen(CppWrapperCodeGen):
         kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
         self.writeline(f"void* {kernel_args_var}[] = {{{call_args}}};")
         stream = (
-            "stream" if V.graph.aot_mode else self.write_get_cuda_stream(device_index)
+            "stream" if V.graph.aot_mode else self.write_get_raw_stream(device_index)
         )
         grid_name = f"{name}_grid_{next(self.grid_id)}"
         assert isinstance(

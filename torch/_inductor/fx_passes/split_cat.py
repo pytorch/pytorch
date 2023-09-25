@@ -3,6 +3,8 @@ import logging
 import operator
 from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
 
+from typing_extensions import TypeAlias
+
 import torch
 from torch._dynamo.utils import counters
 
@@ -33,14 +35,14 @@ from .pre_grad import (
 
 log = logging.getLogger(__name__)
 
-_Arguments = Tuple[torch.fx.node.Argument, ...]
-_TransformParam = Tuple[
+_Arguments: TypeAlias = Tuple[torch.fx.node.Argument, ...]
+_TransformParam: TypeAlias = Tuple[
     Optional[_Arguments],
     Optional[_Arguments],
     Optional[_Arguments],
     Optional[_Arguments],
 ]
-_Range = Tuple[int, int]
+_Range: TypeAlias = Tuple[int, int]
 
 
 def _get_split_args_default(split_node):
@@ -798,7 +800,7 @@ class UnbindCatRemover(SplitCatSimplifier):
         split_dim = unbind_node.kwargs["dim"]
         transform_params_list: List[List[_TransformParam]] = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            cat_dim = get_arg_value(user_node, 1, "dim") or 0
+            cat_dim = get_arg_value(user_node, 1, "dim")
             transform_params: List[_TransformParam] = []
             for user_input in user_inputs:
                 if isinstance(user_input, tuple):

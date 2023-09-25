@@ -91,68 +91,73 @@ AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   });
 }
 
-AOTITorchError aoti_torch_get_data_ptr(void** ret, AtenTensorHandle tensor) {
+AOTITorchError aoti_torch_get_data_ptr(
+    AtenTensorHandle tensor,
+    void** ret_data_ptr) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret = t->data_ptr();
+    *ret_data_ptr = t->data_ptr();
   });
 }
 
-AOTITorchError aoti_torch_get_sizes(int64_t** ret, AtenTensorHandle tensor) {
+AOTITorchError aoti_torch_get_sizes(
+    AtenTensorHandle tensor,
+    int64_t** ret_sizes) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret = const_cast<int64_t*>(t->sizes().data());
+    *ret_sizes = const_cast<int64_t*>(t->sizes().data());
   });
 }
 
-AOTITorchError aoti_torch_get_strides(int64_t** ret, AtenTensorHandle tensor) {
+AOTITorchError aoti_torch_get_strides(
+    AtenTensorHandle tensor,
+    int64_t** ret_strides) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    *ret = const_cast<int64_t*>(t->strides().data());
+    *ret_strides = const_cast<int64_t*>(t->strides().data());
   });
 }
 
 AOTITorchError aoti_torch__reinterpret_tensor(
-    AtenTensorHandle* ret,
     AtenTensorHandle self,
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
-    int64_t offset_increment) {
+    int64_t offset_increment,
+    AtenTensorHandle* ret_new_tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
-    at::Tensor* out_tensor =
+    at::Tensor* new_tensor =
         new at::Tensor(torch::inductor::_reinterpret_tensor(
             *self_tensor, sizes, strides, offset_increment));
-    *ret = tensor_pointer_to_tensor_handle(out_tensor);
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
 
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_empty_strided(
-    AtenTensorHandle* ret,
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
     int32_t dtype,
     int32_t device_type,
-    int32_t device_index) {
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
     c10::Device device = c10_device(device_type, device_index);
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
-    at::Tensor* out_tensor =
+    at::Tensor* new_tensor =
         new at::Tensor(at::empty_strided(sizes, strides, options));
-    *ret = tensor_pointer_to_tensor_handle(out_tensor);
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
 
 AOTITorchError aoti_torch_create_tensor_from_blob(
-    AtenTensorHandle* ret,
     void* data,
     int64_t ndim,
     const int64_t* sizes_ptr,
@@ -160,19 +165,20 @@ AOTITorchError aoti_torch_create_tensor_from_blob(
     int64_t storage_offset,
     int32_t dtype,
     int32_t device_type,
-    int32_t device_index) {
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     c10::IntArrayRef sizes(sizes_ptr, ndim);
     c10::IntArrayRef strides(strides_ptr, ndim);
     c10::Device device = c10_device(device_type, device_index);
     c10::TensorOptions options = c10::TensorOptions().device(device).dtype(
         static_cast<c10::ScalarType>(dtype));
-    at::Tensor* out_tensor = new at::Tensor(at::for_blob(data, sizes)
+    at::Tensor* new_tensor = new at::Tensor(at::for_blob(data, sizes)
                                                 .strides(strides)
                                                 .storage_offset(storage_offset)
                                                 .options(options)
                                                 .make_tensor());
-    *ret = tensor_pointer_to_tensor_handle(out_tensor);
+    *ret_new_tensor = tensor_pointer_to_tensor_handle(new_tensor);
   });
 }
 

@@ -138,8 +138,9 @@ class AOTInductorModelContainer {
       }
 
       AtenTensorHandle tensor_handle;
+      int device_idx; // should be the same as was used for constant_blob_
+      AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx));
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
-          &tensor_handle,
           internal_ptr,
           ndim,
           size,
@@ -147,8 +148,8 @@ class AOTInductorModelContainer {
           offset,
           dtype,
           device_type,
-          0 // device index, should read it from cudaStream_t?
-          ));
+          device_idx,
+          &tensor_handle));
       constants_->emplace(
           std::move(name), std::move(RAIIAtenTensorHandle(tensor_handle)));
     }
