@@ -228,6 +228,56 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         }
         self.assertTrue(guard_manager.check(f_locals_not_aliased_same_value))
 
+    def test_tensor_aliasing_guard_reset(self):
+        # Check that guard state is reset on failure
+        guard_manager = GuardManager()
+
+        a = torch.randn(3, 4)
+        b = torch.randn(3, 4)
+        f_locals = {
+            "x": a,
+            "y": 4,
+            "z": b,
+        }
+
+        x_guard_mgr = guard_manager.dict_get_item_manager("x")
+        y_guard_mgr = guard_manager.dict_get_item_manager("y")
+        z_guard_mgr = guard_manager.dict_get_item_manager("z")
+
+        install_no_tensor_aliasing_guard(x_guard_mgr, z_guard_mgr)
+        y_guard_mgr.add_lambda_guard(
+            lambda x: x == 4,
+            lambda x: f"Expected int but got {type(x)}",
+        )
+
+        # first use check_verbose as it does not shuffle the guards on failures.
+        # The order of accessors is x, y and z . Let the guard fail on y. This
+        # would call the tensor aliasing guard for x.
+        f_locals_to_fail = {
+            "x": a,
+            "y": 5,
+            "z": a,
+        }
+        self.assertFalse(guard_manager.check_verbose(f_locals_to_fail).result)
+        # Now if we did not reset the guard on x, it would be expecting a tensor
+        # not aliased to a. Lets send an input that is supposed to eval to True
+        # but with "x" : a
+        f_locals = {
+            "x": a,
+            "y": 4,
+            "z": b,
+        }
+        self.assertTrue(guard_manager.check_verbose(f_locals).result)
+
+        # Lets check the same behavior using check function.
+        self.assertFalse(guard_manager.check(f_locals_to_fail))
+        f_locals = {
+            "x": b,
+            "y": 4,
+            "z": a,
+        }
+        self.assertTrue(guard_manager.check(f_locals))
+
     def test_reshuffling_and_reason(self):
         class Pair:
             def __init__(self, x, y):

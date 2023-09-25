@@ -838,14 +838,37 @@ class PythonLambdaGuard : public LeafGuard {
 };
 
 /**
- * This is an example of relational guard and checks tensor X is not tensor Y.
- * We construct one leaf guard and install it at as a leaf of two guard managers
- * (one for X and another for Y). Therefore, this guard is run twice. In the
- * first invocation, it saves the first value and returns True. In the second
- * invocation, it compares the saved value with the new value and returns True
- * if they do not alias.
+ * Relational guards compare more than one value. We implement Relational guards
+ * by capturing some state in the guard object. For example for tensor aliasing
+ * guards - tensor X is not tensor Y - we construct one leaf guard and and
+ * install it at as a leaf of two guard managers (one for X and another for Y).
+ * Therefore, this guard is run twice. In the first invocation, it saves the
+ * first value (state) and returns True. In the second invocation, it compares
+ * the saved value with the new value and returns True if they do not alias.
+ *
+ * We have to be careful about resetting in case the other guards fail and we
+ * have some state in the relational guard. This is done by virtual method
+ * reset_state_on_guard_failure(). This is called by the GuardManager whenever
+ * there is a guard failure. In the event that the Guard evals to true, we do
+ * not need to reset the state. THe check_nopybind method should itself reset
+ * the state if it was called N times. So, fast path is unaffected.
+ *
+ * There is a question on which GuardManager node calls the
+ * reset_state_on_guard_failure. This is done by finding the lowest common
+ * ancestor of the guard manager nodes, and registering the guard as a
+ * relational_guard_resetter on that node.
  */
-class NoTensorAliasingGuard : public LeafGuard {
+class RelationalGuard : public LeafGuard {
+ public:
+  // reset the relational guard state on guard failure. This is called by the
+  // guard manager.
+  virtual void reset_state_on_guard_failure() = 0;
+};
+
+/**
+ * Checks that tensor x in tensor y.
+ */
+class NoTensorAliasingGuard : public RelationalGuard {
  public:
   NoTensorAliasingGuard() : _is_first_call(true) {}
 
@@ -855,13 +878,18 @@ class NoTensorAliasingGuard : public LeafGuard {
       _is_first_call = false;
       return true;
     }
+    bool result = _first_tensor != value;
     _is_first_call = true;
-    return _first_tensor != value;
+    return result;
   }
 
   std::string get_failure_reason(PyObject* value) override { // borrowed ref
     // TODO - Generate better error  msg
     return "Tensor aliasing guard failed";
+  }
+
+  void reset_state_on_guard_failure() override {
+    _is_first_call = true;
   }
 
  private:
@@ -887,8 +915,8 @@ class GuardManager;
  */
 class GuardAccessor {
  public:
-  GuardAccessor(py::object accessor_key)
-      : _guard_manager(std::make_unique<GuardManager>()),
+  GuardAccessor(GuardManager* parent, py::object accessor_key)
+      : _guard_manager(std::make_unique<GuardManager>(parent)),
         _accessor_key(std::move(accessor_key)) {}
 
   // Return by reference as GuardAccessor owns the GuardManager.
@@ -920,9 +948,8 @@ class GuardAccessor {
  */
 class GetAttrGuardAccessor : public GuardAccessor {
  public:
-  GetAttrGuardAccessor(py::str name)
-      : GuardAccessor(name), _attr_name(name.ptr()) {}
-
+  GetAttrGuardAccessor(GuardManager* parent, py::str name)
+      : GuardAccessor(parent, name), _attr_name(name.ptr()) {}
 
   // Returns a new reference.
   PyObject* access(PyObject* obj) override { // borrowed ref
@@ -940,8 +967,8 @@ class GetAttrGuardAccessor : public GuardAccessor {
  */
 class GetDictItemGuardAccessor : public GuardAccessor {
  public:
-  GetDictItemGuardAccessor(py::str name)
-      : GuardAccessor(name), _attr_name(name.ptr()) {}
+  GetDictItemGuardAccessor(GuardManager* parent, py::str name)
+      : GuardAccessor(parent, name), _attr_name(name.ptr()) {}
 
   // Returns a new reference.
   PyObject* access(PyObject* obj) override { // borrowed ref
@@ -960,8 +987,8 @@ class GetDictItemGuardAccessor : public GuardAccessor {
  */
 class GetItemGuardAccessor : public GuardAccessor {
  public:
-  GetItemGuardAccessor(py::str name)
-      : GuardAccessor(name), _attr_name(name.ptr()) {}
+  GetItemGuardAccessor(GuardManager* parent, py::str name)
+      : GuardAccessor(parent, name), _attr_name(name.ptr()) {}
 
   // Returns a new reference.
   PyObject* access(PyObject* obj) override { // borrowed ref
@@ -1019,15 +1046,23 @@ class GetItemGuardAccessor : public GuardAccessor {
  */
 class GuardManager {
  public:
-  GuardManager() = default;
+  GuardManager() : _parent(nullptr) {}
+  GuardManager(GuardManager* m) : _parent(m) {}
   GuardManager(const GuardManager& m) = delete;
   GuardManager& operator=(const GuardManager&) = delete;
 
-  // GuardManager is the owner of the leaf_guards
+  GuardManager* get_parent() {
+    return _parent;
+  }
+
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) {
     _leaf_guards.emplace_back(std::move(leaf_guard));
   }
 
+  void add_relational_guard_resetter(
+      std::shared_ptr<RelationalGuard> relational_guard) {
+    _relational_guard_resetters.emplace_back(std::move(relational_guard));
+  }
   /**
    * Adds a new guard manager with appropriate Accessor. If the accessor is
    * already present, we just return the guard manager.
@@ -1046,7 +1081,8 @@ class GuardManager {
     }
 
     // Construct a new guard accessor
-    _accessors.emplace_back(std::make_unique<GuardAccessorT>(accessor_key));
+    _accessors.emplace_back(
+        std::make_unique<GuardAccessorT>(this, accessor_key));
     return _accessors.back()->get_guard_manager().get();
   }
 
@@ -1073,6 +1109,7 @@ class GuardManager {
       result = result && guard->check_nopybind(value);
       if (!result) { // early exit
         _fail_count += 1;
+        _reset_relational_guard_state();
         return result;
       }
     }
@@ -1086,6 +1123,7 @@ class GuardManager {
       Py_DECREF(accessed_value);
       if (!result) { // early exit
         _fail_count += 1;
+        _reset_relational_guard_state();
         break;
       }
       failed_on_first = false;
@@ -1128,6 +1166,7 @@ class GuardManager {
       result = result && debug_info.result;
       num_guards_executed++;
       if (!result) {
+        _reset_relational_guard_state();
         return GuardDebugInfo(
             false, debug_info.failure_reason, num_guards_executed);
       }
@@ -1140,7 +1179,8 @@ class GuardManager {
           manager->check_verbose_nopybind(accessor->access(value));
       result = result && debug_info.result;
       num_guards_executed += debug_info.num_guards_executed;
-      if (result == false) {
+      if (!result) {
+        _reset_relational_guard_state();
         return GuardDebugInfo(
             false, debug_info.failure_reason, num_guards_executed);
       }
@@ -1174,6 +1214,14 @@ class GuardManager {
   }
 
  private:
+  void _reset_relational_guard_state() {
+    for (auto& guard : _relational_guard_resetters) {
+      guard->reset_state_on_guard_failure();
+    }
+  }
+
+ private:
+  GuardManager* _parent;
   // Leaf guards are the terminal guards on this object, e.g, type check on a
   // list. These guards have to be run before any children are run.
   //
@@ -1189,6 +1237,12 @@ class GuardManager {
   // object is shared across multiple guard managers, and hence a shared ptr.
   std::vector<std::shared_ptr<LeafGuard>> _leaf_guards;
 
+  // These are the relational guards under the subtree of this guard manager. We
+  // only use these guards on guard failure. These reset the state of relational
+  // guards under this subtree. Look more into install_no_tensor_aliasing_guard
+  // to understand how we find register these resetters.
+  std::vector<std::shared_ptr<RelationalGuard>> _relational_guard_resetters;
+
   // GuardAccessors nodes to access the child guards. These guards are
   // shufflable. On a guard failure, they are sorted based on their fail count
   // to enable fail fast for the next check.
@@ -1199,10 +1253,56 @@ class GuardManager {
   int _fail_count{0};
 };
 
+void traverse_to_root(GuardManager* node, std::vector<GuardManager*>& path) {
+  while (node != nullptr) {
+    path.push_back(node);
+    node = node->get_parent();
+  }
+  // Get the root node at the top
+  std::reverse(path.begin(), path.end());
+}
+
+GuardManager* find_lca(GuardManager* x, GuardManager* y) {
+  // Find lowest commmon ancestor to attach the guard state.
+  std::vector<GuardManager*> x_path;
+  traverse_to_root(x, x_path);
+  std::vector<GuardManager*> y_path;
+  traverse_to_root(y, y_path);
+
+  if (x_path.size() == 0 || y_path.size() == 0) {
+    throw std::runtime_error("Could not find common ancestor");
+  }
+
+  //
+  GuardManager* lca = nullptr;
+  size_t x_index, y_index;
+  x_index = y_index = 0;
+  while (x_index < x_path.size() && y_index < y_path.size()) {
+    if (x_path[x_index] == y_path[y_index]) {
+      lca = x_path[x_index];
+      break;
+    }
+    x_index++;
+    y_index++;
+  }
+  return lca;
+}
+
 void install_no_tensor_aliasing_guard(GuardManager* x, GuardManager* y) {
   // Adds tensor X is not tensor Y. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
-  std::shared_ptr<LeafGuard> guard = std::make_shared<NoTensorAliasingGuard>();
+  std::shared_ptr<RelationalGuard> guard =
+      std::make_shared<NoTensorAliasingGuard>();
+
+  // Find the lowest common ancestor.
+  GuardManager* lca = find_lca(x, y);
+  if (lca == nullptr) {
+    throw std::runtime_error("Could not find common ancestor");
+  }
+
+  // Register the resetter on the lowest common ancestor node, so that it can
+  // reset the newly added relational guard when the guard eval fails.
+  lca->add_relational_guard_resetter(guard);
   x->add_leaf_guard(guard);
   y->add_leaf_guard(guard);
 }
