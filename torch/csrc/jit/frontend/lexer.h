@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <algorithm>
-#include <clocale>
 #include <cstdlib>
 #include <memory>
 #include <sstream>
@@ -518,8 +517,7 @@ struct Lexer {
             indent_stack.pop_back();
             next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.empty()) {
-              reportError(
-                  "invalid indent level " + c10::guts::to_string(depth), r);
+              reportError("invalid indent level " + std::to_string(depth), r);
             }
           }
           return; // We've already queued the tokens

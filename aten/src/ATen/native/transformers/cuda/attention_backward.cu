@@ -360,40 +360,32 @@ _efficient_attention_backward(
 
       p.bias_ptr = (scalar_t*)bias->data_ptr();
 
-      // assign strides for bias, viewed as:
-      // (batch_sz, n_heads, n_queries, n_keys)
-      // We make sure to expand prior to calling the kernel
-      const at::Tensor& bias_4d_view = *bias;
-      TORCH_CHECK(bias_4d_view.dim()==4);
-      TORCH_CHECK(bias_4d_view.size(0)==B);
-      TORCH_CHECK(bias_4d_view.size(1)==nH);
-      TORCH_CHECK(bias_4d_view.size(2)==M);
-      TORCH_CHECK(bias_4d_view.size(3)==N);
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias_4d_view.stride(0));
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias_4d_view.stride(1));
-      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias_4d_view.stride(2));
+      TORCH_CHECK(bias->dim() == 4, "Bias expected in BMHK format");
+      TORCH_CHECK(
+          bias->size(0) == query.size(0),
+          "attn_bias: wrong shape (batch dimension)");
+      TORCH_CHECK(
+          bias->size(1) == query.size(2),
+          "attn_bias: wrong shape (head dimension)");
+      TORCH_CHECK(
+          bias->size(2) == query.size(1),
+          "attn_bias: wrong shape (seqlenQ dimension)");
+      TORCH_CHECK(
+          bias->size(3) == key.size(1),
+          "attn_bias: wrong shape (seqlenKV dimension)");
+      TORCH_CHECK(
+          bias->stride(3) == 1,
+          "attn_bias: wrong alignment (last dimension must be contiguous)");
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias->stride(0));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias->stride(1));
+      ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias->stride(2));
 
       if (bias_requires_grad) {
         p.grad_bias_ptr = (scalar_t*)grad_bias.data_ptr();
 
-        // assign strides for gB, viewed as
-        // (batch_sz, n_heads, n_queries, n_keys). might have different strides
-        // than B, for example if bias tensor was created with
-        // torch.tensor((B * nH, 1, nK)).expand((B * nH, nQ, nK)),
-        // different values of Q will point to the same memory
-        // locations, meaning bias.stride(1) == 0, while we'd want
-        // grad_bias.stride(1) == nK
-        // We have expanded the input prior to calling the forward kernel
-        const at::Tensor& grad_bias_4d_view = grad_bias;
-        TORCH_CHECK(grad_bias_4d_view.dim()==4);
-        TORCH_CHECK(grad_bias_4d_view.size(0)==B);
-        TORCH_CHECK(grad_bias_4d_view.size(1)==nH);
-        TORCH_CHECK(grad_bias_4d_view.size(2)==M);
-        TORCH_CHECK(grad_bias_4d_view.size(3)==N);
-
-        ASSIGN_CHECK_OVERFLOW(p.gB_strideB, grad_bias_4d_view.stride(0));
-        ASSIGN_CHECK_OVERFLOW(p.gB_strideH, grad_bias_4d_view.stride(1));
-        ASSIGN_CHECK_OVERFLOW(p.gB_strideM, grad_bias_4d_view.stride(2));
+        ASSIGN_CHECK_OVERFLOW(p.gB_strideB, grad_bias.stride(0));
+        ASSIGN_CHECK_OVERFLOW(p.gB_strideH, grad_bias.stride(1));
+        ASSIGN_CHECK_OVERFLOW(p.gB_strideM, grad_bias.stride(2));
       }
     }
 

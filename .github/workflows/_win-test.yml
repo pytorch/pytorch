@@ -161,8 +161,8 @@ jobs:
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         run: |
           pushd "${PYTORCH_FINAL_PACKAGE_DIR}"
-          # shellcheck disable=SC2046
-          python3 -mpip install $(echo *.whl)[opt-einsum]
+          # shellcheck disable=SC2046,SC2102
+          python3 -mpip install $(echo *.whl)[opt-einsum,optree]
           popd
 
           .ci/pytorch/win-test.sh
