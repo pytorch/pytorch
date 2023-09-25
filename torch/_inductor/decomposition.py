@@ -1,7 +1,6 @@
 import functools
 import logging
 import math
-import numbers
 import typing
 
 import torch
@@ -54,13 +53,10 @@ inductor_decompositions = get_decompositions(
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
-        aten.std,
-        aten.std_mean,
         out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
-        aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
     ]
 )
@@ -70,7 +66,6 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
-    aten._unsafe_view,
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
@@ -208,9 +203,12 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         self = self * beta
     return self + result
 
-
 @register_decomposition([aten.bmm])
 def bmm(self, batch2):
+    if config.coordinate_descent_tuning:
+        if self.shape[1] == 1:
+            out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
+            return out
     if self.device == "cpu":
         if self.size(1) == 1 and batch2.size(-1) == 1:
             return torch.sum(
