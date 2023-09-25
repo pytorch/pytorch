@@ -6,6 +6,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIndexing.h>
@@ -16,7 +17,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
-#include <c10/util/Exception.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/DispatchKeySet.h>
 #include <ATen/TensorSubclassLikeUtils.h>
@@ -523,7 +523,7 @@ at::Tensor preprocess_mask(
   }
   // Check and make the tensor contiguous if needed
   if (attn_mask.sym_stride(0) % 16 != 0 || attn_mask.sym_stride(1) % 16 != 0 ||
-      attn_mask.sym_stride(2) % 16 != 0) {
+      attn_mask.sym_stride(2) % 16 != 0 || attn_mask.sym_stride(3) != 1) {
     return attn_mask.contiguous();
   }
 

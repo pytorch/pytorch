@@ -31,11 +31,15 @@ class ContextWrappingVariable(VariableTracker):
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def reconstruct(self, codegen):
         attr_source = AttrSource(
@@ -102,9 +106,9 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
             ).call_function(
                 tx,
                 [
-                    variables.ConstantVariable(None),
-                    variables.ConstantVariable(None),
-                    variables.ConstantVariable(None),
+                    variables.ConstantVariable.create(None),
+                    variables.ConstantVariable.create(None),
+                    variables.ConstantVariable.create(None),
                 ],
                 {},
             )
@@ -141,7 +145,9 @@ class GradModeVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -181,7 +187,9 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -212,7 +220,9 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -250,7 +260,9 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -355,10 +367,14 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def exit(self, tx, *args):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def module_name(self):
         return "contextlib"

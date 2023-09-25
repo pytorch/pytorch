@@ -10,7 +10,6 @@ from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from functorch import make_fx
 
@@ -436,9 +435,17 @@ class InputAliasInfo:
 @dataclasses.dataclass
 class SubclassCreationMeta:
     """
-    Used for AOTDispatch: The graph that we'd like to trace out contains flat tensor inputs,
-    And this dataclass gives us the information we need to reconstruct a tensor subclass
+    Used for AOTDispatch.
+    This dataclass gives us the information we need to reconstruct a tensor subclass
     from our flat inputs.
+    Why is this important? The graph that we'd like to trace out contains flat tensor inputs,
+    But the user's original model may have subclass inputs and outputs.
+    So we need to wrap/unwrap subclasses as necessary to translate between the user's
+    view (subclass inps/outs), and the backend compiler's view (graph with no subclass args).
+
+    Complications arise mostly from the fact that a subclass can hold more than one inner tensor;
+    So for a given subclass input/output, we need to carefully track which indices map
+    to the subclass tensor in the corresponding "dense-tensor-only" graph.
     """
 
     # In the inner graph that only takes in dense tensor inputs,
@@ -451,8 +458,9 @@ class SubclassCreationMeta:
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
     original_subclass: torch.Tensor
+    # meta and inner_keys are produced by the subclass's __tensor_flatten__.
+    # We need to keep them around to plumb them into __tensor_unflatten__.
     meta: Any
-    # metadata we need to pass to __tensor_unflatten__
     inner_keys: List[any]
 
     def creation_fn(self, all_args, *, is_runtime: bool):
@@ -466,9 +474,6 @@ class SubclassCreationMeta:
             # to compute this extra metadata then!
             torch._mirror_autograd_meta_to(self.original_subclass, out)
 
-        # We can't rely on the user's `__tensor_unflatten__()` to return a subclass with the same tensor metadata
-        # as the initial subclass (say, if the initial subclass got a metadata mutation like t_(), so its strides are no longer contiguous).
-        # So we manually fix up the metadata here.
         return out
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
@@ -508,10 +513,18 @@ class ViewAndMutationMeta:
     # pass once, and re-use the output throughout AOTAutograd
     traced_tangents: List[Any]
 
+    # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
+    # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
+    # Given a (potentially larger) list of plain torch tensors.
+
+    # Taking subclass_inp_meta as an example:
+    #   subclass_inp_meta[i] = j (an int) tells us:
+    #     "The i'th user input is not a subclass, and corresponds to inputs[j] of the plain-tensor graph."
+    #   subclass_inp_meta[i] = SubclassCreationMeta(flat_tensor_start_idx=3, arg_count=2)
+    #     "The i'th user input is subclass holding two inner tensors, which are
+    #      inputs[3] and inputs[4] of the plain-tensor graph".
     subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
-
     subclass_out_meta: List[Union[int, SubclassCreationMeta]]
-
     subclass_tangent_meta: List[Union[int, SubclassCreationMeta]]
 
     num_symints_saved_for_bw: Optional[int] = None
@@ -596,9 +609,10 @@ class ViewAndMutationMeta:
         self.dynamic_outputs = any(
             o.dynamic_dims for o in self.output_info
         )
-        # Pre-computed for fast asserts on the types of our grad_outputs in the backward.
+        # See Note: [AOTAutograd Backward Guards]
+        # This is pre-computed for fast asserts on the types of our grad_outputs in the backward.
         # Eventually, we should kill this and replace with real backward guards.
-        # (we want to precompute the "runtime types, so replace FakeTensor with torch.Tensor)
+        # (we want to precompute the "runtime" types, so replace FakeTensor with torch.Tensor)
         self.output_types = [torch.Tensor if isinstance(x, FakeTensor) else type(x) for x in self.traced_tangents]
 
         self.is_rng_op_functionalized = config.functionalize_rng_ops
@@ -653,15 +667,17 @@ class ViewAndMutationMeta:
 @dataclass(eq=False)
 class SubclassMeta:
     # A copy of all forward metadata, but computed on the *dense* tensor forward (after desugaring subclasses)
+    # So for example, if the user had a model containing two `TwoTensor` inputs,
+    # Then `SubclassMeta.fw_metadata.input_infos` would have length 4 here.
     fw_metadata: ViewAndMutationMeta
 
     # Note: [Computing Subclass Metadata about grad_inputs]
-    # Given a list of flattened dense_tensor grad_inputs, this tells us how to reconstruct the grad_input subclasses
+    # Given a list of flattened, plain tensor grad_inputs, this tells us how to reconstruct the grad_input subclasses
     #
     # You might think: why not just assume that all grad_inputs will have the same subclass-ness as the original inputs?
     # (AOTAutograd generally assumes other properties, e.g. that grad_outputs are contiguous)
     #
-    # This doens't really work though. take this example:
+    # This doesn't really work though. take this example:
     #
     # def f(DoubleTensor, DenseTensor):
     #     return DoubleTensor  * DenseTensor
@@ -674,7 +690,8 @@ class SubclassMeta:
     # Note that this info **cannot** easily be figured out from ViewAndMutationMeta.
     # We can only compute this info by tracing the entire joint and examining the grad_inputs that we computed.
     #
-    # This also requires us to install backward guards,
+    # See Note: [AOTAutograd Backward Guards]
+    # This will also eventually require us to install backward guards,
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
@@ -933,7 +950,7 @@ def run_functionalized_fw_and_collect_metadata(
 ) -> ViewAndMutationMeta:
     memo = {}
 
-    def to_fun_cached(t):
+    def _to_fun(t):
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
@@ -953,7 +970,7 @@ def run_functionalized_fw_and_collect_metadata(
         input_requires_grad_info: List[bool] = []
         output_requires_grad_info: List[bool] = []
 
-        flat_f_args = pytree.tree_map(to_fun_cached, flat_args)
+        flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
         # See Note [Disabling Functionalize TLS Above Python Functionalization]
         disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
@@ -1168,7 +1185,7 @@ def run_functionalized_fw_and_collect_metadata(
         ]
         # When handling subclasses, we need info about **all** outputs of compiled forward graph,
         # so we know precisely which graph outputs to wrap back into tensor subclasses
-        graph_outs = pytree.tree_map(from_fun, f_mutated_inputs + list(flat_f_outs) + intermediate_bases)
+        fw_graph_outs = pytree.tree_map(from_fun, f_mutated_inputs + list(flat_f_outs) + intermediate_bases)
 
         metadata = ViewAndMutationMeta(
             input_info=input_info,
@@ -1178,7 +1195,7 @@ def run_functionalized_fw_and_collect_metadata(
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
             subclass_inp_meta=create_subclass_meta(flat_args),
-            subclass_out_meta=create_subclass_meta(graph_outs),
+            subclass_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
         )
         return metadata
@@ -1734,7 +1751,13 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             out = normalize_as_list(f(*args))
     return out
 
-def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta) -> Tuple[Callable, List[Any], Optional[SubclassMeta]]:
+def aot_dispatch_base_graph(
+    flat_fn,
+    flat_args: List[Tensor],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta
+) -> Tuple[Callable, List[Any], Optional[SubclassMeta]]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -1742,16 +1765,17 @@ def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTCon
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-    keep_mutations = aot_config.keep_inference_input_mutations
     fn_to_trace = fn_input_mutations_to_outputs(
         flat_fn,
         fw_metadata,
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
 
-    fn_to_trace, updated_flat_args = create_functionalized_fn(fn_to_trace, flat_args, meta=fw_metadata, aot_config=aot_config, trace_joint=False)
+    fn_to_trace, updated_flat_args = create_functionalized_fn(
+        fn_to_trace, flat_args, meta=fw_metadata, aot_config=aot_config, trace_joint=False)
 
-    fn_to_trace, updated_flat_args_subclasses_desugared, maybe_subclass_meta = aot_dispatch_subclass(fn_to_trace, updated_flat_args, trace_joint=False, meta=fw_metadata, fw_only=flat_fn)
+    fn_to_trace, updated_flat_args_subclasses_desugared, maybe_subclass_meta = aot_dispatch_subclass(
+        fn_to_trace, updated_flat_args, trace_joint=False, meta=fw_metadata, fw_only=flat_fn)
 
     fw_module = create_graph(
         fn_to_trace,
@@ -1773,13 +1797,15 @@ def aot_dispatch_base_graph(flat_fn, flat_args: List[Tensor], aot_config: AOTCon
     if aot_config.enable_log:
         aot_graphs_log.info("%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id))
 
+    # TODO: should factor this into a separate function for export that always only returns just the graph.
     if aot_config.is_export:
         assert maybe_subclass_meta is None, "aot_export_module does not support tensor subclass inputs for now."
         return fw_module
     return fw_module, updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
-    fw_module, updated_flat_args, maybe_subclass_meta  = aot_dispatch_base_graph(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
+    fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
+        flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = torch._C._DisableAutocast if disable_amp else nullcontext
@@ -1793,7 +1819,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             updated_flat_args.extend([seed, offset])
 
         if torch._guards.TracingContext.get():
-            torch._guards.TracingContext.get().fw_metadata = fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
+            torch._guards.TracingContext.get().fw_metadata = fw_metadata \
+                if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
         compiled_fw = compiler(fw_module, updated_flat_args)
 
     # This boxed_call handling happens inside create_runtime_wrapper as well.
@@ -1818,7 +1845,8 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
             return compiled_fw(args)
 
     if maybe_subclass_meta is not None:
-        compiled_fw_func = aot_dispatch_subclass_wrapper(rng_functionalization_wrapper, subclass_metas=fw_metadata.subclass_out_meta, num_fw_outs_saved_for_bw=None)
+        compiled_fw_func = aot_dispatch_subclass_wrapper(
+            rng_functionalization_wrapper, subclass_metas=fw_metadata.subclass_out_meta, num_fw_outs_saved_for_bw=None)
     else:
         compiled_fw_func = rng_functionalization_wrapper
 
@@ -2222,10 +2250,11 @@ def remove_dupe_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
-        # TODO: fix this
-        subclass_inp_meta=[],
-        subclass_out_meta=[],
-        subclass_tangent_meta=[],
+        # We are guaranteed not to get here, since dupes are not supported today with subclass inputs.
+        # We should eventually fix this.
+        subclass_inp_meta=m.subclass_inp_meta,
+        subclass_out_meta=m.subclass_out_meta,
+        subclass_tangent_meta=m.subclass_tangent_meta,
     )
 
 # Given our ViewAndMutation metadata, this fn constructs a new set of metadata,
@@ -2332,10 +2361,11 @@ def create_synthetic_base_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
-        # TODO: fix this
-        subclass_inp_meta=[],
-        subclass_out_meta=[],
-        subclass_tangent_meta=[],
+        # We are guaranteed not to get here, since synthetic_base codepaths are not supported today with subclass inputs.
+        # We should eventually fix this.
+        subclass_inp_meta=m.subclass_inp_meta,
+        subclass_out_meta=m.subclass_out_meta,
+        subclass_tangent_meta=m.subclass_tangent_meta,
     ), outer_aliased_arg_idx_with_metadata_mutations
 
 # MOTIVATION:
@@ -2450,6 +2480,12 @@ def aot_wrapper_dedupe(
 
     if ok:
         return compiler_fn(flat_fn, leaf_flat_args, aot_config, fw_metadata=fw_metadata)
+
+    if requires_subclass_dispatch(leaf_flat_args, fw_metadata):
+        raise RuntimeError("""\
+Encountered duplicate inputs that are mutated in the graph, but at least one input/output
+to the graph is a tensor subclass. This is not supported today. You can try to
+remove the aliasing yourself as a workaround, or otherwise file an issue on github.""")
 
     # export path: ban duplicate inputs for now, add later if requested.
     if aot_config.is_export:
@@ -2632,6 +2668,12 @@ def aot_wrapper_synthetic_base(
         return compiler_fn(flat_fn, flat_args, aot_config, fw_metadata=fw_metadata)
 
     # export path: ban synthetic bases for now, add later if requested.
+    if requires_subclass_dispatch(flat_args, fw_metadata):
+        raise RuntimeError("""\
+Encountered aliased inputs that are mutated in the graph, but at least one input/output
+to the graph is a tensor subclass. This is not supported today. You can try to
+remove the aliasing yourself as a workaround, or otherwise file an issue on github.""")
+
     if aot_config.is_export:
         raise RuntimeError(f"""\
 Encountered aliased inputs that are mutated in the graph you are trying to export.
@@ -3034,7 +3076,13 @@ def unwrap_tensor_subclasses(wrapped_args, *, trace_joint: bool):
 
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
 # This function is used both at trace time and runtime, so we have an is_runtime flag telling us which context we're in.
-def wrap_tensor_subclasses_simple(unwrapped_args: List[Any], *, subclass_metas: List[Union[int, SubclassCreationMeta]], num_fw_outs_saved_for_bw: Optional[int] = None, is_runtime: bool = False) -> List[Any]:
+def wrap_tensor_subclasses_simple(
+    unwrapped_args: List[Any],
+    *,
+    subclass_metas: List[Union[int, SubclassCreationMeta]],
+    num_fw_outs_saved_for_bw: Optional[int] = None,
+    is_runtime: bool = False,
+) -> List[Any]:
     wrapped_args = []
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
@@ -3100,12 +3148,18 @@ def wrap_tensor_subclasses(unwrapped_args, *, trace_joint: bool, meta: ViewAndMu
 # At runtime, we have a compiled function that knows how to operate on the domain of DenseTensor -> DenseTensor,
 # But the user might have passed us some tensor subclass inputs (or expect some subclass tensor outputs).
 # This function handles the wrapping and unwrapping of tensor subclasses at runtime.
-def aot_dispatch_subclass_wrapper(runtime_fn: Callable, *, subclass_metas: List[Union[int, SubclassCreationMeta]], num_fw_outs_saved_for_bw: Optional[int]) -> Callable:
+def aot_dispatch_subclass_wrapper(
+    runtime_fn: Callable,
+    *,
+    subclass_metas: List[Union[int, SubclassCreationMeta]],
+    num_fw_outs_saved_for_bw: Optional[int],
+) -> Callable:
     def inner_fn(*args):
         unwrapped_args = unwrap_tensor_subclasses(args, trace_joint=False)
         # expectation: runtime_fn is a boxed fn
         unwrapped_outs = runtime_fn(unwrapped_args)
-        wrapped_outs = wrap_tensor_subclasses_simple(unwrapped_outs, subclass_metas=subclass_metas, num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw, is_runtime=True)
+        wrapped_outs = wrap_tensor_subclasses_simple(
+            unwrapped_outs, subclass_metas=subclass_metas, num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw, is_runtime=True)
         return wrapped_outs
     return inner_fn
 
@@ -3130,11 +3184,20 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
         for _ in range(num_outs):
             output_info.append(out)
 
-    # TODO
+    # A bit hacky, but we don't actually care about all of the metadata here.
+    # This metadata is used **underneath** both autograd and subclass de-sugaring,
+    # So all we really care about is stuff like:
+    # - num inputs/outputs (needed by the partitioner)
+    # - input mutations (**not** used today, since we don't handle input mutations inside the subclass,
+    #   although we should handle this eventually)
+    #   TODO: add a test case to assert we error when this happens, instead of getting silent correctness
     requires_grad_info = []
     num_intermediate_bases = 0
-    keep_input_mutations = meta.keep_input_mutations,
-    traced_tangents = [],
+    keep_input_mutations = meta.keep_input_mutations
+    traced_tangents = []
+    subclass_inp_meta = []
+    subclass_out_meta = []
+    subclass_tangent_meta = []
 
     metadata = ViewAndMutationMeta(
         input_info=input_info,
@@ -3143,9 +3206,9 @@ def create_metadata_for_subclass(meta: ViewAndMutationMeta) -> ViewAndMutationMe
         num_intermediate_bases=num_intermediate_bases,
         keep_input_mutations=keep_input_mutations,
         traced_tangents=traced_tangents,
-        subclass_inp_meta=[],
-        subclass_out_meta=[],
-        subclass_tangent_meta=[],
+        subclass_inp_meta=subclass_inp_meta,
+        subclass_out_meta=subclass_out_meta,
+        subclass_tangent_meta=subclass_tangent_meta,
     )
     return metadata
 
@@ -3172,10 +3235,13 @@ def aot_dispatch_subclass(
     if not req_subclass_dispatch:
         return flat_fn_maybe_joint, args, None
 
-    # TODO: add subclass guards.
+    # TODO: add subclass guards (later PR).
 
+    # What's going on here? We need to compute subclass metadata about the outputs of the joint (grad_inputs).
     # Annoying: we don't know the grad input metas until we're in the middle of tracing the joint,
-    # so we set it later, while we're tracing the joint (see inner_fn() below)
+    # so we set it later, while we're tracing the joint (see inner_fn() below).
+    # Another option would be to run our run_functionalized_fw_and_collect_metadata() function
+    # directly on the joint, but this would hurt compile time (adding yet another pass through the joint).
     subclass_meta = SubclassMeta()
 
     def inner_fn(fn, args, *, use_trace_joint: bool):
@@ -3234,9 +3300,9 @@ def aot_dispatch_subclass(
     # and plumb it back up to the partitioner.
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
-            metadata_fn,
-            keep_input_mutations=meta.keep_input_mutations,
-        )(*primals_unwrapped)
+        metadata_fn,
+        keep_input_mutations=meta.keep_input_mutations,
+    )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated
 
@@ -3273,12 +3339,10 @@ def aot_dispatch_autograd_graph(flat_fn, flat_args: List[Any], aot_config: AOTCo
         trace_joint=True,
     )
 
-    joint_fn_to_trace, updated_joint_inputs, maybe_subclass_meta = aot_dispatch_subclass(joint_fn_to_trace, joint_inputs, trace_joint=True, meta=fw_metadata, fw_only=flat_fn)
+    joint_fn_to_trace, updated_joint_inputs, maybe_subclass_meta = aot_dispatch_subclass(
+        joint_fn_to_trace, joint_inputs, trace_joint=True, meta=fw_metadata, fw_only=flat_fn)
 
     fx_g = create_graph(joint_fn_to_trace, updated_joint_inputs, aot_config=aot_config)
-    # WHAT TO DO NEXT: I just finished trying to add aot_dispatch_subclass in the line above here.
-    # It runs successfully, but the partitioner fails.
-    # When I print(fx_g.code) here, one suspicious bit is that there are only 2 primals, but there should be 3
 
     # There should be *NO* mutating ops in the graph at this point.
     assert_functional_graph(fx_g.graph)
@@ -3390,7 +3454,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
         _indices_of_inps_to_detach = []
         bw_outs = [n for n in bw_module.graph.nodes if n.op == "output"][0].args[0]
 
-        # Computing which our our inputs get None gradients is a bit more complicated though,
+        # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
+        # optimization even if we have subclass inputs/outputs (we do not handle this today).
+        # Computing which our our inputs get None gradients is a bit more complicated,
         # if any of our inputs are subclasses. Why?
         # (a) we need to make sure that we call .detach() on the input subclasses, since autograd sees subclasses.
         # (b) The grad_outputs that we AOT computed in our backward graph are the desugared tensor tensors,
@@ -3399,23 +3465,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             assert len(bw_outs) == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             for i, (bw_out) in enumerate(bw_outs):
                 if bw_out is None:
-                    _indices_of_inps_to_detach.append(i)
-        else:
-            # TODO: add a test for this detach() case, where some inputs are subclasses
-            for i, subclass_meta in enumerate(maybe_subclass_meta.grad_input_metas):
-                if isinstance(subclass_meta, int):
-                    grad_out_idx = subclass_meta
-                    dense_tensor_grad_out = (bw_outs[grad_out_idx],)
-                else:
-                    # If our i'th input has a grad_output that is a tensor subclass, then that grad_out subclass
-                    # could map to multiple individual dense tensor grad_outs in the final traced graph.
-                    # We should only perform the detach if **none** of those dense tensors get computed gradients.
-                    assert isinstance(subclass_meta, SubclassCreationMeta)
-                    grad_outs_start_idx = subclass_meta.flat_tensor_start_idx
-                    grad_outs_count = subclass_meta.arg_count
-                    dense_tensor_grad_out = bw_outs[grad_outs_start_idx:grad_outs_start_idx + grad_outs_count]
-
-                if all(x is None for x in dense_tensor_grad_out):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
@@ -3448,7 +3497,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             if maybe_subclass_meta is not None:
                 # Why do we need to pass in num_fw_outs_saved_for_bw?
                 # See Note: [Partitioner handling for Subclasses, Part 2]
-                compiled_fw_func = aot_dispatch_subclass_wrapper(compiled_fw_func, subclass_metas=fw_metadata.subclass_out_meta, num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw)
+                compiled_fw_func = aot_dispatch_subclass_wrapper(
+                    compiled_fw_func,
+                    subclass_metas=fw_metadata.subclass_out_meta,
+                    num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw
+                )
                 if not hasattr(compiled_fw_func, "_boxed_call"):
                     compiled_fw_func = make_boxed_func(compiled_fw_func)
 
@@ -3717,7 +3770,28 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                 *rng_args
             ]
 
-            # TODO: make these real backward guards?
+            # Note: [AOTAutograd Backward Guards]
+            # During AOTDispatch, we eagerly create and trace out a joint fw-bw graph.
+            # Doing so requires us to "guess" about some of the metadata of our grad_outputs.
+            #
+            # In particular: if an output to the forward is a plain tensor or a subclass,
+            # its corresponding grad_output in the backward **may or may not** be
+            # a plain tensor or a subclass. The main cases are:
+            # (1) If an output is a plain tensor, its grad_out will also be a plain tensor,
+            #     *unless* the output is used in some subclass compute later in the forward graph,
+            #     which will cause its grad_output to become a subclass
+            # (2) If an output is a subclass, its grad_out will also be a subclass,
+            #     *unless* the output of the forward did not actually participate in the gradient computation,
+            #     in which case autograd will insert a plain tensor of zeros for the grad_output.
+            #     We could avoid this case with `torch.autograd.Function.set_materialize_grads`,
+            #     although this is not turned on today in AOTAutgrad and would require more work.
+            #
+            # Today, we make a guess on subclass-ness based on the above examples,
+            # and hard-error in the backward if we guessed wrong.
+            #
+            # In the future, we should add backward guards that would allow us to
+            # properly handle this case instead of erroring: we would need to retrace the backward graph,
+            # since we might produce an entirely different trace if our grad_outputs are subclass or not.
             assert len(CompiledFunction.metadata.output_types) == num_contiguous_args
             grad_output_types = [type(x) for x in all_args[-num_contiguous_args:]]
             # In general, we can add more asserts/guards here for when we partitioned
@@ -3773,7 +3847,8 @@ Got grad_output types: {str(grad_output_types)}"""
                         outs = call_compiled_backward()
                         # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
                         if CompiledFunction.maybe_subclass_metadata is not None:
-                            outs_wrapped = wrap_tensor_subclasses_simple(outs, subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas)
+                            outs_wrapped = wrap_tensor_subclasses_simple(
+                                outs, subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas)
                             return outs_wrapped
                         return outs
 
@@ -3790,7 +3865,8 @@ Got grad_output types: {str(grad_output_types)}"""
 
             # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
             if CompiledFunction.maybe_subclass_metadata is not None:
-                outs_wrapped = wrap_tensor_subclasses_simple(out, subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas)
+                outs_wrapped = wrap_tensor_subclasses_simple(
+                    out, subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas)
                 return outs_wrapped
             return out
 

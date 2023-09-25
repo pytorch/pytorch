@@ -47,6 +47,14 @@ def resolve_library_path(path: str) -> str:
     return os.path.realpath(path)
 
 
+def throw_abstract_impl_not_imported_error(opname, module, context):
+    raise NotImplementedError(
+        f"{opname}: We could not find the abstract impl for this operator. "
+        f"The operator specified that you need to import the '{module}' Python "
+        f"module to load the abstract impl. {context}"
+    )
+
+
 # Meta only, see
 # https://www.internalfb.com/intern/wiki/ML_Workflow_Observability/User_Guides/Adding_instrumentation_to_your_code/
 #

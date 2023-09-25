@@ -4,6 +4,8 @@
 #error C++17 or later compatible compiler is required to use ATen.
 #endif
 
+// IWYU pragma: begin_exports
+
 #include <ATen/Context.h>
 #include <ATen/Device.h>
 #include <ATen/DeviceGuard.h>
@@ -32,6 +34,4 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 
-// TODO: try to remove this
-// There is some back story, see https://github.com/pytorch/pytorch/issues/48684
-#include <ATen/NativeFunctions.h>
+// IWYU pragma: end_exports
