@@ -82,6 +82,22 @@ SymInt::operator SymFloat() const {
   }
 }
 
+bool SymInt::is_same(const SymInt& other) const {
+  if (is_heap_allocated() != other.is_heap_allocated()) {
+    return false;
+  }
+  // Both not heap allocated
+  if (!is_heap_allocated() && this->operator!=(other)) {
+    return false;
+  }
+  // Both heap allocated
+  if (is_heap_allocated() &&
+      toSymNodeImplUnowned() != other.toSymNodeImplUnowned()) {
+    return false;
+  }
+  return true;
+}
+
 SymNode SymInt::wrap_node(const SymNode& base) const {
   if (auto ma = maybe_as_int()) {
     return base->wrap_int(*ma);
