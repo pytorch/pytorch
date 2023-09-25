@@ -779,9 +779,9 @@ void initDispatchBindings(PyObject* module) {
         include_set.has(c10::DispatchKey::FuncTorchDynamicLayerBackMode));
   });
 
-  m.def("_get_singleton_int", [](int64_t data) {
+  m.def("_get_singleton_int", [](int64_t data, int64_t factor) {
     return c10::SymInt(
-        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data)));
+        c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(data, factor)));
   });
 
   m.def("_get_constant_bool_symnode", [](int64_t data) {

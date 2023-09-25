@@ -1275,6 +1275,11 @@ void initJITBindings(PyObject* module) {
           "singleton_int",
           [](const c10::SymNode& node) {
             return node->singleton_int();
+          })
+      .def(
+          "factor",
+          [](const c10::SymNode& node) {
+            return node->factor();
           });
 
   // clang-format on
