@@ -290,6 +290,7 @@ class WrapperCodeGen(CodeGen):
         self.first_device_guard = True
         self.supports_intermediate_hooks = True
         self.expr_printer = pexpr
+        self.defined_symbols = set()
 
         self.write_header()
         self.write_prefix()
@@ -581,6 +582,7 @@ class WrapperCodeGen(CodeGen):
         for name, shape in graph_inputs_expr:
             shape = V.graph.sizevars.simplify(shape)
             if shape in needed:
+                self.defined_symbols.add(shape)
                 needed.remove(shape)
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
@@ -589,6 +591,7 @@ class WrapperCodeGen(CodeGen):
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)
                 if shape in needed:
+                    self.defined_symbols.add(shape)
                     needed.remove(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
@@ -599,6 +602,7 @@ class WrapperCodeGen(CodeGen):
             for dim, shape in enumerate(shapes):
                 shape = V.graph.sizevars.simplify(shape)
                 if shape in needed:
+                    self.defined_symbols.add(shape)
                     needed.remove(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
@@ -617,7 +621,7 @@ class WrapperCodeGen(CodeGen):
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
 
-    def codegen_tuple_access(self, basename: str, index: str) -> str:
+    def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
         return f"{basename}[{index}]"
 
     def codegen_python_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
@@ -636,6 +640,9 @@ class WrapperCodeGen(CodeGen):
         stride = self.codegen_shape_tuple(stride)
         offset = self.codegen_sizevar(offset)
         return f"reinterpret_tensor({name}, {size}, {stride}, {offset})"
+
+    def codegen_multi_output(self, name, value):
+        self.writeline(f"{self.declare}{name} = {value}{self.ending}")
 
     def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
@@ -1182,7 +1189,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             if V.graph.aot_mode:
                 self.prefix.writeline("inputs.clear();")
-                dynamic_symbols = V.graph.sizevars.free_symbols()
+                dynamic_symbols = [
+                    s
+                    for s in V.graph.sizevars.free_symbols()
+                    if s in self.defined_symbols
+                ]
                 for dim in dynamic_symbols:
                     self.prefix.writeline(
                         f'auto dim_{dim} = find_dynamic_dim("{dim}");'
@@ -1402,21 +1413,53 @@ class CppWrapperCodeGen(WrapperCodeGen):
         kernel = "aoti_torch_" + kernel.split("::")[-1]
         self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({kernel}({', '.join(args)}));")
 
+    def generate_c_shim_fallback_kernel_call(self, fallback_kernel, args):
+        output_args = []
+        output_raii_handles = []
+        output_name_base = fallback_kernel.get_name()
+        for idx, output in enumerate(fallback_kernel.outputs):
+            if isinstance(output, ir.MultiOutput):
+                name = f"{output.get_name()}"
+                output_handle_name = f"{name}_handle"
+                assert (
+                    output.indices[0][1] == idx
+                ), f"expected {output.indices[1]=} == {idx=} for {output_name_base=}"
+                self.writeline(f"AtenTensorHandle {output_handle_name};")
+                output_args.append(f"&{output_handle_name}")
+                output_raii_handles.append(
+                    f"RAIIAtenTensorHandle {name}({output_handle_name});"
+                )
+            elif isinstance(output, int):
+                output_name = f"{output_name_base}_{idx}"
+                self.writeline(f"int64_t {output_name} = {output};")
+                output_args.append(f"&{output_name}")
+            elif output is None:
+                output_args.append("nullptr")
+            else:
+                raise NotImplementedError("unsupported type of {output=}")
+        num_inputs = len(args)
+        args = output_args + [f"{num_inputs}"] + args
+        self.generate_c_shim_extern_kernel_call(fallback_kernel.kernel, args)
+        for raii_handle in output_raii_handles:
+            self.writeline(raii_handle)
+
     def generate_extern_kernel_alloc(self, extern_kernel, args):
         if V.graph.aot_mode and config.aot_inductor.abi_compatible:
-            output_name = extern_kernel.get_name()
-            self.writeline(f"AtenTensorHandle {output_name};")
-            kernel = extern_kernel.kernel
-            size = self.codegen_shape_tuple(tuple(extern_kernel.get_size()))
-            stride = self.codegen_shape_tuple(tuple(extern_kernel.get_stride()))
-            args = [
-                f"&{output_name}",
-                str(len(extern_kernel.get_size())),  # ndim
-                self.codegen_int_array_var(size),
-                self.codegen_int_array_var(stride),
-            ] + args
-            # TODO: support extern kernel that allocates
-            self.generate_c_shim_extern_kernel_call(kernel, args)
+            if isinstance(extern_kernel, ir.FallbackKernel):
+                self.generate_c_shim_fallback_kernel_call(extern_kernel, args)
+            else:
+                output_name = extern_kernel.get_name()
+                self.writeline(f"AtenTensorHandle {output_name};")
+                kernel = extern_kernel.kernel
+                size = self.codegen_shape_tuple(tuple(extern_kernel.get_size()))
+                stride = self.codegen_shape_tuple(tuple(extern_kernel.get_stride()))
+                args = [
+                    f"&{output_name}",
+                    str(len(extern_kernel.get_size())),  # ndim
+                    self.codegen_int_array_var(size),
+                    self.codegen_int_array_var(stride),
+                ] + args
+                self.generate_c_shim_extern_kernel_call(kernel, args)
         else:
             super().generate_extern_kernel_alloc(extern_kernel, args)
 
@@ -1461,8 +1504,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def codegen_sizevar(self, x: Expr) -> str:
         return self.expr_printer(V.graph.sizevars.simplify(x))
 
-    def codegen_tuple_access(self, basename: str, index: str) -> str:
-        return f"std::get<{index}>({basename})"
+    def codegen_tuple_access(self, basename: str, name: str, index: str) -> str:
+        if V.graph.aot_mode and config.aot_inductor.abi_compatible:
+            # in the abi_compatible mode, outputs are returned via arguments
+            return name
+        else:
+            return f"std::get<{index}>({basename})"
 
     def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
         parts = list(map(self.codegen_sizevar, shape))
@@ -1583,6 +1630,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args = [name, size, stride, offset]
             return f"reinterpret_tensor({', '.join(args)})"
+
+    def codegen_multi_output(self, name, value):
+        # if V.graph.aot_mode and name in set(V.graph.get_output_names()):
+        if not config.aot_inductor.abi_compatible:
+            super().codegen_multi_output(name, value)
 
     def generate_extern_kernel_args_decl_if_needed(
         self, op_overload, raw_args, output_args
