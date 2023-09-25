@@ -138,7 +138,7 @@ class TestForeach(TestCase):
         "noncontiguous,inplace",
         [(False, False), (False, True), (True, False), (True, True)],
         name_fn=lambda x, y: '{}_{}'.format(
-            'fastpath' if x else 'slowpath', 'inplace' if y else 'outplace'
+            'fastpath' if not x else 'slowpath', 'inplace' if y else 'outplace'
         )
     )
     def test_parity(self, device, dtype, op, noncontiguous, inplace):

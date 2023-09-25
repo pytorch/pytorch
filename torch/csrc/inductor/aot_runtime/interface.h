@@ -53,16 +53,16 @@ AOTIRuntimeError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    // Array of raw AtenTensorHandle for input tensors. Handles will be stolen
-    AtenTensorHandle* input_handles,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
     size_t num_inputs,
-    // Array of raw AtenTensorHandle for output tensors. Handles will be stolen
-    AtenTensorHandle* output_handles,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTIProxyExecutorHandle proxy_executor_handle,
-    const int64_t** ret_output_sizes,
-    int64_t* ret_output_ndims);
+    AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Retrieves the number of inputs for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumInputs(
