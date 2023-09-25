@@ -1767,6 +1767,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_control_flow(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -3276,6 +3280,9 @@ def run(runner, args, original_dir=None):
             assert not args.training, "AOTInductor only supports inference"
             assert args.devices == ["cuda"], "AOTInductor only tested for CUDA"
             optimize_ctx = export_aot_inductor
+
+            # AOTInductor doesn't support control flow yet
+            runner.skip_models.update(runner.skip_models_due_to_control_flow)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
