@@ -1191,7 +1191,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         before, after = opt_fn()
         self.assertTrue(same(before, after))
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, 3)  # rand, rand
+        self.assertEqual(cnt.op_count, 2)  # rand, rand
         try:
             graph, _ = torch._dynamo.export(fn)()
             # See https://github.com/pytorch/pytorch/pull/87490

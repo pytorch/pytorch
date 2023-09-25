@@ -103,9 +103,13 @@ def triton_compute_type(dtype):
     triton_type_name = str(dtype).split(".")[-1]
     if triton_type_name == "bool":
         triton_type_name = "int1"
-    if triton_type_name in ("float16", "bfloat16"):
+    elif triton_type_name in ("float16", "bfloat16"):
         # float16 math is done in float32 inside the kernel
         triton_type_name = "float32"
+    elif triton_type_name == "float8_e4m3fn":
+        triton_type_name = "float8e4nv"
+    elif triton_type_name == "float8_e5m2":
+        triton_type_name = "float8e5"
     return f"tl.{triton_type_name}"
 
 
@@ -153,7 +157,43 @@ class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
     @staticmethod
-    def to_dtype(x, dtype: torch.dtype):
+    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+        def _get_min_elements_per_thread(
+            src_dtype: torch.dtype, dst_dtype: torch.dtype
+        ) -> int:
+            if src_dtype == dst_dtype:
+                # No data type conversion is needed. No requirements on min_elem_per_thread.
+                return 0
+
+            # fp8 data type conversions has min_elem_per_thread requirements.
+            # Refer to Triton implementations here:
+            # https://github.com/openai/triton/blob/10f59d8ce04052521c1bc0cb3a3f8b98918fc7e3/lib/Conversion/TritonGPUToLLVM/ElementwiseOpToLLVM.cpp#L10.
+            fp8_dtypes = {
+                torch.float8_e4m3fn,
+                torch.float8_e5m2,
+            }
+            # Triton doesn't support type conversions between fp8_e4m3 and fp8_e5m2.
+            assert not (
+                src_dtype in fp8_dtypes
+                and dst_dtype in fp8_dtypes
+                and src_dtype != dst_dtype
+            ), "Conversions between float8_e5m2 and float8_e4m3fn is not supported!"
+            if src_dtype == torch.float8_e5m2 or dst_dtype == torch.float8_e5m2:
+                return 4
+            if src_dtype == torch.float8_e4m3fn or dst_dtype == torch.float8_e4m3fn:
+                return 2
+            # No requirements on min_elem_per_thread.
+            return 0
+
+        if src_dtype is not None:
+            # Both dtype and src_dtype are set. This is used by torch to(dtype=dtype).
+            # It takes the maximum min_elem_per_thread if there are multiple fp8 conversions
+            # in the same kernel.
+            V.kernel.min_elem_per_thread = max(
+                _get_min_elements_per_thread(src_dtype, dtype),
+                V.kernel.min_elem_per_thread,
+            )
+
         if dtype == torch.bool:
             return f"({x} != 0)"
         elif dtype == torch.uint8:
@@ -762,6 +802,7 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
+        min_elem_per_thread=0,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -779,6 +820,7 @@ class TritonKernel(Kernel):
         self.outside_loop_vars = set()
         self.reduction_hint = reduction_hint
         self.index_dtype = index_dtype
+        self.min_elem_per_thread = min_elem_per_thread
         # Upper bounds for indirect_indexing and their str representation
         self.indirect_max_sizes: Dict[Tuple[str, str], Tuple[sympy.Expr, str]] = {}
         self.last_usage = set()
@@ -1949,7 +1991,12 @@ class TritonKernel(Kernel):
                 else:
                     tile_hint = "tile_hint=TileHint.DEFAULT,"
             heuristics_line = f"""
-                @{heuristics}(size_hints={size_hints!r}, {tile_hint}filename=__file__, meta={triton_meta!r})
+                @{heuristics}(
+                    size_hints={size_hints!r}, {tile_hint}
+                    filename=__file__,
+                    meta={triton_meta!r},
+                    min_elem_per_thread={self.min_elem_per_thread}
+                )
                 @triton.jit
             """
         code.splice(heuristics_line)
