@@ -4980,9 +4980,13 @@ def linspace(
     )
     cast_rg = partial(_maybe_convert_to_dtype, dtype=computation_dtype)
 
+    start = _maybe_convert_to_dtype(start, dtype)
+    end = _maybe_convert_to_dtype(end, dtype)
+    dtype_step = torch.float32 if utils.is_integer_dtype(dtype) else dtype
+    cast_step = partial(_maybe_convert_to_dtype, dtype=dtype_step)
     # We implement torch.lerp without performing rg / (steps - 1) explicitly
     # With this we get out[0] == start, out[-1] == end
-    step = (end - start) / (steps - 1)
+    step = (cast_step(end) - cast_step(start)) / (steps - 1)
     out = torch.where(
         rg < steps / 2,
         start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
