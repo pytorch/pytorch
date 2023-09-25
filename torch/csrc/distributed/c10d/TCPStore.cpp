@@ -218,8 +218,6 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
       sizeof(timeoutTV)));
 }
 
-using detail::queryMagicNumber;
-
 class SendBuffer {
   // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
   const size_t FLUSH_WATERMARK = 1440;
@@ -235,11 +233,7 @@ class SendBuffer {
  public:
   SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
       : client(client) {
-    auto *tmp_ptr = static_cast<const uint8_t>(queryMagicNumber);
-    buffer.reserve(32 + sizeof(queryMagicNumber)); // enough for most commands
-    for (int i = 0; i < 4; i++) {
-      buffer.push_back(tmp_ptr[i]);
-    }
+    buffer.reserve(32); // enough for most commands
     buffer.push_back((uint8_t)cmd);
   }
 
@@ -347,6 +341,9 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
   // TCP connection established
   C10D_DEBUG("TCP client connected to host {}:{}", addr_.host, addr_.port);
 
+  // client's first query for validation
+  validate(); 
+
   if (opts.waitWorkers) {
     waitForWorkers();
   }
@@ -390,6 +387,13 @@ void TCPStore::waitForWorkers() {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
   }
+}
+
+void TCPStore::validate(void) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+  detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
+  buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
+  buffer.flush();
 }
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {

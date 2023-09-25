@@ -18,10 +18,11 @@
 namespace c10d {
 namespace detail {
 
-// Magic number prefixed to queries.
-static const uint32_t queryMagicNumber = 0xDEADC0DE;
+// Magic number for client validation.
+static const uint32_t validationMagicNumber = 0x3C85F7CE;
 
 enum class QueryType : uint8_t {
+  VALIDATE,
   SET,
   COMPARE_SET,
   GET,
