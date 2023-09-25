@@ -2224,7 +2224,7 @@ def _make_copy_from_view(fn):
 py_all = all
 
 
-@register_decomposition(aten.all)
+# @register_decomposition(aten.all)
 @out_wrapper()
 def all(
     a: TensorLikeType,

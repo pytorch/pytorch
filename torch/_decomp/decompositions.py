@@ -4018,6 +4018,21 @@ def multilabel_margin_loss_forward(
     return z, is_target
 
 
+@register_decomposition(aten.all)
+def all_dim(input, dim=None, keepdim=False):
+    if dim is None:
+        all_dim_output = aten.logical_not(aten.any(aten.logical_not(input)))
+    else:
+        all_dim_output = aten.logical_not(
+            aten.any(aten.logical_not(input), dim, keepdim=keepdim)
+        )
+
+    if input.dtype == torch.uint8:
+        all_dim_output = all_dim_output.to(dtype=torch.uint8)
+
+    return all_dim_output
+
+
 # scaled_dot_product_attention used to be decomposed in pre-autograd, given that
 # it calls _scaled_dot_product_attention_math and
 # _scaled_dot_product_attention_math only has a CompositeImplicitAutograd
