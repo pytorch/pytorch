@@ -915,8 +915,8 @@ class GuardManager;
  */
 class GuardAccessor {
  public:
-  GuardAccessor(GuardManager* parent, py::object accessor_key)
-      : _guard_manager(std::make_unique<GuardManager>(parent)),
+  GuardAccessor(GuardManager* parent_manager, py::object accessor_key)
+      : _guard_manager(std::make_unique<GuardManager>(parent_manager)),
         _accessor_key(std::move(accessor_key)) {}
 
   // Return by reference as GuardAccessor owns the GuardManager.
@@ -928,75 +928,19 @@ class GuardAccessor {
     return _accessor_key.equal(key);
   }
 
+  virtual bool check_nopybind(PyObject* obj) = 0;
+  virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
+
   // Returns a new reference. It is the responsbility of the GuardManager
   // (caller in this case) to decref.
-  virtual PyObject* access(PyObject* obj) = 0;
   virtual ~GuardAccessor() = default;
 
- private:
+ protected:
   // Guard manager corresponding to the retrieved value from the GuardAccessor.
   std::unique_ptr<GuardManager> _guard_manager;
-
- protected:
   // accessor key could be py::str for getattr, getitem or py::function for
   // lambda accessor.
   py::object _accessor_key;
-};
-
-/**
- * Represents __getattr__ acccessor.
- */
-class GetAttrGuardAccessor : public GuardAccessor {
- public:
-  GetAttrGuardAccessor(GuardManager* parent, py::str name)
-      : GuardAccessor(parent, name), _attr_name(name.ptr()) {}
-
-  // Returns a new reference.
-  PyObject* access(PyObject* obj) override { // borrowed ref
-    return PyObject_GetAttr(obj, _attr_name); // new ref
-  }
-
- private:
-  PyObject* _attr_name;
-};
-
-/**
- * Represents dict[name] acccessor. We differentiate it from
- * GetItemGuardAccessor because PyDict_GetItem should be fastern the
- * PyObject_GetItem.
- */
-class GetDictItemGuardAccessor : public GuardAccessor {
- public:
-  GetDictItemGuardAccessor(GuardManager* parent, py::str name)
-      : GuardAccessor(parent, name), _attr_name(name.ptr()) {}
-
-  // Returns a new reference.
-  PyObject* access(PyObject* obj) override { // borrowed ref
-    PyObject* item = PyDict_GetItem(obj, _attr_name); // borrowed ref
-    // GetItem returns a borrowed reference, incref to own it.
-    Py_INCREF(item);
-    return item;
-  }
-
- private:
-  PyObject* _attr_name;
-};
-
-/**
- * Represents __getitem__ acccessor.
- */
-class GetItemGuardAccessor : public GuardAccessor {
- public:
-  GetItemGuardAccessor(GuardManager* parent, py::str name)
-      : GuardAccessor(parent, name), _attr_name(name.ptr()) {}
-
-  // Returns a new reference.
-  PyObject* access(PyObject* obj) override { // borrowed ref
-    return PyObject_GetItem(obj, _attr_name);
-  }
-
- private:
-  PyObject* _attr_name;
 };
 
 /**
@@ -1117,10 +1061,7 @@ class GuardManager {
     // Iterate over accessors.
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
-      auto& manager = accessor->get_guard_manager();
-      PyObject* accessed_value = accessor->access(value); // new ref
-      result = result && manager->check_nopybind(accessed_value);
-      Py_DECREF(accessed_value);
+      result = result && accessor->check_nopybind(value);
       if (!result) { // early exit
         _fail_count += 1;
         _reset_relational_guard_state();
@@ -1174,9 +1115,8 @@ class GuardManager {
 
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
-      auto& manager = accessor->get_guard_manager();
       const GuardDebugInfo& debug_info =
-          manager->check_verbose_nopybind(accessor->access(value));
+          accessor->check_verbose_nopybind(value);
       result = result && debug_info.result;
       num_guards_executed += debug_info.num_guards_executed;
       if (!result) {
@@ -1221,7 +1161,11 @@ class GuardManager {
   }
 
  private:
+  // Parent of the guard manager. If this is root, parent is nullptr. This is
+  // used for finding the lowest common ancestor during installation of
+  // relational guards.
   GuardManager* _parent;
+
   // Leaf guards are the terminal guards on this object, e.g, type check on a
   // list. These guards have to be run before any children are run.
   //
@@ -1251,6 +1195,93 @@ class GuardManager {
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
   int _fail_count{0};
+};
+
+/**
+ * Represents __getattr__ acccessor.
+ */
+class GetAttrGuardAccessor : public GuardAccessor {
+ public:
+  GetAttrGuardAccessor(GuardManager* parent_manager, py::str name)
+      : GuardAccessor(parent_manager, name), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetAttr(obj, _attr_name); // new ref
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+ private:
+  PyObject* _attr_name;
+};
+
+/**
+ * Represents dict[name] acccessor. We differentiate it from
+ * GetItemGuardAccessor because PyDict_GetItem should be fastern the
+ * PyObject_GetItem.
+ */
+class GetDictItemGuardAccessor : public GuardAccessor {
+ public:
+  GetDictItemGuardAccessor(GuardManager* parent_manager, py::str name)
+      : GuardAccessor(parent_manager, name), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyDict_GetItem(obj, _attr_name); // borrowed ref
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+ private:
+  PyObject* _attr_name;
+};
+
+/**
+ * Represents __getitem__ acccessor.
+ */
+class GetItemGuardAccessor : public GuardAccessor {
+ public:
+  GetItemGuardAccessor(GuardManager* parent_manager, py::str name)
+      : GuardAccessor(parent_manager, name), _attr_name(name.ptr()) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyObject_GetItem(obj, _attr_name); // new ref
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+ private:
+  PyObject* _attr_name;
 };
 
 void traverse_to_root(GuardManager* node, std::vector<GuardManager*>& path) {
