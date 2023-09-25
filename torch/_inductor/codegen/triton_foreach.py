@@ -241,7 +241,7 @@ class ForeachKernel(Kernel):
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_cuda_stream(
+            stream_name = code.write_get_raw_stream(
                 V.graph.scheduler.current_device.index
             )
             code.writeline(
