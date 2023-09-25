@@ -2901,6 +2901,10 @@ uint64_t ProcessGroupGloo::getSequenceNumberForGroup() {
   return sequenceNum_->get();
 }
 
+void ProcessGroupGloo::enableCollectivesTiming() {
+  // Nothing to do to enable timing
+}
+
 } // namespace c10d
 
 #endif // USE_C10D_GLOO
