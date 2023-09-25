@@ -6,6 +6,7 @@
 #include <torch/library.h>
 #include <ATen/mps/EmptyTensor.h>
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/native/mps/Copy.h>
