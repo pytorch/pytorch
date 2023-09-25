@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/macros/Export.h>
+#include <atomic>
 
 namespace c10 {
 namespace impl {

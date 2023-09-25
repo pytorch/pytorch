@@ -1807,13 +1807,21 @@ class FlatParamHandle:
                     # A `DTensor` `view` is not compatible with assigning
                     # `param.data = view`, so we cannot preserve the parameter
                     # variable.
-                    self._setattr_param(module, param_name, nn.Parameter(view))
+                    self._setattr_param(
+                        module,
+                        param_name,
+                        nn.Parameter(view, requires_grad=flat_param.requires_grad),
+                    )
                     continue
                 param = self.flat_param._params[i]
                 self._setattr_param(module, param_name, param)
                 param.data = view
             elif as_params:
-                self._setattr_param(module, param_name, nn.Parameter(view))
+                self._setattr_param(
+                    module,
+                    param_name,
+                    nn.Parameter(view, requires_grad=flat_param.requires_grad),
+                )
             else:  # `as_params=False`
                 param_var: Tensor = view
                 if self._use_orig_params:
