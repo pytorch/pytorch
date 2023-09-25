@@ -2205,7 +2205,7 @@ def memory_bandwidth(model, inp, num_samples=1, batch_size=1):
     bandwidth = (model_size / batch_size) / avg_time / 1e9
     return bandwidth
 
- def is_rng_state_getter_or_setter(value):
+def is_rng_state_getter_or_setter(value):
     getters = (
         torch.default_generator.get_state,
         torch.get_rng_state,
