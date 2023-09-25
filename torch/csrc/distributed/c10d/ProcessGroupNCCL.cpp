@@ -881,7 +881,7 @@ void abortCommsFromMap(
     // it to recover from errors.
 
     LOG(INFO) << "[Rank " << rank << "] Destroyed " << ncclComms.size()
-              << "communicators on CUDA device " << devName;
+              << " communicators on CUDA device " << devName;
   }
 }
 
