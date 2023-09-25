@@ -497,7 +497,8 @@ def _update_special_qspecs_after_replacement(
 
 def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     m = _fuse_conv_bn_qat_helper(m, is_cuda=False)
-    m = _fuse_conv_bn_qat_helper(m, is_cuda=True)
+    if torch.cuda.is_available():
+        m = _fuse_conv_bn_qat_helper(m, is_cuda=True)
     return m
 
 def _fuse_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
@@ -646,7 +647,8 @@ def _remove_extra_dequantize(m: GraphModule):
 
 def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     m = _fold_conv_bn_qat_helper(m, is_cuda=False)
-    m = _fold_conv_bn_qat_helper(m, is_cuda=True)
+    if torch.cuda.is_available():
+        m = _fold_conv_bn_qat_helper(m, is_cuda=True)
     return m
 
 def _fold_conv_bn_qat_helper(m: GraphModule, is_cuda: bool) -> GraphModule:
