@@ -23,6 +23,7 @@ from torch._guards import GuardSource, TracingContext
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch.fx.experimental.symbolic_shapes import (
+    _constrain_range_for_size,
     DimConstraint,
     DimDynamic,
     RelaxedUnspecConstraint,
@@ -44,6 +45,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    ConvertIntSource,
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
@@ -113,8 +115,10 @@ from .misc import (
     AutogradFunctionVariable,
     ComptimeVariable,
     GetAttrVariable,
+    GetSetDescriptorVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
     SkipFilesVariable,
@@ -389,6 +393,19 @@ class VariableBuilder:
         elif is_namedtuple(value):
             return self.wrap_listlike(value)
 
+        elif value is torch.utils._pytree.SUPPORTED_NODES:
+            result = {
+                k: UserDefinedObjectVariable(
+                    value[k],
+                    source=GetItemSource(self.get_source(), k),
+                    # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
+                    # under the assumption that the values themselves don't change.
+                    guards=self.make_guards(GuardBuilder.DICT_VERSION),
+                )
+                for k in value.keys()
+            }
+            return ConstDictVariable(result, type(value))
+
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -447,7 +464,7 @@ class VariableBuilder:
         ):
             # For frozenset, we can guard by object ID instead of value
             # equality, this allows us to handle non-literal values
-            return ConstantVariable(
+            return ConstantVariable.create(
                 value=value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
@@ -498,7 +515,9 @@ class VariableBuilder:
                 args_source.make_guard(GuardBuilder.LIST_LENGTH),
             }
 
-            return FunctoolsPartialVariable(func_obj, args, keywords, guards=guards)
+            return FunctoolsPartialVariable(
+                func_obj, args, keywords, original=value, guards=guards
+            )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.
             return TypingVariable(
@@ -667,6 +686,14 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
+        elif isinstance(value, types.GetSetDescriptorType):
+            return GetSetDescriptorVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(
+                value, guards=self.make_guards(GuardBuilder.FUNCTION_MATCH)
+            )
         elif isinstance(value, torch.optim.Optimizer):
             return OptimizerVariable(
                 value,
@@ -710,6 +737,46 @@ class VariableBuilder:
                 value,
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
+            )
+        elif isinstance(value, torch.SymBool):
+            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
+            # user provided SymBool with a SymInt in dynamo.
+
+            # Concretely,
+            # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
+            # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
+            # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
+            # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
+
+            value_hint = value.node.require_hint()
+            new_source = ConvertIntSource(self.source)
+
+            new_symint = self.tx.output.shape_env.create_unspecified_symint_and_symbol(
+                int(value_hint),
+                new_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+
+            sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                type(new_symint),
+                source=new_source,
+            )
+
+            sym_node_proxy.node.meta["grapharg"] = GraphArg(
+                new_source,
+                new_symint,
+                False,
+                None,
+                is_tensor=False,
+                example_strong_ref=new_symint,
+            )
+            self.tx.output.tracked_fakes.append(
+                TrackedFake(new_symint, new_source, None)
+            )
+            return SymNodeVariable(
+                sym_node_proxy,
+                new_symint == 1,
             )
         else:
             result = UserDefinedObjectVariable(
@@ -885,7 +952,7 @@ class VariableBuilder:
         elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if (
+            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
@@ -894,14 +961,14 @@ class VariableBuilder:
                 # NN modules on the fly)
                 or self.source.guard_source().is_nn_module()
             ):
-                return ConstantVariable(
+                return ConstantVariable.create(
                     value=value,
                     guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                 )
             else:
                 return self.wrap_unspecialized_primitive(value)
         else:
-            return ConstantVariable(
+            return ConstantVariable.create(
                 value=value,
                 guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
             )
@@ -1083,11 +1150,21 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            shape_env = self.tx.output.shape_env
+            if TracingContext.get().force_unspec_int_unbacked_size_like and isinstance(
+                value, int
+            ):
+                wrapped_value = shape_env.create_unbacked_symint()
+                _constrain_range_for_size(wrapped_value)
+                self.tx.output.tracked_fakes.append(
+                    TrackedFake(wrapped_value, self.source, None)
+                )
+
             # NB: We do not do float.  For motivation, see
             # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
             # but the general idea is that we generate kernels that can
             # take unspecialized floats and use them in sizevar computation
-            if (
+            elif (
                 isinstance(value, int)
                 and not is_constant_source(self.get_source())
                 and not isinstance(self.get_source(), RandomValueSource)
@@ -1096,12 +1173,10 @@ class VariableBuilder:
                     # If specialize_int is False, also return
                     # a constant (but this should have been handled
                     # in the caller, TBH)
-                    return ConstantVariable(
+                    return ConstantVariable.create(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
-
-                shape_env = self.tx.output.shape_env
 
                 name = self.source.name()
                 if name not in self.tx.output.frame_state:
@@ -1133,7 +1208,7 @@ class VariableBuilder:
                 else:  # assume_static_by_default
                     # TODO: dynamic_dim = DimDynamic.STATIC should work but
                     # for some reason it doesn't
-                    return ConstantVariable(
+                    return ConstantVariable.create(
                         value=value,
                         guards=self.make_guards(GuardBuilder.CONSTANT_MATCH),
                     )
@@ -1387,7 +1462,7 @@ def wrap_fx_proxy_cls(
     elif istype(example_value, torch.Size) and all(
         isinstance(x, int) for x in example_value
     ):
-        sizes = [ConstantVariable(x) for x in example_value]
+        sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list, set)):
         proxy.node.meta["example_value"] = example_value
@@ -1396,7 +1471,7 @@ def wrap_fx_proxy_cls(
             if val is None:
                 # nn.MultiheadAttention() can return None, see issue #175
                 unpacked.append(
-                    ConstantVariable(None, **options),
+                    ConstantVariable.create(None, **options),
                 )
             else:
                 unpacked.append(
@@ -1426,7 +1501,7 @@ def wrap_fx_proxy_cls(
             ), f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             return NamedTupleVariable(unpacked, example_value.__class__, **options)
     elif example_value is None or proxy.node.target is torch.manual_seed:
-        return ConstantVariable(None, **options)
+        return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
         proxy.node.meta["example_value"] = example_value
         return SymNodeVariable(proxy, example_value, **options)
@@ -1448,7 +1523,7 @@ def wrap_fx_proxy_cls(
         torch._export.constraints.constrain_as_value,
     ]:
         proxy.node.meta["example_value"] = example_value
-        return ConstantVariable(example_value, **options)
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
@@ -1479,6 +1554,14 @@ class TrackedFake:
 def _automatic_dynamic(e, tx, name, static_shapes):
     if static_shapes:
         return [DimDynamic.STATIC] * e.dim(), [None] * e.dim()
+
+    # We preserve the dynamism of inputs. For example, when users call
+    # make_fx(torch.cond, tracing_mode="symbolic")(*args), inputs have SymInt sizes.
+    if any(isinstance(s, SymInt) for s in e.size()):
+        return [
+            DimDynamic.DYNAMIC if isinstance(s, SymInt) else DimDynamic.STATIC
+            for s in e.size()
+        ], [None] * e.dim()
 
     # Prep for automatic dynamic
     frame_state_entry = None
@@ -1519,21 +1602,30 @@ def _automatic_dynamic(e, tx, name, static_shapes):
     t_id = id(e)
     dim2constraint = {}
 
-    def update_dim2constraint(dim, constraint_range):
+    def update_dim2constraint(dim, constraint_range, debug_name):
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
-            dim2constraint[dim] = StrictMinMaxConstraint(
-                vr=constraint_range.vr & dim2constraint[dim].vr,
+            old_constraint_range, old_debug_name = dim2constraint[dim]
+            new_constraint_range = StrictMinMaxConstraint(
+                vr=constraint_range.vr & old_constraint_range.vr,
                 warn_only=False,
             )
+            if old_debug_name is not None:
+                assert debug_name is None or debug_name == old_debug_name
+                new_debug_name = old_debug_name
+            else:
+                new_debug_name = debug_name
+            dim2constraint[dim] = new_constraint_range, new_debug_name
         else:
-            dim2constraint[dim] = constraint_range
+            dim2constraint[dim] = constraint_range, debug_name
 
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
             if constraint.t_id == t_id:
-                update_dim2constraint(constraint.dim, constraint.constraint_range)
+                update_dim2constraint(
+                    constraint.dim, constraint.constraint_range, constraint.debug_name
+                )
             if constraint.shared is not None and constraint.shared.t_id == t_id:
                 # We process constraint ranges for each shared dimension separately
                 # so that we can directly check range constraint violations on them
@@ -1542,7 +1634,9 @@ def _automatic_dynamic(e, tx, name, static_shapes):
                 # constraint ranges, no matter where / how they were specified, by
                 # by the end of this loop.
                 update_dim2constraint(
-                    constraint.shared.dim, constraint.constraint_range
+                    constraint.shared.dim,
+                    constraint.constraint_range,
+                    constraint.debug_name,
                 )
 
     dynamic_dims = []
@@ -1570,13 +1664,20 @@ def _automatic_dynamic(e, tx, name, static_shapes):
         constraint = dim2constraint.get(i)
         if constraint is None:
             if marked_dynamic and not config.allow_ignore_mark_dynamic:
-                constraint = RelaxedUnspecConstraint(warn_only=False)
+                constraint_dim = RelaxedUnspecConstraint(warn_only=False)
             elif not marked_static and automatic_dynamic:
-                constraint = RelaxedUnspecConstraint(warn_only=True)
-        constraint_dims.append(constraint)
+                constraint_dim = RelaxedUnspecConstraint(warn_only=True)
+            else:
+                constraint_dim = None
+        else:
+            constraint_dim, debug_name = constraint
+            if debug_name is not None:
+                dim_name = f"{name}.size()[{i}]"
+                tx.output.shape_env.source_name_to_debug_name[dim_name] = debug_name
+        constraint_dims.append(constraint_dim)
 
         # Now, figure out if the dim is dynamic/duck/static
-        if constraint is not None or marked_dynamic or marked_weak_dynamic:
+        if constraint_dim is not None or marked_dynamic or marked_weak_dynamic:
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override policy in this
             # case
@@ -1680,9 +1781,11 @@ class SourcelessBuilder:
         elif isinstance(value, (tuple, list)):
             cls = BaseListVariable.cls_for(type(value))
             return cls([self(tx, x) for x in value], mutable_local=MutableLocal())
+        elif isinstance(value, types.MethodWrapperType):
+            return MethodWrapperVariable(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
     def wrap_constant_literal(value):
         assert ConstantVariable.is_literal(value)
-        return ConstantVariable(value=value)
+        return ConstantVariable.create(value=value)

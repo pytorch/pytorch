@@ -1212,7 +1212,7 @@ struct AttentionBackwardKernel {
           p.num_heads <= 1 || p.bias_strideH % kMinimumAlignment == 0,
           "attn_bias is not correctly aligned (strideH)");
       TORCH_CHECK(
-          p.bias_strideM % kMinimumAlignment == 0,
+          p.num_queries <= 1 || p.bias_strideM % kMinimumAlignment == 0,
           "attn_bias is not correctly aligned (strideM)");
     }
     if (p.grad_bias_ptr) {
