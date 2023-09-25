@@ -1706,7 +1706,9 @@ class FlatParamHandle:
             return
 
         if not self._limit_all_gathers:
-            # Direct free if there is no rate limiting
+            # Direct free if there is no rate limiting.
+            # The `_free_unsharded_flat_param` function include `record_stream`
+            # -- the technique we use in no-limiting case.
             self._free_unsharded_flat_param()
             return
 
@@ -1729,11 +1731,14 @@ class FlatParamHandle:
         else:
             # In backward, we first check if the tensor is still stashed in queue
             # e.g. last two layers of forward
-            # If it is, unstash it from queue
+            # If it is, unstash it from queue; otherwise this is a no-op
             self._free_event_queue.pop(unsharded_flat_param)
             # Then direct free, because we have asked unshard stream to wait for
             # default stream before calling `reshard`. See the wait in
             # `_post_backward_reshard`.
+            # Note that we call `_free_storage` here instead of
+            # `_free_unsharded_flat_param` because the latter would call
+            # `record_stream`
             _free_storage(unsharded_flat_param)
 
     def post_reshard(self):
