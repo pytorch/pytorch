@@ -216,8 +216,8 @@ div.line:after {
 }
 
 div.line.glow {
-        background-color: cyan;
-        box-shadow: 0 0 10px cyan;
+        background-color: #00FFFF;  /*Cyan*/
+        box-shadow: 0 0 10px #00FFFF; /*Cyan*/
 }
 
 
