@@ -1376,6 +1376,7 @@ class TestOperators(TestCase):
         xfail('normal', ''),
         xfail('cdist', ''),  # NYI: forward-AD for _cdist_forward
         xfail('cholesky', ''),  # NYI: forward-AD for cholesky
+        xfail('masked_scatter', ''),  # NYI: forward-AD for masked_scatter
         xfail('nn.functional.embedding_bag', ''),  # NYI: forward-AD for _embedding_bag
         xfail('nn.functional.grid_sample', ''),  # NYI: forward AD for grid_sampler_2d
         xfail('grid_sampler_2d', ''),  # NYI: forward AD for grid_sampler_2d
