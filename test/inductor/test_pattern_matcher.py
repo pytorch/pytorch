@@ -496,7 +496,16 @@ class TestPaternMatcher(TestCase):
             x = torch.full([100], 0.1, dtype=torch.float32)
             return torch.cumsum(x, 0)
 
-        for fn in (fn1, fn2, fn3, fn4):
+        def fn5():
+            t1 = torch.full([2, 4], 1)
+            t2 = t1.to(dtype=torch.bool)
+            return torch.cumsum(t2, 1)
+
+        def fn6():
+            x = torch.full([10, 10], True, dtype=torch.int32)
+            return torch.cumsum(x, 1)
+
+        for fn in (fn1, fn2, fn3, fn4, fn5, fn6):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
@@ -786,6 +795,7 @@ class TestPaternMatcher(TestCase):
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
     def test_fuse_attention_roundtrip_pattern(self):
+        # are we losing anything in serialization
         from torch._inductor.fx_passes.fuse_attention import _get_sfdp_patterns
 
         global_vals = {

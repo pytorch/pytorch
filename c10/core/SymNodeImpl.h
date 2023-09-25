@@ -157,6 +157,11 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     // with a better implementation!
     return guard_bool(file, line);
   };
+  virtual bool expect_size(const char* file, int64_t line) {
+    // No improvement for unbacked SymInts by default, replace this
+    // with a better implementation!
+    return ge(wrap_int(0))->guard_bool(file, line);
+  };
   virtual int64_t int_() {
     TORCH_CHECK(false, "NYI");
   };
@@ -170,6 +175,9 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   virtual c10::optional<int64_t> singleton_int() {
+    return c10::nullopt;
+  }
+  virtual c10::optional<int64_t> factor() {
     return c10::nullopt;
   }
   virtual c10::optional<int64_t> constant_int() {

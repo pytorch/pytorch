@@ -9,12 +9,12 @@ _tensor_id_counter = 0
 _tensor_id_registry = WeakTensorKeyDictionary()
 
 
-def get_tensor_id(tensor):
+def get_tensor_id(tensor, factor):
     global _tensor_id_counter
     if tensor not in _tensor_id_registry:
         _tensor_id_registry[tensor] = _tensor_id_counter
         _tensor_id_counter += 1
-    return torch._C._get_singleton_int(_tensor_id_registry[tensor])
+    return torch._C._get_singleton_int(_tensor_id_registry[tensor], factor)
 
 
 class NestedTensor(torch.Tensor):
