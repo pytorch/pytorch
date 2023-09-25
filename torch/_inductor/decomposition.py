@@ -192,17 +192,6 @@ def all_dim(input, dim, keepdim=False):
     return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
-@register_decomposition([aten.baddbmm])
-def baddbmm(self, batch1, batch2, beta=1, alpha=1):
-    result = torch.bmm(batch1, batch2)
-    if not isinstance(alpha, numbers.Number) or alpha != 1:
-        result = result * alpha
-    if beta == 0:
-        return result
-    if not isinstance(beta, numbers.Number) or beta != 1:
-        self = self * beta
-    return self + result
-
 @register_decomposition([aten.bmm])
 def bmm(self, batch2):
     if config.coordinate_descent_tuning:
