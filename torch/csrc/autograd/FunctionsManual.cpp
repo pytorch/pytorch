@@ -1000,10 +1000,10 @@ Tensor unbind_backward_nested(
     int64_t dim) {
   std::vector<Tensor> grads_tensors;
   for (auto i : c10::irange(grads.size())) {
-    auto v = grads[i];
-    auto r = result[i];
-    auto v_tensor = v.defined() ? static_cast<Tensor>(v) : at::zeros_like(r);
-    grads_tensors.push_back(v_tensor);
+    const auto& v = grads[i];
+    const auto& r = result[i];
+    grads_tensors.push_back(
+        v.defined() ? static_cast<Tensor>(v) : at::zeros_like(r));
   }
 
   return at::_nested_tensor_from_tensor_list(grads_tensors);
