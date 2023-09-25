@@ -1909,7 +1909,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
                     "comment": "",
                     "status": "success",
                 }
@@ -1922,7 +1922,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch__test_delayed_error": {
                     "comment": "",
                     "status": "xfail",
                 },
@@ -1935,7 +1935,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                "MiniOpTest.test_aot_dispatch_static__test_delayed_error_nopenopenope": {
                     "comment": "",
                     "status": "xfail",
                 },
