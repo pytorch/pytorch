@@ -1132,6 +1132,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_getset_descriptor(self):
+        def fn(g, x):
+            return g.__get__(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        g = torch.Tensor.shape
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
+    def test_get_attr_function(self):
+        def fn(g, x):
+            return g(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        g = torch.Tensor.shape.__get__
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
     def test_user_getattribute(self):
         class MyObject:
             def __init__(self):
@@ -1646,6 +1670,39 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
         assert r2 in ("L", "U")
 
+    def test_dtypes_no_graphbreaks(self):
+        # cache size limit needs to be larger than the `dtypes` list size
+        torch._dynamo.config.cache_size_limit = 12
+
+        dtypes = [
+            # floats
+            float,
+            np.float64,
+            "float64",
+            np.float32,
+            "float32",
+            # np.dtype('float64')   # XXX: this is not supported, yet
+            # integers
+            int,
+            "int",
+            np.intp,
+            np.int32,
+            np.uint8
+            # np.dtype('int')       # XXX: as above
+        ]
+
+        def fn(dt):
+            return np.arange(5, dtype=dt)
+
+        for dtyp in dtypes:
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+            val = fn(dtyp)
+            opt_val = opt_fn(dtyp)
+
+            self.assertEqual(cnts.frame_count, 1)  # no graph break
+
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
         func_args_map = {
@@ -1731,6 +1788,26 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(len(counters["graph_break"]), 1)
         self.assertFalse("super() nn.Module.__init__" in counters["graph_break"])
+
+    def test_class_duner_mro(self):
+        class ModuleA(torch.nn.Module):
+            pass
+
+        class ModuleB(ModuleA):
+            pass
+
+        def fn(x, mod):
+            if ModuleA in type(mod).__mro__:
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.rand(2, 3)
+        mod = ModuleB()
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        ref = fn(x, mod)
+        res = opt_fn(x, mod)
+        self.assertTrue(same(ref, res))
 
     def test_module_deepcopy(self):
         m1 = torch.nn.Sequential(
@@ -2751,9 +2828,9 @@ def fn():
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": ConstantVariable(10), "b": ConstantVariable(20)}
+        d1 = {"a": ConstantVariable.create(10), "b": ConstantVariable.create(20)}
         d2 = collections.OrderedDict(
-            [("x", ConstantVariable(12)), ("y", ConstantVariable(22))]
+            [("x", ConstantVariable.create(12)), ("y", ConstantVariable.create(22))]
         )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
@@ -4688,6 +4765,8 @@ def fn():
         def fn():
             default_state = torch.default_generator.get_state()
             x = torch.rand([2, 3])
+            if default_state.dtype != "float32":
+                x = x * 2
             torch._dynamo.graph_break()
             torch.default_generator.set_state(default_state)
             y = torch.rand([2, 3])
@@ -4695,7 +4774,7 @@ def fn():
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
         x, y = opt_fn()
-        self.assertEqual(x, y)
+        self.assertEqual(x, y * 2)
 
     def test_torch_distributions_lazy_property(self):
         def fn(x):
@@ -7273,6 +7352,9 @@ ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
   >  Left: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
+  > Right: {}
+==> runtime_var_to_range: values don't match.
+  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
   > Right: {}
 ==> source_to_symbol: values don't match.
   >  Left: {x.size()[0]: x.size()[0], x.size()[1]: x.size()[1], x.storage_offset(): x.storage_offset(), x.stride()[0]: x.stride()[0], x.stride()[1]: x.stride()[1]}
