@@ -496,6 +496,8 @@ aten::tril_indices
 aten::tril_indices.out
 aten::triu_indices
 aten::triu_indices.out
+aten::trunc
+aten::trunc.out
 aten::trunc_
 aten::unbind.int
 aten::unfold
