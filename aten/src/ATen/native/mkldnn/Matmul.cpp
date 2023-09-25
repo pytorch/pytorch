@@ -3,7 +3,6 @@
 #include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/native/mkldnn/Matmul.h>
-#include <ATen/OpMathType.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -87,7 +86,10 @@ static bool use_mkldnn_fp16_matmul() {
 
 
 template<typename scalar_t>
-inline typename std::enable_if_t<!std::is_same_v<scalar_t, at::opmath_type<scalar_t>>, bool>
+inline typename std::enable_if_t<
+    std::is_same_v<scalar_t, c10::Half> ||
+    std::is_same_v<scalar_t, c10::BFloat16>,
+    bool>
 mkldnn_lowerp_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
