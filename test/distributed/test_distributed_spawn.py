@@ -34,24 +34,10 @@ if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
                 super().setUp()
                 self._spawn_processes()
                 torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
-
-        DummyTestClass = type(f"{TestDistBackendWithSpawn.__name__}{BACKEND}", TestDistBackendWithSpawn.__bases__, {})
-        DummyTestClass.__qualname__ = DummyTestClass.__name__
-        for name in dir(TestDistBackendWithSpawn):
-            if name.startswith("test_"):
-                fn = getattr(TestDistBackendWithSpawn, name)
-                if not callable(fn):
-                    setattr(DummyTestClass, name, getattr(TestDistBackendWithSpawn, name))
-                    continue
-                setattr(DummyTestClass, name, fn)
-            else:
-                try:
-                    setattr(DummyTestClass, name, getattr(TestDistBackendWithSpawn, name))
-                except Exception:
-                    pass
-        globals()[DummyTestClass.__name__] = DummyTestClass
-        return DummyTestClass
-
+        TestDistBackendWithSpawn.__name__ = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}"
+        TestDistBackendWithSpawn.__qualname__ = TestDistBackendWithSpawn.__name__
+        globals()[TestDistBackendWithSpawn.__name__] = TestDistBackendWithSpawn
+        return TestDistBackendWithSpawn
     make_test_classes()
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
