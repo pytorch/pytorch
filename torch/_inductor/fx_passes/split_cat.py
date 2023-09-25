@@ -778,7 +778,7 @@ class UnbindCatRemover(SplitCatSimplifier):
         split_dim = unbind_node.kwargs["dim"]
         transform_params_list = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            cat_dim = get_arg_value(user_node, 1, "dim") or 0
+            cat_dim = get_arg_value(user_node, 1, "dim")
             transform_params = []
             for user_input in user_inputs:
                 if isinstance(user_input, tuple):
