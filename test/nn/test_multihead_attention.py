@@ -329,7 +329,7 @@ class TestMultiheadAttentionNN(NNTestCase):
         key = torch.rand(batch_size, src_len, embed_dim)  # [N, S, D]
         value = key  # [N, S, D]
         attn_mask = torch.randint(0, 2, (batch_size, tgt_len, src_len)).float()  # [N, T, S]
-        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, float(0.0))
+        attn_mask = attn_mask.masked_fill(attn_mask == 0, float('-inf')).masked_fill(attn_mask == 1, 0.0)
 
         mta_model = torch.nn.MultiheadAttention(embed_dim, num_heads)
 

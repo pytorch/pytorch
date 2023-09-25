@@ -30,18 +30,19 @@ time python test/run_test.py --verbose -i distributed/_shard/sharding_spec/test_
 time python test/run_test.py --verbose -i distributed/_shard/sharding_plan/test_sharding_plan
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor_reshard
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding_bag
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_binary_cmp
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_init
-time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
+
+# functional collective tests
+time python test/run_test.py --verbose -i distributed/test_functional_api
+
 
 # DTensor tests
-time python test/run_test.py --verbose -i distributed/_tensor/test_device_mesh.py
-time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops.py
+time python test/run_test.py --verbose -i distributed/_tensor/test_device_mesh
+time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops
+time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compile
 
 # DTensor/TP tests
-time python test/run_test.py --verbose -i distributed/tensor/parallel/test_2d_parallel
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_ddp_2d_parallel
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_fsdp_2d_parallel
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples
 
 # Other tests

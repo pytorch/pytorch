@@ -24,7 +24,7 @@ from torch.distributed._tensor.op_schema import (
     TupleStrategy,
 )
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
-from torch.distributed._tensor.redistribute import _redistribute_with_local_tensor
+from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -139,7 +139,7 @@ def _gen_shard_strategy(
     util function to generate a shard strategy on shard_dim
     """
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[Shard(shard_dim)]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(Shard(shard_dim),)),
         input_specs=input_specs,
     )
 
@@ -151,7 +151,7 @@ def _gen_replicate_strategy(
     util function to generate a replicate strategy
     """
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[Replicate()]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(Replicate(),)),
         input_specs=input_specs,
     )
 
@@ -169,7 +169,7 @@ def _gen_partial_strategy(mesh: DeviceMesh) -> PlacementStrategy:
     # for non-NCCL backend
     reduce_op = c10d.ReduceOp.AVG  # type: ignore[attr-defined]
     return PlacementStrategy(
-        output_spec=DTensorSpec(mesh=mesh, placements=[_Partial(reduce_op)]),
+        output_spec=DTensorSpec(mesh=mesh, placements=(_Partial(reduce_op),)),
     )
 
 
@@ -459,7 +459,7 @@ def build_data_parallel_strategies(
                             elif node_type == NodeType.PARAM:
                                 # param must be replicated
                                 input_specs.append(
-                                    DTensorSpec(mesh=mesh, placements=[Replicate()])
+                                    DTensorSpec(mesh=mesh, placements=(Replicate(),))
                                 )
                             else:
                                 raise RuntimeError(
@@ -670,17 +670,16 @@ def partitioner(graph: GraphModule) -> GraphModule:
                     else expected_input_specs[idx]
                 )
                 if input_arg_spec != desired_spec:
-                    input_full_shape = input_arg.meta["tensor_meta"].shape
+                    input_arg_spec.tensor_meta = input_arg.meta["tensor_meta"]
+                    desired_spec.tensor_meta = input_arg.meta["tensor_meta"]
                     input_arg_tensor = input_arg.meta["val"]
 
                     # insert reshard operation
                     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
-                        return _redistribute_with_local_tensor(
+                        return redistribute_local_tensor(
                             local_tensor,
-                            input_full_shape,
-                            out_spec.mesh,
-                            input_arg_spec.placements,
-                            desired_spec.placements,
+                            input_arg_spec,
+                            desired_spec,
                         )
 
                     reshard_gm = make_fx(reshard_fn)(input_arg_tensor)

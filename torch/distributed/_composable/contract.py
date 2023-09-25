@@ -190,5 +190,11 @@ def _get_registry(module: nn.Module) -> Dict[str, RegistryItem]:
     Get an ``OrderedDict`` of composable APIs that have been applied to the
     ``module``, indexed by the API name.
     """
-    default_registry: Dict[str, RegistryItem] = OrderedDict()
-    return module.__dict__.setdefault(REGISTRY_KEY, default_registry)  # type: ignore[call-overload]
+    registry = getattr(module, REGISTRY_KEY, None)
+    if registry is None:
+        # https://github.com/pytorch/pytorch/issues/107054
+        default_registry: Dict[str, RegistryItem] = OrderedDict()
+        setattr(module, REGISTRY_KEY, default_registry)
+        return default_registry
+    else:
+        return registry

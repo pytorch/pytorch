@@ -133,7 +133,7 @@ static std::vector<std::unique_ptr<CuFFTParamsLRUCache>> plan_caches;
 static std::mutex plan_caches_mutex;
 
 static inline
-CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
+CuFFTParamsLRUCache &cufft_get_plan_cache(DeviceIndex device_index) {
   std::lock_guard<std::mutex> guard(plan_caches_mutex);
 
   AT_ASSERT(device_index >= 0);
@@ -152,7 +152,7 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(int64_t device_index) {
 
 namespace detail {
 
-int64_t cufft_get_plan_cache_max_size_impl(int64_t device_index) {
+int64_t cufft_get_plan_cache_max_size_impl(DeviceIndex device_index) {
   TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
     "cufft_get_plan_cache_max_size: expected 0 <= device_index < ",
     at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
@@ -160,7 +160,7 @@ int64_t cufft_get_plan_cache_max_size_impl(int64_t device_index) {
   return cufft_get_plan_cache(device_index).max_size();
 }
 
-void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size) {
+void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_size) {
   TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
     "cufft_set_plan_cache_max_size: expected 0 <= device_index < ",
     at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
@@ -168,7 +168,7 @@ void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size) 
   return cufft_get_plan_cache(device_index).resize(max_size);
 }
 
-int64_t cufft_get_plan_cache_size_impl(int64_t device_index) {
+int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index) {
   TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
     "cufft_get_plan_cache_size: expected 0 <= device_index < ",
     at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
@@ -176,7 +176,7 @@ int64_t cufft_get_plan_cache_size_impl(int64_t device_index) {
   return cufft_get_plan_cache(device_index).size();
 }
 
-void cufft_clear_plan_cache_impl(int64_t device_index) {
+void cufft_clear_plan_cache_impl(DeviceIndex device_index) {
   TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
     "cufft_clear_plan_cache: expected 0 <= device_index < ",
     at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",

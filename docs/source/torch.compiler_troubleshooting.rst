@@ -26,13 +26,13 @@ tools and their typical usage. For additional help see
      - Find smallest subgraph which reproduces errors for any backend
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="dynamo"``
    * - Minifier for ``TorchInductor``
-     - If the error is known to occur after `AOTAutograd`` find
-       smallest subgraph which reproduces errors during TorchInductor lowering
+     - If the error is known to occur after ``AOTAutograd`` find
+       smallest subgraph which reproduces errors during ``TorchInductor`` lowering
      - set environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"``
    * - Dynamo accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
        between an eager mode model and optimized model, when you
-       suspect the problem is in AOTAutograd
+       suspect the problem is in ``AOTAutograd``
      - ``TORCHDYNAMO_REPRO_AFTER="dynamo" TORCHDYNAMO_REPRO_LEVEL=4``
    * - Inductor accuracy minifier
      - Finds the smallest subgraph which reproduces an accuracy issue
@@ -76,7 +76,7 @@ the stack and will provide full stack traces.
 To determine in which component an error occurred,
 you may use info-level logging
 ``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``
-and look for``Step #: ...`` outputs. Logs are made at the beginning and end of
+and look for ``Step #: ...`` outputs. Logs are made at the beginning and end of
 each step, so the step that an error should correspond to is the most recently
 logged step whose end has not yet been logged. The steps correspond to the
 following parts of the stack:

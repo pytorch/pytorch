@@ -269,6 +269,9 @@ void FunctionalTensorWrapper::maybe_replace_storage(const Tensor& other) {
   // (Technically we should be guaranteed that the tensor was already contiguous,
   // since it's guaranteed not to have been a view. Doesnt hurt to run though)
   refresh_contiguous();
+  // Swapping out the storage of a tensor (aka from a resize_() call) will update the sizes and strides of the tensor,
+  // so we need to record the fact that metadata was mutated.
+  has_metadata_mutation_ = true;
 }
 
 
