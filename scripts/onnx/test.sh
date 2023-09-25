@@ -50,7 +50,7 @@ fi
 
 if [[ "$SHARD_NUMBER" == "2" ]]; then
   # Sanity check on torchbench w/ onnx
-  pip install -e pandas
+  pip install pandas
   log_folder="test/.torchbench_logs"
   device="cpu"
 
