@@ -78,7 +78,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # NB: If you add a new method to Tensor, you must update
 # torch/__init__.py.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
-class Tensor(torch._C._TensorBase):
+class Tensor(torch._C.TensorBase):
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -628,7 +628,7 @@ class Tensor(torch._C._TensorBase):
         )
 
     detach = _C._add_docstr(
-        _C._TensorBase.detach,
+        _C.TensorBase.detach,
         r"""
     Returns a new Tensor, detached from the current graph.
 
@@ -654,7 +654,7 @@ class Tensor(torch._C._TensorBase):
     )
 
     detach_ = _C._add_docstr(
-        _C._TensorBase.detach_,
+        _C.TensorBase.detach_,
         r"""
     Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
@@ -913,13 +913,13 @@ class Tensor(torch._C._TensorBase):
         return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
-    __itruediv__ = _C._TensorBase.__idiv__
+    __itruediv__ = _C.TensorBase.__idiv__
 
     __pow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C._TensorBase.pow
+        _C.TensorBase.pow
     )
     __ipow__ = _handle_torch_function_and_wrap_type_error_to_not_implemented(
-        _C._TensorBase.pow_
+        _C.TensorBase.pow_
     )
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -957,9 +957,9 @@ class Tensor(torch._C._TensorBase):
     def __rmatmul__(self, other):
         return torch.matmul(other, self)
 
-    __pos__ = _C._TensorBase.positive
-    __neg__ = _C._TensorBase.neg
-    __abs__ = _C._TensorBase.abs
+    __pos__ = _C.TensorBase.positive
+    __neg__ = _C.TensorBase.neg
+    __abs__ = _C.TensorBase.abs
 
     def __len__(self):
         if has_torch_function_unary(self):
@@ -1318,6 +1318,36 @@ class Tensor(torch._C._TensorBase):
 
         """
         return self.to_sparse()
+
+    def dim_order(self):
+        """
+
+        dim_order() -> tuple
+
+        Returns a tuple of int describing the dim order or physical layout of :attr:`self`.
+
+        Args:
+            None
+
+        Dim order represents how dimensions are laid out in memory,
+        starting from the outermost to the innermost dimension.
+
+        Example::
+            >>> torch.empty((2, 3, 5, 7)).dim_order()
+            (0, 1, 2, 3)
+            >>> torch.empty((2, 3, 5, 7), memory_format=torch.channels_last).dim_order()
+            (0, 2, 3, 1)
+
+        .. warning::
+            The dim_order tensor API is experimental and subject to change.
+
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.dim_order, (self,), self)
+
+        import torch._prims_common as utils
+
+        return tuple(utils.compute_elementwise_output_logical_to_physical_perm(self))
 
     def _update_names(self, names, inplace):
         if has_torch_function_unary(self):

@@ -92,8 +92,7 @@ class SGD(Optimizer):
         return loss
 
 
-SGD.__doc__ = r"""\
-    Implements stochastic gradient descent (optionally with momentum).
+SGD.__doc__ = r"""Implements stochastic gradient descent (optionally with momentum).
 
     .. math::
        \begin{aligned}

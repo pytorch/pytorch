@@ -60,6 +60,8 @@ aten::_copy_from
 aten::_copy_from.out
 aten::_copy_from_and_resize
 aten::_copy_from_and_resize.out
+aten::_cslt_compress
+aten::_cslt_sparse_mm
 aten::_ctc_loss
 aten::_ctc_loss.Tensor
 aten::_ctc_loss.Tensor_out
@@ -455,7 +457,6 @@ aten::_sample_dirichlet
 aten::_sample_dirichlet.out
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
-aten::_scaled_dot_product_flash_attention
 aten::_scaled_dot_product_flash_attention_backward
 aten::_scaled_mm
 aten::_scaled_mm.out
@@ -626,8 +627,6 @@ aten::avg_pool3d
 aten::avg_pool3d.out
 aten::avg_pool3d_backward
 aten::avg_pool3d_backward.grad_input
-aten::baddbmm
-aten::baddbmm.out
 aten::bartlett_window
 aten::bartlett_window.out
 aten::bartlett_window.periodic
@@ -764,6 +763,8 @@ aten::frexp.Tensor
 aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
+aten::full.names
+aten::full.names_out
 aten::full_like
 aten::full_like.out
 aten::gather
@@ -1266,7 +1267,6 @@ aten::squeeze_copy.dims
 aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
-aten::std_mean.correction_out
 aten::t_
 aten::t_copy
 aten::t_copy.out
@@ -1292,6 +1292,7 @@ aten::unique_dim.out
 aten::unique_dim_consecutive
 aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
+aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
 aten::unsqueeze_copy
 aten::unsqueeze_copy.out
@@ -1321,8 +1322,6 @@ aten::upsample_trilinear3d_backward.grad_input
 aten::values
 aten::values_copy
 aten::values_copy.out
-aten::vdot
-aten::vdot.out
 aten::view.dtype
 aten::view_as_complex
 aten::view_as_complex_copy

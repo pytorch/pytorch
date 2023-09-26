@@ -806,6 +806,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 seq_nr = seq_nr - min_seq_nr
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
 
+        self.maxDiff = None
         self.assertExpectedInline(
             seq_table,
             dedent(
@@ -815,6 +816,7 @@ SeqNr|OrigAten|SrcFn
 0|aten.add.Tensor|l__self___bn1
 1|aten._native_batch_norm_legit_functional.default|l__self___bn1
 2|aten.relu.default|l__self___relu1
+2|aten.detach.default|l__self___relu1
 3|aten.add.Tensor|add
 4|aten.view.default|flatten
 5|aten.view.default|l__self___fc1
@@ -840,9 +842,11 @@ SeqNr|OrigAten|SrcFn
 6|aten.t.default|
 5|aten.view.default|
 4|aten.view.default|
+2|aten.detach.default|
 2|aten.threshold_backward.default|
 1|aten.native_batch_norm_backward.default|
 0|aten.convolution_backward.default|
+11|aten.add.Tensor|
 """
             ),
         )

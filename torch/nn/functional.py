@@ -120,8 +120,8 @@ Args:
 
     dilation: the spacing between kernel elements. Can be a single number or
       a tuple `(dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
-      number of groups. Default: 1
+    groups: split input into groups, both :math:`\text{in\_channels}` and :math:`\text{out\_channels}`
+      should be divisible by the number of groups. Default: 1
 
 Examples::
 
@@ -4922,7 +4922,7 @@ greater than 0.0 is specified.
 
         if attn_mask is not None:
             if attn_mask.dtype == torch.bool:
-                attn_mask.masked_fill_(attn_mask.logical_not(), float("-inf"))
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
             else:
                 attn_bias += attn_mask
         attn_weight = query @ key.transpose(-2, -1) * scale_factor

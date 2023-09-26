@@ -14,6 +14,7 @@ _TAGS: Dict[str, Dict[str, Any]] = {
         "dynamic-shape": {},
         "escape-hatch": {},
         "map": {},
+        "dynamic-value": {},
     },
     "python": {
         "assert": {},
