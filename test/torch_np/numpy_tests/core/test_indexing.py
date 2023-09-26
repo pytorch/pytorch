@@ -1,14 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import operator
 import re
 import sys
 import warnings
 
 from itertools import product
-
-from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
 
 import pytest
 
@@ -21,18 +18,9 @@ from torch._numpy.testing import (
     assert_warns,
     HAS_REFCOUNT,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
-
-skip = functools.partial(skipif, True)
 
 
-@instantiate_parametrized_tests
-class TestIndexing(TestCase):
+class TestIndexing:
     def test_index_no_floats(self):
         a = np.array([[[5]]])
 
@@ -103,7 +91,7 @@ class TestIndexing(TestCase):
         # should still get the DeprecationWarning if step = 0.
         assert_raises(TypeError, lambda: a[::0.0])
 
-    @skip(reason="torch allows slicing with non-0d array components")
+    @pytest.mark.skip(reason="torch allows slicing with non-0d array components")
     def test_index_no_array_to_index(self):
         # No non-scalar arrays.
         a = np.array([[[1]]])
@@ -128,7 +116,7 @@ class TestIndexing(TestCase):
         assert_equal(a[()], a)
         assert_(a[()].tensor._base is a.tensor)
         a = np.array(0)
-        raise SkipTest(
+        pytest.skip(
             "torch doesn't have scalar types with distinct instancing behaviours"
         )
         assert_(isinstance(a[()], np.int_))
@@ -304,7 +292,7 @@ class TestIndexing(TestCase):
 
         assert_equal(a, b)
 
-    @skip(reason="torch does not limit dims to 32")
+    @pytest.mark.skip(reason="torch does not limit dims to 32")
     def test_too_many_fancy_indices_special_case(self):
         # Just documents behaviour, this is a small limitation.
         a = np.ones((1,) * 32)  # 32 is NPY_MAXDIMS
@@ -400,7 +388,7 @@ class TestIndexing(TestCase):
         # Unlike the non nd-index:
         assert_(arr[index,].shape != (1,))
 
-    @xfail  # (reason="XXX: low-prio behaviour to support")
+    @pytest.mark.xfail(reason="XXX: low-prio behaviour to support")
     def test_broken_sequence_not_nd_index(self):
         # See https://github.com/numpy/numpy/issues/5063
         # If we have an object which claims to be a sequence, but fails
@@ -450,17 +438,16 @@ class TestIndexing(TestCase):
         arr[slices] = 10
         assert_array_equal(arr, 10.0)
 
-    @parametrize("index", [True, False, np.array([0])])
-    @parametrize("num", [32, 40])
-    @parametrize("original_ndim", [1, 32])
+    @pytest.mark.parametrize("index", [True, False, np.array([0])])
+    @pytest.mark.parametrize("num", [32, 40])
+    @pytest.mark.parametrize("original_ndim", [1, 32])
     def test_too_many_advanced_indices(self, index, num, original_ndim):
         # These are limitations based on the number of arguments we can process.
         # For `num=32` (and all boolean cases), the result is actually define;
         # but the use of NpyIter (NPY_MAXARGS) limits it for technical reasons.
         if not (isinstance(index, np.ndarray) and original_ndim < num):
             # unskipped cases fail because of assigning too many indices
-            raise SkipTest("torch does not limit dims to 32")
-
+            pytest.skip("torch does not limit dims to 32")
         arr = np.ones((1,) * original_ndim)
         with pytest.raises(IndexError):
             arr[(index,) * num]
@@ -471,7 +458,7 @@ class TestIndexing(TestCase):
         a = np.arange(25).reshape((5, 5))
         assert_equal(a[[0, 1]], np.array([a[0], a[1]]))
         assert_equal(a[[0, 1], [0, 1]], np.array([0, 6]))
-        raise SkipTest(
+        pytest.skip(
             "torch happily consumes non-tuple sequences with multi-axis "
             "indices (i.e. slices) as an index, whereas NumPy invalidates "
             "them, assumedly to keep things simple. This invalidation "
@@ -480,8 +467,7 @@ class TestIndexing(TestCase):
         assert_raises(IndexError, a.__getitem__, [slice(None)])
 
 
-@instantiate_parametrized_tests
-class TestBroadcastedAssignments(TestCase):
+class TestBroadcastedAssignments:
     def assign(self, a, ind, val):
         a[ind] = val
         return a
@@ -527,7 +513,7 @@ class TestBroadcastedAssignments(TestCase):
             (ValueError, RuntimeError), assign, a, s_[[0], :], np.zeros((2, 1))
         )
 
-    @parametrize(
+    @pytest.mark.parametrize(
         "index", [(..., [1, 2], slice(None)), ([0, 1], ..., 0), (..., [1, 2], [1, 2])]
     )
     def test_broadcast_error_reports_correct_shape(self, index):
@@ -557,10 +543,10 @@ class TestBroadcastedAssignments(TestCase):
         assert_((a[::-1] == v).all())
 
 
-class TestFancyIndexingCast(TestCase):
-    @xfail  # (
-    #    reason="XXX: low-prio to support assigning complex values on floating arrays"
-    # )
+class TestFancyIndexingCast:
+    @pytest.mark.xfail(
+        reason="XXX: low-prio to support assigning complex values on floating arrays"
+    )
     def test_boolean_index_cast_assign(self):
         # Setup the boolean index and float arrays.
         shape = (8, 63)
@@ -585,8 +571,8 @@ class TestFancyIndexingCast(TestCase):
         assert_equal(zero_array[0, 1], 0)
 
 
-@xfail  # (reason="XXX: requires broadcast() and broadcast_to()")
-class TestMultiIndexingAutomated(TestCase):
+@pytest.mark.xfail(reason="XXX: requires broadcast() and broadcast_to()")
+class TestMultiIndexingAutomated:
     """
     These tests use code to mimic the C-Code indexing for selection.
 
@@ -608,7 +594,7 @@ class TestMultiIndexingAutomated(TestCase):
 
     """
 
-    def setupUp(self):
+    def setup_method(self):
         self.a = np.arange(np.prod([3, 1, 5, 6])).reshape(3, 1, 5, 6)
         self.b = np.empty((3, 0, 5, 6))
         self.complex_indices = [
@@ -931,7 +917,7 @@ class TestMultiIndexingAutomated(TestCase):
 
     def _compare_index_result(self, arr, index, mimic_get, no_copy):
         """Compare mimicked result to indexing result."""
-        raise SkipTest("torch does not support subclassing")
+        pytest.skip("torch does not support subclassing")
         arr = arr.copy()
         indexed_arr = arr[index]
         assert_array_equal(indexed_arr, mimic_get)
@@ -1015,7 +1001,7 @@ class TestMultiIndexingAutomated(TestCase):
             self._check_single_index(a, index)
 
 
-class TestFloatNonIntegerArgument(TestCase):
+class TestFloatNonIntegerArgument:
     """
     These test that ``TypeError`` is raised when you try to use
     non-integers as arguments to for indexing and slicing e.g. ``a[0.0:5]``
@@ -1054,7 +1040,7 @@ class TestFloatNonIntegerArgument(TestCase):
         assert_raises(TypeError, np.take, a, [0], 1.0)
         assert_raises((TypeError, RuntimeError), np.take, a, [0], np.float64(1.0))
 
-    @skip(
+    @pytest.mark.skip(
         reason=("torch doesn't have scalar types with distinct element-wise behaviours")
     )
     def test_non_integer_sequence_multiplication(self):
@@ -1074,7 +1060,7 @@ class TestFloatNonIntegerArgument(TestCase):
         assert_raises(TypeError, np.min, d, (0.2, 1.2))
 
 
-class TestBooleanIndexing(TestCase):
+class TestBooleanIndexing:
     # Using a boolean as integer argument/indexing is an error.
     def test_bool_as_int_argument_errors(self):
         a = np.array([[[1]]])
@@ -1086,7 +1072,7 @@ class TestBooleanIndexing(TestCase):
 
         assert_raises(TypeError, np.take, args=(a, [0], False))
 
-        raise SkipTest("torch consumes boolean tensors as ints, no bother raising here")
+        pytest.skip("torch consumes boolean tensors as ints, no bother raising here")
         assert_raises(TypeError, np.reshape, a, (np.bool_(True), -1))
         assert_raises(TypeError, operator.index, np.array(True))
 
@@ -1124,7 +1110,7 @@ class TestBooleanIndexing(TestCase):
             a[idx]
 
 
-class TestArrayToIndexDeprecation(TestCase):
+class TestArrayToIndexDeprecation:
     """Creating an index from array not 0-D is an error."""
 
     def test_array_to_index_error(self):
@@ -1133,17 +1119,17 @@ class TestArrayToIndexDeprecation(TestCase):
 
         assert_raises((TypeError, RuntimeError), np.take, a, [0], a)
 
-        raise SkipTest(
+        pytest.skip(
             "Multi-dimensional tensors are indexable just as long as they only "
             "contain a single element, no bother raising here"
         )
         assert_raises(TypeError, operator.index, np.array([1]))
 
-        raise SkipTest("torch consumes tensors as ints, no bother raising here")
+        pytest.skip("torch consumes tensors as ints, no bother raising here")
         assert_raises(TypeError, np.reshape, a, (a, -1))
 
 
-class TestNonIntegerArrayLike(TestCase):
+class TestNonIntegerArrayLike:
     """Tests that array_likes only valid if can safely cast to integer.
 
     For instance, lists give IndexError when they cannot be safely cast to
@@ -1151,12 +1137,13 @@ class TestNonIntegerArrayLike(TestCase):
 
     """
 
-    @skip(
+    @pytest.mark.skip(
         reason=(
             "torch consumes floats by way of falling back on its deprecated "
             "__index__ behaviour, no bother raising here"
         )
     )
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_basic(self):
         a = np.arange(10)
 
@@ -1167,15 +1154,15 @@ class TestNonIntegerArrayLike(TestCase):
         a.__getitem__([])
 
 
-class TestMultipleEllipsisError(TestCase):
+class TestMultipleEllipsisError:
     """An index can only have a single ellipsis."""
 
-    @xfail  # (
-    #    reason=(
-    #        "torch currently consumes multiple ellipsis, no bother raising "
-    #        "here. See https://github.com/pytorch/pytorch/issues/59787#issue-917252204"
-    #    )
-    # )
+    @pytest.mark.xfail(
+        reason=(
+            "torch currently consumes multiple ellipsis, no bother raising "
+            "here. See https://github.com/pytorch/pytorch/issues/59787#issue-917252204"
+        )
+    )
     def test_basic(self):
         a = np.arange(10)
         assert_raises(IndexError, lambda: a[..., ...])
@@ -1184,4 +1171,6 @@ class TestMultipleEllipsisError(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()

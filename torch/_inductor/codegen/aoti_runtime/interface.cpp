@@ -1,5 +1,5 @@
-#include <torch/csrc/inductor/aot_runtime/interface.h>
-#include <torch/csrc/inductor/aot_runtime/model_container.h>
+#include <torch/csrc/inductor/aoti_runtime/interface.h>
+#include <torch/csrc/inductor/aoti_runtime/model_container.h>
 
 #include <iostream>
 #include <stdexcept>

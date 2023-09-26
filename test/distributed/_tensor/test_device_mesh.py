@@ -27,6 +27,8 @@ from torch.distributed.distributed_c10d import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MLPModule,
+    skip_if_lt_x_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -208,7 +210,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             )
 
 
-class TestDeviceMeshGetItem(DTensorTestBase):
+class TestDeviceMeshMeshEnv(DTensorTestBase):
     @property
     def world_size(self):
         return 8
@@ -288,6 +290,44 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
         self.assertEqual(mesh_resources.get_parent_mesh_dim(mesh), None)
+
+
+class TestMeshEnvParentMeshDimUsage(DTensorTestBase):
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_parent_mesh_dim_usage(self):
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+
+        model = MLPModule(self.device_type)
+        from torch.distributed.tensor.parallel import (
+            PairwiseParallel,
+            parallelize_module,
+        )
+
+        model = parallelize_module(model, tp_mesh, PairwiseParallel())
+        from torch.distributed.fsdp.fully_sharded_data_parallel import (
+            FullyShardedDataParallel as FSDP,
+        )
+
+        model = FSDP(model, device_mesh=dp_mesh)
+        from torch.distributed._tensor import mesh_resources
+
+        parent_mesh_dim_usage = mesh_resources.get_parent_mesh_dim_usage()
+
+        self.assertEqual(len(parent_mesh_dim_usage.keys()), 1)
+        self.assertObjectIn(mesh_2d, parent_mesh_dim_usage.keys())
+
+        mesh_dim_to_mesh_usage = parent_mesh_dim_usage[mesh_2d]
+        self.assertEqual(len(mesh_dim_to_mesh_usage.items()), 2)
+        self.assertEqual(mesh_dim_to_mesh_usage[0], "torch.distributed.fsdp")
+        self.assertEqual(
+            mesh_dim_to_mesh_usage[1],
+            "torch.distributed.tensor.parallel.parallelize_module",
+        )
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):

@@ -1,9 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import itertools
 
-from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
+import pytest
 
 import torch._numpy as np
 from pytest import raises as assert_raises
@@ -15,15 +14,6 @@ from torch._numpy.testing import (
     assert_equal,
     suppress_warnings,
 )
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
-
-skip = functools.partial(skipif, True)
-
 
 # Setup for optimize einsum
 chars = "abcdefghij"
@@ -31,8 +21,7 @@ sizes = np.array([2, 3, 4, 5, 4, 3, 2, 6, 5, 4, 3])
 global_size_dict = dict(zip(chars, sizes))
 
 
-@instantiate_parametrized_tests
-class TestEinsum(TestCase):
+class TestEinsum:
     def test_einsum_errors(self):
         for do_opt in [True, False]:
             # Need enough arguments
@@ -195,7 +184,7 @@ class TestEinsum(TestCase):
                 order="d",
             )
 
-    @xfail  # (reason="a view into smth else")
+    @pytest.mark.xfail(reason="a view into smth else")
     def test_einsum_views(self):
         # pass-through
         for do_opt in [True, False]:
@@ -745,15 +734,15 @@ class TestEinsum(TestCase):
             np.einsum("ij,i->", x, y, optimize=optimize), [2.0]
         )  # contig_stride0_outstride0_two
 
-    @xfail  # (reason="int overflow differs in numpy and pytorch")
+    @pytest.mark.xfail(reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_int8(self):
         self.check_einsum_sums("i1")
 
-    @xfail  # (reason="int overflow differs in numpy and pytorch")
+    @pytest.mark.xfail(reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_uint8(self):
         self.check_einsum_sums("u1")
 
-    @xfail  # (reason="int overflow differs in numpy and pytorch")
+    @pytest.mark.xfail(reason="int overflow differs in numpy and pytorch")
     def test_einsum_sums_int16(self):
         self.check_einsum_sums("i2")
 
@@ -764,7 +753,7 @@ class TestEinsum(TestCase):
     def test_einsum_sums_int64(self):
         self.check_einsum_sums("i8")
 
-    @xfail  # (reason="np.float16(4641) == 4640.0")
+    @pytest.mark.xfail(reason="np.float16(4641) == 4640.0")
     def test_einsum_sums_float16(self):
         self.check_einsum_sums("f2")
 
@@ -948,7 +937,7 @@ class TestEinsum(TestCase):
         y = tensor.trace(axis1=0, axis2=2).trace()
         assert_allclose(x, y)
 
-    @xfail  # (reason="no base")
+    @pytest.mark.xfail(reason="no base")
     def test_einsum_all_contig_non_contig_output(self):
         # Issue gh-5907, tests that the all contiguous special case
         # actually checks the contiguity of the output
@@ -972,7 +961,9 @@ class TestEinsum(TestCase):
         np.einsum("ij,jk->ik", x, x, out=out)
         assert_array_equal(out.base, correct_base)
 
-    @parametrize("dtype", np.typecodes["AllFloat"] + np.typecodes["AllInteger"])
+    @pytest.mark.parametrize(
+        "dtype", np.typecodes["AllFloat"] + np.typecodes["AllInteger"]
+    )
     def test_different_paths(self, dtype):
         # Test originally added to cover broken float16 path: gh-20305
         # Likely most are covered elsewhere, at least partially.
@@ -1012,8 +1003,7 @@ class TestEinsum(TestCase):
         # contig + contig + contig -> scalar
 
         if dtype in ["e", "B", "b"]:
-            # FIXME make xfail
-            raise SkipTest("overflow differs in pytorch and numpy")
+            pytest.xfail(reason="overflow differs in pytorch and numpy")
 
         arr = np.array([0.5, 0.5, 0.25, 4.5, 3.0], dtype=dtype)
         res = np.einsum("i,i,i->", arr, arr, arr)
@@ -1158,7 +1148,7 @@ class TestEinsum(TestCase):
         g = np.arange(64).reshape(2, 4, 8)
         self.optimize_compare("obk,ijk->ioj", operands=[g, g])
 
-    @xfail  # (reason="order='F' not supported")
+    @pytest.mark.xfail(reason="order='F' not supported")
     def test_output_order(self):
         # Ensure output order is respected for optimize cases, the below
         # conraction should yield a reshaped tensor view
@@ -1196,8 +1186,8 @@ class TestEinsum(TestCase):
             assert_(tmp.flags.c_contiguous)
 
 
-@skip(reason="no pytorch analog")
-class TestEinsumPath(TestCase):
+@pytest.mark.skip(reason="no pytorch analog")
+class TestEinsumPath:
     def build_operands(self, string, size_dict=global_size_dict):
         # Builds views based off initial operands
         operands = [string]
@@ -1358,18 +1348,19 @@ class TestEinsumPath(TestCase):
             np.einsum("{}...a{}->{}...a{}".format(*sp), arr)
 
 
-class TestMisc(TestCase):
-    def test_overlap(self):
-        a = np.arange(9, dtype=int).reshape(3, 3)
-        b = np.arange(9, dtype=int).reshape(3, 3)
-        d = np.dot(a, b)
-        # sanity check
-        c = np.einsum("ij,jk->ik", a, b)
-        assert_equal(c, d)
-        # gh-10080, out overlaps one of the operands
-        c = np.einsum("ij,jk->ik", a, b, out=b)
-        assert_equal(c, d)
+def test_overlap():
+    a = np.arange(9, dtype=int).reshape(3, 3)
+    b = np.arange(9, dtype=int).reshape(3, 3)
+    d = np.dot(a, b)
+    # sanity check
+    c = np.einsum("ij,jk->ik", a, b)
+    assert_equal(c, d)
+    # gh-10080, out overlaps one of the operands
+    c = np.einsum("ij,jk->ik", a, b, out=b)
+    assert_equal(c, d)
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()

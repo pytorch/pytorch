@@ -34,7 +34,11 @@ if TYPE_CHECKING:
 class _MeshEnv:
     def __init__(self) -> None:
         self.mesh_stack: List[DeviceMesh] = []
+        # child_to_parent_mapping records all the child to parent mesh mapping in the current Mesh Environment
         self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+        # parent_mesh_dim_usage records the PT-D API call on a mesh dimension for a given parent_mesh
+        # in the current Mesh Environment
+        self.parent_mesh_dim_usage: Dict[DeviceMesh, Dict[int, str]] = {}
 
     def get_current_mesh(self) -> "DeviceMesh":
         if len(self.mesh_stack) == 0:
@@ -84,6 +88,40 @@ class _MeshEnv:
             if parent_mesh.mesh_dim_names:
                 return parent_mesh.mesh_dim_names.index(child_mesh_dim_name)
         return None
+
+    def set_parent_mesh_dim_usage(
+        self, device_mesh: "DeviceMesh", api_name: "str"
+    ) -> None:
+        """
+        If the given device_mesh has no parent_mesh, this API is no-op.
+        If the given device_mesh has a parent_mesh, it records the PTD-API call for a
+        mesh_dim on a parent mesh.
+
+        For example, if we call `parallelize_module` on a 1d mesh and the 1d mesh is on
+        dim 1 of a 2d mesh, it will record the usage as follows.
+
+        Example (2 host with 4 GPUs each):
+
+        ```
+            self.parent_mesh_dim_usage = {
+                {
+                    DeviceMesh:([[0, 1], [2, 3]]):
+                    {1: 'torch.distributed.tensor.parallel.parallelize_module'},
+                },
+            }
+        ```
+        """
+        parent_mesh = self.get_parent_mesh(device_mesh)
+        if parent_mesh:
+            parent_mesh_dim = self.get_parent_mesh_dim(device_mesh)
+            self.parent_mesh_dim_usage.setdefault(parent_mesh, {})
+            self.parent_mesh_dim_usage[parent_mesh].setdefault(
+                parent_mesh_dim, api_name
+            )
+            print(f"parent_mesh_dim_usage:{self.parent_mesh_dim_usage}")
+
+    def get_parent_mesh_dim_usage(self) -> Dict["DeviceMesh", Dict[int, str]]:
+        return self.parent_mesh_dim_usage
 
 
 mesh_resources: _MeshEnv = _MeshEnv()

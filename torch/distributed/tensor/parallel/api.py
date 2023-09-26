@@ -8,6 +8,7 @@ from torch.distributed._tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
+    mesh_resources,
     Replicate,
     Shard,
 )
@@ -94,6 +95,10 @@ def parallelize_module(  # type: ignore[return]
 
     if device_mesh.ndim > 1:
         device_mesh = _create_1d_device_mesh(device_mesh, tp_mesh_dim)
+    elif device_mesh.ndim == 1:
+        mesh_resources.set_parent_mesh_dim_usage(
+            device_mesh, "torch.distributed.tensor.parallel.parallelize_module",
+        )
 
     if isinstance(parallelize_plan, ParallelStyle):
         # RowwiseParallel or ColwiseParallel
