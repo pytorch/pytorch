@@ -228,6 +228,7 @@ class ExportedProgram:
         equality_constraints: List[Tuple[Any, Any]],
         module_call_graph: List[ModuleCallEntry],
         example_inputs: Optional[Tuple[Tuple[Any, ...], Dict[str, Any]]] = None,
+        dialect: Optional[str] = None,
     ):
         from torch._export.exported_program import (
             _create_graph_module_for_export,
@@ -253,6 +254,7 @@ class ExportedProgram:
         ] = equality_constraints
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
+        self._dialect = dialect or "ATEN"
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -333,6 +335,10 @@ class ExportedProgram:
     def example_inputs(self):
         return self._example_inputs
 
+    @property
+    def dialect(self):
+        return self._dialect
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         import torch._export.error as error
         from torch._export import combine_args_kwargs
@@ -340,10 +346,12 @@ class ExportedProgram:
         if self.call_spec.in_spec is not None:
             try:
                 user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
+                args = fx_pytree.tree_flatten_spec(
+                    user_args, self.call_spec.in_spec, exact_structural_match=True
+                )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise error.InternalError(
+                raise TypeError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -358,12 +366,11 @@ class ExportedProgram:
         )
         self._check_input_constraints(*ordered_params, *ordered_buffers, *args)
 
-        with torch.no_grad():
-            # NOTE: calling convention is first params, then buffers, then args as user supplied them.
-            # See: torch/_functorch/aot_autograd.py#L1034
-            res = torch.fx.Interpreter(self.graph_module).run(
-                *ordered_params, *ordered_buffers, *args, enable_io_processing=False
-            )
+        # NOTE: calling convention is first params, then buffers, then args as user supplied them.
+        # See: torch/_functorch/aot_autograd.py#L1034
+        res = torch.fx.Interpreter(self.graph_module).run(
+            *ordered_params, *ordered_buffers, *args, enable_io_processing=False
+        )
 
         if self.call_spec.out_spec is not None:
             mutation = self.graph_signature.buffers_to_mutate
@@ -518,6 +525,7 @@ class ExportedProgram:
             copy.deepcopy(self.equality_constraints),
             copy.deepcopy(self._module_call_graph),
             self.example_inputs,
+            self.dialect,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
