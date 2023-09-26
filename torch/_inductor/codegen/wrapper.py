@@ -1019,7 +1019,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def write_header(self):
         if V.graph.aot_mode:
             with open(
-                os.path.join(os.path.dirname(__file__), "aot_runtime", "interface.cpp")
+                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
             ) as f:
                 self.header.splice(f.read())
         else:

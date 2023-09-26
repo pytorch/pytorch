@@ -64,31 +64,38 @@ inline int64_t getTimeUs() {
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::get_record_concrete_inputs_enabled;
 using torch::profiler::impl::ivalueListToStr;
 using torch::profiler::impl::op_input_t;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;
+using torch::profiler::impl::shape;
 using torch::profiler::impl::shapesToStr;
 using torch::profiler::impl::stacksToStr;
 using torch::profiler::impl::strListToStr;
 using torch::profiler::impl::TensorMetadata;
+using torch::profiler::impl::variantShapesToStr;
 
 struct OpArgData {
   bool has_data;
-  std::vector<std::vector<int64_t>> shapes;
+  std::vector<shape> shapes;
   std::vector<std::string> dtypes;
   std::vector<c10::IValue> concrete_inputs;
+  std::vector<std::vector<int64_t>> shapes_for_kineto_event;
 };
 
 auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concrete_inputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}};
+    return OpArgData{false, {}, {}, {}, {}};
   }
 
-  std::vector<std::vector<int64_t>> shapes(input_shapes.size());
+  std::vector<shape> shapes(input_shapes.size());
+  std::vector<std::vector<int64_t>> shapes_for_kineto_event(
+      input_shapes.size());
+
   std::vector<std::string> dtypes(input_shapes.size());
   std::vector<c10::IValue> concrete_inputs_list;
 
@@ -97,9 +104,16 @@ auto parseArgData(
         c10::overloaded(
             [&](const TensorMetadata& t) {
               shapes[i] = t.sizes_;
+              shapes_for_kineto_event[i] = t.sizes_;
               dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
             },
-            [&](const std::vector<TensorMetadata>&) {
+            [&](const std::vector<TensorMetadata>& l) {
+              std::vector<std::vector<int64_t>> shape;
+              shape.reserve(l.size());
+              for (const auto& t : l) {
+                shape.emplace_back(t.sizes_);
+              }
+              shapes[i] = shape;
               dtypes[i] = "TensorList";
             },
             [&](const c10::IValue& val) { dtypes[i] = "Scalar"; },
@@ -129,7 +143,8 @@ auto parseArgData(
     }
   }
 
-  return OpArgData{true, shapes, dtypes, concrete_inputs_list};
+  return OpArgData{
+      true, shapes, dtypes, concrete_inputs_list, shapes_for_kineto_event};
 }
 
 struct MetadataBase {
@@ -217,7 +232,12 @@ struct AddGenericMetadata : public MetadataBase {
         parseArgData(op_event.inputs_, op_event.concrete_inputs_);
 
     if (arg_data.has_data) {
-      addMetadata("Input Dims", shapesToStr(arg_data.shapes));
+      if (get_record_concrete_inputs_enabled()) {
+        addMetadata("Input Dims", variantShapesToStr(arg_data.shapes));
+      } else {
+        addMetadata(
+            "Input Dims", shapesToStr(arg_data.shapes_for_kineto_event));
+      }
       addMetadata("Input type", strListToStr(arg_data.dtypes));
       if (!arg_data.concrete_inputs.empty()) {
         addMetadata(
@@ -682,7 +702,7 @@ KinetoEvent::KinetoEvent(
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
     auto arg_data = parseArgData(op.inputs_, op.concrete_inputs_);
-    shapes_ = std::move(arg_data.shapes);
+    shapes_ = std::move(arg_data.shapes_for_kineto_event);
     dtypes_ = std::move(arg_data.dtypes);
     concrete_inputs_ = std::move(arg_data.concrete_inputs);
   });

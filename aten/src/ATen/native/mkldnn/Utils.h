@@ -1,14 +1,13 @@
 #pragma once
 
 #include <ATen/Config.h>
+#include <ATen/core/List.h>
 #include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
 #include <cpuinfo.h>
 #include <vector>
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/core/List.h>
-#include <c10/util/string_view.h>
 #include <ideep/tensor.hpp>
 #endif // AT_MKLDNN_ENABLED()
 
