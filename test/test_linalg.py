@@ -5783,10 +5783,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 n = mat1.size(0)
                 m = mat1.size(1)
                 p = mat2.size(1)
-                res = torch.zeros(n, p, dtype=dtype, device=device)
+                dtype_ = torch.float if dtype == torch.half else dtype
+                if dtype == torch.half:
+                    mat1 = mat1.float()
+                    mat2 = mat2.float()
+                res = torch.zeros(n, p, dtype=dtype_, device=device)
                 for i, j in iter_indices(res):
                     res[i, j] = sum(mat1[i, k] * mat2[k, j] for k in range(m))
-                return res
+                return res.half() if dtype == torch.half else res
 
             # contiguous case
             mat1 = genf(n, m)
