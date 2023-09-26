@@ -650,32 +650,18 @@ class TritonKernelVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        def call_kernel(grid, *args, **kwargs):
-            self.kernel.run(*args, grid=grid, **kwargs)
-
         from .dicts import ConstDictVariable
         from .lists import BaseListVariable
 
         grid = self.grid
 
+        assert grid is not None
+
         # If the grid is a function, then lets execute it and convert it to
         # a list
         if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
             # Populate the special "meta" argument to call the grid function
-            # Triton functions cannot take variadic or default arguments,
-            # so iterating over the arguments and parameters in a linear
-            # fashion is enough.
-            d = {}
-            for idx, name in enumerate(self.kernel.arg_names):
-                # no duplicates
-                assert name not in d
-
-                if idx < len(args):
-                    d[name] = args[idx]
-                else:
-                    assert name in kwargs
-                    d[name] = kwargs[name]
-
+            d = {**dict(zip(self.kernel.arg_names, args)), **kwargs}
             meta = ConstDictVariable(d, dict)
             grid = grid.call_function(tx, [meta], {})
 
