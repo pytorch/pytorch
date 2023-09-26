@@ -6,9 +6,9 @@ from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
-from ..source import AttrSource, DummyGlobalSource
+from ..source import AttrSource, GlobalStateSource
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -31,11 +31,15 @@ class ContextWrappingVariable(VariableTracker):
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def exit(self, tx, *args):
         self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def reconstruct(self, codegen):
         attr_source = AttrSource(
@@ -78,30 +82,41 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__enter__")
         )
-        return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(tx, [], {})
+        try:
+            return variables.UserMethodVariable(
+                self.cm_obj.__enter__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(tx, [], {})
+        except Unsupported as e:
+            raise unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __enter__ function"
+            ) from e
 
     def exit(self, tx, *args):
         options = VariableTracker.propagate(self)
         options["source"] = (
             None if self.source is None else AttrSource(self.source, "__exit__")
         )
-        x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,
-            variables.UserDefinedObjectVariable(self.cm_obj, **options),
-            **options,
-        ).call_function(
-            tx,
-            [
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-                variables.ConstantVariable(None),
-            ],
-            {},
-        )
+        try:
+            x = variables.UserMethodVariable(
+                self.cm_obj.__exit__.__func__,
+                variables.UserDefinedObjectVariable(self.cm_obj, **options),
+                **options,
+            ).call_function(
+                tx,
+                [
+                    variables.ConstantVariable.create(None),
+                    variables.ConstantVariable.create(None),
+                    variables.ConstantVariable.create(None),
+                ],
+                {},
+            )
+        except Unsupported as e:
+            raise unimplemented(
+                f"Unsupported context manager {self.cm_obj}'s __exit__ function"
+            ) from e
+
         # Remove the checkpoint if there is no graph break
         # under this GenericContextWrappingVariable.
         tx.states_before_block.pop()
@@ -111,7 +126,7 @@ class GenericContextWrappingVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = {Guard(DummyGlobalSource(), GuardBuilder.GRAD_MODE)}
+    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)}
 
     @staticmethod
     def create(tx, target_value, **kwargs):
@@ -130,7 +145,9 @@ class GradModeVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -150,7 +167,7 @@ class GradModeVariable(ContextWrappingVariable):
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = {Guard(DummyGlobalSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
+    _guards_singleton = {Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)}
 
     @staticmethod
     def create(tx, **kwargs):
@@ -170,7 +187,9 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -181,7 +200,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
     _guards_singleton = {
-        Guard(DummyGlobalSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
+        Guard(GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS)
     }
 
     @staticmethod
@@ -201,7 +220,9 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         self.guards = self.guards | self._guards_singleton
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -239,7 +260,9 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def _call_func(self, tx, values):
         assert len(values) == 1
@@ -344,10 +367,14 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def exit(self, tx, *args):
-        return variables.ConstantVariable(None, **VariableTracker.propagate(self))
+        return variables.ConstantVariable.create(
+            None, **VariableTracker.propagate(self)
+        )
 
     def module_name(self):
         return "contextlib"

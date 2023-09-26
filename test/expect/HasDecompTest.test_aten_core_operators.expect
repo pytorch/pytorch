@@ -19,8 +19,6 @@ aten::_softmax
 aten::_softmax.out
 aten::_to_copy
 aten::_to_copy.out
-aten::_unsafe_view
-aten::_unsafe_view.out
 aten::abs
 aten::abs.out
 aten::abs_
@@ -133,16 +131,8 @@ aten::clamp.Tensor_out
 aten::clamp.out
 aten::clamp_
 aten::clamp_.Tensor
-aten::clamp_max
-aten::clamp_max.Tensor
-aten::clamp_max.Tensor_out
-aten::clamp_max.out
 aten::clamp_max_
 aten::clamp_max_.Tensor
-aten::clamp_min
-aten::clamp_min.Tensor
-aten::clamp_min.Tensor_out
-aten::clamp_min.out
 aten::clamp_min_
 aten::clamp_min_.Tensor
 aten::clone
@@ -244,8 +234,6 @@ aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
 aten::full
-aten::full.names
-aten::full.names_out
 aten::full.out
 aten::gcd
 aten::gcd.out
@@ -263,6 +251,8 @@ aten::geometric.out
 aten::geometric_
 aten::glu
 aten::glu.out
+aten::grid_sampler_2d
+aten::grid_sampler_2d.out
 aten::gt.Scalar
 aten::gt.Scalar_out
 aten::gt.Tensor
@@ -358,7 +348,6 @@ aten::mul_.Scalar
 aten::mul_.Tensor
 aten::narrow_copy
 aten::narrow_copy.out
-aten::native_batch_norm
 aten::native_batch_norm.out
 aten::native_dropout
 aten::native_dropout.out
@@ -485,9 +474,6 @@ aten::sqrt_
 aten::squeeze
 aten::squeeze.dim
 aten::squeeze.dims
-aten::std.correction
-aten::std.correction_out
-aten::std_mean.correction
 aten::sub.Scalar
 aten::sub.Scalar_out
 aten::sub.Tensor
@@ -516,9 +502,6 @@ aten::unfold
 aten::uniform
 aten::uniform.out
 aten::uniform_
-aten::unsafe_split.Tensor
-aten::unsafe_split_with_sizes
-aten::unsafe_split_with_sizes.out
 aten::unsqueeze
 aten::upsample_bicubic2d
 aten::upsample_nearest1d
