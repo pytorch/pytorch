@@ -220,8 +220,6 @@ aten::flip.out
 aten::floor
 aten::floor.out
 aten::floor_
-aten::floor_divide
-aten::floor_divide.out
 aten::floor_divide_.Tensor
 aten::fmax
 aten::fmax.out
@@ -234,8 +232,6 @@ aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
 aten::full
-aten::full.names
-aten::full.names_out
 aten::full.out
 aten::gcd
 aten::gcd.out
