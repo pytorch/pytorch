@@ -1048,7 +1048,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       }
     }();
 
-    auto wrapped_callback = [ callback = std::move(callback), uses_future ]() -> auto {
+    auto wrapped_callback = [ callback = std::move(callback) ]() -> auto {
       if constexpr (std::is_invocable_r<void, T, Future&>::value) {
         return [callback = std::move(callback)](Future& future) mutable { callback(future); };
       } else {
