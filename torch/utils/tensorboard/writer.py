@@ -3,11 +3,12 @@ consumed by TensorBoard for visualization."""
 
 import os
 import time
-from typing import List, Optional, Union
+from typing import List, Optional, Union, TYPE_CHECKING
 
 import torch
 
-from matplotlib.figure import Figure
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
 from tensorboard.compat import tf
 from tensorboard.compat.proto import event_pb2
 from tensorboard.compat.proto.event_pb2 import Event, SessionLog
