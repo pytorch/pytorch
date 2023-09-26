@@ -178,6 +178,37 @@ void DeviceGemmInstanceLauncher<DeviceGemmTemplate, DeviceGemmTraits>::Launch(
 
   float avg_time = invoker.Run(argument, StreamConfig{stream, time_kernel});
 
+  hipStreamCaptureStatus cap_stat;
+  hipGraph_t current_graph;
+  AT_CUDA_CHECK(hipStreamGetCaptureInfo_v2(stream,
+                                           &cap_stat,
+                                           nullptr,
+                                           &current_graph,
+                                           nullptr,
+                                           nullptr));
+  if (cap_stat == hipStreamCaptureStatusActive) {
+    // Keep argument.group_kernel_args_ for future graph replay
+    struct PersistentBlobs {
+      decltype(argument.group_kernel_args_) group_kernel_args_;
+    };
+    hipUserObject_t uobj;
+    PersistentBlobs* pb = new PersistentBlobs;
+    auto deletePersistentBlobs = [](void* ptr) -> void {
+      delete (PersistentBlobs*)ptr;
+    };
+    AT_CUDA_CHECK(hipUserObjectCreate(&uobj,
+                                      pb,
+                                      deletePersistentBlobs,
+                                      1,
+                                      hipUserObjectNoDestructorSync));
+    pb->group_kernel_args_ = std::move(argument.group_kernel_args_);
+    AT_CUDA_CHECK(hipGraphRetainUserObject(current_graph,
+                                           uobj,
+                                           1,
+                                           hipGraphUserObjectMove));
+  }
+
+
   if (time_kernel) {
     std::cout << "time elpase is " << avg_time << " ms" << std::endl;
   }
