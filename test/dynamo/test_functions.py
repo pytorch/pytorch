@@ -34,6 +34,10 @@ HAS_TRITON = has_triton()
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
+if HAS_TRITON:
+    import triton
+    from triton import language as tl
+
 
 d = torch.ones(10, 10)
 e = torch.nn.Linear(10, 10)
@@ -1450,9 +1454,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
     @requires_triton()
     @skipIfRocm
     def test_triton_kernel_by_hand(self):
-        import triton
-        from triton import language as tl
-
         @triton.jit
         def add_kernel(
             in_ptr0,
