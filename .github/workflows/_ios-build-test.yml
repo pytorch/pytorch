@@ -416,8 +416,7 @@ jobs:
           path: ${{ env.DEST_DIR }}/${{ env.SPEC_NAME_WITH_VERSION }}
 
       - name: Set DRY_RUN
-        # TODO: uncomment me before pushing
-        # if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
+        if: ${{ (inputs.trigger-event == 'push' || inputs.trigger-event == 'workflow_dispatch') && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
