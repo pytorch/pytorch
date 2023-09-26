@@ -221,8 +221,9 @@ def clone_preserve_strides(x, device=None):
     return out
 
 
-@patch.object(config, "debug", True)
 def run_and_get_cpp_code(fn, *args, **kwargs):
+    old_debug_config = config.debug
+    config.debug = True
     torch._dynamo.reset()
     import io
     import logging
@@ -238,6 +239,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     s = log_capture_string.getvalue()
     output_code_log.setLevel(prev_level)
     output_code_log.removeHandler(ch)
+    config.debug = old_debug_config
     return s
 
 
