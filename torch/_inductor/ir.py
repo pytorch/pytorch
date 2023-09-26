@@ -44,7 +44,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
@@ -3372,11 +3372,25 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_uses(self):
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
+
+        # NB: recursive structure here reflects val_to_arg_str, avoid
+        # calling free_unbacked_symbols on "exotic" types that don't get pexpr
+        # treatment
+        def maybe_free_unbacked_symbols(s):
+            if isinstance(s, (SymTypes, sympy.Expr)):
+                return free_unbacked_symbols(s)
+            elif isinstance(s, (tuple, list)):
+                r = set()
+                for t in s:
+                    r |= maybe_free_unbacked_symbols(t)
+            else:
+                return set()
+
         r = set()
         for arg in self.constant_args:
-            r |= free_unbacked_symbols(arg)
+            r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
-            r |= free_unbacked_symbols(arg)
+            r |= maybe_free_unbacked_symbols(arg)
         return r
 
     def __str__(self):
