@@ -337,6 +337,18 @@ def forward(self, l_x_, size):
         y = torch.randn(3, 3)
         self._test_wrap_simple(f, (x, y, (x, y)), 3)
 
+    def test_wrap_pytree_args_not_const_symint_tensor(self):
+        class MyClass:
+            def __init__(self, x):
+                self.val = x
+
+        def f(x, y):
+            return wrap(lambda z: z[0].sin() * z[1].val.cos(), (x, y))
+
+        x = torch.tensor(1.2)
+        y = MyClass(torch.tensor(3.4))
+        self._assert_wrap_fallback(f, (x, y))
+
     def test_capture_constants(self):
         x = torch.randn(3, 3)
         y = 4.0
@@ -1626,7 +1638,7 @@ def forward(self):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {".*HigherOrderOperator body's output must consist of tensors only": 1},
+            {".*torch.* op returned non-Tensor dict call_function": 1},
         )
 
     def test_access_module_attr(self):
