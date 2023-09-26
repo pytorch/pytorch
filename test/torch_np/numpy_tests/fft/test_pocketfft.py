@@ -1,26 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import queue
 import threading
-from unittest import skipIf as skipif, SkipTest
 
 import pytest
 import torch._numpy as np
 from pytest import raises as assert_raises
 
 from torch._numpy.random import random
-
 from torch._numpy.testing import assert_allclose, assert_array_equal  # , IS_WASM
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
-)
-
-skip = functools.partial(skipif, True)
-
 
 IS_WASM = False
 
@@ -32,14 +20,13 @@ def fft1(x):
     return np.sum(x * np.exp(phase), axis=1)
 
 
-class TestFFTShift(TestCase):
+class TestFFTShift:
     def test_fft_n(self):
         assert_raises((ValueError, RuntimeError), np.fft.fft, [1, 2, 3], 0)
 
 
-@instantiate_parametrized_tests
-class TestFFT1D(TestCase):
-    def setUp(self):
+class TestFFT1D:
+    def setup_method(self):
         np.random.seed(123456)
 
     def test_identity(self):
@@ -58,7 +45,7 @@ class TestFFT1D(TestCase):
         assert_allclose(fft1(x) / np.sqrt(30), np.fft.fft(x, norm="ortho"), atol=5e-6)
         assert_allclose(fft1(x) / 30.0, np.fft.fft(x, norm="forward"), atol=5e-6)
 
-    @parametrize("norm", (None, "backward", "ortho", "forward"))
+    @pytest.mark.parametrize("norm", (None, "backward", "ortho", "forward"))
     def test_ifft(self, norm):
         x = random(30) + 1j * random(30)
         assert_allclose(x, np.fft.ifft(np.fft.fft(x, norm=norm), norm=norm), atol=1e-6)
@@ -260,7 +247,9 @@ class TestFFT1D(TestCase):
             atol=1e-6,
         )
 
-    @parametrize("op", [np.fft.fftn, np.fft.ifftn, np.fft.rfftn, np.fft.irfftn])
+    @pytest.mark.parametrize(
+        "op", [np.fft.fftn, np.fft.ifftn, np.fft.rfftn, np.fft.irfftn]
+    )
     def test_axes(self, op):
         x = random((30, 20, 10))
         axes = [(0, 1, 2), (0, 2, 1), (1, 0, 2), (1, 2, 0), (2, 0, 1), (2, 1, 0)]
@@ -288,7 +277,7 @@ class TestFFT1D(TestCase):
                     tmp = back(tmp, n=n, norm=norm)
                     assert_allclose(x_norm, np.linalg.norm(tmp), atol=1e-6)
 
-    @parametrize("dtype", [np.half, np.single, np.double])
+    @pytest.mark.parametrize("dtype", [np.half, np.single, np.double])
     def test_dtypes(self, dtype):
         # make sure that all input precisions are accepted and internally
         # converted to 64bit
@@ -296,49 +285,50 @@ class TestFFT1D(TestCase):
         assert_allclose(np.fft.ifft(np.fft.fft(x)), x, atol=1e-6)
         assert_allclose(np.fft.irfft(np.fft.rfft(x)), x, atol=1e-6)
 
-    @parametrize("dtype", [np.float32, np.float64, np.complex64, np.complex128])
-    @parametrize("order", ["F", "non-contiguous"])
-    @parametrize(
-        "fft",
-        [np.fft.fft, np.fft.fft2, np.fft.fftn, np.fft.ifft, np.fft.ifft2, np.fft.ifftn],
-    )
-    def test_fft_with_order(self, dtype, order, fft):
-        # Check that FFT/IFFT produces identical results for C, Fortran and
-        # non contiguous arrays
-        #   rng = np.random.RandomState(42)
-        rng = np.random
-        X = rng.rand(8, 7, 13).astype(dtype)  # , copy=False)
-        # See discussion in pull/14178
-        _tol = float(8.0 * np.sqrt(np.log2(X.size)) * np.finfo(X.dtype).eps)
-        if order == "F":
-            raise SkipTest("Fortran order arrays")
-            Y = np.asfortranarray(X)
-        else:
-            # Make a non contiguous array
-            Z = np.empty((16, 7, 13), dtype=X.dtype)
-            Z[::2] = X
-            Y = Z[::2]
-            X = Y.copy()
 
-        if fft.__name__.endswith("fft"):
-            for axis in range(3):
-                X_res = fft(X, axis=axis)
-                Y_res = fft(Y, axis=axis)
-                assert_allclose(X_res, Y_res, atol=_tol, rtol=_tol)
-        elif fft.__name__.endswith(("fft2", "fftn")):
-            axes = [(0, 1), (1, 2), (0, 2)]
-            if fft.__name__.endswith("fftn"):
-                axes.extend([(0,), (1,), (2,), None])
-            for ax in axes:
-                X_res = fft(X, axes=ax)
-                Y_res = fft(Y, axes=ax)
-                assert_allclose(X_res, Y_res, atol=_tol, rtol=_tol)
-        else:
-            raise ValueError()
+@pytest.mark.parametrize("dtype", [np.float32, np.float64, np.complex64, np.complex128])
+@pytest.mark.parametrize("order", ["F", "non-contiguous"])
+@pytest.mark.parametrize(
+    "fft",
+    [np.fft.fft, np.fft.fft2, np.fft.fftn, np.fft.ifft, np.fft.ifft2, np.fft.ifftn],
+)
+def test_fft_with_order(dtype, order, fft):
+    # Check that FFT/IFFT produces identical results for C, Fortran and
+    # non contiguous arrays
+    #   rng = np.random.RandomState(42)
+    rng = np.random
+    X = rng.rand(8, 7, 13).astype(dtype)  # , copy=False)
+    # See discussion in pull/14178
+    _tol = float(8.0 * np.sqrt(np.log2(X.size)) * np.finfo(X.dtype).eps)
+    if order == "F":
+        pytest.skip("Fortran order arrays")
+        Y = np.asfortranarray(X)
+    else:
+        # Make a non contiguous array
+        Z = np.empty((16, 7, 13), dtype=X.dtype)
+        Z[::2] = X
+        Y = Z[::2]
+        X = Y.copy()
+
+    if fft.__name__.endswith("fft"):
+        for axis in range(3):
+            X_res = fft(X, axis=axis)
+            Y_res = fft(Y, axis=axis)
+            assert_allclose(X_res, Y_res, atol=_tol, rtol=_tol)
+    elif fft.__name__.endswith(("fft2", "fftn")):
+        axes = [(0, 1), (1, 2), (0, 2)]
+        if fft.__name__.endswith("fftn"):
+            axes.extend([(0,), (1,), (2,), None])
+        for ax in axes:
+            X_res = fft(X, axes=ax)
+            Y_res = fft(Y, axes=ax)
+            assert_allclose(X_res, Y_res, atol=_tol, rtol=_tol)
+    else:
+        raise ValueError()
 
 
-@skipif(IS_WASM, reason="Cannot start thread")
-class TestFFTThreadSafe(TestCase):
+@pytest.mark.skipif(IS_WASM, reason="Cannot start thread")
+class TestFFTThreadSafe:
     threads = 16
     input_shape = (800, 200)
 
@@ -382,4 +372,6 @@ class TestFFTThreadSafe(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()

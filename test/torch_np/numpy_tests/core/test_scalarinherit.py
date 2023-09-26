@@ -3,17 +3,10 @@
 """ Test printing of scalar types.
 
 """
-import functools
-
-from unittest import skipIf as skipif
-
 import pytest
 
 import torch._numpy as np
 from torch._numpy.testing import assert_
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-skip = functools.partial(skipif, True)
 
 
 class A:
@@ -49,8 +42,8 @@ class B1(np.float64, HasNew):
     pass
 
 
-@skip(reason="scalar repr: numpy plans to make it more explicit")
-class TestInherit(TestCase):
+@pytest.mark.skip(reason="scalar repr: numpy plans to make it more explicit")
+class TestInherit:
     def test_init(self):
         x = B(1.0)
         assert_(str(x) == "1.0")
@@ -76,4 +69,6 @@ class TestInherit(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()

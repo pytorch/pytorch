@@ -5,6 +5,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/SmallVector.h>
 
 #define C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE 5
 
