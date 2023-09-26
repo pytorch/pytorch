@@ -59,6 +59,18 @@ class EnvVarMetric:
         return value
 
 
+global_metrics: Dict[str, Any] = {}
+
+
+def add_global_metric(metric_name: str, metric_value: Any) -> None:
+    """
+    Adds stats that should be emitted with every metric by the current process.
+    If the emit_metrics method specifies a metric with the same name, it will
+    overwrite this value.
+    """
+    global_metrics[metric_name] = metric_value
+
+
 def emit_metric(
     metric_name: str,
     metrics: Dict[str, Any],
@@ -82,6 +94,10 @@ def emit_metric(
 
     if metrics is None:
         raise ValueError("You didn't ask to upload any metrics!")
+
+    # Merge the given metrics with the global metrics, overwriting any duplicates
+    # with the given metrics.
+    metrics = {**global_metrics, **metrics}
 
     # We use these env vars that to determine basic info about the workflow run.
     # By using env vars, we don't have to pass this info around to every function.
