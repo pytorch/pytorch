@@ -443,6 +443,7 @@ core_backward_failures = {
     skip('logaddexp'),  # slow: fails with --timeout=360 secs
     skip('native_dropout_backward'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.binary_cross_entropy_with_logits'),
+    skip('nn.functional.glu'),  # slow: fails with --timeout=360 secs
     xfail('nn.functional.hardshrink'),
     xfail('nn.functional.softshrink'),
     skip('nn.functional.unfold'),  # slow: fails with --timeout=360 secs
@@ -477,6 +478,7 @@ class TestDecomp(TestCase):
     @suppress_warnings
     @ops(_decomp_test_ops)
     def test_quick(self, device, dtype, op):
+        print(op)
         self.do_cross_ref(device, dtype, op, run_all=False)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
