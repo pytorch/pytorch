@@ -10,6 +10,7 @@ from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter, assert_metadata_eq
 import torch.utils._python_dispatch
 from torch._dispatch.python import enable_python_dispatcher
+from torch._ops import OpOverload, OpOverloadPacket
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -36,6 +37,7 @@ import yaml
 import atexit
 import re
 from collections import defaultdict
+from collections.abc import Iterable
 import unittest
 import warnings
 import weakref
@@ -54,7 +56,6 @@ i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
 u8 = torch.uint8
-
 
 class TestMetaConverter(TestCase):
     def assertSameVersionCounter(self, m1, m2):
@@ -490,7 +491,6 @@ def run_meta_crossref(
 ):
     to_meta = MetaConverter()
     do_meta = test_expect is not TestExpect.SKIP
-
     if do_meta:
         try:
             meta_args = tree_map(to_meta, args)
@@ -499,7 +499,6 @@ def run_meta_crossref(
             raise RuntimeError(
                 f"failed to convert args to meta; "
                 f"originally (*{args}, **{kwargs})") from e
-
     try:
         rs = func(*args, **kwargs)
     except Exception as e:
@@ -529,10 +528,12 @@ def run_meta_crossref(
             for a, ma in zip(flat_args, flat_meta_args):
                 flat_new_args.append(a if isinstance(a, torch.Tensor) and a.dtype in [torch.int8, torch.bool] else ma)
             meta_args = (meta_args[0], tree_unflatten(flat_new_args, spec))
-        elif func is torch.ops.aten.repeat_interleave.Tensor:
+        elif func in (torch.ops.aten.repeat_interleave.Tensor, torch.ops.aten.repeat_interleave.Tensor_out):
             if kwargs.get("output_size", None) is None:
                 meta_args = args
-        elif func is torch.ops.aten.index.Tensor:
+            if func is torch.ops.aten.repeat_interleave.Tensor_out:
+                meta_kwargs["out"] = kwargs["out"]
+        elif func in (torch.ops.aten.index.Tensor, torch.ops.aten.index.Tensor_out):
             # Don't convert boolean tensors to meta as they will have nonzero
             # called on them
             indices = []
@@ -863,6 +864,11 @@ meta_dispatch_device_skips['cpu'] = {
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
+
+    # If the computation dtype is different from the input
+    # dtype this will fail. CPU execution may also have a
+    # a different output from other devices.
+    aten.native_batch_norm.out: {bf16, f16, f32, f64}
 }
 
 meta_dispatch_device_skips['cuda'] = {
@@ -930,8 +936,9 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
     device: torch.device
     dtype: torch.dtype
+    aten_olp_no_out_overload: set = set()
 
-    def __init__(self, test_case, *, device, dtype, symbolic_meta: bool):
+    def __init__(self, test_case, *, device, dtype, symbolic_meta: bool, inplace: bool, supports_out: bool):
         self.test_case = test_case
         # save TLS
         self.precision = test_case.precision
@@ -939,13 +946,76 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         self.device_type = torch.device(device).type
         self.dtype = dtype
         self.symbolic_meta = symbolic_meta
+        self.inplace = inplace
+        self.supports_out = supports_out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
+    @staticmethod
+    def try_resolve_aten_out_overload(ol, args, kwargs, num_outputs):
 
-        self.test_case.precision = self.precision
-        self.test_case.rel_tol = self.rel_tol
+        ol_args = ol._schema.arguments
+        olp: OpOverloadPacket = ol._overloadpacket
 
+        if olp in MetaCrossRefDispatchMode.aten_olp_no_out_overload:
+            return (None, None, None)
+
+        candidate_ols = []
+        for candidate_ol_name in olp.overloads():
+            candidate_ol = getattr(olp, candidate_ol_name)
+            if any(arg.is_out for arg in candidate_ol._schema.arguments):
+                candidate_ols.append(candidate_ol)
+
+        if not candidate_ols:
+            MetaCrossRefDispatchMode.aten_olp_no_out_overload.add(olp)
+            return (None, None, None)
+
+        # Now match based on args, kwargs and number of required outputs
+        candidate_ol: OpOverload = None
+        for candidate_ol in candidate_ols:
+            candidate_ol_args = candidate_ol._schema.arguments
+
+            if (len(args) >= len(candidate_ol_args)):
+                continue
+
+            # Positional arguments must have the same type
+            if not all(
+                ol_args[pos_arg_ind].type == candidate_ol_args[pos_arg_ind].type
+                for pos_arg_ind in range(len(args))
+            ):
+                continue
+
+            # Number of outputs must match
+            candidate_out_names = [out_arg.name for out_arg in candidate_ol_args[-num_outputs:] if out_arg.is_out]
+            if len(candidate_out_names) != num_outputs:
+                continue
+
+            # Now try and match kwargs. Just need to ensure that the
+            # remaining kwargs allow an out overload to be called. For example
+            # we can throw away parameters like `dtype` that may be passed to the
+            # functional version of the op since the `dtype` will already be present
+            # in the `out` argument
+            new_kwargs = {}
+            kwargs_match = True
+            for arg in candidate_ol_args[len(args):-num_outputs]:
+                if arg.name not in kwargs:
+                    if arg.has_default_value():
+                        new_kwargs[arg.name] = arg.default_value
+                    elif isinstance(arg.type, torch.OptionalType):
+                        if isinstance(arg.type.getElementType(), torch.BoolType):
+                            new_kwargs[arg.name] = False
+                        else:
+                            new_kwargs[arg.name] = None
+                    else:
+                        kwargs_match = False
+                        break
+                else:
+                    new_kwargs[arg.name] = kwargs[arg.name]
+
+            if kwargs_match:
+                return candidate_ol, candidate_out_names, new_kwargs
+
+        return None, None, None
+
+    def _get_expected_test_result(self, func: OpOverload):
         if self.dtype in meta_dispatch_skips.get(func, set()):
             test_expect = TestExpect.SKIP
         elif self.dtype in meta_dispatch_device_skips[self.device_type].get(func, set()):
@@ -956,8 +1026,16 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             test_expect = TestExpect.XFAILURE
         else:
             test_expect = TestExpect.SUCCESS
+        return test_expect
 
-        return run_meta_crossref(
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        self.test_case.precision = self.precision
+        self.test_case.rel_tol = self.rel_tol
+
+        test_expect = self._get_expected_test_result(func)
+
+        expected = run_meta_crossref(
             self.test_case,
             test_expect,
             func,
@@ -967,6 +1045,46 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
             device_type=self.device_type,
             run_symbolic_meta=self.symbolic_meta,
         )
+
+        # This is to test torch ops that do not have an out parameter but have
+        # aten op overloads that have out parameters. Additionally, Python decompositions
+        # may register OpOverloadPacket's so decompositions need to be tested
+        # to ensure all OpOverloads still function for the Meta key (e.g. if a python decomposition
+        # is registered for an aten op aten.foo with overloads [default, out], the python
+        # function needs to support receiving `out` arguments)
+        if (
+            not self.inplace and
+            not self.supports_out and
+            test_expect == TestExpect.SUCCESS and
+            (torch.is_tensor(expected) or isinstance(expected, Iterable))
+        ):
+
+            # check to see if there is a potential out overload
+            num_outputs = 1 if torch.is_tensor(expected) else len(expected)
+            func_out_overload, out_param_names, kwargs = self.try_resolve_aten_out_overload(func, args, kwargs, num_outputs)
+
+            if func_out_overload:
+
+                if num_outputs == 1:
+                    kwargs[out_param_names[0]] = expected
+                else:
+                    for ind, out_param_name in enumerate(out_param_names):
+                        kwargs[out_param_name] = expected[ind]
+
+                test_expect = self._get_expected_test_result(func_out_overload)
+
+                run_meta_crossref(
+                    self.test_case,
+                    test_expect,
+                    func_out_overload,
+                    args,
+                    kwargs,
+                    dtype=self.dtype,
+                    device_type=self.device_type,
+                    run_symbolic_meta=self.symbolic_meta,
+                )
+
+        return expected
 
 # NB: we're running these tests only on CUDA because there are some
 # inconsistencies between CUDA and CPU, and running on CUDA makes it easier
@@ -1020,8 +1138,6 @@ class TestMeta(TestCase):
                 if op.name != "empty_like":
                     self.assertEqual(ref, meta)
 
-
-
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef
     @suppress_warnings
@@ -1071,7 +1187,10 @@ class TestMeta(TestCase):
                 strided_args = [sample_args]
 
             for args in strided_args:
-                with MetaCrossRefDispatchMode.push(self, dtype=dtype, device=device, symbolic_meta=symbolic_meta):
+                with MetaCrossRefDispatchMode.push(
+                    self, dtype=dtype, device=device,
+                    symbolic_meta=symbolic_meta, inplace=inplace,
+                     supports_out=op.supports_out):
                     expected = func(*args, **kwargs)
 
                     if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
@@ -1084,7 +1203,6 @@ class TestMeta(TestCase):
     @ops(op_db)
     def test_dispatch_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=False, inplace=False)
-
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipIfCrossRef

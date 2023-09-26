@@ -1529,9 +1529,15 @@ def forward(self, arg0_1, arg1_1):
         inp = torch.ones(3, 4)
         exp_out = inp.sin()
         iter_n = torch._dynamo.config.cache_size_limit + 1
+
+        # Need this because Dynamo checks lambda code ID not object itself.
+        def make_dummy_fn(op):
+            exec(f"temp = lambda x: x.{op}()")
+            return locals()["temp"]
+
         for _ in range(iter_n):
             # each lambda has a different object id thus fails the guard
-            self.assertEqual(foo(inp, lambda x: x.cos(), lambda x: x.sin()), exp_out)
+            self.assertEqual(foo(inp, make_dummy_fn("cos"), make_dummy_fn("sin")), exp_out)
         self.assertEqual(counters["stats"]["calls_captured"], iter_n)
         self.assertEqual(counters["stats"]["unique_graphs"], iter_n)
 
