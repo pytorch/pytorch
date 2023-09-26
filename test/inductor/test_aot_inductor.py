@@ -32,9 +32,9 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_torchinductor import copy_tests
+        from .test_torchinductor import copy_tests, requires_cuda
     except ImportError:
-        from test_torchinductor import copy_tests
+        from test_torchinductor import copy_tests, requires_cuda
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -193,6 +193,19 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device="cpu"),
             torch.randn(10, 10, device="cpu"),
         )
+        self.check_model(Repro(), example_inputs)
+
+    @requires_cuda()
+    def test_multi_device(self):
+        class Repro(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                x = x.cpu()
+                x = x + 2
+                x = x.cuda()
+                return x
+
+        example_inputs = (torch.randn(32, 64, device="cuda"),)
         self.check_model(Repro(), example_inputs)
 
     def test_large(self):
