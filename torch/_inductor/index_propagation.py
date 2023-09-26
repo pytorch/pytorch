@@ -21,7 +21,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 """
 import itertools
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, overload, Tuple, Union
 
 import sympy
 
@@ -176,13 +176,23 @@ class IndexPropagation:
 
         return a.value
 
-    def wrap(self, a: Any) -> Union[IndexPropVar, Sequence[IndexPropVar]]:
+    # FIXME MYPYNOFOLLOW thinks this overload clashes with the one below because it doesn't follow the import of
+    # sympy, so it treats sympy.Symbol as an Any type. We can probably remove the type-ignore once we remove the nofollow.
+    @overload
+    def wrap(self, a: Union[List[Any], Tuple[Any]]) -> Tuple[IndexPropVar]:  # type: ignore[misc]
+        ...
+
+    @overload
+    def wrap(self, a: Union[torch.fx.Proxy, sympy.Symbol, TypedExpr]) -> IndexPropVar:
+        ...
+
+    def wrap(self, a):
         if isinstance(a, (list, tuple)):
             return tuple(self.wrap(v) for v in a)
         return IndexPropVar(a)
 
     def fallback(
-        self, name: str, args: Tuple, kwargs: Dict[str, Any]
+        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Union[IndexPropVar, Tuple[IndexPropVar, ...]]:
         # Fallback to the wrapped handler
         new_args = [self.unwrap(a) for a in args]
@@ -190,8 +200,8 @@ class IndexPropagation:
         return self.wrap(getattr(self._inner, name)(*new_args, **new_kwargs))
 
     def propagate_sympy(
-        self, name: str, args: Tuple, kwargs: Dict[str, Any]
-    ) -> IndexPropVar:
+        self, name: str, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Union[IndexPropVar, Tuple[IndexPropVar, ...]]:
         # Build a new SymPy expression from this ops call
         def unwrap(a: Union[Any, IndexPropVar]) -> Any:
             if not isinstance(a, IndexPropVar):
@@ -239,4 +249,4 @@ class IndexPropagation:
             # If we are turning a indirect indexing into direct, we need to wrap it.
             index = index.value.expr
             return index + Where(index >= 0, 0, size)
-        return self.fallback("indirect_indexing", (index, size, check), {}).value
+        return self.fallback("indirect_indexing", (index, size, check), {}).value  # type: ignore[union-attr]
