@@ -4,7 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._functorch.aot_autograd import AOTConfig, create_joint, from_fun
+from torch._functorch.aot_autograd import AOTConfig, create_joint
 
 from torch._higher_order_ops.cond import (
     _has_potential_branch_input_alias,
@@ -25,6 +25,23 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
+
+
+# TODO: pull these helpers from AOTAutograd later
+def to_fun(t):
+    if isinstance(t, torch.Tensor):
+        return FunctionalTensor.to_functional(t)
+    return t
+
+
+def from_fun(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
+        return t
+    torch._sync(t)
+    return torch._from_functional_tensor(t.elem)
 
 
 # TODO: We add this to prevent dymamo from tracing into map_wrapper,
