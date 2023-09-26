@@ -2230,6 +2230,7 @@ def all(
     # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
     # case must be handled separately.
     if dim is None:
+        assert not keepdim
         result = torch.logical_not(torch.any(torch.logical_not(a)))
     else:
         result = torch.logical_not(
