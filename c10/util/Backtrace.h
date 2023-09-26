@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <string>
+#include <typeinfo>
 
 #include <c10/macros/Macros.h>
 
