@@ -3837,6 +3837,9 @@ class TestMPS(TestCaseMPS):
         x_mps[2:4] = update_mps  # implicit type casting and copy
         self.assertEqual(x_cpu, x_mps)
 
+        x_cpu[2:4] = update_mps  # implicit device moving and copy
+        self.assertEqual(x_cpu, x_mps)
+
     def test_copy_broadcasting(self):
         def helper(src_shape, dst_shape, src_dtype, dst_dtype):
             cpu_src = torch.randint(0, 127, src_shape).to(src_dtype)
@@ -4225,20 +4228,24 @@ class TestNLLLoss(TestCaseMPS):
 
     def test_nll_loss_out_of_bounds_ignore_index(self):
 
-        def _test_nll_loss_out_of_bounds_ignore_index(device):
+        def test_nll_loss_out_of_bounds_ignore_index_helper(device):
             output = []
             x = torch.tensor([[0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1], [
                              0.3, 0.5, 0.2], [0.1, 0.7, 0.2], [0.4, 0.5, 0.1]], device=device)
-            t = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+            t1 = torch.tensor([0, 1, 255, 0, 1, 2], dtype=torch.int64, device=device)
+            t2 = torch.tensor([0, 1, 1, 0, -100, 2], dtype=torch.int64, device=device)
             for reduction in ['mean', 'none']:
-                output.append(F.nll_loss(x, t, ignore_index=255, reduction=reduction))
+                # out of bound ignore_index
+                output.append(F.nll_loss(x, t1, ignore_index=255, reduction=reduction))
+                # default ignore_index
+                output.append(F.nll_loss(x, t2, reduction=reduction))
             return output
 
-        output_cpu = _test_nll_loss_out_of_bounds_ignore_index(device='cpu')
-        output_mps = _test_nll_loss_out_of_bounds_ignore_index(device='mps')
+        output_cpu = test_nll_loss_out_of_bounds_ignore_index_helper(device='cpu')
+        output_mps = test_nll_loss_out_of_bounds_ignore_index_helper(device='mps')
 
         for cpu, mps in zip(output_cpu, output_mps):
-            self.assertEqual(cpu, mps.to('cpu'))
+            self.assertEqual(cpu, mps)
 
     def test_nll_loss_invalid_target_dim(self):
 
