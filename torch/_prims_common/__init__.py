@@ -76,6 +76,8 @@ TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
+CustomOutParamAnnotation = "__custom_out_param__"
+
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):

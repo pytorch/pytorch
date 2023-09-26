@@ -10,6 +10,7 @@ from enum import Enum
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union, NewType
 from unittest.mock import patch
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from functorch import make_fx
 
@@ -27,6 +28,7 @@ from torch._guards import detect_fake_mode, tracing
 from torch._prims_common import CUDARngStateHelper
 from torch._logging import getArtifactLogger
 from torch._subclasses import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, is_concrete_int, fx_placeholder_vals
@@ -676,17 +678,37 @@ def gen_alias_from_base(aliased_base_tensor, target_meta_tensor, target_requires
 
 def to_fun(t):
     if isinstance(t, Tensor):
-        out = torch._to_functional_tensor(t)
-        torch._mirror_autograd_meta_to(t, out)
-        return out
+        return FunctionalTensor.to_functional(t)
     else:
         return t
 
 def from_fun(t):
-    if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
+    if not isinstance(t, FunctionalTensor):
+        # quick sanity assert
+        if isinstance(t, torch.Tensor):
+            assert not torch._is_functional_tensor(t)
         return t
     torch._sync(t)
-    return torch._from_functional_tensor(t)
+    return torch._from_functional_tensor(t.elem)
+
+def is_fun(t):
+    if isinstance(t, Tensor) and is_traceable_wrapper_subclass(t):
+        # See Note [Functionalization always runs last]
+        # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
+        # goes at the bottom.
+        # recurse here, so we can support nested wrapper subclasses
+        t_attrs, _ = t.__tensor_flatten__()
+        t_inners = [getattr(t, attr) for attr in t_attrs]
+        any_fun = any(is_fun(x) for x in t_inners)
+        all_fun = all(is_fun(x) for x in t_inners)
+        assert any_fun == all_fun
+        return any_fun
+
+    return isinstance(t, FunctionalTensor)
+
+def has_metadata_mutation(t):
+    assert isinstance(t, FunctionalTensor)
+    return torch._functionalize_has_metadata_mutation(t.elem)
 
 def _get_hints(exprs):
     """
@@ -725,22 +747,15 @@ def run_functionalized_fw_and_collect_metadata(
 ) -> ViewAndMutationMeta:
     memo = {}
 
-    def to_fun(t):
+    def _to_fun(t):
         if isinstance(t, Tensor):
             if t in memo:
                 return memo[t]
-            r = torch._to_functional_tensor(t)
-            torch._mirror_autograd_meta_to(t, r)
+            r = to_fun(t)
             memo[t] = r
             return r
         else:
             return t
-
-    def from_fun(t):
-        if not isinstance(t, Tensor) or not torch._is_functional_tensor(t):
-            return t
-        torch._sync(t)
-        return torch._from_functional_tensor(t)
 
     @wraps(f)
     def inner(*flat_args):
@@ -752,14 +767,13 @@ def run_functionalized_fw_and_collect_metadata(
         input_requires_grad_info: List[bool] = []
         output_requires_grad_info: List[bool] = []
 
-        flat_f_args = pytree.tree_map(to_fun, flat_args)
+        flat_f_args = pytree.tree_map(_to_fun, flat_args)
 
-        torch._enable_functionalization(reapply_views=True)
-        try:
+        # See Note [Disabling Functionalize TLS Above Python Functionalization]
+        disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with disable_above, FunctionalTensorMode():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_outs = f(*flat_f_args)
-        finally:
-            torch._disable_functionalization()
 
         # Inspect the state of the input tensor functional wrapper to detect input mutation info
         # If inp[i] has a metadata-only mutation, then maybe_inputs_with_mutated_metadata[i] contains the updated version
@@ -767,15 +781,14 @@ def run_functionalized_fw_and_collect_metadata(
             if not isinstance(arg, Tensor):
                 new_arg = arg
             else:
-                torch._sync(f_arg)
-                new_arg = torch._from_functional_tensor(f_arg)
+                new_arg = from_fun(f_arg)
             if arg is not new_arg:
                 if StorageWeakRef(arg.untyped_storage()) == StorageWeakRef(new_arg.untyped_storage()):
                     mutates_data = False
                     mutates_metadata = True
                 else:
                     mutates_data = True
-                    mutates_metadata = torch._functionalize_has_metadata_mutation(f_arg)
+                    mutates_metadata = has_metadata_mutation(f_arg)
                 # Only track requires_grad info on *mutated* inputs,
                 # because they show up in the autograd.Function.forward as outputs
                 input_requires_grad_info.append(
@@ -1360,12 +1373,12 @@ def create_functionalized_graph(
     def functionalized_f_helper(*args):
         # Wrap inputs into functional wrappers
         f_args = pytree.tree_map(to_fun, args)
-        torch._enable_functionalization(reapply_views=True)
-        try:
+
+        # See Note [Disabling Functionalize TLS Above Python Functionalization]
+        disable_above = torch._C._ExcludeDispatchKeyGuard(torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize))
+        with disable_above, FunctionalTensorMode():
             # Run the joint
             f_outs = fn(*f_args)
-        finally:
-            torch._disable_functionalization()
 
         if aot_config.keep_inference_input_mutations and not trace_joint:
             # Note: This is a bit annoying. There's a layering issue here, where:
@@ -1395,8 +1408,8 @@ def create_functionalized_graph(
             for i, (inpt_old, inpt_f) in enumerate(zip(args, f_args)):
                 if not isinstance(inpt_f, torch.Tensor):
                     continue
-                torch._sync(inpt_f)
-                inpt_new = torch._from_functional_tensor(inpt_f)
+                assert is_fun(inpt_f)
+                inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutates_data and not meta.input_info[i].mutates_metadata:
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
@@ -2068,7 +2081,7 @@ def create_synthetic_base_metadata(
     input_metadata_output_info = [
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
-            raw_type=torch.Tensor,
+            raw_type=FunctionalTensor,
             dynamic_dims={i for i, s in enumerate(outer_args[outer_idx].shape) if not is_concrete_int(s)},
             base_idx=synthetic_base_info[outer_idx][0],
         ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
