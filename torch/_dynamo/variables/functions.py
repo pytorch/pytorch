@@ -678,8 +678,11 @@ class TritonKernelVariable(VariableTracker):
 
         proxied_args, proxied_kwargs = proxy_args_kwargs(args, kwargs)
         fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
-        # FX graph needs a __name__ attribute
+        # FX graph needs __name__ and __module__ attributes
         fn.__name__ = triton_kernel_wrapper_mutation.__name__
+        if not hasattr(fn, "__module__"):
+            # Super hacky but on AMD __module__ is not set
+            fn.__module__ = "itertools"
 
         tx.output.create_proxy(
             "call_function", fn, proxied_args, {**proxied_kwargs, "grid": grid}

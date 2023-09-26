@@ -5,6 +5,7 @@ import functools
 import inspect
 import itertools
 import operator
+import sys
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
@@ -23,21 +24,13 @@ from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
 )
-
-try:
-    try:
-        import triton
-        from triton import language as tl
-    except ImportError:
-        raise unittest.SkipTest("requires triton")
-
-except unittest.SkipTest:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
-
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+from torch.utils._triton import has_triton
+
+HAS_TRITON = has_triton()
+
+requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
@@ -1453,7 +1446,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 1)
 
     @requires_cuda()
+    @requires_triton()
     def test_triton_kernel_by_hand(self):
+        import triton
+        from triton import language as tl
+
         @triton.jit
         def add_kernel(
             in_ptr0,
