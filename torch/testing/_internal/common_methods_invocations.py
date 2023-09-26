@@ -21112,6 +21112,8 @@ python_ref_db = [
         torch_opinfo_name="all",
         supports_multiple_dims=True,
         skips=(
+            # FIXME: does not support passing keepdim without dim
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
