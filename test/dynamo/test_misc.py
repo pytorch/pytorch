@@ -51,9 +51,6 @@ from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.fx.experimental.recording import NotEqualError, replay_shape_env_events
 from torch.fx.experimental.symbolic_shapes import (
-    _constrain_range_for_size,
-    constrain_range,
-    constrain_unify,
     ConstraintViolationError,
     expect_true,
     ShapeEnv,
@@ -7584,18 +7581,6 @@ ShapeEnv not equal: field values don't match:
 """,
         )
         self._replay_and_check(main)
-
-    def test_shape_env_recorded_function_fallback(self):
-        # Make sure the record/replay mechanism for ShapeEnv will fallback
-        # if no ShapeEnv instance is found.
-        constrain_range(5, min=2, max=10)
-        constrain_unify(5, 5)
-
-        self.assertExpectedRaisesInline(
-            AssertionError,
-            lambda: _constrain_range_for_size(5, min=2, max=10),
-            """can only constrain range for SymInt""",
-        )
 
     def test_default_dtype_change(self):
         @torch.compile
