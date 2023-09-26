@@ -601,8 +601,13 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and not options.continue_through_error
     )
+    is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
+        "BUILD_ENVRIONMENT", ""
+    )
     timeout = (
-        THRESHOLD * 3
+        THRESHOLD * 6
+        if is_slow
+        else THRESHOLD * 3
         if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
