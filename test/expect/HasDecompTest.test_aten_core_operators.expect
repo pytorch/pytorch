@@ -220,8 +220,6 @@ aten::flip.out
 aten::floor
 aten::floor.out
 aten::floor_
-aten::floor_divide
-aten::floor_divide.out
 aten::floor_divide_.Tensor
 aten::fmax
 aten::fmax.out
