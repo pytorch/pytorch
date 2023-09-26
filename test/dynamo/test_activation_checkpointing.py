@@ -756,11 +756,12 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             return torch.utils.checkpoint.checkpoint(mod, x)
 
         x = torch.randn(4, 4).cuda()
-        ref = fn(x)
-        opt_fn = torch.compile(fn)
-        torch.manual_seed(0)
-        res = opt_fn(x)
-        self.assertEqual(ref, res)
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "while introspecting torch.utils.checkpoint.checkpoint, we were unable to trace function `NNModuleVariable`",
+        ):
+            opt_fn(x)
 
 
 if __name__ == "__main__":
