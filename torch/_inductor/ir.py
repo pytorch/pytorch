@@ -3626,6 +3626,10 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
@@ -3878,7 +3882,8 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output, [])
+        packed.outputs = generate_output(example_output, [])
+        return packed.outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3898,7 +3903,7 @@ class MultiOutput(ExternKernel):
             elif itype == tuple:
                 # cpp wrapper code needs to use std::get<> to access a tuple
                 tuple_access = V.graph.wrapper_code.codegen_tuple_access(
-                    basename, str(i)
+                    basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
             else:
@@ -3907,10 +3912,10 @@ class MultiOutput(ExternKernel):
             return basename
 
     def codegen(self, wrapper):
-        line = wrapper.declare
-        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
-        line += wrapper.ending
-        wrapper.writeline(line)
+        wrapper.codegen_multi_output(
+            self.get_name(),
+            self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
+        )
         self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
