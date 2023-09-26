@@ -4131,11 +4131,6 @@ def scaled_dot_product_flash_attention(
     )
 
 
-@register_decomposition([aten.trunc])
-def trunc(self: Tensor, **kwargs) -> Tensor:
-    return torch.where(self > 0, torch.floor(self), torch.ceil(self))
-
-
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):
@@ -4145,9 +4140,9 @@ def register_inplace(aten_op, outplace_op):
     return inplace_op
 
 
-@register_decomposition([aten.baddbmm])
 @out_wrapper()
 @pw_cast_for_opmath
+@register_decomposition([aten.baddbmm])
 def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)

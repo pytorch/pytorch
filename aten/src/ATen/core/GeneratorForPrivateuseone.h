@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
-#include <c10/util/intrusive_ptr.h>
 
 namespace at {
 

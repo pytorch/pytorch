@@ -1132,6 +1132,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
 
+    def test_getset_descriptor(self):
+        def fn(g, x):
+            return g.__get__(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        g = torch.Tensor.shape
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
+    def test_get_attr_function(self):
+        def fn(g, x):
+            return g(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        g = torch.Tensor.shape.__get__
+
+        res = opt_fn(g, torch.ones(2, 2))
+        exp_res = fn(g, torch.ones(2, 2))
+        self.assertEqual(res, exp_res)
+
     def test_user_getattribute(self):
         class MyObject:
             def __init__(self):
@@ -1645,6 +1669,39 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         r2 = fn2()
         self.assertEqual(cnts.frame_count, 0)
         assert r2 in ("L", "U")
+
+    def test_dtypes_no_graphbreaks(self):
+        # cache size limit needs to be larger than the `dtypes` list size
+        torch._dynamo.config.cache_size_limit = 12
+
+        dtypes = [
+            # floats
+            float,
+            np.float64,
+            "float64",
+            np.float32,
+            "float32",
+            # np.dtype('float64')   # XXX: this is not supported, yet
+            # integers
+            int,
+            "int",
+            np.intp,
+            np.int32,
+            np.uint8
+            # np.dtype('int')       # XXX: as above
+        ]
+
+        def fn(dt):
+            return np.arange(5, dtype=dt)
+
+        for dtyp in dtypes:
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+            val = fn(dtyp)
+            opt_val = opt_fn(dtyp)
+
+            self.assertEqual(cnts.frame_count, 1)  # no graph break
 
     def test_inplace_view_on_graph_input(self):
         # graph break when calling methods with inplace_view tag on graph input
@@ -2751,9 +2808,9 @@ def fn():
     def test_const_dict_variable_python_type(self):
         from torch._dynamo.variables import ConstantVariable, ConstDictVariable
 
-        d1 = {"a": ConstantVariable(10), "b": ConstantVariable(20)}
+        d1 = {"a": ConstantVariable.create(10), "b": ConstantVariable.create(20)}
         d2 = collections.OrderedDict(
-            [("x", ConstantVariable(12)), ("y", ConstantVariable(22))]
+            [("x", ConstantVariable.create(12)), ("y", ConstantVariable.create(22))]
         )
         self.assertEqual(ConstDictVariable(d1, dict).python_type(), dict)
         self.assertEqual(
@@ -4688,6 +4745,8 @@ def fn():
         def fn():
             default_state = torch.default_generator.get_state()
             x = torch.rand([2, 3])
+            if default_state.dtype != "float32":
+                x = x * 2
             torch._dynamo.graph_break()
             torch.default_generator.set_state(default_state)
             y = torch.rand([2, 3])
@@ -4695,7 +4754,7 @@ def fn():
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
         x, y = opt_fn()
-        self.assertEqual(x, y)
+        self.assertEqual(x, y * 2)
 
     def test_torch_distributions_lazy_property(self):
         def fn(x):
@@ -7484,6 +7543,76 @@ ShapeEnv not equal: field values don't match:
         foo()
         torch.set_default_dtype(torch.double)
         foo()
+
+    def test_no_recompile_inner_function(self):
+        def forward(inp):
+            def g(y):
+                return inp + y
+
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_no_recompile_inner_lambda(self):
+        def forward(inp):
+            g = lambda y: inp + y
+            print("graph break")
+            return g(torch.rand([1]))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(forward)
+
+        input = torch.rand([2])
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        _ = opt_fn(input)
+        # Should not have recompiled
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_complex_closure(self):
+        @torch.compile
+        def forward(y):
+            def a():
+                def x(z):
+                    return y + z
+
+                return x
+
+            return a()
+
+        input1 = torch.rand([2])
+        input2 = torch.rand([2])
+        res = forward(input1)(input2)
+        self.assertTrue(same(res, input1 + input2))
+
+    def test_non_inlined_closure(self):
+        @torch.compile()
+        def program(x, y):
+            one = lambda x, y: x + y
+
+            def inner():
+                # Force no inlining
+                torch._dynamo.graph_break()
+                return one(x, y)
+
+            res = inner()
+            one = lambda x, y: x - y
+            res += inner()
+            return res
+
+        input1 = torch.randn(1)
+        input2 = torch.randn(1)
+
+        self.assertTrue(same(program(input1, input2), input1 + input1))
 
 
 class TestTracer(JitTestCase):
