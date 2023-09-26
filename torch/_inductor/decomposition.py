@@ -69,8 +69,9 @@ decomps_to_exclude = [
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
-    aten.glu,  # has lowering in inductor
-    aten.lift_fresh,  # inductor lowers this (to no-op)
+    aten.glu,  # inductor lowers this directly
+    aten.lift_fresh,  # inductor lowers this directly (to no-op)
+    aten.split.Tensor,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
 ]
 
