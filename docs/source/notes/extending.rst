@@ -890,7 +890,7 @@ Some important implications of this implementation are:
 - Our native functions are lazily populated as ``torch.ops.{namespace}.{func_name}.{overload_name}`` as callable Python objects to enable easily interacting with them from Python. The ``func`` object given to ``__torch_dispatch__`` is always an entry from this namespace. This namespace can be used to directly call native ops and bypass the usual Python API and binding code.
 
 
-In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able to intercept all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
+In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able intercepting all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
 Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
 Some more exotic functions or features are also registered in other places in the C++ codebase or in user-defined C++ extensions.
 
@@ -905,10 +905,10 @@ Extending all :mod:`torch` API with Modes
 
 Unfortunately, there are functions that do not take Tensor inputs. This means that the subclass approach described above cannot be used to override the behavior of all of PyTorch's functions. Also, if the use case requires to intercept every function call, changing every Tensor to be a subclass can be overly intrusive.
 
-To address this use case, we introduced the concept of "Mode". These exist for for ``__torch_function__`` and ``__torch_dispatch__`` overrides, are created by subclassing respectively :class:`torch.overrides.TorchFunctionMode` and :class:`torch.utils._python_dispatch.TorchDispatchMode` and are used as a context manager.
+To address this use case, we introduced the concept of "Mode". These exist for ``__torch_function__`` and ``__torch_dispatch__`` overrides, are created by subclassing respectively :class:`torch.overrides.TorchFunctionMode` and :class:`torch.utils._python_dispatch.TorchDispatchMode`, and are used as a context manager.
 
-To simplify the description how it interacts with subclasses and other modes, whenever the context manager for a mode is entered, every function behaves as if there was an extra Tensor argument at the beginning of the argument list with the mode as a subclass.
-This means in particular that all modes handler will be called before any subclass handler and that modes corresponding to the inner context manager will always run first.
+To simplify the description of how it interacts with subclasses and other modes, whenever the context manager for a mode is entered, every function behaves as if there was an extra Tensor argument at the beginning of the argument list with the mode as a subclass.
+This means in particular that all modes handlers will be called before any subclass handler and that modes corresponding to the inner context manager will always run first.
 
 It is also important to note that within a given mode handler, this specific mode is disabled and can be re-enabled manually by doing ``with self:``.
 
