@@ -34,6 +34,7 @@ import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._prims_common import (
@@ -49,7 +50,6 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
@@ -641,7 +641,10 @@ class Reduction(Loops):
         if not should_split:
             return ReductionHint.DEFAULT, 1
 
-        num_sm = get_device_properties(device).multi_processor_count
+        device_interface = get_interface_for_device(get_device_type(device))
+        num_sm = device_interface.Worker.get_device_properties(
+            device
+        ).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -3656,13 +3659,9 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
         else:
-            wrapper.writeline(
-                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
 class DynamicScalar(ExternKernel):
@@ -4000,10 +3999,10 @@ class MultiOutput(ExternKernel):
         return free_unbacked_symbols(self.get_size()) - self.get_unbacked_symbol_uses()
 
     def codegen(self, wrapper):
-        line = V.graph.wrapper_code.declare
+        line = wrapper.declare
         line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
-        line += V.graph.wrapper_code.ending
-        V.graph.wrapper_code.writeline(line)
+        line += wrapper.ending
+        wrapper.writeline(line)
         # NB: If it is possible for other ir node types to return unbacked
         # symints, we also have to add this logic there too.  Don't forget to
         # update get_unbacked_symbol_defs too.
@@ -4012,12 +4011,12 @@ class MultiOutput(ExternKernel):
         symbols_to_define = self.get_unbacked_symbol_defs()
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
-                V.graph.wrapper_code.writeline(f"{s} = {self.get_name()}.size({i})")
+                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
                 symbols_to_define.remove(s)
         assert (
             not symbols_to_define
         ), f"unbacked symint {s} not written out, check comment above"
-        self.codegen_size_asserts(V.graph.wrapper_code)
+        self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
