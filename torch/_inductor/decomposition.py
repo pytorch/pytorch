@@ -71,6 +71,7 @@ decomps_to_exclude = [
     aten.clamp_min,
     aten.glu,  # has lowering in inductor
     aten.lift_fresh,  # inductor lowers this (to no-op)
+    aten.unbind,  # inductor lowers this directly
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
