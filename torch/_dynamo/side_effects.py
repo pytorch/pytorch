@@ -126,6 +126,16 @@ class SideEffects:
         )
 
     def apply(self, fn, cache=None, skip_fn=lambda _: False):
+        # if export:
+            # This is hacky
+            # if there's an attribute mutation, what does it look like when we export it?
+            # should we do ep.attr? No
+            # should the mutations be ignored (after tracing the value doesn't change, only when tracing we get the changed attrs)?
+            # change to unspecialized? self.type/config will become inputs? no.
+                # with nn.module, we skip a lot of guards bc we know what they look like
+                # with unspecialized, treat as user-defined
+            # what does tgraph look like? end result of original module?
+            # return
         if cache is None:
             cache = dict()
 

@@ -4082,36 +4082,40 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_constant_mutation(self):
         class M(torch.nn.Module):
-            def __init__(self, config: str):
+            def __init__(self, num_labels: int):
                 super().__init__()
-                self.config = config
-                self.type = None
+                self.config = None
+                self.num_labels = num_labels
 
             def forward(self, x):
-                if self.type is None:
-                    if self.config == "add":
-                        self.type = self.config
+                if self.config is None:
+                    if self.num_labels == 1:
+                        self.config = "add"
                     else:
-                        self.type = "other"
+                        self.config = "mul"
 
                 if self.config == "add":
                     return x + x
+                else:
+                    return x * x
 
-                assert self.type == "other"
-                return x * x
-
-        gm = torch._dynamo.export(M("add"), aten_graph=True)(
+        m = M(1)
+        gm = torch._dynamo.export(m, aten_graph=True)(
             torch.zeros(1),
         ).graph_module
+        print(gm)
         op_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
+        self.assertTrue(m.type is None)
         self.assertEqual(len(op_nodes), 1)
         self.assertEqual(op_nodes[0].target, torch.ops.aten.add.Tensor)
 
-        gm = torch._dynamo.export(M("mul"), aten_graph=True)(
+        m = M(2)
+        gm = torch._dynamo.export(m, aten_graph=True)(
             torch.zeros(1),
         ).graph_module
         op_nodes = [node for node in gm.graph.nodes if node.op == "call_function"]
         self.assertEqual(len(op_nodes), 1)
+        self.assertTrue(m.type is None)
         self.assertEqual(op_nodes[0].target, torch.ops.aten.mul.Tensor)
 
 

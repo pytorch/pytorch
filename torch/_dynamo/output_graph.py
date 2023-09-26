@@ -868,6 +868,7 @@ class OutputGraph(Checkpointable[OutputGraphState]):
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
         else:
+            breakpoint()
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.side_effects.codegen_hooks(pass1)

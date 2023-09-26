@@ -241,14 +241,6 @@ class NNModuleVariable(VariableTracker):
 
         return variables.GetAttrVariable(self, name, **options)
 
-    def var_setattr(self, tx, name, val):
-        assert name.is_python_constant() and val.is_python_constant()
-
-        options = VariableTracker.propagate(self)
-        mod = tx.output.get_submodule(self.module_key)
-        setattr(mod, name.as_python_constant(), val.as_python_constant())
-        return val
-
     def call_function(
         self,
         tx,
@@ -642,6 +634,27 @@ class NNModuleVariable(VariableTracker):
             )
         ):
             return generic_call_method_helper(name)
+
+        elif name == "__setattr__":
+            # Only allow setattr on constant attributes
+            assert len(args) == 2
+            assert isinstance(args[1], variables.ConstantVariable)
+
+            fn = getattr(module, name).__func__
+
+            # This is a hack because current torch.nn.Module.__setattr__ is not
+            # traceable due to the self.__dict__ line not being traceable.
+            if fn is torch.nn.Module.__setattr__:
+                breakpoint()
+                setattr(module, args[0].as_python_constant(), args[1].as_python_constant())
+                return args[1]
+
+            source = None if self.source is None else AttrSource(self.source, name)
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, source=source, **options),
+                [self] + list(args),
+                kwargs,
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
 

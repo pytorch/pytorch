@@ -2302,7 +2302,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__") and not (
             args is not None
             and len(args) > 0
-            and isinstance(args[0], variables.CustomizedDictVariable)
+            and isinstance(args[0], (variables.CustomizedDictVariable, variables.NNModuleVariable))
         ):
             unimplemented(f"inline {code.co_name}")
 
