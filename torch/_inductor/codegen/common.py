@@ -818,7 +818,7 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
-        self.cse = CSE(self.newvar_prefix, self.suffix)
+        self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
         # set in set_current_node

@@ -1,5 +1,7 @@
 #include <c10/core/ConstantSymNodeImpl.h>
+#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
+#include <iostream>
 
 namespace c10 {
 

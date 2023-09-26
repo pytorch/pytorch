@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <memory>
+#include <regex>
 #include <stack>
 #include <string>
 #include <utility>
