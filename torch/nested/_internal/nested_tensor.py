@@ -95,6 +95,7 @@ class NestedTensor(torch.Tensor):
 
         raise NotImplementedError(f"{str(func)}")
 
+
 # Not actually a view!
 class ViewBufferFromNested(torch.autograd.Function):
     @staticmethod

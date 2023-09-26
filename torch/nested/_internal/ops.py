@@ -9,12 +9,15 @@ __all__: List[Any] = []
 
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
+
 def _wrap_jagged_dim(ndim, dim, op_name):
-    import torch._prims_common
     from torch._prims_common import canonicalize_dims
+
     wrapped = canonicalize_dims(ndim, dim)
     if wrapped < 2:
-        raise RuntimeError(f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1")
+        raise RuntimeError(
+            f"{op_name}(): not supported for NestedTensor on dim=0 or dim=1"
+        )
     return wrapped - 1
 
 
@@ -111,8 +114,10 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
     return None
 
+
 def jagged_unary_pointwise(func, *args, **kwargs):
     return NestedTensor(func(args[0]._values, *args[1:], **kwargs), args[0]._offsets)
+
 
 def jagged_binary_pointwise(func, *args, **kwargs):
     a, b = args[0], args[1]
@@ -133,12 +138,16 @@ def jagged_binary_pointwise(func, *args, **kwargs):
             return NestedTensor(new_values, a._offsets)
     return NestedTensor(func(a._values, b, **kwargs), a._offsets)
 
-@register_jagged_func([
-    torch.ops.aten.is_non_overlapping_and_dense.default,
-    torch.ops.aten.sym_size.default,
-    torch.ops.aten.dim.default,
-    torch.ops.aten.sym_numel.default,
-], "self: jt")
+
+@register_jagged_func(
+    [
+        torch.ops.aten.is_non_overlapping_and_dense.default,
+        torch.ops.aten.sym_size.default,
+        torch.ops.aten.dim.default,
+        torch.ops.aten.sym_numel.default,
+    ],
+    "self: jt",
+)
 def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.is_non_overlapping_and_dense.default:
         return False
@@ -152,33 +161,42 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.sym_numel.default:
         return args[0]._values.numel()
 
-@register_jagged_func([
-    torch.ops.aten.size.default,
-    torch.ops.aten.sym_stride.default,
-    torch.ops.aten.is_contiguous.default,
-    torch.ops.aten.is_contiguous.memory_format,
-    torch.ops.aten.sym_storage_offset.default,
-], "self: jt, memory_format: any?")
+
+@register_jagged_func(
+    [
+        torch.ops.aten.size.default,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.is_contiguous.default,
+        torch.ops.aten.is_contiguous.memory_format,
+        torch.ops.aten.sym_storage_offset.default,
+    ],
+    "self: jt, memory_format: any?",
+)
 def tensor_attr_unsupported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.size.default:
         raise RuntimeError(
             "NestedTensors does not support directly calling torch.ops.aten.size "
-            "please use `nested_tensor.size()` instead.")
+            "please use `nested_tensor.size()` instead."
+        )
 
     raise RuntimeError(
         "NestedTensors do not support directly querying strides, "
-        "storage_offset, or contiguity.")
+        "storage_offset, or contiguity."
+    )
 
-@register_jagged_func(torch.ops.aten.linear.default,
-                      "input: jt, weight: t, bias: t?")
+
+@register_jagged_func(torch.ops.aten.linear.default, "input: jt, weight: t, bias: t?")
 def linear_default(func, *args, **kwargs):
     new_values = torch.mm(args[0]._values, args[1])
     if len(args) == 3:
         new_values += args[2]
     return NestedTensor(new_values, args[0]._offsets)
 
-@register_jagged_func(torch.ops.aten.linear_backward.default,
-                      "self: jt, grad_output: jt, weight: t, output_mask: any")
+
+@register_jagged_func(
+    torch.ops.aten.linear_backward.default,
+    "self: jt, grad_output: jt, weight: t, output_mask: any",
+)
 def linear_backward_default(func, *args, **kwargs):
     check_ragged_dim_same(func, args[0], "self", args[1], "grad_output")
     ds = NestedTensor(torch.mm(args[1]._values, args[2].T), args[1]._offsets)
@@ -186,20 +204,29 @@ def linear_backward_default(func, *args, **kwargs):
     db = None  # NYI: gradient for bias, need to reduce over ragged dim
     return (ds, dw, db)
 
+
 @register_jagged_func(torch.ops.aten._to_copy.default, "self: jt")
 def to_copy_default(func, *args, **kwargs):
-    return NestedTensor(args[0]._values.to(
-        device=kwargs['device'],
-        dtype=kwargs['dtype'],
-        non_blocking=kwargs['non_blocking'],
-        copy=True
-    ), args[0]._offsets)
+    return NestedTensor(
+        args[0]._values.to(
+            device=kwargs["device"],
+            dtype=kwargs["dtype"],
+            non_blocking=kwargs["non_blocking"],
+            copy=True,
+        ),
+        args[0]._offsets,
+    )
 
-register_jagged_func([
-    torch.ops.aten.ones_like.default,
-    torch.ops.aten.zeros_like.default,
-    torch.ops.aten.randn_like.default,
-], "self: jt")(jagged_unary_pointwise)
+
+register_jagged_func(
+    [
+        torch.ops.aten.ones_like.default,
+        torch.ops.aten.zeros_like.default,
+        torch.ops.aten.randn_like.default,
+    ],
+    "self: jt",
+)(jagged_unary_pointwise)
+
 
 @register_jagged_func(torch.ops.aten.prod.dim_int, "self: jt, dim: any, keepdim: any?")
 def prod_dim_int(func, *args, **kwargs):
@@ -210,14 +237,15 @@ def prod_dim_int(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     # TODO: Figure out how to handle this better
     # keep_dim is required to keep it in jagged format
-    if not new_kwargs['keepdim']:
+    if not new_kwargs["keepdim"]:
         raise RuntimeError("prod(): keepdim=True must be set for NestedTensor")
-    dim = new_kwargs['dim']
-    new_kwargs['dim'] = _wrap_jagged_dim(len(inp.shape), dim, "prod")
-    if new_kwargs['dim'] == 0:
+    dim = new_kwargs["dim"]
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape), dim, "prod")
+    if new_kwargs["dim"] == 0:
         raise RuntimeError("prod(): not supported for NestedTensor on dim=0")
 
     return NestedTensor(func(inp._values, **new_kwargs), args[0]._offsets)
+
 
 @register_jagged_func(torch.ops.aten.unbind.int, "self: jt, dim: any?")
 def unbind_int(func, *args, **kwargs):
@@ -225,7 +253,7 @@ def unbind_int(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dim = new_kwargs['dim']
+    dim = new_kwargs["dim"]
     if dim != 0:
         raise RuntimeError("unbind(): only supported for NestedTensor on dim=0")
 
@@ -236,10 +264,11 @@ def unbind_int(func, *args, **kwargs):
     views = []
     start = 0
     for length in offsets.diff().cpu().tolist():
-        views.append(inp._values[start:start+length, ...])
+        views.append(inp._values[start : start + length, ...])
         start += length
 
     return tuple(views)
+
 
 @register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
 def unsqueeze_default(func, *args, **kwargs):
@@ -252,9 +281,10 @@ def unsqueeze_default(func, *args, **kwargs):
     offsets = inp.offsets
 
     # Account for collapsed jagged dim
-    dim = new_kwargs['dim']
-    new_kwargs['dim'] = _wrap_jagged_dim(len(inp.shape) + 1, dim, "unsqueeze")
+    dim = new_kwargs["dim"]
+    new_kwargs["dim"] = _wrap_jagged_dim(len(inp.shape) + 1, dim, "unsqueeze")
     return NestedTensor(func(values, **new_kwargs), inp._offsets)
+
 
 @register_jagged_func(torch.ops.aten.cat.default, "tensors: any, dim: any")
 def cat_default(func, *args, **kwargs):
@@ -271,11 +301,13 @@ def cat_default(func, *args, **kwargs):
     tensors = [t if t.is_nested else t.expand_as(first) for t in tensors]
 
     # Account for collapsed jagged dim
-    dim = new_kwargs['dim']
-    new_kwargs['dim'] = _wrap_jagged_dim(len(first.shape), dim, "cat")
+    dim = new_kwargs["dim"]
+    new_kwargs["dim"] = _wrap_jagged_dim(len(first.shape), dim, "cat")
 
-    return NestedTensor(func([t._values for t in tensors], **new_kwargs),
-                        tensors[0]._offsets)
+    return NestedTensor(
+        func([t._values for t in tensors], **new_kwargs), tensors[0]._offsets
+    )
+
 
 @register_jagged_func(torch.ops.aten.matmul.default, "self: jt, other: any")
 def matmul_default(func, *args, **kwargs):
@@ -286,24 +318,30 @@ def matmul_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
     if (not inp.is_nested) or other.is_nested:
-        raise RuntimeError("matmul(): only supported input pattern is (nested, non-nested)")
+        raise RuntimeError(
+            "matmul(): only supported input pattern is (nested, non-nested)"
+        )
     return NestedTensor(func(inp._values, other, **new_kwargs), inp._offsets)
 
-@register_jagged_func(torch.ops.aten.expand.default, "self: jt, size: any, implicit: any?")
+
+@register_jagged_func(
+    torch.ops.aten.expand.default, "self: jt, size: any, implicit: any?"
+)
 def expand_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
     inp = new_kwargs.pop("input")
-    size = new_kwargs['size']
+    size = new_kwargs["size"]
 
-    assert (not "implicit" in new_kwargs) or (not new_kwargs.pop("implicit"))
+    assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
     if list(size[:2]) != list(inp.shape[:2]):
         raise RuntimeError("expand(): cannot expand if ragged dims don't match")
 
     expand_arg = [-1, *size[2:]]
     return NestedTensor(func(inp._values, expand_arg), inp._offsets)
+
 
 @register_jagged_func(torch.ops.aten.expand_as.default, "self: t, other: jt")
 def expand_as_default(func, *args, **kwargs):
@@ -316,6 +354,7 @@ def expand_as_default(func, *args, **kwargs):
 
     return NestedTensor(func(inp, other._values), other._offsets)
 
+
 @register_jagged_func(torch.ops.aten.where.self, "condition: jt, self: jt, other: jt")
 def where_self(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -326,10 +365,13 @@ def where_self(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     other = new_kwargs.pop("other")
 
-    assert (condition.shape == other.shape == inp.shape)
+    assert condition.shape == other.shape == inp.shape
 
-    return NestedTensor(func(condition._values, inp._values, other._values, **new_kwargs),
-                        condition._offsets)
+    return NestedTensor(
+        func(condition._values, inp._values, other._values, **new_kwargs),
+        condition._offsets,
+    )
+
 
 @register_jagged_func(torch.ops.aten.pin_memory.default, "self: jt, device: any?")
 def pin_memory_default(func, *args, **kwargs):
@@ -340,6 +382,7 @@ def pin_memory_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
 
     return NestedTensor(func(inp._values, **new_kwargs), inp._offsets)
+
 
 @register_jagged_func(torch.ops.aten.is_pinned.default, "self: jt, device: any?")
 def is_pinned_default(func, *args, **kwargs):
