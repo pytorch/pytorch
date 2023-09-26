@@ -133,7 +133,9 @@
 #include <string>
 #include <tuple>
 #include <utility>
+#if !defined(__s390x__)
 #include <cpuinfo.h>
+#endif
 
 namespace at {
 
@@ -1329,9 +1331,11 @@ static inline int64_t get_mkldnn_matmul_min_dim() {
     const int64_t default_min_dim = [&] {
       // Minimum dimension requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
+#if !defined(__s390x__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8;
       }
+#endif
       return 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_DIM");
@@ -1346,9 +1350,11 @@ static inline int64_t get_mkldnn_matmul_min_size() {
     const int64_t default_min_size = [&] {
       // Minimum size requirement for MKLDNN; derived based on experiments.
       // By default, it's only enabled on Neoverse V1.
+#if !defined(__s390x__)
       if (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 && cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1) {
         return 8 * 1024;
       }
+#endif
       return 0;
     }();
     const char* ptr = std::getenv("TORCH_MKLDNN_MATMUL_MIN_SIZE");
