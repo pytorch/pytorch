@@ -2467,14 +2467,25 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
+        def dynamo_wrapper(backend, function):
+            @functools.wraps(function)
+            def inner(*args, **kwargs):
+                # It's important to reset the Dynamo state so that previous
+                # invocations do not affect future ones.
+                torch._dynamo.reset()
+                try:
+                    return torch._dynamo.optimize(backend)(function)(*args, **kwargs)
+                finally:
+                    torch._dynamo.reset()
+            return inner
+
         super_run = super().run
         if TEST_WITH_TORCHINDUCTOR:
-            super_run = torch._dynamo.optimize("inductor")(super_run)
+            super_run = dynamo_wrapper("inductor", super_run)
         elif TEST_WITH_AOT_EAGER:
-            super_run = torch._dynamo.optimize("aot_eager")(super_run)
+            super_run = dynamo_wrapper("aot_eager", super_run)
         elif TEST_WITH_TORCHDYNAMO:
-            # TorchDynamo optimize annotation
-            super_run = torch._dynamo.optimize("eager")(super_run)
+            super_run = dynamo_wrapper("eager", super_run)
 
         super_run(result=result)
 
