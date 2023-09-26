@@ -30,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._triton import has_triton
 from torch.utils.weak import TensorWeakRef, WeakIdRef
 
 from .. import config, mutation_guard, replay_record, skipfiles
@@ -143,13 +142,6 @@ from .user_defined import (
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
 )
-
-if has_triton():
-    from triton.runtime.jit import JITFunction
-else:
-
-    class JITFunction:
-        pass
 
 
 log = logging.getLogger(__name__)
@@ -378,6 +370,14 @@ class VariableBuilder:
         return result
 
     def _wrap(self, value):
+        # import here to avoid circular dependencies
+        if torch.utils._triton.has_triton():
+            from triton.runtime.jit import JITFunction
+        else:
+
+            class JITFunction:
+                pass
+
         make_guards = self.make_guards
 
         # Handle exact type() match
