@@ -995,6 +995,7 @@ def _make_elementwise_binary_reference(
     supports_lhs_python_scalar=True,
     supports_rhs_python_scalar=True,
     supports_two_python_scalars=False,
+    should_register_decomposition=True,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op, name
@@ -1035,7 +1036,7 @@ def _make_elementwise_binary_reference(
         _ref.__name__ = name
         if aten_op is infer_aten_op:
             aten_op = utils.get_aten_op(prim, name)
-        if aten_op is not None:
+        if aten_op is not None and should_register_decomposition:
             register_decomposition(aten_op)(_ref)
 
         return _ref
@@ -1268,6 +1269,7 @@ def float_power(
 @_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_two_python_scalars=True,
+    should_register_decomposition=False,
 )
 def floor_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
