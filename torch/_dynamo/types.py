@@ -21,6 +21,14 @@ if sys.version_info >= (3, 11):
 else:
     DynamoFrameType = types.FrameType
 
+import torch
+
+# This class has a `check_fn` field for the guard,
+#  and a `code` field for the code object.
+CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
+
+# We use a dict to store additional data per frame.
+FrameState = dict
 
 class GuardFail(NamedTuple):
     # A string repr of the piece of failed guard code we eval-ed
@@ -38,7 +46,7 @@ class GuardFn(Protocol):
     guard_fail_fn: Optional[Callable[[GuardFail], None]]
 
     # maps locals of user function to bool
-    def __call__(self, *maybe_dotzero: object, **f_locals: object) -> bool:
+    def __call__(self, f_locals: dict) -> bool:
         ...
 
 
@@ -52,7 +60,8 @@ class DynamoCallbackFn(Protocol):
     def __call__(
         self,
         frame: DynamoFrameType,
-        cache_size: int,
+        cache_entry: Optional[CacheEntry],
+        frame_state: FrameState
     ) -> Optional[GuardedCode]:
         ...
 
