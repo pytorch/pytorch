@@ -1755,6 +1755,32 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         with self.assertRaises(NotImplementedError):
             m.train()
 
+    def test_reentrant(self):
+        """Test we can safely call quantization apis multiple times"""
+        m = TestHelperModules.ConvBnReLU2dAndLinearReLU()
+        example_inputs = (torch.randn(3, 3, 10, 10),)
+
+        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=True))
+        m.conv_bn_relu = capture_pre_autograd_graph(m.conv_bn_relu, example_inputs)
+        print("after capture:", m)
+        m.conv_bn_relu = prepare_qat_pt2e(m.conv_bn_relu, quantizer)
+        print("after prepare qat:", m.conv_bn_relu)
+        m.conv_bn_relu = convert_pt2e(m.conv_bn_relu)
+
+        quantizer = XNNPACKQuantizer().set_global(get_symmetric_quantization_config(is_per_channel=False))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        m = convert_pt2e(m, fold_quantize=True)
+
+        print("m:", m)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+        }
+        node_list = [
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
+        )
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EOps(QuantizationTestCase):
