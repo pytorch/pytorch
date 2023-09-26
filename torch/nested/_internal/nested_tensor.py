@@ -65,7 +65,6 @@ class NestedTensor(torch.Tensor):
         B = offsets.shape[0] - 1
         self._size = (B, ragged_dim, *Ds)
         self._offsets = offsets
-        return
 
     def values(self):
         return self._values
@@ -81,6 +80,16 @@ class NestedTensor(torch.Tensor):
         if self.grad_fn:
             grad_fn_str = f", grad_fn={self.grad_fn}"
         return f"NestedTensor(size={self._size}, offsets={self._offsets}{grad_fn_str})"
+
+    def __reduce_ex__(self, proto):
+        state = torch._utils._get_obj_state(self)
+        # SymNodes are not serializable
+        if "_size" in state:
+            state = dict(state)
+            del state["_size"]
+        func = NestedTensor
+        args = (self._values, self._offsets)
+        return (torch._tensor._rebuild_from_type_v2, (func, type(self), args, state))
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
