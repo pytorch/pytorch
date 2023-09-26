@@ -9,7 +9,6 @@
 #include <utility>
 
 #include <ATen/Operators.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>

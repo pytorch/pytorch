@@ -163,8 +163,6 @@ def get_c2_fbobjc_xplat_compiler_flags():
 
 def get_c2_fbandroid_xplat_compiler_flags():
     flags = [
-        # T95767731 -- remove this once all builds are on at least llvm-13
-        "-Wno-unknown-warning-option",
         "-Wno-unused-but-set-variable",
         "-DHAVE_MMAP",
     ]

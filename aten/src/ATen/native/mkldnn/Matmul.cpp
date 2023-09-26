@@ -73,15 +73,11 @@ namespace at {
 namespace native {
 
 static bool use_mkldnn_bf16_matmul() {
-  return (
-      at::globalContext().userEnabledMkldnn() &&
-      mkldnn_bf16_device_check());
+  return at::globalContext().userEnabledMkldnn() && mkldnn_bf16_device_check();
 }
 
 static bool use_mkldnn_fp16_matmul() {
-  return (
-      at::globalContext().userEnabledMkldnn() &&
-      mkldnn_fp16_device_check());
+  return at::globalContext().userEnabledMkldnn() && mkldnn_fp16_device_check();
 }
 
 
@@ -207,15 +203,21 @@ void mkldnn_matmul(
                 "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
   }
 #else
-  TORCH_CHECK((mat1.scalar_type() == at::kBFloat16 || mat1.scalar_type() == at::kHalf) &&
-                 mat2.scalar_type() == mat1.scalar_type() &&
-                 result.scalar_type() == mat1.scalar_type(), "mkldnn_matmul:  only enabled for bf16 and fp16 path");
+  TORCH_CHECK(
+      (mat1.scalar_type() == at::kBFloat16 ||
+       mat1.scalar_type() == at::kHalf) &&
+          mat2.scalar_type() == mat1.scalar_type() &&
+          result.scalar_type() == mat1.scalar_type(),
+      "mkldnn_matmul:  only enabled for bf16 and fp16 path");
   if (mat1.scalar_type() == at::kBFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq, or AWS Graviton3");
+    TORCH_CHECK(
+        mkldnn_bf16_device_check(),
+        "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq, or AWS Graviton3");
   } else {
-    TORCH_CHECK(mkldnn_fp16_device_check(),
-    "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
+    TORCH_DEBUG_ASSERT(mat1.scalar_type() == at::kHalf);
+    TORCH_CHECK(
+        mkldnn_fp16_device_check(),
+        "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
   }
 #endif
 
