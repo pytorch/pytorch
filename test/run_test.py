@@ -631,8 +631,7 @@ def run_test(
         # comes up in the future.
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    print_log_file(test_module, log_path, failed=(ret_code != 0))
-    os.remove(log_path)
+    handle_log_file(test_module, log_path, failed=(ret_code != 0))
     return ret_code
 
 
@@ -925,7 +924,7 @@ def sanitize_file_name(file: str):
     return file.replace("\\", ".").replace("/", ".").replace(" ", "_")
 
 
-def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
+def handle_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
     verbose = "VERBOSE_LOGS=1" in os.environ.get("PR_BODY", "")
     test = str(test)
     if not failed and not verbose:
@@ -950,7 +949,7 @@ def print_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
         print_to_stderr(f.read().decode("utf-8", errors="ignore"))
         print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         print_to_stderr("")
-        os.remove(file_path)
+    os.remove(file_path)
 
 
 def get_pytest_args(
