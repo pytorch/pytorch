@@ -20,7 +20,7 @@ def get_tensor_id(tensor):
 class NestedTensor(torch.Tensor):
     _values: torch.Tensor  # type: ignore[assignment]
     _offsets: torch.Tensor
-    _size: Tuple[int, int, int]
+    _size: Tuple[int, ...]
 
     __torch_function__ = torch._C._disabled_torch_function_impl
 
