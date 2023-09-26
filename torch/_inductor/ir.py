@@ -3383,6 +3383,7 @@ class ExternKernel(InputsKernel):
                 r = set()
                 for t in s:
                     r |= maybe_free_unbacked_symbols(t)
+                return r
             else:
                 return set()
 
