@@ -434,13 +434,13 @@ TEST(ModuleAPITest, OfiFreezesNoForward) {
       return self.foo + x + b
   )");
   m.eval();
-  
+
   // OFI is called without the presence of forward methods
-  auto frozen_mod = torch::jit::optimize_for_inference(m, std::vector<std::string>{"bar"});
+  auto frozen_mod =
+      torch::jit::optimize_for_inference(m, std::vector<std::string>{"bar"});
   ASSERT_EQ(
-    m.run_method("bar", torch::ones({})).toTensor().item<float>(),
-    frozen_mod.run_method("bar", torch::ones({})).toTensor().item<float>()
-  );
+      m.run_method("bar", torch::ones({})).toTensor().item<float>(),
+      frozen_mod.run_method("bar", torch::ones({})).toTensor().item<float>());
 }
 
 TEST(ModuleAPITest, To_CUDA) {
