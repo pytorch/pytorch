@@ -8,9 +8,11 @@
 #endif
 
 #include <c10/core/CPUAllocator.h>
-
-#ifdef _WIN32
 #include <c10/util/Unicode.h>
+
+/* stuff for mapped files */
+#ifdef _WIN32
+#include <c10/util/win32-headers.h>
 #endif
 
 #if defined(HAVE_MMAP)
