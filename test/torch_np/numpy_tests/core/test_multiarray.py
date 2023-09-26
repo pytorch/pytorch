@@ -6822,7 +6822,11 @@ class TestArange(TestCase):
     def test_error_paths_and_promotion(self, which):
         args = [0, 1, 2]  # start, stop, and step
         args[which] = np.float64(2.0)  # should ensure float64 output
+        assert np.arange(*args).dtype == np.float64
 
+        # repeat with non-empty ranges
+        args = [0, 8, 2]
+        args[which] = np.float64(2.0)
         assert np.arange(*args).dtype == np.float64
 
         # Cover stranger error path, test only to achieve code coverage!
@@ -6831,12 +6835,13 @@ class TestArange(TestCase):
             # Fails discovering start dtype
             np.arange(*args)
 
-    @parametrize("dt", [np.float32, np.uint8])
+    @parametrize("dt", [np.float32, np.uint8, complex])
     def test_explicit_dtype(self, dt):
         assert np.arange(5.0, dtype=dt).dtype == dt
 
-    def test_arange_np_scalars(self):
-        r = np.arange(np.int32(5))
+    @parametrize("dt", [np.int32, np.complex64])
+    def test_arange_np_scalars(self, dt):
+        r = np.arange(dt(5))
         assert_equal(r, [0, 1, 2, 3, 4])
 
 
