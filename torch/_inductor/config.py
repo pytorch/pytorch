@@ -64,6 +64,9 @@ post_grad_custom_post_pass = None
 # Optimize away split cat patterns (Experimental)
 split_cat_fx_passes = True
 
+# Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
+efficient_conv_bn_eval_fx_passes = False
+
 # enable pattern match with group fusion (using fbgemm)
 group_fusion = False
 
@@ -198,6 +201,11 @@ debug_index_asserts = False
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
+
+# The multiprocessing start method to use for inductor workers in the codecache.
+# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
+# the default to spawn.
+worker_start_method = "fork"
 
 
 def decide_compile_threads():
@@ -517,6 +525,9 @@ class trace:
 
     # SVG figure showing post-fusion graph
     graph_diagram = os.environ.get("INDUCTOR_POST_FUSION_SVG", "0") == "1"
+
+    # SVG figure showing fx with fusion
+    draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
