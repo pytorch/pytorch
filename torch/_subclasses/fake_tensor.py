@@ -1528,10 +1528,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
-        maybe_abstract_impl = torch._custom_op.impl.get_abstract_impl(func.name())
+        maybe_abstract_impl = torch._library.simple_registry.singleton.find(
+            func.name()
+        ).abstract_impl.kernel
         if maybe_abstract_impl:
-            ctx = torch._custom_op.impl.AbstractImplCtx(self.shape_env, func)
-            with torch._custom_op.impl.set_ctx_getter(lambda: ctx), self:
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
                 result = maybe_abstract_impl(*args, **kwargs)
                 return result
 
@@ -1858,7 +1860,7 @@ class FakeCopyMode(TorchFunctionMode):
         kwargs = kwargs if kwargs else {}
 
         # clone will get called in Parameter deepcopy
-        if func == torch._C._TensorBase.clone:
+        if func == torch._C.TensorBase.clone:
             return func(
                 self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
             )
