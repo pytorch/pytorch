@@ -296,6 +296,7 @@ class TestGradTransform(TestCase):
 
         self.assertEqual(result, expected)
 
+    @skipIfTorchDynamo()
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1., 2., 3.], device=device)
         captured = torch.randn(3, device=device)
