@@ -14,6 +14,7 @@
 #include <c10/util/irange.h>
 
 #include <functional>
+#include <sstream>
 #include <tuple>
 #include <utility>
 
