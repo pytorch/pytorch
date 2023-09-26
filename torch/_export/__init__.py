@@ -259,6 +259,9 @@ def capture_pre_autograd_graph(
             **kwargs,
         )[0]
 
+        for n in m.graph.nodes:
+            n.meta["is_torch_exported"] = True
+
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
 
@@ -301,6 +304,13 @@ def _convert_input_to_fake(gm, args, kwargs):
     # TODO properly use the cached fake tensor
     fake_kwargs = pytree.tree_map_only(torch.Tensor, fake_mode.from_tensor, kwargs)
     return fake_args, fake_kwargs, fake_mode
+
+
+def _safe_to_skip_dynamo(gm: torch.fx.GraphModule):
+    for node in gm.graph.nodes:
+        if "is_torch_exported" in node.meta:
+            return True
+    return False
 
 
 def _replace_param_buffer_names(param_buffer_table, sig):
@@ -398,21 +408,35 @@ def export(
     # We convert to nn.Module because __call__ of ExportedProgram
     # is untracable right now.
     if isinstance(f, ExportedProgram):
+        if len(constraints) > 0:
+            raise UserError(
+                UserErrorType.INVALID_INPUT,
+                "Cannot provide constraints for already exported program."
+            )
         f = f.module()
 
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):  # type: ignore[attr-defined]
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    constraints=constraints,
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                )(
-                    *args,
-                    **kwargs,
-                )
+            # TODO Horrible hack to skip dynamo
+            if isinstance(f, torch.fx.GraphModule) and _safe_to_skip_dynamo(f):
+                if len(constraints) > 0:
+                    raise UserError(
+                        UserErrorType.INVALID_INPUT,
+                        "Cannot provide constraints for already exported program."
+                    )
+                gm_torch_level = f
+            else:
+                with _wrap_submodules(f, preserve_module_call_signature, module_call_specs):
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        constraints=constraints,
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                    )(
+                        *args,
+                        **kwargs,
+                    )
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAIN_VIOLATION, str(e))
         except GuardOnDataDependentSymNode as e:
@@ -473,7 +497,6 @@ def export(
 
     # Fix the graph output signature to be tuple if scalar
     out_spec = orig_out_spec = gm_torch_level._out_spec
-    assert isinstance(out_spec, pytree.TreeSpec)
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
@@ -584,6 +607,8 @@ def export(
                 if buffer_name in params_buffers_to_node_meta:
                     for k, v in params_buffers_to_node_meta[buffer_name].items():
                         node.meta[k] = v
+
+        node.meta["is_torch_exported"] = True
 
     range_constraints, equality_constraints = _process_constraints(
         gm,
