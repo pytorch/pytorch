@@ -71,6 +71,7 @@ verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards"
 TensorGuards = torch._C._dynamo.guards.TensorGuards
 check_obj_id = torch._C._dynamo.guards.check_obj_id
 check_type_id = torch._C._dynamo.guards.check_type_id
+dict_version = torch._C._dynamo.guards.dict_version
 
 
 # For user stack printing
@@ -105,6 +106,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___odict_getitem", collections.OrderedDict.__getitem__),
         ("___dict_param_key_ids", dict_param_key_ids),
         ("___dict_const_keys", dict_const_keys),
+        ("___dict_version", dict_version),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
         ("__math_isnan", math.isnan),
@@ -180,7 +182,7 @@ class GuardCodeList:
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
-        id_ref: Callable[[Type[object]], str],
+        id_ref: Callable[[Any], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[Type[object]], ReferenceType[object]],
         user_scope: Optional[Dict[str, object]],
@@ -274,6 +276,13 @@ class GuardBuilder(GuardBuilderBase):
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        self._produce_guard_code(guard, [code])
+
+    def DICT_VERSION(self, guard: Guard):
+        # ___check_dict_version is same as `dict_version(x) == y`
+        ref = self.arg_ref(guard)
+        version = dict_version(self.get(guard.name))
+        code = f"___dict_version({ref}) == {version}"
         self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
@@ -477,6 +486,20 @@ class GuardBuilder(GuardBuilderBase):
         """things like torch.add and user defined functions"""
         if guard.is_local():
             return self.ID_MATCH(guard)
+
+    def CLOSURE_MATCH(self, guard: Guard):
+        """matches a closure by __code__ id."""
+        if guard.is_local():
+            val = self.get(guard.name)
+            # Strictly only want user-defined functions
+            if type(val) == types.FunctionType and hasattr(val, "__code__"):
+                ref = self.arg_ref(guard)
+                code = [
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
+                ]
+                self._produce_guard_code(guard, code)
+            else:
+                self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
@@ -1043,15 +1066,19 @@ class CheckFunctionManager:
             if not log_only:
                 code_parts.append(code)
 
-        # TODO: Maybe better not to repeatedly spam the same guard information
-        # for each individual piece?  Not sure.
+        seen = set()
         for gcl in local_builder.code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
+        seen = set()
         for gcl in global_builder.code:
             for code in gcl.code_list:
-                add_code_part(code, gcl.guard)
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
