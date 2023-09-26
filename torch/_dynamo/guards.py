@@ -497,8 +497,7 @@ class GuardBuilder(GuardBuilderBase):
             if type(val) == types.FunctionType and hasattr(val, "__code__"):
                 ref = self.arg_ref(guard)
                 code = [
-                    f"hasattr({ref}, '__code__')",
-                    f"___check_obj_id({ref}, {self.id_ref(val.__code__)})",
+                    f"___check_obj_id(getattr({ref}, '__code__', None), {self.id_ref(val.__code__)})",
                 ]
                 self._produce_guard_code(guard, code)
             else:
