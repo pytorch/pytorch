@@ -2,6 +2,7 @@
 import inspect
 from typing import Dict, Optional
 
+from torch._dynamo.bytecode_transformation import is_generator
 from torch._dynamo.eval_frame import set_eval_frame
 from torch._dynamo.test_case import TestCase
 
@@ -65,7 +66,7 @@ class MyCallback:
             print(f"number of caches in the last call: {cache_len}")
         frame_state["cache_len"] = cache_len
 
-        if self.skip:
+        if self.skip or is_generator(frame.f_code):
             return None
         return GuardedCode(code=frame.f_code, check_fn=Always(hit=self.hit))
 
