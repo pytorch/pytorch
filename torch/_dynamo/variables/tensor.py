@@ -343,7 +343,6 @@ class TensorVariable(VariableTracker):
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
-
         if name in ("stride", "size"):
             dim_var = None
             if len(args) == 1:
@@ -690,6 +689,8 @@ class TensorVariable(VariableTracker):
                 ), "Unreachable - See unimplemented for lambdas above"
             tx.output.side_effects.register_hook(self, fn_var, handle_variable)
             return handle_variable
+        elif name == "requires_grad_":
+            unimplemented("Tensor.requires_grad_")
 
         else:
             # Convert x.new(torch.Size) into x.new_empty(torch.Size),
