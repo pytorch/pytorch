@@ -23,6 +23,7 @@ from torch._dynamo.utils import same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -1447,6 +1448,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @requires_triton()
+    @skipIfRocm
     def test_triton_kernel_by_hand(self):
         import triton
         from triton import language as tl
