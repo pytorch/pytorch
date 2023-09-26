@@ -42,7 +42,6 @@ from torch.distributed.fsdp._init_utils import (
     _init_buffer_state,
     _init_core_state,
     _init_device_handle,
-    _init_extension,
     _init_ignored_module_states,
     _init_param_handle_from_module,
     _init_prefetching_state,
@@ -492,8 +491,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         _init_runtime_state(self)
         _init_prefetching_state(self, backward_prefetch, forward_prefetch)
         _init_buffer_state(self, module)
-        # extension needs to be set before `_init_param_handle_from_module()`
-        _init_extension(self, device_mesh)
         _init_param_handle_from_module(
             self,
             module,
