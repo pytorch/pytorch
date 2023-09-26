@@ -23,7 +23,6 @@ from torch._dynamo.utils import same
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -1452,7 +1451,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
     @requires_cuda()
     @requires_triton()
-    @skipIfRocm
     def test_triton_kernel_by_hand(self):
         @triton.jit
         def add_kernel(
@@ -1460,7 +1458,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             in_ptr1,
             out_ptr,
             n_elements,
-            BLOCK_SIZE: tl.constexpr,
+            BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
             block_start = pid * BLOCK_SIZE
