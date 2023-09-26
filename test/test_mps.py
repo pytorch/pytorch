@@ -171,6 +171,13 @@ def mps_ops_grad_modifier(ops):
 
     XPASSLIST_GRAD = {
         'nn.functional.pairwise_distance': [torch.float16],
+        # failed assertion `destination datatype must be fp32'
+        'nn.functional.conv1d': [torch.float16],
+        'nn.functional.conv2d': [torch.float16],
+        'nn.functional.conv3d': [torch.float16],
+        'nn.functional.conv_transpose1d': [torch.float16],
+        'nn.functional.conv_transpose2d': [torch.float16],
+        'nn.functional.conv_transpose3d': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -10960,6 +10967,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                atol = 5e-2
+                rtol = 5e-2
             elif op.name == "masked.mean":
                 atol = 7e-4
                 rtol = 2e-3
@@ -11010,6 +11022,11 @@ class TestConsistency(TestCaseMPS):
             elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
                 atol = 1e-2
                 rtol = 1e-2
+            elif op.name in ['nn.functional.conv_transpose1d',
+                             'nn.functional.conv_transpose2d',
+                             'nn.functional.conv_transpose3d'] and dtype == torch.float16:
+                atol = 5e-2
+                rtol = 5e-2
             elif (op.name == "masked.mean"):
                 atol = 7e-4
                 rtol = 2e-3

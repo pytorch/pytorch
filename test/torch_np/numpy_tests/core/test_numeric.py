@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import itertools
 import math
 import platform
@@ -24,25 +23,12 @@ from torch._numpy.testing import (
 IS_WASM = False
 HAS_REFCOUNT = True
 
-from unittest import expectedFailure as xfail, skipIf as skipif, SkipTest
-
 from hypothesis import given, strategies as st
 from hypothesis.extra import numpy as hynp
 from pytest import raises as assert_raises
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    subtest,
-    TEST_WITH_TORCHDYNAMO,
-    TestCase,
-)
-
-skip = functools.partial(skipif, True)
 
 
-@instantiate_parametrized_tests
-class TestResize(TestCase):
+class TestResize:
     def test_copies(self):
         A = np.array([[1, 2], [3, 4]])
         Ar1 = np.array([[1, 2, 3, 4], [1, 2, 3, 4]])
@@ -91,8 +77,7 @@ class TestResize(TestCase):
             np.resize(A, new_shape=new_shape)
 
 
-@instantiate_parametrized_tests
-class TestNonarrayArgs(TestCase):
+class TestNonarrayArgs:
     # check that non-array arguments to functions wrap them in arrays
     def test_choose(self):
         choices = [[0, 1, 2], [3, 4, 5], [5, 6, 7]]
@@ -108,7 +93,7 @@ class TestNonarrayArgs(TestCase):
         tgt = [2, 5, 2, 3, 7, 2, 2]
         assert_equal(out, tgt)
 
-    @xfail  # (reason="TODO implement compress(...)")
+    @pytest.mark.xfail(reason="TODO implement compress(...)")
     def test_compress(self):
         arr = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
         tgt = [[5, 6, 7, 8, 9]]
@@ -178,13 +163,13 @@ class TestNonarrayArgs(TestCase):
         s = np.float64(1.0)
         assert_equal(s.round(), 1.0)
 
-    @xfail  # (reason="scalar instances")
+    @pytest.mark.xfail(reason="scalar instances")
     def test_round_2(self):
         s = np.float64(1.0)
         assert_(isinstance(s.round(), np.float64))
 
-    @xfail  # (reason="scalar instances")
-    @parametrize(
+    @pytest.mark.xfail(reason="scalar instances")
+    @pytest.mark.parametrize(
         "dtype",
         [
             np.int8,
@@ -206,14 +191,13 @@ class TestNonarrayArgs(TestCase):
         assert_equal(round(s, None), 1)
         assert_equal(round(s, ndigits=None), 1)
 
-    @xfail  # (reason="scalar instances")
-    @parametrize(
+    @pytest.mark.xfail(reason="scalar instances")
+    @pytest.mark.parametrize(
         "val, ndigits",
         [
-            # pytest.param(
-            #    2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
-            # ),
-            subtest((2**31 - 1, -1), decorators=[xfail]),
+            pytest.param(
+                2**31 - 1, -1, marks=pytest.mark.xfail(reason="Out of range of int32")
+            ),
             (2**31 - 1, 1 - math.ceil(math.log10(2**31 - 1))),
             (2**31 - 1, -math.ceil(math.log10(2**31 - 1))),
         ],
@@ -221,7 +205,7 @@ class TestNonarrayArgs(TestCase):
     def test_dunder_round_edgecases(self, val, ndigits):
         assert_equal(round(val, ndigits), round(np.int32(val), ndigits))
 
-    @xfail  # (reason="scalar instances")
+    @pytest.mark.xfail(reason="scalar instances")
     def test_dunder_round_accuracy(self):
         f = np.float64(5.1 * 10**73)
         assert_(isinstance(round(f, -73), np.float64))
@@ -235,7 +219,8 @@ class TestNonarrayArgs(TestCase):
         assert_(isinstance(round(i, ndigits=-2), np.int64))
         assert_array_max_ulp(round(i, ndigits=-2), 500)
 
-    @xfail  # (raises=AssertionError, reason="gh-15896")
+    # @pytest.mark.xfail(raises=AssertionError, reason="gh-15896")
+    @pytest.mark.xfail
     def test_round_py_consistency(self):
         f = 5.1 * 10**73
         assert_equal(round(np.float64(f), -73), round(f, -73))
@@ -318,8 +303,8 @@ class TestNonarrayArgs(TestCase):
     #      assert_(w[0].category is RuntimeWarning)
 
 
-@xfail  # (reason="TODO")
-class TestIsscalar(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestIsscalar:
     def test_isscalar(self):
         assert_(np.isscalar(3.1))
         assert_(np.isscalar(np.int16(12345)))
@@ -337,7 +322,7 @@ class TestIsscalar(TestCase):
         assert_(np.isscalar(Number()))
 
 
-class TestBoolScalar(TestCase):
+class TestBoolScalar:
     def test_logical(self):
         f = np.False_
         t = np.True_
@@ -370,8 +355,8 @@ class TestBoolScalar(TestCase):
         assert_((f ^ f) is f)
 
 
-class TestBoolArray(TestCase):
-    def setUp(self):
+class TestBoolArray:
+    def setup_method(self):
         # offset for simd tests
         self.t = np.array([True] * 41, dtype=bool)[1::]
         self.f = np.array([False] * 41, dtype=bool)[1::]
@@ -457,8 +442,8 @@ class TestBoolArray(TestCase):
         assert_array_equal(self.im ^ False, self.im)
 
 
-class TestBoolCmp(TestCase):
-    def setUp(self):
+class TestBoolCmp:
+    def setup_method(self):
         self.f = np.ones(256, dtype=np.float32)
         self.ef = np.ones(self.f.size, dtype=bool)
         self.d = np.ones(128, dtype=np.float64)
@@ -557,8 +542,8 @@ class TestBoolCmp(TestCase):
             assert_array_equal(np.signbit(self.signd[i:]), self.ed[i:])
 
 
-@xfail  # (reason="TODO")
-class TestSeterr(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestSeterr:
     def test_default(self):
         err = np.geterr()
         assert_equal(
@@ -577,8 +562,8 @@ class TestSeterr(TestCase):
         np.seterr(**old)
         assert_(np.geterr() == old)
 
-    @skipif(IS_WASM, reason="no wasm fp exception support")
-    @skipif(platform.machine() == "armv5tel", reason="See gh-413.")
+    @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
+    @pytest.mark.skipif(platform.machine() == "armv5tel", reason="See gh-413.")
     def test_divide_err(self):
         with assert_raises(FloatingPointError):
             np.array([1.0]) / np.array([0.0])
@@ -586,7 +571,7 @@ class TestSeterr(TestCase):
         np.seterr(divide="ignore")
         np.array([1.0]) / np.array([0.0])
 
-    @skipif(IS_WASM, reason="no wasm fp exception support")
+    @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
     def test_errobj(self):
         olderrobj = np.geterrobj()
         self.called = 0
@@ -615,9 +600,8 @@ class TestSeterr(TestCase):
             del self.called
 
 
-@xfail  # (reason="TODO")
-@instantiate_parametrized_tests
-class TestFloatExceptions(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestFloatExceptions:
     def assert_raises_fpe(self, fpeerr, flop, x, y):
         ftype = type(x)
         try:
@@ -642,8 +626,8 @@ class TestFloatExceptions(TestCase):
         self.assert_raises_fpe(fpeerr, flop, sc1[()], sc2[()])
 
     # Test for all real and complex float types
-    @skipif(IS_WASM, reason="no wasm fp exception support")
-    @parametrize("typecode", np.typecodes["AllFloat"])
+    @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
+    @pytest.mark.parametrize("typecode", np.typecodes["AllFloat"])
     def test_floating_exceptions(self, typecode):
         # Test basic arithmetic function errors
         ftype = np.obj2sctype(typecode)
@@ -691,7 +675,7 @@ class TestFloatExceptions(TestCase):
         )
         self.assert_raises_fpe(invalid, lambda a, b: a * b, ftype(0), ftype(np.inf))
 
-    @skipif(IS_WASM, reason="no wasm fp exception support")
+    @pytest.mark.skipif(IS_WASM, reason="no wasm fp exception support")
     def test_warnings(self):
         # test warning code path
         with warnings.catch_warnings(record=True) as w:
@@ -710,7 +694,7 @@ class TestFloatExceptions(TestCase):
             assert_("underflow" in str(w[-1].message))
 
 
-class TestTypes(TestCase):
+class TestTypes:
     def check_promotion_cases(self, promote_func):
         # tests that the scalars get coerced correctly.
         b = np.bool_(0)
@@ -821,7 +805,7 @@ class TestTypes(TestCase):
         # assert_equal(b, [0.0, 1.5])
         # assert_equal(b.dtype, np.dtype('f4'))
 
-    @xfail  # (reason="'Scalars do not upcast arrays' rule")
+    @pytest.mark.xfail(reason="'Scalars do not upcast arrays' rule")
     def test_coercion_2(self):
         def res_type(a, b):
             return np.add(a, b).dtype
@@ -831,11 +815,11 @@ class TestTypes(TestCase):
     def test_result_type(self):
         self.check_promotion_cases(np.result_type)
 
-    @skip(reason="array(None) not supported")
+    @pytest.mark.skip(reason="array(None) not supported")
     def test_tesult_type_2(self):
         assert_(np.result_type(None) == np.dtype(None))
 
-    @skip(reason="no endianness in dtypes")
+    @pytest.mark.skip(reason="no endianness in dtypes")
     def test_promote_types_endian(self):
         # promote_types should always return native-endian types
         assert_equal(np.promote_types("<i8", "<i8"), np.dtype("i8"))
@@ -851,7 +835,7 @@ class TestTypes(TestCase):
 
         assert_(np.can_cast("i8", "i8", "no"))
 
-    @skip(reason="no endianness in dtypes")
+    @pytest.mark.skip(reason="no endianness in dtypes")
     def test_can_cast_2(self):
         assert_(not np.can_cast("<i8", ">i8", "no"))
 
@@ -872,7 +856,7 @@ class TestTypes(TestCase):
         # Also test keyword arguments
         assert_(np.can_cast(from_=np.int32, to=np.int64))
 
-    @xfail  # (reason="value-based casting?")
+    @pytest.mark.xfail(reason="value-based casting?")
     def test_can_cast_values(self):
         # gh-5917
         for dt in np.sctypes["int"] + np.sctypes["uint"]:
@@ -893,9 +877,8 @@ class NIterError(Exception):
     pass
 
 
-@xfail  # (reason="TODO")
-@instantiate_parametrized_tests
-class TestFromiter(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestFromiter:
     def makegen(self):
         return (x**2 for x in range(24))
 
@@ -930,8 +913,8 @@ class TestFromiter(TestCase):
                 raise NIterError("error at index %s" % eindex)
             yield e
 
-    @parametrize("dtype", [int])
-    @parametrize("count, error_index", [(10, 5), (10, 9)])
+    @pytest.mark.parametrize("dtype", [int])
+    @pytest.mark.parametrize(["count", "error_index"], [(10, 5), (10, 9)])
     def test_2592(self, count, error_index, dtype):
         # Test iteration exceptions are correctly raised. The data/generator
         # has `count` elements but errors at `error_index`
@@ -966,8 +949,7 @@ class TestFromiter(TestCase):
             np.fromiter(iterable, dtype=np.dtype((int, 2)))
 
 
-@instantiate_parametrized_tests
-class TestNonzeroAndCountNonzero(TestCase):
+class TestNonzeroAndCountNonzero:
     def test_count_nonzero_list(self):
         lst = [[0, 1, 2, 3], [1, 0, 0, 6]]
         assert np.count_nonzero(lst) == 5
@@ -1053,7 +1035,7 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert_raises(np.AxisError, np.count_nonzero, m, axis=3)
         assert_raises(TypeError, np.count_nonzero, m, axis=np.array([[1], [2]]))
 
-    @parametrize("typecode", np.typecodes["All"])
+    @pytest.mark.parametrize("typecode", np.typecodes["All"])
     def test_count_nonzero_axis_all_dtypes(self, typecode):
         # More thorough test that the axis argument is respected
         # for all dtypes and responds correctly when presented with
@@ -1092,7 +1074,7 @@ class TestNonzeroAndCountNonzero(TestCase):
         assert isinstance(np.count_nonzero(a, axis=1, keepdims=True), np.ndarray)
 
 
-class TestIndex(TestCase):
+class TestIndex:
     def test_boolean(self):
         a = rand(3, 5, 8)
         V = rand(5, 8)
@@ -1111,8 +1093,8 @@ class TestIndex(TestCase):
         assert_equal(c.dtype, np.dtype("int32"))
 
 
-@xfail  # (reason="TODO")
-class TestBinaryRepr(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestBinaryRepr:
     def test_zero(self):
         assert_equal(np.binary_repr(0), "0")
 
@@ -1149,8 +1131,8 @@ class TestBinaryRepr(TestCase):
         assert_equal(np.binary_repr(np.int64(-(2**62)), width=64), "11" + "0" * 62)
 
 
-@xfail  # (reason="TODO")
-class TestBaseRepr(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestBaseRepr:
     def test_base3(self):
         assert_equal(np.base_repr(3**5, 3), "100000")
 
@@ -1172,7 +1154,7 @@ class TestBaseRepr(TestCase):
             np.base_repr(1, 37)
 
 
-class TestArrayComparisons(TestCase):
+class TestArrayComparisons:
     def test_array_equal(self):
         res = np.array_equal(np.array([1, 2]), np.array([1, 2]))
         assert_(res)
@@ -1255,9 +1237,8 @@ class TestArrayComparisons(TestCase):
         assert_(type(res) is bool)
 
 
-@instantiate_parametrized_tests
-class TestClip(TestCase):
-    def setUp(self):
+class TestClip:
+    def setup_method(self):
         self.nr = 5
         self.nc = 3
 
@@ -1310,7 +1291,7 @@ class TestClip(TestCase):
 
     # Now the real test cases
 
-    @parametrize("dtype", "?bhilBfd")
+    @pytest.mark.parametrize("dtype", "?bhilBfd")
     def test_ones_pathological(self, dtype):
         # for preservation of behavior described in
         # gh-12519; amin > amax behavior may still change
@@ -1320,11 +1301,10 @@ class TestClip(TestCase):
         actual = np.clip(arr, 1, 0)
         assert_equal(actual, expected)
 
-    @parametrize("dtype", "eFD")
+    @pytest.mark.parametrize("dtype", "eFD")
     def test_ones_pathological_2(self, dtype):
         if dtype in "FD":
-            # FIXME: make xfail
-            raise SkipTest("torch.clamp not implemented for complex types")
+            pytest.xfail("torch.clamp not implemented for complex types")
         # for preservation of behavior described in
         # gh-12519; amin > amax behavior may still change
         # in the future
@@ -1361,7 +1341,7 @@ class TestClip(TestCase):
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="byteorder not supported in torch")
+    @pytest.mark.xfail(reason="byteorder not supported in torch")
     def test_simple_nonnative(self):
         # Test non native double input with scalar min/max.
         # Test native double input with non native double scalar min/max.
@@ -1381,7 +1361,7 @@ class TestClip(TestCase):
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="clamp not supported for complex")
+    @pytest.mark.xfail(reason="clamp not supported for complex")
     def test_simple_complex(self):
         # Test native complex input with native double scalar min/max.
         # Test native input with complex double scalar min/max.
@@ -1400,7 +1380,7 @@ class TestClip(TestCase):
         act = self.clip(a, m, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="clamp not supported for complex")
+    @pytest.mark.xfail(reason="clamp not supported for complex")
     def test_clip_complex(self):
         # Address Issue gh-5354 for clipping complex arrays
         # Test native complex input without explicit min/max
@@ -1434,8 +1414,8 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="casting not supported")
-    @parametrize("casting", [None, "unsafe"])
+    @pytest.mark.xfail(reason="casting not supported")
+    @pytest.mark.parametrize("casting", [None, "unsafe"])
     def test_simple_int32_inout(self, casting):
         # Test native int32 input with double min/max and int32 out.
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1460,7 +1440,7 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="FIXME arrays not equal")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_simple_int64_inout(self):
         # Test native int32 input with double array min/max and int32 out.
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1471,7 +1451,7 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="FIXME arrays not equal")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_simple_int32_out(self):
         # Test native double input with scalar min/max and int out.
         a = self._generate_data(self.nr, self.nc)
@@ -1561,7 +1541,7 @@ class TestClip(TestCase):
         act = self.clip(a, m * np.zeros(a.shape), M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="newbyteorder not supported")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_06(self):
         # Test native with NON native scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1572,7 +1552,7 @@ class TestClip(TestCase):
         ac = self.fastclip(a, m_s, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="newbyteorder not supported")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_07(self):
         # Test NON native with native array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1584,7 +1564,7 @@ class TestClip(TestCase):
         ac = self.fastclip(a_s, m, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="newbyteorder not supported")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_08(self):
         # Test NON native with native scalar min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1596,7 +1576,7 @@ class TestClip(TestCase):
         act = a_s.clip(m, M)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="newbyteorder not supported")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_09(self):
         # Test native with NON native array min/max.
         a = self._generate_data(self.nr, self.nc)
@@ -1618,7 +1598,7 @@ class TestClip(TestCase):
         ac = self.fastclip(a, m, M, out=b)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="newbyteorder not supported")
+    @pytest.mark.xfail(reason="newbyteorder not supported")
     def test_type_cast_11(self):
         # Test non native with native scalar, min/max, out non native
         a = self._generate_non_native_data(self.nr, self.nc)
@@ -1652,7 +1632,7 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="FIXME arrays not equal")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_clip_with_out_simple2(self):
         # Test native int32 input with double min/max and int32 out
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1674,7 +1654,7 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="FIXME arrays not equal")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_clip_with_out_array_int32(self):
         # Test native int32 input with double array min/max and int32 out
         a = self._generate_int32_data(self.nr, self.nc)
@@ -1685,7 +1665,7 @@ class TestClip(TestCase):
         self.clip(a, m, M, act)
         assert_array_equal(ac, act)
 
-    @xfail  # (reason="FIXME arrays not equal")
+    @pytest.mark.xfail(reason="FIXME arrays not equal")
     def test_clip_with_out_array_outint32(self):
         # Test native double input with scalar min/max and int out
         a = self._generate_data(self.nr, self.nc)
@@ -1743,7 +1723,7 @@ class TestClip(TestCase):
         assert_array_equal(a2, ac)
         assert_(a2 is a)
 
-    @skip(reason="Edge case; Wait until deprecation graduates")
+    @pytest.mark.skip(reason="Edge case; Wait until deprecation graduates")
     def test_clip_nan(self):
         d = np.arange(7.0)
         with assert_warns(DeprecationWarning):
@@ -1757,7 +1737,7 @@ class TestClip(TestCase):
         with assert_warns(DeprecationWarning):
             assert_equal(d.clip(min=np.nan, max=10), d)
 
-    @parametrize(
+    @pytest.mark.parametrize(
         "amin, amax",
         [
             # two scalars
@@ -1775,7 +1755,7 @@ class TestClip(TestCase):
         actual = np.clip(a, amin, amax)
         assert_equal(actual, expected)
 
-    @parametrize(
+    @pytest.mark.parametrize(
         "arr, amin, amax",
         [
             # problematic scalar nan case from hypothesis
@@ -1786,6 +1766,7 @@ class TestClip(TestCase):
             ),
         ],
     )
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_clip_scalar_nan_propagation(self, arr, amin, amax):
         # enforcement of scalar nan propagation for comparisons
         # called through clip()
@@ -1793,7 +1774,7 @@ class TestClip(TestCase):
         actual = np.clip(arr, amin, amax)
         assert_equal(actual, expected)
 
-    @xfail  # (reason="np.maximum(..., dtype=) needs implementing")
+    @pytest.mark.xfail(reason="np.maximum(..., dtype=) needs implementing")
     @given(
         data=st.data(),
         arr=hynp.arrays(
@@ -1849,9 +1830,15 @@ class TestClip(TestCase):
         assert_array_equal(result, expected)
 
 
-class TestAllclose(TestCase):
+class TestAllclose:
     rtol = 1e-5
     atol = 1e-8
+
+    #  def setup_method(self):
+    #      self.olderr = np.seterr(invalid='ignore')
+
+    #  def teardown_method(self):
+    #      np.seterr(**self.olderr)
 
     def tst_allclose(self, x, y):
         assert_(np.allclose(x, y), f"{x} and {y} not close")
@@ -1922,7 +1909,7 @@ class TestAllclose(TestCase):
         assert_(np.allclose(x, x, equal_nan=True))
 
 
-class TestIsclose(TestCase):
+class TestIsclose:
     rtol = 1e-5
     atol = 1e-8
 
@@ -2032,8 +2019,8 @@ class TestIsclose(TestCase):
         assert_(np.isclose(0, np.inf).item() is False)
 
 
-class TestStdVar(TestCase):
-    def setUp(self):
+class TestStdVar:
+    def setup_method(self):
         self.A = np.array([1, -1, 1, -1])
         self.real_var = 1
 
@@ -2075,7 +2062,7 @@ class TestStdVar(TestCase):
         assert_array_equal(r, out)
 
 
-class TestStdVarComplex(TestCase):
+class TestStdVarComplex:
     def test_basic(self):
         A = np.array([1, 1.0j, -1, -1.0j])
         real_var = 1
@@ -2087,10 +2074,10 @@ class TestStdVarComplex(TestCase):
         assert_equal(np.std(1j), 0)
 
 
-class TestCreationFuncs(TestCase):
+class TestCreationFuncs:
     # Test ones, zeros, empty and full.
 
-    def setUp(self):
+    def setup_method(self):
         dtypes = {np.dtype(tp) for tp in itertools.chain(*np.sctypes.values())}
         self.dtypes = dtypes
         self.orders = {
@@ -2129,8 +2116,7 @@ class TestCreationFuncs(TestCase):
         self.check_function(np.full, 0)
         self.check_function(np.full, 1)
 
-    @skipif(TEST_WITH_TORCHDYNAMO, reason="fails with dynamo")
-    @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
+    @pytest.mark.skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_for_reference_leak(self):
         # Make sure we have an object for reference
         dim = 1
@@ -2145,12 +2131,11 @@ class TestCreationFuncs(TestCase):
         assert_(sys.getrefcount(dim) == beg)
 
 
-@skip(reason="implement order etc")  # FIXME: make xfail
-@instantiate_parametrized_tests
-class TestLikeFuncs(TestCase):
+@pytest.mark.xfail(reason="implement order etc")
+class TestLikeFuncs:
     """Test ones_like, zeros_like, empty_like and full_like"""
 
-    def setUp(self):
+    def setup_method(self):
         self.data = [
             # Array scalars
             (np.array(3.0), None),
@@ -2304,8 +2289,10 @@ class TestLikeFuncs(TestCase):
         # Inf to integer casts cause invalid-value errors: ignore them.
         self.check_like_function(np.full_like, np.inf, True)
 
-    @parametrize("likefunc", [np.empty_like, np.full_like, np.zeros_like, np.ones_like])
-    @parametrize("dtype", [str, bytes])
+    @pytest.mark.parametrize(
+        "likefunc", [np.empty_like, np.full_like, np.zeros_like, np.ones_like]
+    )
+    @pytest.mark.parametrize("dtype", [str, bytes])
     def test_dtype_str_bytes(self, likefunc, dtype):
         # Regression test for gh-19860
         a = np.arange(16).reshape(2, 8)
@@ -2319,7 +2306,7 @@ class TestLikeFuncs(TestCase):
             assert result.strides == (4, 1)
 
 
-class TestCorrelate(TestCase):
+class TestCorrelate:
     def _setup(self, dt):
         self.x = np.array([1, 2, 3, 4, 5], dtype=dt)
         self.xs = np.arange(1, 20)[::3]
@@ -2369,7 +2356,7 @@ class TestCorrelate(TestCase):
         with pytest.raises((ValueError, RuntimeError)):
             np.correlate(np.ones(1000), np.array([]), mode="full")
 
-    @skip(reason="do not implement deprecated behavior")
+    @pytest.mark.skip(reason="do not implement deprecated behavior")
     def test_mode(self):
         d = np.ones(100)
         k = np.ones(3)
@@ -2386,7 +2373,7 @@ class TestCorrelate(TestCase):
             np.correlate(d, k, mode=None)
 
 
-class TestConvolve(TestCase):
+class TestConvolve:
     def test_object(self):
         d = [1.0] * 100
         k = [1.0] * 3
@@ -2399,7 +2386,7 @@ class TestConvolve(TestCase):
         assert_array_equal(d, np.ones(100))
         assert_array_equal(k, np.ones(3))
 
-    @skip(reason="do not implement deprecated behavior")
+    @pytest.mark.skip(reason="do not implement deprecated behavior")
     def test_mode(self):
         d = np.ones(100)
         k = np.ones(3)
@@ -2426,14 +2413,13 @@ class TestConvolve(TestCase):
         assert_allclose(conv, [2.5], atol=1e-15)
 
 
-class TestDtypePositional(TestCase):
+class TestDtypePositional:
     def test_dtype_positional(self):
         np.empty((2,), bool)
 
 
-@instantiate_parametrized_tests
-class TestArgwhere(TestCase):
-    @parametrize("nd", [0, 1, 2])
+class TestArgwhere:
+    @pytest.mark.parametrize("nd", [0, 1, 2])
     def test_nd(self, nd):
         # get an nd array with multiple elements in every dimension
         x = np.empty((2,) * nd, dtype=bool)
@@ -2464,8 +2450,8 @@ class TestArgwhere(TestCase):
         assert_equal(np.argwhere([4, 0, 2, 1, 3]), [[0], [2], [3], [4]])
 
 
-@xfail  # (reason="TODO")
-class TestStringFunction(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestStringFunction:
     def test_set_string_function(self):
         a = np.array([1])
         np.set_string_function(lambda x: "FOO", repr=True)
@@ -2479,7 +2465,7 @@ class TestStringFunction(TestCase):
         assert_equal(str(a), "[1]")
 
 
-class TestRoll(TestCase):
+class TestRoll:
     def test_roll1d(self):
         x = np.arange(10)
         xr = np.roll(x, 2)
@@ -2537,7 +2523,7 @@ class TestRoll(TestCase):
         assert_equal(np.roll(x, 1), np.array([]))
 
 
-class TestRollaxis(TestCase):
+class TestRollaxis:
     # expected shape indexed by (axis, start) for array of
     # shape (1, 2, 3, 4)
     tgtshape = {
@@ -2570,7 +2556,7 @@ class TestRollaxis(TestCase):
         assert_raises(np.AxisError, np.rollaxis, a, 4, 0)
         assert_raises(np.AxisError, np.rollaxis, a, 0, 5)
 
-    @xfail  # (reason="needs fancy indexing")
+    @pytest.mark.xfail(reason="needs fancy indexing")
     def test_results(self):
         a = np.arange(1 * 2 * 3 * 4).reshape(1, 2, 3, 4).copy()
         aind = np.indices(a.shape)
@@ -2609,7 +2595,7 @@ class TestRollaxis(TestCase):
             assert_(not res.flags["OWNDATA"])
 
 
-class TestMoveaxis(TestCase):
+class TestMoveaxis:
     def test_move_to_end(self):
         x = np.random.randn(5, 6, 7)
         for source, expected in [
@@ -2694,7 +2680,7 @@ class TestMoveaxis(TestCase):
         assert_(isinstance(result, np.ndarray))
 
 
-class TestCross(TestCase):
+class TestCross:
     def test_2x2(self):
         u = [1, 2]
         v = [3, 4]
@@ -2780,20 +2766,18 @@ class TestCross(TestCase):
         assert_equal(np.cross(u, v), -z)
 
 
-class TestOuterMisc(TestCase):
-    def test_outer_out_param(self):
-        arr1 = np.ones((5,))
-        arr2 = np.ones((2,))
-        arr3 = np.linspace(-2, 2, 5)
-        out1 = np.empty(shape=(5, 5))
-        out2 = np.empty(shape=(2, 5))
-        res1 = np.outer(arr1, arr3, out1)
-        assert_equal(res1, out1)
-        assert_equal(np.outer(arr2, arr3, out2), out2)
+def test_outer_out_param():
+    arr1 = np.ones((5,))
+    arr2 = np.ones((2,))
+    arr3 = np.linspace(-2, 2, 5)
+    out1 = np.empty(shape=(5, 5))
+    out2 = np.empty(shape=(2, 5))
+    res1 = np.outer(arr1, arr3, out1)
+    assert_equal(res1, out1)
+    assert_equal(np.outer(arr2, arr3, out2), out2)
 
 
-@instantiate_parametrized_tests
-class TestIndices(TestCase):
+class TestIndices:
     def test_simple(self):
         [x, y] = np.indices((4, 3))
         assert_array_equal(x, np.array([[0, 0, 0], [1, 1, 1], [2, 2, 2], [3, 3, 3]]))
@@ -2817,8 +2801,8 @@ class TestIndices(TestCase):
         assert_array_equal(x, np.array([[0], [1], [2], [3]]))
         assert_array_equal(y, np.array([[0, 1, 2]]))
 
-    @parametrize("dtype", [np.int32, np.int64, np.float32, np.float64])
-    @parametrize("dims", [(), (0,), (4, 3)])
+    @pytest.mark.parametrize("dtype", [np.int32, np.int64, np.float32, np.float64])
+    @pytest.mark.parametrize("dims", [(), (0,), (4, 3)])
     def test_return_type(self, dtype, dims):
         inds = np.indices(dims, dtype=dtype)
         assert_(inds.dtype == dtype)
@@ -2827,8 +2811,8 @@ class TestIndices(TestCase):
             assert_(arr.dtype == dtype)
 
 
-@xfail  # (reason="TODO")
-class TestRequire(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestRequire:
     flag_names = [
         "C",
         "C_CONTIGUOUS",
@@ -2894,8 +2878,8 @@ class TestRequire(TestCase):
         assert_raises(ValueError, np.require, a, None, ["C", "F"])
 
 
-@xfail  # (reason="TODO")
-class TestBroadcast(TestCase):
+@pytest.mark.xfail(reason="TODO")
+class TestBroadcast:
     def test_broadcast_in_args(self):
         # gh-5881
         arrs = [
@@ -2960,7 +2944,7 @@ class TestBroadcast(TestCase):
             np.broadcast([[1, 2, 3]], [[4], [5]], [6, 7])
 
 
-class TestTensordot(TestCase):
+class TestTensordot:
     def test_zero_dimension(self):
         # Test resolution to issue #5663
         a = np.zeros((3, 0))
@@ -2985,4 +2969,6 @@ class TestTensordot(TestCase):
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()

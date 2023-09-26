@@ -89,6 +89,11 @@ if(${USE_GLOG})
 endif()
 target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
 
+if(C10_USE_NUMA)
+  target_include_directories(c10 PRIVATE ${Numa_INCLUDE_DIR})
+  target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+endif()
+
 if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
     target_link_libraries(c10 PRIVATE cpuinfo)
 endif()
