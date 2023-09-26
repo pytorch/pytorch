@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 
 namespace at {
 namespace native {
