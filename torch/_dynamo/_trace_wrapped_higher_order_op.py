@@ -1,5 +1,3 @@
-import functools
-
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -42,9 +40,6 @@ def inner_trace(mode, *args, fn):
     assert len(args) == 1
     grad = args[0]
     assert isinstance(grad, torch.Tensor)
-
-    if isinstance(fn, functools.partial):
-        fn.__name__ = fn.func.__name__  # type: ignore[attr-defined]
 
     # We've implemented a higher-order operator that remains consistent in proxy tensor tracing.
     # However, Dynamo is aware and traces this into its genuine functionality.
