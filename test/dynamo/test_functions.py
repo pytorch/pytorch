@@ -1471,7 +1471,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        def call_triton_add(x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1):
+        def call_triton_add(
+            x: torch.Tensor, y: torch.Tensor, grid_type: int, num=1, positional=False
+        ):
             output = torch.zeros_like(x)
             n_elements = output.numel()
 
@@ -1485,7 +1487,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             else:
                 grid = grid_fn
 
-            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=2)
+            if positional:
+                add_kernel[grid](x, y, output, n_elements, 16)
+            else:
+                add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
+
             return output
 
         t1 = torch.rand(5, device="cuda")
@@ -1494,7 +1500,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         torch_add = t1 + t2
 
         # No Dynamo -- Make sure triton kernel works
-        self.assertEqual(call_triton_add(t1, t2, True), torch_add)
+        self.assertEqual(call_triton_add(t1, t2, 1), torch_add)
+        # No Dynamo -- Make sure triton kernel works (with positional BLOCK_SIZE)
+        self.assertEqual(call_triton_add(t1, t2, 1, True), torch_add)
 
         # With Dynamo
         compiled_func = torch.compile(call_triton_add, backend="eager", fullgraph=True)
@@ -1502,6 +1510,8 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(t1, t2, 0), torch_add)
         # With lambda kernel
         self.assertEqual(compiled_func(t1, t2, 1), torch_add)
+        # With lambda kernel (with positional BLOCK_SIZE)
+        self.assertEqual(compiled_func(t1, t2, 1, 1, True), torch_add)
         # With user defined function kernel
         self.assertEqual(compiled_func(t1, t2, 2, 200), torch_add)
 

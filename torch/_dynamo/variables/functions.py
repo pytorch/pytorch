@@ -654,7 +654,6 @@ class TritonKernelVariable(VariableTracker):
             self.kernel.run(*args, grid=grid, **kwargs)
 
         from .dicts import ConstDictVariable
-        from .functions import NestedUserFunctionVariable, UserFunctionVariable
         from .lists import BaseListVariable
 
         grid = self.grid
@@ -662,7 +661,21 @@ class TritonKernelVariable(VariableTracker):
         # If the grid is a function, then lets execute it and convert it to
         # a list
         if isinstance(grid, (NestedUserFunctionVariable, UserFunctionVariable)):
-            d = dict(kwargs)
+            # Populate the special "meta" argument to call the grid function
+            # Triton functions cannot take variadic or default arguments,
+            # so iterating over the arguments and parameters in a linear
+            # fashion is enough.
+            d = {}
+            for idx, name in enumerate(self.kernel.arg_names):
+                # no duplicates
+                assert name not in d
+
+                if idx < len(args):
+                    d[name] = args[idx]
+                else:
+                    assert name in kwargs
+                    d[name] = kwargs[name]
+
             meta = ConstDictVariable(d, dict)
             grid = grid.call_function(tx, [meta], {})
 
@@ -673,12 +686,17 @@ class TritonKernelVariable(VariableTracker):
         else:
             unimplemented(f"grid for the triton kernel is {type(grid)}")
 
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_mutation,
+        )
+
         proxied_args, proxied_kwargs = proxy_args_kwargs(args, kwargs)
+        fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
+        # FX graph needs a __name__ attribute
+        fn.__name__ = triton_kernel_wrapper_mutation.__name__
+
         tx.output.create_proxy(
-            "call_function",
-            call_kernel,
-            (grid,) + proxied_args,
-            proxied_kwargs,
+            "call_function", fn, proxied_args, {**proxied_kwargs, "grid": grid}
         )
 
         return variables.ConstantVariable(

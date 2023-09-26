@@ -1,10 +1,8 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <c10/util/Metaprogramming.h>
 #include <torch/library.h>
 
 namespace at::native {
