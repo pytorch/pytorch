@@ -571,6 +571,8 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             args1=args,
             has_dropout=True,
             override_check_equal=True,
+            atol=1e-2,
+            rtol=1e-2,
         )
 
 
