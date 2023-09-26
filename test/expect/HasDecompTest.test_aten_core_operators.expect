@@ -232,8 +232,6 @@ aten::fmod.Tensor_out
 aten::fmod_.Scalar
 aten::fmod_.Tensor
 aten::full
-aten::full.names
-aten::full.names_out
 aten::full.out
 aten::gcd
 aten::gcd.out
@@ -494,6 +492,8 @@ aten::tril_indices
 aten::tril_indices.out
 aten::triu_indices
 aten::triu_indices.out
+aten::trunc
+aten::trunc.out
 aten::trunc_
 aten::unbind.int
 aten::unfold

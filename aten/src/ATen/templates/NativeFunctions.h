@@ -1,5 +1,4 @@
 #pragma once
-// IWYU pragma: begin_exports
 
 // ${generated_comment}
 
@@ -32,5 +31,3 @@
 ${NativeFunctions_includes}
 
 ${NativeFunctions_declarations}
-
-// IWYU pragma: end_exports
