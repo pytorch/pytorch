@@ -97,13 +97,9 @@ def deco_binary_ufunc(torch_func):
         elif isinstance(x1, torch.Tensor) and isinstance(x2, torch.Tensor):
             dtype = _dtypes_impl.result_type_impl(x1, x2)
             x1, x2 = _util.typecast_tensors((x1, x2), dtype, casting)
-        elif not (
-            any(isinstance(x, torch.Tensor) for x in [x1, x2])
-            and any(_dtypes_impl.is_scalar(x) for x in [x1, x2])
-        ):
-            # If one is already scalar and the other is tensor, no need for casting the scalar.
+        else:
             x1, x2 = _dtypes_impl.nep50_to_tensors(
-                x1, x2, torch_func.__name__ in NEP50_FUNCS
+                x1, x2, torch_func.__name__ in NEP50_FUNCS, torch_func.__name__
             )
 
         result = torch_func(x1, x2)
