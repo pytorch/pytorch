@@ -359,23 +359,26 @@ def arange(
 
     # the dtype of the result
     if dtype is None:
-        target_dtype = (
+        dtype = (
             _dtypes_impl.default_dtypes().float_dtype
             if any(_dtypes_impl.is_float_or_fp_tensor(x) for x in (start, stop, step))
             else _dtypes_impl.default_dtypes().int_dtype
         )
-    else:
-        target_dtype = dtype
 
-    # work around RuntimeError: "arange_cpu" not implemented for 'ComplexFloat'
-    work_dtype = torch.float64 if target_dtype.is_complex else target_dtype
+    # Fall back to eager work on complex arguments:
+    # start, stop, and step are documented as int or real; but complex values
+    # are accepted and the result is inconsistent.
+    if dtype.is_complex or any(
+        _dtypes_impl.is_complex_or_complex_tensor(x) for x in (start, stop, step)
+    ):
+        raise NotImplementedError("arange/complex")
 
     if (step > 0 and start > stop) or (step < 0 and start < stop):
         # empty range
-        return torch.empty(0, dtype=target_dtype)
+        return torch.empty(0, dtype=dtype)
 
-    result = torch.arange(start, stop, step, dtype=work_dtype)
-    result = _util.cast_if_needed(result, target_dtype)
+    result = torch.arange(start, stop, step, dtype=dtype)
+    result = _util.cast_if_needed(result, dtype)
     return result
 
 

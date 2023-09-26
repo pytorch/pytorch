@@ -6831,7 +6831,7 @@ class TestArange(TestCase):
             # Fails discovering start dtype
             np.arange(*args)
 
-    @parametrize("dt", [np.float32, np.uint8, complex])
+    @parametrize("dt", [np.float32, np.uint8])
     def test_explicit_dtype(self, dt):
         assert np.arange(5.0, dtype=dt).dtype == dt
 
