@@ -4,38 +4,38 @@
   "data": {
     "aten::mm": {},
     "aten::nonzero": {
-      "MiniOpTest.test_aot_dispatch_static__test_nonzero": {
+      "test_aot_dispatch_static__test_nonzero": {
         "comment": "",
         "status": "xfail"
       }
     },
     "aten::sin_": {},
     "mini_op_test::delayed_error": {
-      "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error": {
+      "test_aot_dispatch_dynamic__test_delayed_error": {
         "comment": "",
         "status": "xfail"
       },
-      "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
+      "test_aot_dispatch_static__test_delayed_error": {
         "comment": "",
         "status": "xfail"
       }
     },
     "mini_op_test::incorrect_schema": {
-      "MiniOpTest.test_schema__test_incorrect_schema": {
+      "test_schema__test_incorrect_schema": {
         "comment": "",
         "status": "xfail"
       }
     },
     "mini_op_test::no_abstract": {
-      "MiniOpTest.test_aot_dispatch_dynamic__test_no_abstract": {
+      "test_aot_dispatch_dynamic__test_no_abstract": {
         "comment": "",
         "status": "xfail"
       },
-      "MiniOpTest.test_aot_dispatch_static__test_no_abstract": {
+      "test_aot_dispatch_static__test_no_abstract": {
         "comment": "testing a skip just for the fun of it",
         "status": "skip"
       },
-      "MiniOpTest.test_faketensor__test_no_abstract": {
+      "test_faketensor__test_no_abstract": {
         "comment": "",
         "status": "xfail"
       }
