@@ -70,7 +70,6 @@ decomps_to_exclude = [
     aten.clamp_max,
     aten.clamp_min,
     aten.glu,  # has lowering in inductor
-    aten.trunc,
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)

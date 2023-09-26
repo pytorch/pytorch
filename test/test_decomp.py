@@ -478,7 +478,6 @@ class TestDecomp(TestCase):
     @suppress_warnings
     @ops(_decomp_test_ops)
     def test_quick(self, device, dtype, op):
-        print(op)
         self.do_cross_ref(device, dtype, op, run_all=False)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")

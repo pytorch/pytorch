@@ -1874,7 +1874,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
-        '_refs.trunc',
         '_refs.trunc_divide',
         '_refs.vsplit',
         '_refs.vstack',
