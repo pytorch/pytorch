@@ -3005,7 +3005,7 @@ class ExternKernel(InputsKernel):
         if (
             V.graph.cpp_wrapper
             and kwargs
-            and isinstance(kernel, torch._ops.OpOverloadPacket)
+            and isinstance(kernel, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
         ):
             schema = try_find_schema(schemas, args, kwargs)
 
