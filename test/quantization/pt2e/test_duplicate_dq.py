@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import unittest
 
 import torch
 import torch._export as export
@@ -26,7 +27,6 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS
-import unittest
 
 
 class TestHelperModules:
