@@ -149,7 +149,7 @@ def export__RC__(
         else:
             constraints.append(primary)
 
-    return export(f, args, kwargs, constraints=constraints)
+    return _export(f, args, kwargs, constraints=constraints)
 
 
 def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
@@ -360,7 +360,33 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                     for key, (path, ty) in nn_module_stack.items()
                 }
 
+
 def export(
+    f: Callable,
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    constraints: Optional[List[Constraint]] = None,
+    *,
+    preserve_module_call_signature: Tuple[str, ...] = (),
+) -> ExportedProgram:
+
+    if constraints is not None:
+        import logging
+
+        logging.warning(
+            "Specifying dynamic shapes with the `constraints` argument is DEPRECATED. "
+            "Please use the `dynamic_shapes` argument instead."
+        )
+    return _export(
+        f,
+        args,
+        kwargs,
+        constraints,
+        preserve_module_call_signature=preserve_module_call_signature,
+    )
+
+
+def _export(
     f: Callable,
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
