@@ -1,4 +1,6 @@
 #pragma once
+#include <cstring>
+#include <map>
 #include <memory>
 #include <ostream>
 #include <sstream>
