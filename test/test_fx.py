@@ -3794,6 +3794,26 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         copy_m = copy.deepcopy(m)  # finishes
         self.assertEqual(id(copy_m), id(copy_m.meta['hello']))
 
+    def test_enum(self):
+        from enum import Enum
+
+        class Foo(Enum):
+            A = 1
+            B = 2
+
+        def leaf_fn(arr, enum_val):
+            # Use the raw enum.
+            arr.append(enum_val)
+            return arr[-1].value
+
+        def foo(x):
+            # Pass the enum as argument.
+            return leaf_fn(x, Foo.A)
+
+        traced = torch.fx.symbolic_trace(foo)
+        self.assertEqual(foo([]), traced([]))
+
+
 
 def run_getitem_target():
     from torch.fx._symbolic_trace import _wrapped_methods_to_patch
