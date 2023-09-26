@@ -1362,9 +1362,6 @@ class BuiltinVariable(VariableTracker):
         )
 
         op = self.fn
-        #import time
-        #print(op.__name__ )
-        #time.sleep(3)
 
         def _unimplemented():
             unimplemented(f"comparison {typestr(left)} {op} {typestr(right)}")
