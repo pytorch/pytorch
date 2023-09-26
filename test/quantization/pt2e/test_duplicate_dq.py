@@ -25,6 +25,8 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import (
 )
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import IS_WINDOWS
+import unittest
 
 
 class TestHelperModules:
@@ -215,6 +217,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
             BackendAQuantizer(),
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_avgpool_use_different_qconfig(self):
         """
         Model under test
