@@ -202,7 +202,6 @@ exclude_patterns = [
     'torch/_inductor/scheduler.py',
     'torch/_inductor/sizevars.py',
     'torch/_inductor/fx_passes/joint_graph.py',
-    'torch/_inductor/fx_passes/pad_mm.py',
     'torch/_inductor/fx_passes/group_batch_fusion.py',
 ]
 command = [
