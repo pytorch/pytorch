@@ -6,7 +6,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
 
-GuardManager = guards.GuardManager
+RootGuardManager = guards.RootGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 GetDictItemGuardAccessor = guards.GetDictItemGuardAccessor
@@ -49,7 +49,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(const_guard("foo"))
 
     def test_guard_manager_leaf_guard(self):
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, int),
             lambda x: f"Expected int but got {type(x)}",
@@ -75,7 +75,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
                 self.y = y
 
         foo = Foo(1, 2)
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, Foo),
             lambda x: f"Expected Foo but got {type(x)}",
@@ -120,7 +120,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
                     raise KeyError(f"{name} not in {self}")
 
         foo = Foo(1, 2)
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, Foo),
             lambda x: f"Expected Foo but got {type(x)}",
@@ -155,7 +155,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             "x": 1,
             "y": 2,
         }
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
         guard_manager.add_lambda_guard(
             lambda x: isinstance(x, dict),
             lambda x: f"Expected dict but got {type(x)}",
@@ -190,7 +190,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard_manager.check("foo"))
 
     def test_tensor_aliasing_guard(self):
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
         f_locals = {
             "x": torch.randn(3, 4),
             "y": torch.randn(3, 4),
@@ -230,7 +230,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
 
     def test_tensor_aliasing_guard_reset(self):
         # Check that guard state is reset on failure
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
 
         a = torch.randn(3, 4)
         b = torch.randn(3, 4)
@@ -288,7 +288,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
             "foo": 5,
             "bar": Pair(1, 2),
         }
-        guard_manager = GuardManager()
+        guard_manager = RootGuardManager()
 
         guard_manager.dict_get_item_manager("foo").add_lambda_guard(
             lambda x: isinstance(x, int),
