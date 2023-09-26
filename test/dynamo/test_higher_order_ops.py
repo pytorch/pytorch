@@ -120,7 +120,14 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(result, expected)
 
-    def _test_wrap_simple(self, func, args, expected_num_wrap_args, expected_opcount=1):
+    def _test_wrap_simple(
+        self,
+        func,
+        args,
+        expected_num_wrap_args,
+        expected_opcount=1,
+        expected_graph=None,
+    ):
         # Given a `func` that has a single call to `wrap`,
         # we check that:
         # - there are no graph breaks
@@ -138,8 +145,11 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, expected_opcount)
 
         self.assertEqual(len(backend.graphs), 1)
-        wrap_node = find_first_node(backend.graphs[0], wrap)
+        wrap_gm = backend.graphs[0]
+        wrap_node = find_first_node(wrap_gm, wrap)
         self.assertEqual(len(wrap_node.args), expected_num_wrap_args)
+        if expected_graph:
+            self.assertExpectedInline(wrap_gm.code.strip(), expected_graph)
 
     def test_error_message_sane(self):
         foo = []
@@ -227,13 +237,28 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             f, (x,), ifdynstaticdefault(2, 3), expected_opcount=ifdynstaticdefault(1, 2)
         )
 
-    def test_wrap_pytree_args(self):
-        def f(x, y):
-            return wrap(lambda z: z[0].sin() * z[1].cos(), (x, y))
+    def test_wrap_pytree_args_nested(self):
+        def f(x, y, z):
+            def fn(d):
+                return d["x"].sin() + d["y"][0].cos() - d["y"][1][2].sin()
+
+            return wrap(fn, d)
 
         x = torch.tensor(1.5)
         y = torch.tensor(2.0)
-        self._test_wrap_simple(f, (x, y), 3)
+        z = torch.tensor(3.0)
+        d = {"x": x, "y": (y, [x, y, z])}
+        expected_graph = """
+def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor, L_z_ : torch.Tensor):
+    l_x_ = L_x_
+    l_y_ = L_y_
+    l_z_ = L_z_
+    wrap_body_0 = self.wrap_body_0
+    wrap = torch._higher_order_ops.wrap.wrap(wrap_body_0, l_x_, l_y_, l_z_);  \
+wrap_body_0 = l_x_ = l_y_ = l_z_ = None
+    return (wrap,)
+        """.strip()
+        self._test_wrap_simple(f, (x, y, z), 4, expected_graph=expected_graph)
 
     def test_wrap_pytree_kwargs(self):
         def f(x, y, z):
