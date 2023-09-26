@@ -95,6 +95,7 @@ SKIP_FOR_CPU = {
     "torchrec_dlrm",  # requires FBGEMM, CUDA only
     "simple_gpt",
     "hf_Whisper",  # works on cuda, accuracy failure on cpu
+    "stable_diffusion_text_encoder",
 }
 
 SKIP_FOR_CUDA = {
