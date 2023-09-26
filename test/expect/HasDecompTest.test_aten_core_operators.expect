@@ -247,8 +247,6 @@ aten::gelu.out
 aten::geometric
 aten::geometric.out
 aten::geometric_
-aten::glu
-aten::glu.out
 aten::grid_sampler_2d
 aten::grid_sampler_2d.out
 aten::gt.Scalar
