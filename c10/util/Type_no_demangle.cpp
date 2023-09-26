@@ -1,8 +1,6 @@
 #include <c10/util/Type.h>
 
 #if HAS_DEMANGLE == 0
-#include <string>
-
 namespace c10 {
 std::string demangle(const char* name) {
   return std::string(name);

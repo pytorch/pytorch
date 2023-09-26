@@ -1,29 +1,20 @@
 # Owner(s): ["module: dynamo"]
 
-import functools
 import itertools
 import sys
 
-from unittest import expectedFailure as xfail, skipIf as skipif
+import pytest
 
 import torch._numpy as np
 from pytest import raises as assert_raises
 from torch._numpy.testing import assert_
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    TestCase,
+
+
+@pytest.mark.xfail(
+    reason="We do not disctinguish between scalar and array types."
+    " Thus, scalars can upcast arrays."
 )
-
-skip = functools.partial(skipif, True)
-
-
-@xfail  # (
-#    reason="We do not disctinguish between scalar and array types."
-#    " Thus, scalars can upcast arrays."
-# )
-class TestCommonType(TestCase):
+class TestCommonType:
     def test_scalar_loses1(self):
         res = np.find_common_type(["f4", "f4", "i2"], ["f8"])
         assert_(res == "f4")
@@ -45,7 +36,7 @@ class TestCommonType(TestCase):
         assert_(res == "f8")
 
 
-class TestIsSubDType(TestCase):
+class TestIsSubDType:
     # scalar types can be promoted into dtypes
     wrappers = [np.dtype, lambda x: x]
 
@@ -101,21 +92,21 @@ class TestIsSubDType(TestCase):
         assert np.issubdtype(np.float32, "f")
 
 
-@xfail  # (
-#    reason="We do not have (or need) np.core.numerictypes."
-#    " Our type aliases are in _dtypes.py."
-# )
-class TestBitName(TestCase):
+@pytest.mark.xfail(
+    reason="We do not have (or need) np.core.numerictypes."
+    " Our type aliases are in _dtypes.py."
+)
+class TestBitName:
     def test_abstract(self):
         assert_raises(ValueError, np.core.numerictypes.bitname, np.floating)
 
 
-@skip(reason="Docstrings for scalar types, not yet.")
-@skipif(
+@pytest.mark.skip(reason="Docstrings for scalar types, not yet.")
+@pytest.mark.skipif(
     sys.flags.optimize > 1,
     reason="no docstrings present to inspect when PYTHONOPTIMIZE/Py_OptimizeFlag > 1",
 )
-class TestDocStrings(TestCase):
+class TestDocStrings:
     def test_platform_dependent_aliases(self):
         if np.int64 is np.int_:
             assert_("int64" in np.int_.__doc__)
@@ -123,8 +114,7 @@ class TestDocStrings(TestCase):
             assert_("int64" in np.longlong.__doc__)
 
 
-@instantiate_parametrized_tests
-class TestScalarTypeNames(TestCase):
+class TestScalarTypeNames:
     # gh-9799
 
     numeric_types = [
@@ -148,16 +138,18 @@ class TestScalarTypeNames(TestCase):
         names = [t.__name__ for t in self.numeric_types]
         assert len(set(names)) == len(names)
 
-    @parametrize("t", numeric_types)
+    @pytest.mark.parametrize("t", numeric_types)
     def test_names_reflect_attributes(self, t):
         """Test that names correspond to where the type is under ``np.``"""
         assert getattr(np, t.__name__) is t
 
-    @parametrize("t", numeric_types)
+    @pytest.mark.parametrize("t", numeric_types)
     def test_names_are_undersood_by_dtype(self, t):
         """Test the dtype constructor maps names back to the type"""
         assert np.dtype(t.__name__).type is t
 
 
 if __name__ == "__main__":
+    from torch._dynamo.test_case import run_tests
+
     run_tests()
