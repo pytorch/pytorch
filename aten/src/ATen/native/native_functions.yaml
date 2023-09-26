@@ -4412,6 +4412,10 @@
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
 # pinned memory
 - func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
+  dispatch:
+    CompositeImplicitAutograd: pin_memory
+    # Needs to be non-implicit for NT so it's overrideable by the tensor subclass
+    NestedTensorCPU, NestedTensorCUDA: pin_memory
   variants: method
 
 # Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
