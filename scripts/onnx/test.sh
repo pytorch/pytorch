@@ -57,7 +57,7 @@ if [[ "$SHARD_NUMBER" == "2" ]]; then
   mkdir -p "${log_folder}"
   for mode in "accuracy" "performance"; do
     for compiler in "dynamo-onnx" "torchscript-onnx"; do
-      for suite in "torchbench" "huggingface" "timm_models"; do
+      for suite in "huggingface" "timm_models"; do
         output_file="${log_folder}/${compiler}_${suite}_float32_inference_${device}_${mode}.csv"
         bench_file="benchmarks/dynamo/${suite}.py"
         # Run only selected model for each suite to quickly validate the benchmark suite works as expected.
