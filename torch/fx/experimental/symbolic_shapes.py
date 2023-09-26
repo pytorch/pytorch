@@ -374,7 +374,7 @@ def _constrain_range_for_size(a, min: Optional[int] = None, max: Optional[int] =
     if isinstance(a, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat/SymBool is nyi")
 
-    assert isinstance(a, SymInt), "can only constrain range for SymInt"
+    assert isinstance(a, SymInt)
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
 
     if min is None:
