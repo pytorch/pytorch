@@ -43,6 +43,7 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     make_contiguous_strides_for,
 )
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
@@ -2269,8 +2270,8 @@ class NoneLayout(IRNode):
     # This doesn't inherit from Layout because Layout assumes you have stuff
     # like sizes, but I don't really have anything here.
     #
-    # If you have an ir.Node with NoneLayout, you probably want
-    # has_side_effects() defined to return True
+    # If you have an ir.Node with NoneLayout, you probably need to setup
+    # dependencies manually in scheduler
 
     def __init__(self):
         self.device = torch.device("cpu")
@@ -2436,7 +2437,7 @@ class Buffer(IRNode):
         pass
 
     def get_alias_names(self):
-        if isinstance(self.layout, (AliasedLayout)):
+        if isinstance(self.layout, AliasedLayout):
             return [self.layout.view.get_name()]
         return ()
 
@@ -2454,6 +2455,30 @@ class Buffer(IRNode):
 
     def get_reads(self):
         return self.get_read_writes().reads
+
+    def get_unbacked_symbol_defs(self):
+        """
+        Returns the unbacked symbols which are defined by this IR node,
+        because this is a data-dependent IR node, or item()
+        """
+        return set()
+
+    def get_unbacked_symbol_uses(self):
+        """
+        Returns the unbacked symbols which are required to be in scope in
+        order to successfully perform codegen for this buffer.  For example,
+        a buffer that corresponds to an extern kernel call that takes i0 as
+        an argument would return {i0} here.  This is used to generate necessary
+        dependencies that ensure we actually bind i0 in codegen before you
+        try to use it.
+
+        Note that this is NOT transitive; in particular, if this buffer takes
+        in as input another buffer with dynamic shape (e.g., (i0,)), we will
+        not report it here, because you will already have a dependency
+        on that buffer, which will eventually have a dependency on i0 if
+        necessary.
+        """
+        return set()
 
     def realize(self):
         pass
@@ -2526,6 +2551,26 @@ class ComputedBuffer(Buffer):
                     self.get_store_function(),
                     self.data.get_size(),
                 )
+
+    def get_unbacked_symbol_uses(self):
+        # Ordinarily, we'd like to just peek at the arguments list,
+        # but ComputedBuffers have no argument list.
+        #
+        # Morally, this logic needs to be synchronized with the
+        # KernelArgs.size calls, which are responsible for making symbols make
+        # there way as kernel arguments (and it is precisely passing in one of
+        # those symbols that establishes a dependency).  However, we haven't
+        # started codegen yet so we can't directly reuse that logic.
+        #
+        # For now, I'm just yoloing with the size of the buffer.  Not sure if
+        # it is enough.
+        #
+        # One thing you might wonder is if this is enough for a ComputedBuffer
+        # denoting a reduction over i0.  Empirically, it is enough, but for an
+        # unusual reason: we only need accurate dependencies for item() call,
+        # but it's impossible to end up with a reduction over i0 from an
+        # item() call without a regular non-reduction buffer first.
+        return free_unbacked_symbols(self.get_size())
 
     def make_loader(self):
         # Inline constants and index_expressions
@@ -3321,6 +3366,16 @@ class ExternKernel(InputsKernel):
         index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
+    def get_unbacked_symbol_uses(self):
+        # NB: It's not necessary to check regular inputs as we automatically
+        # have dependencies on them
+        r = set()
+        for arg in self.constant_args:
+            r |= free_unbacked_symbols(arg)
+        for arg in self.kwargs.values():
+            r |= free_unbacked_symbols(arg)
+        return r
+
     def __str__(self):
         kernel_name = getattr(self, "kernel", None)
         lines = [
@@ -3621,12 +3676,12 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
-    def has_side_effects(self):
-        return True
-
     def __init__(self, sym, data):
         super().__init__(None, NoneLayout(), [data])
         self.sym = sym
+
+    def get_unbacked_symbol_defs(self):
+        return {self.sym}
 
     def codegen(self, wrapper):
         (data,) = (t.codegen_reference() for t in self.inputs)
@@ -3939,18 +3994,29 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
+    def get_unbacked_symbol_defs(self):
+        # This kernel defines all unbacked symbols... that it didn't get in as
+        # arguments!
+        return free_unbacked_symbols(self.get_size()) - self.get_unbacked_symbol_uses()
+
     def codegen(self, wrapper):
         line = V.graph.wrapper_code.declare
         line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
         line += V.graph.wrapper_code.ending
         V.graph.wrapper_code.writeline(line)
         # NB: If it is possible for other ir node types to return unbacked
-        # symints, we also have to add this logic there too.
+        # symints, we also have to add this logic there too.  Don't forget to
+        # update get_unbacked_symbol_defs too.
         # TODO: Also handle dynamic stride/offset (no real use case for this
         # atm)
+        symbols_to_define = self.get_unbacked_symbol_defs()
         for i, s in enumerate(self.get_size()):
-            if V.graph.sizevars.shape_env.is_unbacked_symint(s):
+            if s in symbols_to_define:
                 V.graph.wrapper_code.writeline(f"{s} = {self.get_name()}.size({i})")
+                symbols_to_define.remove(s)
+        assert (
+            not symbols_to_define
+        ), f"unbacked symint {s} not written out, check comment above"
         self.codegen_size_asserts(V.graph.wrapper_code)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):

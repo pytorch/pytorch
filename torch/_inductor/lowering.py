@@ -2025,6 +2025,8 @@ make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
+# these are data-dependent, highly unlikely you can write a lowering
+make_fallback(aten.nonzero.default)
 
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)

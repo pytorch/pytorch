@@ -223,6 +223,11 @@ def free_symbols(val: Union[SymInt, torch.Tensor]) -> Set[sympy.Symbol]:
     else:
         raise AssertionError(f"cannot compute free_symbols of {val} {type(val)}")
 
+# Like free_symbols, but filtered to only report unbacked symbols
+def free_unbacked_symbols(x):
+    # NB: keep synced with is_unbacked_symint
+    return {s for s in free_symbols(x) if s.name.startswith("i")}
+
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
 # setup!
 def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
@@ -2896,6 +2901,7 @@ class ShapeEnv:
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
+        # NB: keep synced with free_unbacked_symbols
         return str(symbol).startswith("i")
 
     @record_shapeenv_event()
