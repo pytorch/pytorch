@@ -170,7 +170,7 @@ def generate_opcheck_tests(
                 prefix,
                 tester,
                 failures_dict,
-                f"{testcase.__name__}.{new_method_name}",
+                new_method_name,
                 failures_dict_path,
             ):
                 result = method(*args, **kwargs)
@@ -293,23 +293,20 @@ def validate_failures_dict_structure(
                 raise RuntimeError(
                     f"In failures_dict, got status={test_option} but it needs to be in {TEST_OPTIONS}"
                 )
-            test_class, actual_test_name = test_name.split(".")
-            if not any(actual_test_name.startswith(test) for test in test_utils):
+            if not any(test_name.startswith(test) for test in test_utils):
                 raise RuntimeError(
                     f"In failures_dict, test name '{test_name}' should begin with one of {test_utils}"
                 )
             for test in test_utils:
-                if not actual_test_name.startswith(test):
+                if not test_name.startswith(test):
                     continue
-                base_test_name = actual_test_name[len(test) + 2 :]
-                if testcase.__name__ == test_class and hasattr(
-                    testcase, base_test_name
-                ):
+                base_test_name = test_name[len(test) + 2 :]
+                if hasattr(testcase, base_test_name):
                     continue
                 raise RuntimeError(
                     f"In failures dict, got test name '{test_name}'. We parsed this as "
                     f"running test '{test}' on '{base_test_name}', but "
-                    f"{base_test_name} does not exist on the TestCase '{testcase.__name__}]. "
+                    f"{base_test_name} does not exist on the TestCase. "
                     f"Maybe you need to change the test name?"
                 )
 
