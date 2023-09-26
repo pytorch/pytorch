@@ -214,7 +214,7 @@ void mkldnn_matmul(
         mkldnn_bf16_device_check(),
         "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx_ne_convert or avx512bw, avx512vl and avx512dq, or AWS Graviton3");
   } else {
-    TORCH_DEBUG_ASSERT(mat1.scalar_type() == at::kHalf);
+    TORCH_INTERNAL_ASSERT(mat1.scalar_type() == at::kHalf);
     TORCH_CHECK(
         mkldnn_fp16_device_check(),
         "mkldnn_matmul: mkldnn_matmul fp16 path needs the cpu support avx_ne_convert or avx512_fp16");
