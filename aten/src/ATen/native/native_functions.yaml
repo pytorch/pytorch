@@ -6043,7 +6043,7 @@
   dispatch:
     SparseCPU, SparseCUDA: trunc_sparse
     SparseCsrCPU, SparseCsrCUDA: trunc_sparse_csr
-  tags: pointwise
+  tags: [core, pointwise]
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: trunc.out
