@@ -18,7 +18,11 @@ class _MultiDeviceReplicator:
     """
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
-        assert master_tensor.is_cuda or master_tensor.device.type == 'xla' or master_tensor.device.type == 'cpu'
+        assert (
+            master_tensor.is_cuda
+            or master_tensor.device.type == "xla"
+            or master_tensor.device.type == "cpu"
+        )
         self.master = master_tensor
         self._per_device_tensors: Dict[torch.device, torch.Tensor] = {}
 
@@ -125,7 +129,9 @@ class GradScaler:
         assert self._device in ["cuda", "cpu"], "gradscaler only supports CUDA and CPU"
         if self._device == "cuda":
             if enabled and torch.cuda.amp.common.amp_definitely_not_available():
-                warnings.warn("torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling.")
+                warnings.warn(
+                    "torch.cuda.amp.GradScaler is enabled, but CUDA is not available.  Disabling."
+                )
                 self._enabled = False
 
         if self._enabled:
@@ -199,7 +205,7 @@ class GradScaler:
         # Short-circuit for the common case.
         if isinstance(outputs, torch.Tensor):
             if self._device == "cuda":
-                assert outputs.is_cuda or outputs.device.type == 'xla'
+                assert outputs.is_cuda or outputs.device.type == "xla"
             else:
                 assert outputs.device.type == "cpu"
             if self._scale is None:
@@ -215,7 +221,7 @@ class GradScaler:
         def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
             if isinstance(val, torch.Tensor):
                 if self._device == "cuda":
-                    assert val.is_cuda or val.device.type == 'xla'
+                    assert val.is_cuda or val.device.type == "xla"
                 else:
                     assert val.device.type == "cpu"
                 if len(stash) == 0:
@@ -472,7 +478,8 @@ class GradScaler:
         affect the scale GradScaler uses internally.)
 
         Args:
-            new_scale (float or :class:`torch.cuda.FloatTensor` or :class:`torch.FloatTensor`, optional, default=None):  New scale factor.
+            new_scale (float or :class:`torch.cuda.FloatTensor` or :class:`torch.FloatTensor`,
+            optional, default=None):  New scale factor.
 
         .. warning::
             :meth:`update` should only be called at the end of the iteration, after ``scaler.step(optimizer)`` has
@@ -498,9 +505,9 @@ class GradScaler:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
                     torch.FloatTensor with requires_grad=False."
                 if self._device == "cuda":
-                    assert  isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
+                    assert isinstance(new_scale, torch.cuda.FloatTensor), reason  # type: ignore[attr-defined]
                 else:
-                    assert  isinstance(new_scale, torch.FloatTensor), reason  # type: ignore[attr-defined]
+                    assert isinstance(new_scale, torch.FloatTensor), reason  # type: ignore[attr-defined]
 
                 assert new_scale.numel() == 1, reason
                 assert new_scale.requires_grad is False, reason
