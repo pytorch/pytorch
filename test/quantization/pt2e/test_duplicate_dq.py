@@ -89,6 +89,7 @@ _DEQUANTIZE_OPS = [
 ]
 
 
+@unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
 class TestDuplicateDQPass(QuantizationTestCase):
     def _test_duplicate_dq(
         self,
@@ -217,7 +218,6 @@ class TestDuplicateDQPass(QuantizationTestCase):
             BackendAQuantizer(),
         )
 
-    @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
     def test_avgpool_use_different_qconfig(self):
         """
         Model under test
