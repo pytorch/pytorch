@@ -204,7 +204,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/joint_graph.py',
     'torch/_inductor/fx_passes/pad_mm.py',
     'torch/_inductor/fx_passes/group_batch_fusion.py',
-    'torch/_inductor/fx_passes/pre_grad.py',
 ]
 command = [
     'python3',
