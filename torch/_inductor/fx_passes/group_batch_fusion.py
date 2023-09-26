@@ -4,6 +4,7 @@ import operator
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.fb.utils import get_everpaste_url
 
 from .. import config
 from ..pattern_matcher import (
@@ -554,7 +555,13 @@ def apply_group_batch_fusion(graph, rule):
                 )
 
 
+def print_graph(graph: torch.fx.Graph, msg: str):
+    if config.is_fbcode():
+        log.info("%s Print graph: %s", msg, get_everpaste_url(str(graph)))
+
+
 def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in post grads pass.")
     fusions = []
 
     if config.group_fusion and has_fbgemm:
@@ -562,9 +569,11 @@ def group_batch_fusion_post_grad_passes(graph: torch.fx.Graph):
 
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")
 
 
 def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
+    print_graph(graph, "Before group_batch fusion in pre grads pass.")
     fusions = []
     if config.batch_fusion:
         fusions += [
@@ -575,3 +584,4 @@ def group_batch_fusion_pre_grad_passes(graph: torch.fx.Graph):
         ]
     for rule in fusions:
         apply_group_batch_fusion(graph, rule)
+        print_graph(graph, f"Apply fusion {rule.__class__.__name__}.")

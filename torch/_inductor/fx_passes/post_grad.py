@@ -5,12 +5,13 @@ import operator
 from collections import defaultdict, namedtuple
 from typing import Any, Dict, List, Optional, Union
 
-from sympy import Expr
-
 import torch
 import torch._inductor as inductor
+
+from sympy import Expr
 from torch._decomp import register_decomposition
 from torch._prims_common import is_boolean_dtype, is_integer_dtype
+from torch._inductor.fb.utils import get_everpaste_url
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -92,6 +93,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     reinplace_scatters(gm.graph)
     gm.recompile()
     gm.graph.lint()
+
+    if config.is_fbcode():
+        logging.info(f"Print graph after recompile in post grad passes: {get_everpaste_url(str(gm.graph))}")
 
 
 @init_once_fakemode

@@ -5,6 +5,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.fb.utils import get_everpaste_url
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -72,6 +73,9 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs):
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
+
+    if config.is_fbcode():
+        logging.info(f"Print graph after recompile in pre grad passes: {get_everpaste_url(str(gm.graph))}")
 
     return gm
 
