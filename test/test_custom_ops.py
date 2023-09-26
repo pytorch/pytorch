@@ -40,7 +40,7 @@ class CustomOpTestCaseBase(TestCase):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
         for lib in self.libraries:
-            del lib.m
+            lib._destroy()
         del self.libraries
 
     def ns(self):
@@ -1345,12 +1345,24 @@ class TestCustomOp(CustomOpTestCaseBase):
         result = op(x_cuda)
         self.assertEqual(result, foo_impl(x_cuda))
 
+    def test_impl_abstract_overload(self):
+        lib = self.lib()
+        lib.define("sin.blah(Tensor x) -> Tensor")
+
+        torch.library.impl_abstract(
+            f"{self.test_ns}::sin.blah", torch.empty_like, lib=lib
+        )
+
+        op = self.ns().sin.blah
+        x = torch.randn(3, device="meta")
+        op(x)
+
     def test_impl_meta(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             raise NotImplementedError()
 
-        @custom_ops.impl_abstract(f"{TestCustomOp.test_ns}::foo")
+        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
@@ -1366,17 +1378,15 @@ class TestCustomOp(CustomOpTestCaseBase):
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
             raise NotImplementedError()
 
-        @custom_ops.impl_abstract(f"{TestCustomOp.test_ns}::foo")
+        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
             output_shape = list(x.shape)
             del output_shape[dim]
             return x.new_empty(output_shape)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"already has a abstract impl.*at .*test_custom_ops.py:\d+"
-        ):
+        with self.assertRaisesRegex(RuntimeError, r"test_custom_ops.py:\d+"):
 
-            @custom_ops.impl_abstract(f"{TestCustomOp.test_ns}::foo")
+            @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
             def foo_meta2(x, dim):
                 output_shape = list(x.shape)
                 del output_shape[dim]
@@ -1387,15 +1397,14 @@ class TestCustomOp(CustomOpTestCaseBase):
         def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError()
 
-        @custom_ops.impl_abstract(f"{TestCustomOp.test_ns}::foo")
+        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
-            ctx = torch._custom_op.impl.get_ctx()
-            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
-                ctx.create_unbacked_symint(min=1)
-            with self.assertRaisesRegex(ValueError, "greater than or equal to 2"):
-                ctx.create_unbacked_symint(min=-1)
+            ctx = torch.library.get_ctx()
+            ctx.new_dynamic_size(min=1)
+            with self.assertRaisesRegex(ValueError, "greater than or equal to 0"):
+                ctx.new_dynamic_size(min=-1)
             with self.assertRaisesRegex(ValueError, "SymInt"):
-                ctx.create_unbacked_symint(max=x.numel())
+                ctx.new_dynamic_size(max=x.numel())
             return torch.clone(x)
 
         x = torch.randn(2, 3, device="cpu")
@@ -1414,7 +1423,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         def foo(x: torch.Tensor) -> torch.Tensor:
             raise NotImplementedError()
 
-        @custom_ops.impl_abstract(f"{TestCustomOp.test_ns}::foo")
+        @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             return x.sum()
 
@@ -1434,7 +1443,9 @@ class TestCustomOp(CustomOpTestCaseBase):
             op(x)
 
         x = torch.randn(3, device="meta")
-        with self.assertRaisesRegex(NotImplementedError, "abstract impl registered"):
+        with self.assertRaisesRegex(
+            NotImplementedError, "no abstract impl or Meta kernel"
+        ):
             op(x)
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar")
@@ -1449,9 +1460,10 @@ class TestCustomOp(CustomOpTestCaseBase):
         custom_op = torch._custom_op.impl._find_custom_op(
             "_torch_testing::numpy_nonzero"
         )
-        loc = custom_op._get_impl("abstract").location
-        matches = re.match(r".*custom_op_db.py:\d+", loc)
-        self.assertIsNotNone(matches)
+        source = torch._library.simple_registry.singleton.find(
+            "_torch_testing::numpy_nonzero"
+        ).abstract_impl.kernel.source
+        self.assertRegex(source, r".*custom_op_db.py:\d+")
 
     def test_data_dependent_basic(self):
         def f(x):
@@ -1563,7 +1575,7 @@ def forward(self, x_1):
         lib.define("foo(Tensor x) -> Tensor")
         qualname = f"{self.test_ns}::foo"
 
-        @torch._custom_ops.impl_abstract(qualname)
+        @torch.library.impl_abstract(qualname, lib=self.lib())
         def foo_impl(x):
             return x.sin()
 
@@ -1586,7 +1598,7 @@ def forward(self, x_1):
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, r"already has .*Meta implementation"):
-            custom_ops.impl_abstract(qualname, func=foo_impl)
+            torch.library.impl_abstract(qualname, func=foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeImplicitAutograd(self):
         lib = self.lib()
@@ -1600,7 +1612,7 @@ def forward(self, x_1):
         op = self.get_op(qualname)
 
         with self.assertRaisesRegex(RuntimeError, "CompositeImplicitAutograd"):
-            custom_ops.impl_abstract(qualname, func=foo_impl)
+            torch.library.impl_abstract(qualname, func=foo_impl, lib=self.lib())
 
     def test_abstract_impl_on_existing_op_with_CompositeExplicitAutograd(self):
         lib = self.lib()
@@ -1613,7 +1625,7 @@ def forward(self, x_1):
         lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
         op = self.get_op(qualname)
 
-        custom_ops.impl_abstract(qualname, func=lambda x: x.sum())
+        torch.library.impl_abstract(qualname, func=lambda x: x.sum(), lib=self.lib())
         with torch._subclasses.FakeTensorMode():
             x = torch.randn(10)
             result = op(x)
@@ -1737,6 +1749,19 @@ class MiniOpTest(CustomOpTestCaseBase):
         result = torch.ops.aten.mm.default(x, y)
         self.assertEqual(result, x @ y)
 
+    def test_mm_meta(self):
+        x = torch.randn(2, 3, requires_grad=True, device="meta")
+        y = torch.randn(3, 5, device="meta")
+        result = torch.ops.aten.mm.default(x, y)
+        self.assertEqual(result.shape, (x @ y).shape)
+
+    def test_mm_fake(self):
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.randn(2, 3, requires_grad=True, device="cpu")
+            y = torch.randn(3, 5, device="cpu")
+            result = torch.ops.aten.mm.default(x, y)
+            self.assertEqual(result.shape, (x @ y).shape)
+
     def test_mm_errors(self):
         x = torch.randn(2, 3, requires_grad=True)
         y = torch.randn(4, 5)
@@ -1804,6 +1829,78 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
                 expected_test = f"{test}__{orig_test}"
                 self.assertTrue(hasattr(MiniOpTest, expected_test), msg=expected_test)
 
+    def test_generate_repro_save_data(self):
+        from torch.testing._internal.optests.generate_tests import generate_repro
+
+        args = (torch.ones(2, 2),)
+        kwargs = {"mat2": torch.zeros(2, 2)}
+        actual = generate_repro(
+            "test_schema",
+            torch.ops.aten.sin.default,
+            args,
+            kwargs,
+            save_data=True,
+            dry_run=True,
+        )
+        actual = re.sub(r"torch.load\(\".*\.pt\"\)", 'torch.load("repro.pt")', actual)
+        self.assertExpectedInline(
+            actual,
+            """\
+# =========================================================
+# BEGIN REPRO SCRIPT
+# =========================================================
+import torch
+from torch.testing._internal.optests import opcheck
+
+# Make sure you have loaded the library that contains the op
+# via an import or torch.ops.load_library(...)
+op = torch.ops.aten.sin.default
+
+args, kwargs = torch.load("repro.pt")
+opcheck(op, args, kwargs, test_utils="test_schema")
+# =========================================================
+# END REPRO SCRIPT
+# =========================================================
+""",
+        )
+
+    def test_generate_repro_no_save_data(self):
+        from torch.testing._internal.optests.generate_tests import generate_repro
+
+        args = (torch.ones(2, 2),)
+        kwargs = {"mat2": torch.zeros(2, 2)}
+        actual = generate_repro(
+            "test_schema",
+            torch.ops.aten.sin.default,
+            args,
+            kwargs,
+            save_data=False,
+            dry_run=True,
+        )
+        self.assertExpectedInline(
+            actual,
+            """\
+# =========================================================
+# BEGIN REPRO SCRIPT
+# =========================================================
+import torch
+from torch.testing._internal.optests import opcheck
+
+# Make sure you have loaded the library that contains the op
+# via an import or torch.ops.load_library(...)
+op = torch.ops.aten.sin.default
+
+# If you rerun your test with PYTORCH_OPCHECK_PRINT_BETTER_REPRO=1
+# we will fill them in same (args, kwargs) as in your test
+args = ()  # args to the operator
+kwargs = {}  # kwargs to the operator
+opcheck(op, args, kwargs, test_utils="test_schema")
+# =========================================================
+# END REPRO SCRIPT
+# =========================================================
+""",
+        )
+
     def test_failures_dict_validation(self):
         from torch.testing._internal.optests.generate_tests import (
             FailuresDict,
@@ -1812,20 +1909,20 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
                     "comment": "",
-                    "status": "XFAIL",
+                    "status": "success",
                 }
             }
         }
-        with self.assertRaisesRegex(RuntimeError, "got status=XFAIL"):
+        with self.assertRaisesRegex(RuntimeError, "got status=success"):
             validate_failures_dict_structure(
                 FailuresDict("", failures), mini_op_test_checks, MiniOpTest
             )
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch__test_delayed_error": {
                     "comment": "",
                     "status": "xfail",
                 },
@@ -1838,7 +1935,7 @@ class TestGenerateOpcheckTests(CustomOpTestCaseBase):
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                "MiniOpTest.test_aot_dispatch_static__test_delayed_error_nopenopenope": {
                     "comment": "",
                     "status": "xfail",
                 },

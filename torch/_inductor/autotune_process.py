@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import functools
 import logging
@@ -42,6 +43,27 @@ class Pong:
     pass
 
 
+@contextlib.contextmanager
+def set_cuda_visible_device(device: Optional[int]):
+    """
+    Context manager to set the CUDA_VISIBLE_DEVICES environment variable to the
+    specified single device. If device is None, don't manipulate the environment.
+    """
+    if device is None:
+        yield
+        return
+
+    current = os.environ.get(CUDA_VISIBLE_DEVICES)
+    os.environ[CUDA_VISIBLE_DEVICES] = str(device)
+    try:
+        yield
+    finally:
+        if current is None:
+            del os.environ[CUDA_VISIBLE_DEVICES]
+        else:
+            os.environ[CUDA_VISIBLE_DEVICES] = current
+
+
 @dataclasses.dataclass
 class TuningProcess:
     """
@@ -57,16 +79,16 @@ class TuningProcess:
 
     @staticmethod
     def process_main(
-        device: Optional[int],
         request_queue: Queue[Any],
         response_queue: Queue[Any],
     ) -> None:
         """
         Entry point for the child process.
         """
-        log.debug("Entering TuningProcess child main: %s", device)
-        if device is not None:
-            os.environ[CUDA_VISIBLE_DEVICES] = str(device)
+        log.debug(
+            "Entering TuningProcess child. Visible devices = %s",
+            os.environ.get(CUDA_VISIBLE_DEVICES),
+        )
         try:
             TuningProcess.workloop(request_queue, response_queue)
         except Exception as ex:
@@ -122,13 +144,13 @@ class TuningProcess:
         self.process = ctx.Process(
             target=self.process_main,
             args=(
-                self.device,
                 self.request_queue,
                 self.response_queue,
             ),
         )
         assert self.process is not None
-        self.process.start()
+        with set_cuda_visible_device(self.device):
+            self.process.start()
 
     def put(self, obj: Any) -> None:
         """
@@ -195,7 +217,7 @@ class TuningProcessPool:
             return
 
         devices = self.get_device_list()
-        log.debug("Device list: %s", devices)
+        log.debug("Sub-process autotune device list: %s", devices)
 
         # Launch the child processes and push a msg to "warm up"
         self.processes = queue.Queue()
