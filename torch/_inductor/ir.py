@@ -16,6 +16,7 @@ from typing import (
     Callable,
     ClassVar,
     Dict,
+    Iterable,
     List,
     Optional,
     Sequence,
@@ -177,12 +178,12 @@ def stride_order2fill_order(order):
     return fill_order
 
 
-def get_stride_order(seq: Sequence[int]):
+def get_stride_order(seq: Sequence[int]) -> List[int]:
     """
     Convert strides to stride order
     """
     sorted_idx: List[int] = argsort(seq)
-    out = [None for _ in range(len(seq))]
+    out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
     return out
@@ -305,7 +306,7 @@ class IRNode:
 
     @cache_on_self
     def get_read_names(self):
-        return {dep.name for dep in self.get_reads()}
+        return {dep.name for dep in self.get_reads()}  # type: ignore[attr-defined]
 
     def get_layout(self):
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
@@ -407,15 +408,30 @@ class Loops(IRNode):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
-                    self.make_loader(),
+                    self.make_loader(),  # type: ignore[attr-defined]
                     self.get_size(),
                     self.get_reduction_size(),
                 ).reads
             else:
                 return extract_read_writes(
-                    self.make_loader(),
+                    self.make_loader(),  # type: ignore[attr-defined]
                     self.get_size(),
                 ).reads
+
+    def get_reduction_size(self):
+        raise NotImplementedError(
+            f"get_reduction_size() is not implemented by {type(self)}!"
+        )
+
+    def get_reduction_type(self):
+        raise NotImplementedError(
+            f"get_reduction_type() is not implemented by {type(self)}!"
+        )
+
+    def constant_to_device(self, device):
+        raise NotImplementedError(
+            f"constant_to_device() is not implemented by {type(self)}!"
+        )
 
 
 def nop_loader_fn(idx, *, dtype):
@@ -595,7 +611,7 @@ class Reduction(Loops):
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
-        loader = self.make_loader()
+        loader = self.make_loader()  # type: ignore[attr-defined]
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
         return Reduction(
             device,
@@ -1177,9 +1193,15 @@ class WelfordReduction(Reduction):
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
+        # FIXME there's a bunch of dead code in this method, see https://github.com/pytorch/pytorch/issues/109963
+        # Most of the type-ignore comments below are due to this dead code
+
         def const(idx, val):
             def inner_fn(idx):
-                return ops.constant(val, dst_dtype)
+                return ops.constant(
+                    val,
+                    dst_dtype,  # type: ignore[name-defined]
+                )
 
             return Pointwise.create(
                 device=device,
@@ -1189,9 +1211,9 @@ class WelfordReduction(Reduction):
             )
 
         if reduction_numel == 0:
-            mean = const(0)
-            m2 = const(0)
-            weight = const(0)
+            mean = const(0)  # type: ignore[call-arg]
+            m2 = const(0)  # type: ignore[call-arg]
+            weight = const(0)  # type: ignore[call-arg]
             return mean, m2, weight
 
         if reduction_numel == 1:
@@ -1203,13 +1225,13 @@ class WelfordReduction(Reduction):
 
                 return Pointwise.create(
                     device=device,
-                    dtype=dst_dtype,
+                    dtype=dst_dtype,  # type: ignore[name-defined]
                     inner_fn=inner_fn,
                     ranges=list(ranges),
                 )
 
             if reduction_type == "welford_reduce":
-                return copy(inner_fns[0]), const(0), const(1)
+                return copy(inner_fns[0]), const(0), const(1)  # type: ignore[call-arg]
             else:
                 return tuple(copy(fn) for fn in inner_fns)
 
@@ -1282,7 +1304,7 @@ class WelfordReduction(Reduction):
         return (0, 0, 0)
 
     @classmethod
-    def create_multilayer(
+    def create_multilayer(  # type: ignore[override]
         cls,
         device: torch.device,
         dtype: torch.dtype,
@@ -1408,7 +1430,7 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
         return x, x.data.layout
     if isinstance(x, ReinterpretView):
         # making the base of x contiguous or stride_ordered will not necessarily make
-        # the ReinterpretedView either, so dont pass along those arguments
+        # the ReinterpretView either, so dont pass along those arguments
         buffer, _ = as_storage_and_layout(
             x.data,
             freeze=freeze,
@@ -1438,7 +1460,7 @@ class BaseView(IRNode):
         raise NotImplementedError(f"make_reindexer NYI on {self}")
 
     def make_indexer(self):
-        inner = self.data.make_indexer()
+        inner = self.data.make_indexer()  # type: ignore[attr-defined]
         reindex = self.make_reindexer()
 
         def indexer(idx):
@@ -1447,7 +1469,7 @@ class BaseView(IRNode):
         return indexer
 
     def make_loader(self):
-        inner = self.data.make_loader()
+        inner = self.data.make_loader()  # type: ignore[attr-defined]
         reindex = self.make_reindexer()
 
         def loader(idx):
@@ -1456,37 +1478,37 @@ class BaseView(IRNode):
         return loader
 
     def get_dtype(self):
-        return self.data.get_dtype()
+        return self.data.get_dtype()  # type: ignore[attr-defined]
 
     def get_layout(self):
-        return self.data.get_layout()
+        return self.data.get_layout()  # type: ignore[attr-defined]
 
     def get_device(self):
-        return self.data.get_device()
+        return self.data.get_device()  # type: ignore[attr-defined]
 
     def get_origin_node(self):
         return None
 
     def get_name(self):
-        return self.data.get_name()
+        return self.data.get_name()  # type: ignore[attr-defined]
 
     def mark_reuse(self, users):
-        return self.data.mark_reuse(users)
+        return self.data.mark_reuse(users)  # type: ignore[attr-defined]
 
     def has_exceeded_max_reads(self):
-        return self.data.has_exceeded_max_reads()
+        return self.data.has_exceeded_max_reads()  # type: ignore[attr-defined]
 
     def realize(self):
         return self.data.realize()
 
     def realize_hint(self):
-        return self.data.realize_hint()
+        return self.data.realize_hint()  # type: ignore[attr-defined]
 
     def get_storage_numel(self):
-        return self.data.get_storage_numel()
+        return self.data.get_storage_numel()  # type: ignore[attr-defined]
 
     def is_extern(self):
-        return self.data.is_extern()
+        return self.data.is_extern()  # type: ignore[attr-defined]
 
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
@@ -1496,7 +1518,7 @@ class BaseView(IRNode):
             ).reads
 
     def unwrap_view(self):
-        x = self
+        x: IRNode = self
         while isinstance(x, BaseView):
             x = x.data
         return x
@@ -1720,7 +1742,7 @@ class View(GenericView):
             def fake_reindex(index):
                 return tuple([0] * len(old_size))
 
-            return cls(x, tuple(new_size), fake_reindex)
+            return cls(x, list(new_size), fake_reindex)
         # TODO: a new class for FixedTransferLayout that output layout is constrained by input layout
         elif is_contiguous_storage_and_layout(x):
             storage, old_layout = as_contiguous_storage_and_layout(x)
@@ -1849,7 +1871,7 @@ class ReinterpretView(BaseView):
     __repr__ = __str__
 
     def get_name(self):
-        return self.data.get_name()
+        return self.data.get_name()  # type: ignore[attr-defined]
 
     def get_device(self):
         return self.layout.device
@@ -1945,6 +1967,9 @@ class SliceView(View):
 
 
 class BaseConstant(IRNode):
+    dtype: torch.dtype
+    device: torch.device
+
     def get_size(self):
         return ()
 
@@ -2012,7 +2037,7 @@ class Layout(IRNode):
         device: torch.device,
         dtype: torch.dtype,
         size: List[Expr],
-        stride: List[Expr],
+        stride: Optional[List[Expr]],
         offset: Expr = Integer(0),
     ):
         assert stride is None or len(size) == len(
@@ -2244,7 +2269,7 @@ class FlexibleLayout(Layout):
 class AliasedLayout(Layout):
     """Shares the same storage as another tensor"""
 
-    def __init__(self, view: "ReinterpretView"):
+    def __init__(self, view: IRNode):
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -2267,18 +2292,19 @@ class AliasedLayout(Layout):
 
 
 class MutationLayout(Layout):
-    def __init__(self, target: IRNode):
+    def __init__(self, target: Union["Buffer", BaseView, "MutableBox"]):
+        assert isinstance(target, (Buffer, BaseView, MutableBox)), type(target)
         super().__init__(
             target.get_device(),
             target.get_dtype(),
             target.get_size(),
-            None,  # type: ignore[arg-type]
+            None,
         )
         self.target = target
         name = self.get_buffer().get_name()
         V.graph.mark_buffer_mutated(name)
 
-    @Layout.stride.getter
+    @Layout.stride.getter  # type: ignore[attr-defined]
     def stride(self):
         return self.real_layout().stride
 
@@ -2421,7 +2447,7 @@ class Buffer(IRNode):
 
     def get_alias_names(self):
         if isinstance(self.layout, AliasedLayout):
-            return [self.layout.view.get_name()]
+            return [self.layout.view.get_name()]  # type: ignore[attr-defined]
         return ()
 
     def get_mutation_names(self):
@@ -2513,20 +2539,21 @@ class ComputedBuffer(Buffer):
 
     def make_loader(self):
         # Inline constants and index_expressions
-        can_inline = (
+        if (
             hasattr(self.data, "make_loader")
             and self.name not in V.graph.mutated_buffers
             and self.num_reads() == 0
-        )
-        if can_inline:
+        ):
+            # can be inlined
             return self.data.make_loader()
         return super().make_loader()
 
     def get_store_function(self):
         indexer = self.layout.as_fixed().make_indexer()
-        if self.data.get_reduction_type():
+        if isinstance(self.data, Reduction):
             return partial(self.data.store_reduction, self.name, indexer)
         else:
+            assert isinstance(self.data, Pointwise)
             return partial(self.data.store_output, self.name, indexer)
 
     def get_fill_order(self):
@@ -2913,14 +2940,14 @@ class ConcatKernel(NopKernel):
         )
         kernel = StorageBox(concat_kernel)
         for i in range(len(inputs)):
-            kernel.data.inputs.append(
+            concat_kernel.inputs.append(
                 cls.realize_into(
                     inputs[i],
                     SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
                 )
             )
-        kernel.data.name = V.graph.register_buffer(kernel.data)
-        kernel.data.inputs = cls.unwrap_storage(kernel.data.inputs)
+        concat_kernel.name = V.graph.register_buffer(concat_kernel)
+        concat_kernel.inputs = cls.unwrap_storage(concat_kernel.inputs)
 
         return kernel
 
@@ -2940,6 +2967,7 @@ class ConcatKernel(NopKernel):
         if isinstance(src, StorageBox):
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
+            assert hasattr(src.data, "layout")
             if isinstance(src.data.layout, FlexibleLayout) and not isinstance(
                 src.data, ExternKernelAlloc
             ):
@@ -2966,6 +2994,9 @@ class ExternKernel(InputsKernel):
     constant_args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = dataclasses.field(default_factory=dict)
     output_view: Optional[ReinterpretView] = None
+    ordered_kwargs_for_cpp_kernel: Iterable[str] = dataclasses.field(
+        default_factory=list
+    )
 
     def decide_layout(self):
         if isinstance(self.layout, FlexibleLayout):
@@ -3936,7 +3967,7 @@ def _prepare_convolution_fusion_create(
     dilation: List[int],
     groups: int,
     transposed: bool = False,
-    output_padding: List[int] = None,
+    output_padding: Optional[List[int]] = None,
 ):
     """
     This function is a helper function to prepare inputs, layout and constant args
@@ -4115,7 +4146,7 @@ def _prepare_linear_fusion_create(
         convert_shape_to_inductor(output_size),
         convert_shape_to_inductor(output_stride),
     )
-    constant_args = []
+    constant_args: List[Any] = []
 
     if bias is not None:
         inputs.append(bias)
@@ -4737,7 +4768,6 @@ class MkldnnRnnLayer(ExternKernelAlloc):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
             return make_contiguous_strides_for(output_shape)
 
-        indices = []
         output_sizes = [output_shape, hy_shape, cy_shape]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
@@ -4753,7 +4783,7 @@ class MkldnnRnnLayer(ExternKernelAlloc):
                     output_stride,
                 ),
                 packed,
-                indices + [(list, i)],
+                [(list, i)],
             )
             for i, (output_size, output_stride) in enumerate(
                 zip(output_sizes, output_strides)
@@ -5191,7 +5221,7 @@ class MutableBox(IRNode):
 
     @property
     def layout(self):
-        return self.data.layout
+        return self.data.layout  # type: ignore[attr-defined]
 
     def get_layout(self):
         return self.layout
@@ -5566,7 +5596,11 @@ class LoopBodyBlock:
         from .index_propagation import IndexPropagation
         from .sizevars import SimplifyIndexing
 
-        handler = SimplifyIndexing(CaptureIndexing(proxy_ops), self.body.var_ranges)
+        # TODO should IndexPropagation inherit from V.WrapperHandler? Then we can use the superclass type here instead
+        # of the Union
+        handler: Union[SimplifyIndexing, IndexPropagation] = SimplifyIndexing(
+            CaptureIndexing(proxy_ops), self.body.var_ranges
+        )
         if config.constant_and_index_propagation:
             handler = IndexPropagation(handler)
 
