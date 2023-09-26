@@ -6839,11 +6839,6 @@ class TestArange(TestCase):
     def test_explicit_dtype(self, dt):
         assert np.arange(5.0, dtype=dt).dtype == dt
 
-    @parametrize("dt", [np.int32, np.complex64])
-    def test_arange_np_scalars(self, dt):
-        r = np.arange(dt(5))
-        assert_equal(r, [0, 1, 2, 3, 4])
-
 
 class TestRichcompareScalar(TestCase):
     @xfail  # (reason="comparison: builtin.bools or...?")

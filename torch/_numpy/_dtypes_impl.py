@@ -111,14 +111,7 @@ def _dtype_for_scalar(py_type):
 
 
 def _dtype_for_scalar_or_tensor(x):
-    # expect that the scalar path is more common
-    try:
-        # x a python scalar
-        dtyp = _dtype_for_scalar(type(x))
-    except KeyError:
-        # x a tensor
-        dtyp = x.dtype
-    return dtyp
+    return x.dtype if isinstance(x, torch.Tensor) else _dtype_for_scalar(type(x))
 
 
 def is_float_or_fp_tensor(x):

@@ -366,11 +366,9 @@ def arange(
         )
     work_dtype = torch.float64 if dtype.is_complex else dtype
 
-    # work around RuntimeError: "lt_cpu" not implemented for 'ComplexFloat'
+    # RuntimeError: "lt_cpu" not implemented for 'ComplexFloat'. Fall back to eager.
     if any(_dtypes_impl.is_complex_or_complex_tensor(x) for x in (start, stop, step)):
-        work_dtype = torch.float64
-        dtype = torch.complex128
-        start, stop, step = float(start), float(stop), float(step)
+        raise NotImplementedError
 
     if (step > 0 and start > stop) or (step < 0 and start < stop):
         # empty range
