@@ -845,12 +845,12 @@ ALSO_REGISTER_AVX512_DISPATCH(reciprocal_stub, &CPU_CAPABILITY::reciprocal_kerne
 ALSO_REGISTER_AVX512_DISPATCH(exp2_stub, &CPU_CAPABILITY::exp2_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
 
 // Might enable AVX512 dispatch after enabling explicit vectorization for them
 REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
-REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
 REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
