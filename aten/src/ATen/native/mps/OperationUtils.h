@@ -317,6 +317,11 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 size_t compute_storage_numel_distance(const at::Tensor& t);
 
 /**
+ * Set contiguous strides to given tensor in-place.
+ */
+void restride_contiguous_(const at::Tensor& t);
+
+/**
  * Checks whether tensor is mapped to a contiguous area in the storage.
  */
 inline bool is_dense_in_storage(const at::Tensor& t) {

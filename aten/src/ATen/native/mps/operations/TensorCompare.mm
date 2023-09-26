@@ -171,30 +171,22 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
       clamp_mps_graph(newCachedGraph, input_t, min_opt_tensor, max_opt_tensor);
     });
 
-    bool gatherTensorData = true;
-    if (!output_t.is_contiguous() || output_t.is_view()) {
-      gatherTensorData = false;
-    }
-
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_t, /*mpsShape=*/nil, /*gatherTensorData=*/true);
     auto outputPlaceholder =
         Placeholder(cachedGraph->outputTensor, output_t, /*mpsShape=*/nil, /*gatherTensorData=*/false);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     if (has_min) {
-      min_opt_tensor =
-          gatherTensorData && !min_opt_tensor.is_contiguous() ? min_opt_tensor.contiguous() : min_opt_tensor;
+      min_opt_tensor = !min_opt_tensor.is_contiguous() ? min_opt_tensor.contiguous() : min_opt_tensor;
       auto minPlaceholder =
-          Placeholder(cachedGraph->minTensor, min_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+          Placeholder(cachedGraph->minTensor, min_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/true);
       feeds[minPlaceholder.getMPSGraphTensor()] = minPlaceholder.getMPSGraphTensorData();
     }
     if (has_max) {
-      max_opt_tensor =
-          gatherTensorData && !max_opt_tensor.is_contiguous() ? max_opt_tensor.contiguous() : max_opt_tensor;
+      max_opt_tensor = !max_opt_tensor.is_contiguous() ? max_opt_tensor.contiguous() : max_opt_tensor;
       auto maxPlaceholder =
-          Placeholder(cachedGraph->maxTensor, max_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/gatherTensorData);
+          Placeholder(cachedGraph->maxTensor, max_opt_tensor, /*mpsShape=*/nil, /*gatherTensorData=*/true);
       feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
     }
 
@@ -203,6 +195,7 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
 
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
   }
+  restride_contiguous_(output_t);
 }
 
 static void clamp_scalar_out_mps(const Tensor& input_t,
