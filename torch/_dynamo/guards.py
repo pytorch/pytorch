@@ -480,7 +480,9 @@ class GuardBuilder(GuardBuilderBase):
             )
             return
         name = self.check_fn_manager.add_extra_closure_var("__nn_module_guard", g)
-        self._produce_guard_code(guard, [f"{name}({ref})"])
+        # debug_msg is only for debugging help and goes to kwargs of guard call,
+        # which is ignored.
+        self._produce_guard_code(guard, [f'{name}({ref}, debug_msg="{g}")'])
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
@@ -1062,28 +1064,19 @@ class CheckFunctionManager:
             if not log_only:
                 code_parts.append(code)
 
-        def add_nn_module_guard(code, guard):
-            # Prints the versions of the nn module guard for debugging.
-            # Manually append the code part
-            code_parts.append(code)
+        seen = set()
+        for gcl in local_builder.code:
+            for code in gcl.code_list:
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
-            # Log the verbose part
-            nn_module_guard = self._extra_closure_vars[code.split("(")[0]]
-            add_code_part(f"{code} # {nn_module_guard}", guard, log_only=True)
-
-        def add_code_parts_for_builder(builder):
-            seen = set()
-            for gcl in builder.code:
-                for code in gcl.code_list:
-                    if code not in seen:
-                        if "__nn_module_guard" in code:
-                            add_nn_module_guard(code, gcl.guard)
-                        else:
-                            add_code_part(code, gcl.guard)
-                        seen.add(code)
-
-        add_code_parts_for_builder(local_builder)
-        add_code_parts_for_builder(global_builder)
+        seen = set()
+        for gcl in global_builder.code:
+            for code in gcl.code_list:
+                if code not in seen:
+                    add_code_part(code, gcl.guard)
+                    seen.add(code)
 
         tensor_check_names = (
             local_builder.tensor_check_names + global_builder.tensor_check_names
