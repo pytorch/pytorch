@@ -56,10 +56,9 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
         ]:
-            # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
-            # -> quantized_decomposed.dequantize_per_channel.default
-            # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
-            # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
+            # For the pattern fp32_weight -> q -> dq
+            # We only folding fp32_weight -> q
+            # int8_weight and leave dq in graph to be fused
             return True
         return False
 

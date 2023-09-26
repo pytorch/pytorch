@@ -166,6 +166,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     float getDuration() const override;
 
+    uint64_t getSequencenumber() const override;
+
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
