@@ -16,7 +16,7 @@ from ..source import (
     GetItemSource,
     GlobalSource,
 )
-from ..utils import make_cell, proxy_args_kwargs
+from ..utils import make_cell
 from .base import typestr, VariableTracker
 
 
@@ -651,7 +651,7 @@ class TritonKernelVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .dicts import ConstDictVariable
-        from .lists import BaseListVariable
+        from .lists import BaseListVariable, TupleVariable
 
         grid = self.grid
 
@@ -676,7 +676,6 @@ class TritonKernelVariable(VariableTracker):
             triton_kernel_wrapper_mutation,
         )
 
-        proxied_args, proxied_kwargs = proxy_args_kwargs(args, kwargs)
         fn = functools.partial(triton_kernel_wrapper_mutation, kernel=self.kernel)
         # FX graph needs __name__ and __module__ attributes
         fn.__name__ = triton_kernel_wrapper_mutation.__name__
@@ -684,8 +683,18 @@ class TritonKernelVariable(VariableTracker):
             # Super hacky but on AMD __module__ is not set
             fn.__module__ = "itertools"
 
+        # Pass args and kwargs as tuple and dict so that if user defined triton
+        # kernel uses variables as 'grid' or 'kernel', it does not conflict with
+        # parameters of the wrapper function
         tx.output.create_proxy(
-            "call_function", fn, proxied_args, {**proxied_kwargs, "grid": grid}
+            "call_function",
+            fn,
+            (),
+            {
+                "grid": grid,
+                "args": TupleVariable(args).as_proxy(),
+                "kwargs": ConstDictVariable(kwargs, dict).as_proxy(),
+            },
         )
 
         return variables.ConstantVariable(
