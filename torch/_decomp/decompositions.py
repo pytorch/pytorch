@@ -4209,6 +4209,12 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     return self + result
 
 
+@register_decomposition(aten.floor_divide)
+@out_wrapper()
+def floor_divide(self, other):
+    return torch.div(self, other, rounding_mode="floor")
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
