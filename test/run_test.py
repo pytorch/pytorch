@@ -649,6 +649,7 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
         try:
             from torch.utils import cpp_extension
+
             cpp_extension.verify_ninja_availability()
         except RuntimeError:
             print_to_stderr(CPP_EXTENSIONS_ERROR)
@@ -1414,7 +1415,9 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
     # Download previous test times to make sharding decisions
     path = os.path.join(str(REPO_ROOT), file)
     if not os.path.exists(path):
-        print_to_stderr("::warning:: Failed to find test times file. Using round robin sharding.")
+        print_to_stderr(
+            "::warning:: Failed to find test times file. Using round robin sharding."
+        )
         return {}
 
     with open(path) as f:
