@@ -249,6 +249,7 @@ class TestORTTensor(common.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
             b = torch.arange(0, 10, device='ort')
 
+    @skipIfTorchDynamo("dynamo cannot model ort device")
     def test_zeros(self):
         a = torch.empty(5, 5, device='cpu')
         self.assertEqual(a.device, torch.device('cpu'))
