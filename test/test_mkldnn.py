@@ -22,13 +22,17 @@ from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
     skipIfTorchDynamo
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    dtypes,
+)
 
 # batched grad doesn't support mkldnn
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
 
-types = [torch.float, torch.bfloat16]
+types = [torch.float, torch.bfloat16, torch.half]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
@@ -39,7 +43,10 @@ class TestMkldnn(TestCase):
                            torch.randn((1, 2, 3, 4, 5),
                                        dtype=torch.float, device=torch.device('cpu'))[:, :, :, :, 1]]:
             cpu_tensor.requires_grad_()
-            # float cpu tensor to mkldnn float tensor or bfloat tensor.
+            convert_dtypes = {torch.half: [torch.half, torch.float],
+                              torch.bfloat16: [torch.bfloat16, torch.float],
+                              torch.float: [torch.bfloat16, torch.half]}
+            # float/bfloat16/half cpu tensor to mkldnn tensortensor.
             for dtype1 in types:
                 mkldnn_tensor = cpu_tensor.to_mkldnn(dtype1)
                 self.assertEqual(mkldnn_tensor.dtype, dtype1)
@@ -47,7 +54,7 @@ class TestMkldnn(TestCase):
                 # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
                 self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
                 # mkldnn float/bfloat tensor to cpu float or bfloat tensor
-                for dtype2 in types:
+                for dtype2 in convert_dtypes[dtype1]:
                     cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
                     self.assertEqual(cpu_tensor_2.dtype, dtype2)
                     atol = 1e-5 if dtype1 == torch.float and dtype2 == torch.float else 1e-2
@@ -65,29 +72,31 @@ class TestMkldnn(TestCase):
                                        lambda: mkldnn_tensor.data_ptr() != 0)
 
             # bfloat cpu tensor to mkldnn float tensor or bfloat tensor.
-            cpu_tensor_bf16 = cpu_tensor.bfloat16()
-            for dtype1 in types:
-                mkldnn_tensor = cpu_tensor_bf16.to_mkldnn(dtype1)
-                self.assertEqual(mkldnn_tensor.dtype, dtype1)
-                cpu_tensor_1 = mkldnn_tensor.to_dense()
-                # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
-                self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
-                # mkldnn float/bfloat tensor to cpu float or bfloat tensor
-                for dtype2 in types:
-                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
-                    self.assertEqual(cpu_tensor_2.dtype, dtype2)
-                    self.assertEqual(cpu_tensor_bf16, cpu_tensor_2.bfloat16(), atol=1e-5, rtol=0)
+            for orig_dtype in [torch.half, torch.bfloat16]:
+                cpu_tensor_lower = cpu_tensor.to(dtype=orig_dtype)
+                for dtype1 in convert_dtypes[orig_dtype]:
+                    mkldnn_tensor = cpu_tensor_lower.to_mkldnn(dtype1)
+                    self.assertEqual(mkldnn_tensor.dtype, dtype1)
+                    cpu_tensor_1 = mkldnn_tensor.to_dense()
+                    # not given dtype for to_dense, mkldnn tensor has same dtype with cpu tensor
+                    self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
+                    # mkldnn float/bfloat/half tensor to cpu float/bfloat/half tensor
+                    for dtype2 in convert_dtypes[cpu_tensor_lower.dtype]:
+                        cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
+                        self.assertEqual(cpu_tensor_2.dtype, dtype2)
+                        self.assertEqual(cpu_tensor_lower,
+                                         cpu_tensor_2.to(dtype=cpu_tensor_lower.dtype), atol=1e-5, rtol=0)
 
-                self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
-                self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
-                self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
-                if dtype1 == torch.bfloat16:
-                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size())
-                else:
-                    self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_bf16.element_size() * 2)
-                self.assertRaisesRegex(RuntimeError,
-                                       "Cannot access data pointer of Tensor that doesn't have storage",
-                                       lambda: mkldnn_tensor.data_ptr() != 0)
+                    self.assertEqual(mkldnn_tensor.device, torch.device('cpu'))
+                    self.assertEqual(mkldnn_tensor.size(), torch.Size([1, 2, 3, 4]))
+                    self.assertEqual(mkldnn_tensor.numel(), cpu_tensor.numel())
+                    if dtype1 in [torch.bfloat16, torch.half]:
+                        self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_lower.element_size())
+                    else:
+                        self.assertEqual(mkldnn_tensor.element_size(), cpu_tensor_lower.element_size() * 2)
+                    self.assertRaisesRegex(RuntimeError,
+                                           "Cannot access data pointer of Tensor that doesn't have storage",
+                                           lambda: mkldnn_tensor.data_ptr() != 0)
 
     def test_conversion_byte_char(self):
         int8_types = [torch.int8, torch.uint8]
@@ -279,25 +288,27 @@ class TestMkldnn(TestCase):
     def test_conv3d(self):
         self._test_conv_base(dim=3)
 
-    def _test_conv_lower_precision_base(self, dim, dtype):
-        conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+    def _test_conv_deconv_lower_precision_base(self, dim, conv_module, dtype):
         input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
         options = itertools.product([True, False], [1, 2], [1, 4])
         for bias, dilation, groups in options:
-            N = torch.randint(3, 10, (1,)).item()
+            N = torch.randint(1, 3, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes[dim]
             x = torch.randn(x_shape, dtype=torch.float32)
-
-            conv = conv_module[dim](in_channels=C,
-                                    out_channels=M,
-                                    kernel_size=3,
-                                    stride=2,
-                                    padding=1,
-                                    dilation=dilation,
-                                    bias=bias,
-                                    groups=groups).float()
+            # TODO: remove this when group depthwise is supported:
+            if conv_module in [torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d,
+                               torch.nn.ConvTranspose3d] and groups > 1 and C == groups:
+                continue
+            conv = conv_module(in_channels=C,
+                               out_channels=M,
+                               kernel_size=3,
+                               stride=2,
+                               padding=1,
+                               dilation=dilation,
+                               bias=bias,
+                               groups=groups).float()
             x_lower = x.to(dtype=dtype)
             if (dtype == torch.bfloat16 and torch.ops.mkldnn._is_mkldnn_bf16_supported()) or \
                (dtype == torch.half and torch.ops.mkldnn._is_mkldnn_fp16_supported()):
@@ -314,18 +325,30 @@ class TestMkldnn(TestCase):
                 with self.assertRaisesRegex(RuntimeError, msg[dtype]):
                     mkldnn_conv_lower = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), dtype)
                     y_lower = mkldnn_conv_lower(x_lower.to_mkldnn()).to_dense(torch.float32)
+            # test thnn impl
+            conv_lower = copy.deepcopy(conv).to(dtype=dtype)
+            conv_ref = copy.deepcopy(conv_lower).float()
+            with torch.backends.mkldnn.flags(enabled=False):
+                x_ref = x_lower.clone().float().detach().requires_grad_()
+                x_lower.requires_grad_()
+                y = conv_ref(x_ref)
+                y_lower = conv_lower(x_lower).float()
+                self.assertEqual(y, y_lower, atol=5e-2, rtol=5e-3)
 
-    def test_conv1d_lower_precision(self):
-        self._test_conv_lower_precision_base(dim=1, dtype=torch.bfloat16)
-        self._test_conv_lower_precision_base(dim=1, dtype=torch.half)
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_conv_deconv_1d_lower_precision(self, dtype):
+        self._test_conv_deconv_lower_precision_base(1, torch.nn.Conv1d, dtype=dtype)
+        self._test_conv_deconv_lower_precision_base(1, torch.nn.ConvTranspose1d, dtype=dtype)
 
-    def test_conv2d_lower_precision(self):
-        self._test_conv_lower_precision_base(dim=2, dtype=torch.bfloat16)
-        self._test_conv_lower_precision_base(dim=2, dtype=torch.half)
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_conv_deconv_2d_lower_precision(self, dtype):
+        self._test_conv_deconv_lower_precision_base(2, torch.nn.Conv2d, dtype=dtype)
+        self._test_conv_deconv_lower_precision_base(2, torch.nn.ConvTranspose2d, dtype=dtype)
 
-    def test_conv3d_lower_precision(self):
-        self._test_conv_lower_precision_base(dim=3, dtype=torch.bfloat16)
-        self._test_conv_lower_precision_base(dim=3, dtype=torch.half)
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_conv_deconv_3d_lower_precision(self, dtype):
+        self._test_conv_deconv_lower_precision_base(3, torch.nn.Conv3d, dtype=dtype)
+        self._test_conv_deconv_lower_precision_base(3, torch.nn.ConvTranspose3d, dtype=dtype)
 
     def _test_conv_deconv_nhwc_base(self, conv_module, weight_memory_format, dtype, prec=None):
         input_shapes = {2: (55, 55), 3: (14, 14, 14)}
@@ -382,25 +405,34 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.float32)
 
-    def test_conv2d_nhwc_lower_precision(self):
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_conv_nhwc_lower_precision(self, dtype):
         # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.half)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.half)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.half)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.half)
-        # test fall back
+        support_checks = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported
+        }
+        if support_checks[dtype]():
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=dtype)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=dtype)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=dtype)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype)
+
+        # BF16/FP16 fallback implementations are divided into two parts im2col+gemm,
+        # and the number of data type conversions in the middle is more than that of onednn's direct conv,
+        # resulting in additional accuracy loss.
+        precisions = {
+            torch.bfloat16: 1e-2,
+            torch.float16: 2e-3,
+        }
+        prec = precisions[dtype]
         with torch.backends.mkldnn.flags(enabled=False):
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-2)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16, prec=1e-2)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-3)
-            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=torch.bfloat16, prec=1e-3)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=dtype, prec=prec)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=dtype, prec=prec)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.contiguous_format, dtype=dtype, prec=prec)
+            self._test_conv_deconv_nhwc_base(torch.nn.Conv3d, torch.channels_last_3d, dtype=dtype, prec=prec)
+
 
     def test_conv_transpose_nhwc_fp32(self):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
@@ -408,25 +440,33 @@ class TestMkldnn(TestCase):
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.float32)
         self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.float32)
 
-    def test_conv_transpose2d_nhwc_lower_precision(self):
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_conv_transpose_nhwc_lower_precision(self, dtype):
         # when torch.ops.mkldnn._is_mkldnn_bf16_supported() or torch.ops.mkldnn._is_mkldnn_fp16_supported()
         # returns false, bf16/fp16 CPU conv will fall back to thnn impl
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.bfloat16)
-        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.half)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.half)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.half)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.half)
-        # test fall back
+        support_checks = {
+            torch.bfloat16: torch.ops.mkldnn._is_mkldnn_bf16_supported,
+            torch.float16: torch.ops.mkldnn._is_mkldnn_fp16_supported
+        }
+        if support_checks[dtype]():
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=dtype)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=dtype)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=dtype)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=dtype)
+
+        # BF16/FP16 fallback implementations are divided into two parts col2im+gemm,
+        # and the number of data type conversions in the middle is more than that of onednn's direct conv,
+        # resulting in additional accuracy loss.
+        precisions = {
+            torch.bfloat16: 2e-2,
+            torch.float16: 3e-3,
+        }
+        prec = precisions[dtype]
         with torch.backends.mkldnn.flags(enabled=False):
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16, prec=2e-2)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16, prec=2e-2)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=torch.bfloat16, prec=1e-3)
-            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=torch.bfloat16, prec=1e-3)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=dtype, prec=prec)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=dtype, prec=prec)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.contiguous_format, dtype=dtype, prec=prec)
+            self._test_conv_deconv_nhwc_base(torch.nn.ConvTranspose3d, torch.channels_last_3d, dtype=dtype, prec=prec)
 
     def _test_conv_transpose_base(self, dim):
         conv_module = {
@@ -1503,6 +1543,8 @@ class TestMkldnn(TestCase):
             y1 = torch.ops.aten.bmm(a1, b)
             y2 = torch.bmm(a2, b)
             self.assertEqual(y1, y2)
+
+instantiate_device_type_tests(TestMkldnn, globals(), only_for=('cpu',))
 
 if __name__ == '__main__':
     run_tests()
