@@ -3629,7 +3629,7 @@ class FallbackKernel(ExternKernelAlloc):
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
-        self.outputs = []
+        self.outputs: Sequence[Any] = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
@@ -3882,7 +3882,11 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        packed.outputs = generate_output(example_output, [])
+        outputs = generate_output(example_output, [])
+        if isinstance(outputs, (list, tuple)):
+            packed.outputs = outputs
+        else:
+            packed.outputs = [outputs]
         return packed.outputs
 
     def apply_constraint(self):
