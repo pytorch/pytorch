@@ -2603,5 +2603,4 @@ class TestHelperModules:
             x = self.conv_bn_relu(x)
             permute_out = torch.permute(x, (0, 2, 3, 1))
             linear_out = self.linear(permute_out)
-            relu_out = self.relu(x)
-            return relu_out
+            return linear_out
