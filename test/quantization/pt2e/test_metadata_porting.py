@@ -16,6 +16,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import OP_TO_ANNOTA
 from torch.fx import Node
 
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import IS_WINDOWS
 
 
 class TestHelperModules:
@@ -58,6 +59,7 @@ _QUANT_OPS = {
 
 
 # TODO: rename to TestPortMetadataPass to align with the util name?
+@unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
 class TestMetaDataPorting(QuantizationTestCase):
     def _test_metadata_porting(
         self,
