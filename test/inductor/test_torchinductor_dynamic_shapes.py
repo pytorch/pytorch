@@ -8,6 +8,8 @@ import unittest
 from functools import partial
 
 import torch
+import torch._custom_ops as custom_ops
+import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -207,7 +209,7 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        import torch._custom_ops as custom_ops
+        lib = torch.library.Library("test", "DEF")
 
         try:
 
@@ -219,7 +221,7 @@ class TestInductorDynamic(TestCase):
             def foo_impl(x: torch.Tensor, y: int) -> torch.Tensor:
                 return x.clone()
 
-            @custom_ops.impl_abstract("test::foo")
+            @torch.library.impl_abstract("test::foo", lib=lib)
             def foo_meta(x: torch.Tensor, y: int) -> torch.Tensor:
                 return x.clone()
 
@@ -229,6 +231,41 @@ class TestInductorDynamic(TestCase):
                 return torch.ops.test.foo(r, y)
 
             f(torch.tensor([3], device=device), torch.randn(10, device=device))
+
+        finally:
+            custom_ops._destroy("test::foo")
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_dynamic_stride_nobreak(self, device):
+        lib = torch.library.Library("test", "DEF")
+
+        try:
+
+            @custom_ops.custom_op("test::foo")
+            def foo(x: torch.Tensor) -> torch.Tensor:
+                raise NotImplementedError()
+
+            @custom_ops.impl("test::foo")
+            def foo_impl(x: torch.Tensor) -> torch.Tensor:
+                stride = x.item()
+                return torch.empty_strided((1,), (stride,), device=x.device)
+
+            @torch.library.impl_abstract("test::foo", lib=lib)
+            def foo_meta(x: torch.Tensor) -> torch.Tensor:
+                ctx = torch.library.get_ctx()
+                stride = ctx.new_dynamic_size()
+                return torch.empty_strided((1,), (stride,), device=x.device)
+
+            @torch.compile(fullgraph=True)
+            def f(x):
+                r = torch.ops.test.foo(x)
+                y = r.stride(0)
+                return torch.empty(y, device=x.device)
+
+            f(torch.tensor([3], device=device))
 
         finally:
             custom_ops._destroy("test::foo")

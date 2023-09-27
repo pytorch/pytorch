@@ -78,11 +78,13 @@ CURRENT_NODE_KEY = "current_node"
 @lru_cache(None)
 def uninteresting_files():
     import torch._inductor.sizevars
+    import torch._library.abstract_impl
     mods = [
         sys.modules[__name__],
         torch.fx.experimental.recording,
         torch,
         torch._inductor.sizevars,
+        torch._library.abstract_impl,
     ]
     return {inspect.getfile(m) for m in mods}
 
@@ -2896,10 +2898,13 @@ class ShapeEnv:
         symbol: sympy.Symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
-        self.var_to_range[symbol] = self._default_unspecified_value_range()
+        vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self.create_fx_placeholder_and_z3var(symbol, int)
+
+        fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
+        log.info("create_unbacked_symbol %s [%s, %s]%s (%s)", symbol, vr.lower, vr.upper, maybe_user_loc, format_frame(fsummary))
 
         return SymInt(SymNode(symbol, self, int, None, fx_node=fx_node))
 
@@ -3913,29 +3918,34 @@ class ShapeEnv:
             log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
 
 
+    def _get_stack_summary(self):
+        fsummary = None
+        frame = inspect.currentframe()
+        try:
+            while frame is not None:
+                if frame.f_code.co_filename not in uninteresting_files():
+                    fsummary = traceback.FrameSummary(
+                        frame.f_code.co_filename,
+                        frame.f_lineno,
+                        frame.f_code.co_name,
+                    )
+                    break
+                frame = frame.f_back
+        finally:
+            del frame
+
+        # NB: this stack is truncated, but it's fine because the main
+        # stack_info will give you the rest of the info you need
+        maybe_user_loc = ""
+        user_tb = TracingContext.extract_stack()
+        if user_tb:
+            maybe_user_loc = " at " + format_frame(user_tb[-1])
+
+        return fsummary, user_tb, maybe_user_loc
+
     def _log_guard(self, prefix: str, g):
         if self.log.isEnabledFor(logging.INFO):
-            fsummary = None
-            frame = inspect.currentframe()
-            try:
-                while frame is not None:
-                    if frame.f_code.co_filename not in uninteresting_files():
-                        fsummary = traceback.FrameSummary(
-                            frame.f_code.co_filename,
-                            frame.f_lineno,
-                            frame.f_code.co_name,
-                        )
-                        break
-                    frame = frame.f_back
-            finally:
-                del frame
-
-            # NB: this stack is truncated, but it's fine because the main
-            # stack_info will give you the rest of the info you need
-            maybe_user_loc = ""
-            user_tb = TracingContext.extract_stack()
-            if user_tb:
-                maybe_user_loc = " at " + format_frame(user_tb[-1])
+            fsummary, user_tb, maybe_user_loc = self._get_stack_summary()
 
             is_debug = self.log.isEnabledFor(logging.DEBUG)
             maybe_extra_debug = ""

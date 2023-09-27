@@ -2391,6 +2391,9 @@ class Buffer(IRNode):
     def get_stride(self):
         return list(self.layout.stride)
 
+    def get_offset(self):
+        return self.layout.offset
+
     def get_layout(self):
         return self.layout
 
@@ -2573,7 +2576,11 @@ class ComputedBuffer(Buffer):
         # unusual reason: we only need accurate dependencies for item() call,
         # but it's impossible to end up with a reduction over i0 from an
         # item() call without a regular non-reduction buffer first.
-        return free_unbacked_symbols(self.get_size())
+        return (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
 
     def make_loader(self):
         # Inline constants and index_expressions
@@ -3123,6 +3130,11 @@ class ExternKernel(InputsKernel):
 
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
+
+        # TODO: Unconditionally do this, not just when example_output has
+        # unbacked symbols
+        if free_unbacked_symbols(example_output):
+            example_output = V.graph.current_node.meta["val"]
 
         return example_output, tensor_args, non_tensor_args, unflatten_args, schema
 
@@ -4011,7 +4023,12 @@ class MultiOutput(ExternKernel):
     def get_unbacked_symbol_defs(self):
         # This kernel defines all unbacked symbols... that it didn't get in as
         # arguments!
-        return free_unbacked_symbols(self.get_size()) - self.get_unbacked_symbol_uses()
+        defs = (
+            free_unbacked_symbols(self.get_size())
+            | free_unbacked_symbols(self.get_stride())
+            | free_unbacked_symbols(self.get_offset())
+        )
+        return defs - self.get_unbacked_symbol_uses()
 
     def codegen(self, wrapper):
         line = wrapper.declare
@@ -4021,13 +4038,18 @@ class MultiOutput(ExternKernel):
         # NB: If it is possible for other ir node types to return unbacked
         # symints, we also have to add this logic there too.  Don't forget to
         # update get_unbacked_symbol_defs too.
-        # TODO: Also handle dynamic stride/offset (no real use case for this
-        # atm)
         symbols_to_define = self.get_unbacked_symbol_defs()
         for i, s in enumerate(self.get_size()):
             if s in symbols_to_define:
                 wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
                 symbols_to_define.remove(s)
+        for i, s in enumerate(self.get_stride()):
+            if s in symbols_to_define:
+                wrapper.writeline(f"{s} = {self.get_name()}.stride({i})")
+                symbols_to_define.remove(s)
+        if (s := self.get_offset()) in symbols_to_define:
+            wrapper.writeline(f"{s} = {self.get_name()}.storage_offset()")
+            symbols_to_define.remove(s)
         assert (
             not symbols_to_define
         ), f"unbacked symint {s} not written out, check comment above"
