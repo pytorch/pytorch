@@ -99,44 +99,48 @@ aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
 
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
-    void** ret, // returns borrowed reference
-    AtenTensorHandle tensor);
+    AtenTensorHandle tensor,
+    void** ret_data_ptr // returns borrowed reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_sizes(
-    int64_t** ret, // returns borrowed reference
-    AtenTensorHandle tensor);
+    AtenTensorHandle tensor,
+    int64_t** ret_size // returns borrowed reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_strides(
-    int64_t** ret, // returns borrowed reference
-    AtenTensorHandle tensor);
+    AtenTensorHandle tensor,
+    int64_t** ret_strides // returns borrowed reference
+);
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__reinterpret_tensor(
-    AtenTensorHandle* ret, // returns new reference
     AtenTensorHandle self,
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
-    int64_t storage_offset);
+    int64_t storage_offset,
+    AtenTensorHandle* ret_new_tensor // returns new reference
+);
 
 // This function will create a new tensor object and its pointer is returned
 // through *out. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
 // when going out of scope.
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_empty_strided(
-    AtenTensorHandle* ret, // returns new reference
     int64_t ndim,
     const int64_t* sizes_ptr,
     const int64_t* strides_ptr,
     int32_t dtype,
     int32_t device_type,
-    int32_t device_index);
+    int32_t device_index,
+    AtenTensorHandle* ret_new_tensor // returns new reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
-    AtenTensorHandle* ret, // returns new reference
     void* data,
     int64_t ndim,
     const int64_t* sizes_ptr,
@@ -144,7 +148,28 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     int64_t storage_offset,
     int32_t dtype,
     int32_t device_type,
-    int32_t device_index);
+    int32_t device_index,
+    AtenTensorHandle* ret // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch__scaled_dot_product_flash_attention(
+    AtenTensorHandle query,
+    AtenTensorHandle key,
+    AtenTensorHandle value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    double scale,
+    AtenTensorHandle* ret0, // returns new reference
+    AtenTensorHandle* ret1, // returns new reference
+    AtenTensorHandle* ret2, // returns new reference
+    AtenTensorHandle* ret3, // returns new reference
+    int64_t* ret4,
+    int64_t* ret5,
+    AtenTensorHandle* ret6, // returns new reference
+    AtenTensorHandle* ret7, // returns new reference
+    AtenTensorHandle* ret8 // returns new reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
@@ -173,9 +198,10 @@ struct CUDAStreamGuardOpaque;
 using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
-    CUDAStreamGuardHandle* ret_guard, // returns new reference
     void* stream,
-    int32_t device_index);
+    int32_t device_index,
+    CUDAStreamGuardHandle* ret_guard // returns new reference
+);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
