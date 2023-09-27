@@ -247,6 +247,9 @@ public:
     return map(std::acos);
   }
   Vectorized<c10::complex<float>> atan() const;
+  Vectorized<c10::complex<float>> atanh() const {
+    return map(std::atanh);
+  }
   Vectorized<c10::complex<float>> atan2(const Vectorized<c10::complex<float>>& /*b*/) const {
     AT_ERROR("not supported for complex numbers");
   }
