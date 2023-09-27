@@ -293,6 +293,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.eye,
             aten.fill,
             aten.fill_,
+            aten.floor_divide,
             aten.frac,
             aten.frac_,
             aten._fused_moving_avg_obs_fq_helper,
