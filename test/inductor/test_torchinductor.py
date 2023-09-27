@@ -2827,6 +2827,7 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
+    @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave_2(self):
         def fn(x):
             return torch.ops.aten.repeat_interleave.Tensor(x, output_size=12)
