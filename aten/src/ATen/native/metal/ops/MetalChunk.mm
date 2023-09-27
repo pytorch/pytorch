@@ -15,7 +15,7 @@ namespace metal {
 
 // Split the input tensor into two on channel dimension
 // TODO: [T87567124] Fully implement chunk in Metal shader
-std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
+static std::vector<Tensor> chunk(const Tensor& input, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks == 2 && dim == 1);
   TORCH_CHECK(input.dim() == 4);
   TORCH_CHECK(input.size(0) == 1);
