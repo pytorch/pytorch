@@ -26,11 +26,6 @@ popd
 python test_custom_ops.py -v
 if ERRORLEVEL 1 exit /b 1
 
-:: TODO: fix and re-enable this test
-:: See https://github.com/pytorch/pytorch/issues/25155
-:: python test_custom_classes.py -v
-:: if ERRORLEVEL 1 exit /b 1
-
 python model.py --export-script-module="build/model.pt"
 if ERRORLEVEL 1 exit /b 1
 

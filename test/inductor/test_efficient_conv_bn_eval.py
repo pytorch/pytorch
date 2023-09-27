@@ -104,6 +104,7 @@ class EfficientConvBNEvalTemplate(TestCase):
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_basic(self):
         def test_conv_bn_eval(test_class, use_bias, module, sync_bn):
+            kwargs = {"kernel_size": 3, "stride": 2} if module[0] != nn.Linear else {}
             mod_eager = test_class(
                 module[0],
                 module[1],
@@ -111,8 +112,7 @@ class EfficientConvBNEvalTemplate(TestCase):
                 3,
                 32,
                 self.device,
-                kernel_size=3,
-                stride=2,
+                **kwargs,
             ).eval()
             # Copy module to test backward
             mod_optimized = copy.deepcopy(mod_eager)
@@ -124,12 +124,17 @@ class EfficientConvBNEvalTemplate(TestCase):
             torch._dynamo.reset()
             mod_optimized = torch.compile(mod_optimized)
 
-            inps = [4, 3, 96]
-            if module[0] == nn.Conv2d:
-                inps.append(inps[-1])
-            if module[0] == nn.Conv3d:
-                inps.append(inps[-1])
-                inps.append(inps[-1])
+            inps = [4, 3]
+            # Conv shape goes from big to small, and ConvTranspose shape goes from small to big
+            spatial_d = (
+                4 if issubclass(module[0], nn.modules.conv._ConvTransposeNd) else 96
+            )
+            if module[0] == nn.Conv1d or module[0] == nn.ConvTranspose1d:
+                inps += [spatial_d] * 1
+            if module[0] == nn.Conv2d or module[0] == nn.ConvTranspose2d:
+                inps += [spatial_d] * 2
+            if module[0] == nn.Conv3d or module[0] == nn.ConvTranspose3d:
+                inps += [spatial_d] * 3
             inp = torch.rand(inps).to(self.device)
 
             original_value = counters["inductor"]["efficient_conv_bn_eval"]
@@ -164,9 +169,13 @@ class EfficientConvBNEvalTemplate(TestCase):
 
         conv_bias = [True, False]
         modules = [
+            (nn.Linear, nn.BatchNorm1d),
             (nn.Conv1d, nn.BatchNorm1d),
             (nn.Conv2d, nn.BatchNorm2d),
             (nn.Conv3d, nn.BatchNorm3d),
+            (nn.ConvTranspose1d, nn.BatchNorm1d),
+            (nn.ConvTranspose2d, nn.BatchNorm2d),
+            (nn.ConvTranspose3d, nn.BatchNorm3d),
         ]
         test_classes = [ConvOp, MultiUserConvOp]
         sync_bns = [False, True]

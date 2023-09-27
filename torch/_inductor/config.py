@@ -202,6 +202,11 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
+# The multiprocessing start method to use for inductor workers in the codecache.
+# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
+# the default to spawn.
+worker_start_method = "fork"
+
 
 def decide_compile_threads():
     """
