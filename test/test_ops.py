@@ -1797,6 +1797,7 @@ class TestRefsOpsInfo(TestCase):
         # duplicated in _decomp and _refs
         '_refs.nn.functional.group_norm',
         '_refs.nn.functional.mse_loss',
+        '_refs.floor_divide',
         '_refs.rsub',
         # duplicated as refs do not have decent support for advanced indexing
         '_refs.index_copy',
@@ -1873,7 +1874,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.tensor_split',
         '_refs.to',
         '_refs.true_divide',
-        '_refs.trunc',
         '_refs.trunc_divide',
         '_refs.vsplit',
         '_refs.vstack',

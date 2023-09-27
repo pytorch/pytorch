@@ -1,5 +1,6 @@
 import contextlib
 import ctypes
+import importlib
 import inspect
 import sys
 import types
@@ -872,6 +873,25 @@ class _Ops(types.ModuleType):
 
     def __iter__(self):
         return iter(self._dir)
+
+    def import_module(self, module):
+        """
+        Imports a Python module that has torch.library registrations.
+
+        Generally, to extend PyTorch with custom operators, a user will
+        create a Python module whose import triggers registration of
+        the custom operators via a torch.ops.load_library call or a call
+        to one or more torch.library.* APIs.
+
+        It is unexpected for Python modules to have side effects, so some
+        linters and formatters will complain. Use this API to import Python
+        modules that contain these torch.library side effects.
+
+        Args:
+            module (str): The name of the Python module to import
+
+        """
+        importlib.import_module(module)
 
     def load_library(self, path):
         """

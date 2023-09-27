@@ -1,6 +1,7 @@
 #include <ATen/core/TensorBase.h>
-#include <ATen/core/TensorBody.h>
 #include <algorithm>
+#include <vector>
+#include <ATen/core/TensorBody.h>
 #include <c10/util/OptionalArrayRef.h>
 
 #ifdef AT_PER_OPERATOR_HEADERS
