@@ -493,5 +493,164 @@
     ],
     "BROKEN_TRUNK": [],
     "UNSTABLE": []
+  },
+  "109584 pytorch": {
+    "FAILED": [
+      {
+        "workflow_id": 6305865216,
+        "id": 17121490206,
+        "name": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-26T00:44:35Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6305865216/job/17121490206",
+        "head_branch": "ciflow/trunk/109584",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "RuntimeError: functorch/test_eager_transforms 1/1 failed"
+        ],
+        "failure_line": "RuntimeError: functorch/test_eager_transforms 1/1 failed! Received signal: SIGIOT",
+        "time": "2023-09-26T00:24:11.012573Z"
+      },
+      {
+        "workflow_id": 6305865216,
+        "id": 17120709688,
+        "name": "win-vs2019-cpu-py3 / test (default, 2, 3, windows.4xlarge.nonephemeral)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-25T23:52:29Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6305865216/job/17120709688",
+        "head_branch": "ciflow/trunk/109584",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "test_tensorboard.py::TestTensorBoardNumpy::test_scalar"
+        ],
+        "failure_line": "FAILED [0.0012s] test_tensorboard.py::TestTensorBoardNumpy::test_scalar - Att...",
+        "time": "2023-09-25T23:45:03.011967Z"
+      }
+    ],
+    "FLAKY": [
+      {
+        "workflow_id": 6239358969,
+        "id": 16942099488,
+        "name": "linux-focal-cuda11.8-py3.10-gcc9 / test (distributed, 1, 3, linux.8xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:18:11Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942099488",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven"
+        ],
+        "failure_line": "FAILED [2.9434s] distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven - RuntimeError: Process 0 exited with error code 10 and exception:",
+        "time": "2023-09-19T21:06:46.334406Z"
+      },
+      {
+        "workflow_id": 6239358969,
+        "id": 16942093819,
+        "name": "linux-jammy-py3.8-gcc11 / test (distributed, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:14:44Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942093819",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": [
+          "distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven"
+        ],
+        "failure_line": "FAILED [3.2397s] distributed/_tensor/test_device_mesh.py::DeviceMeshCollectiveTest::test_reduce_scatter_uneven - RuntimeError: Process 0 exited with error code 10 and exception:",
+        "time": "2023-09-19T21:06:33.334622Z"
+      }
+    ],
+    "BROKEN_TRUNK": [
+      {
+        "workflow_id": 6239358969,
+        "id": 16942102036,
+        "name": "linux-focal-py3.11-clang10 / test (dynamo, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:39:54Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942102036",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": null,
+        "failure_line": null,
+        "time": "2023-09-19T21:06:52.334082Z"
+      },
+      {
+        "workflow_id": 6239358969,
+        "id": 16942095433,
+        "name": "linux-focal-py3.8-clang10 / test (dynamo, 1, 2, linux.2xlarge)",
+        "conclusion": "failure",
+        "completed_at": "2023-09-19T21:39:53Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/6239358969/job/16942095433",
+        "head_branch": "gh/qqaatw/22/head",
+        "pr_number": 109584,
+        "head_sha": "6fdc6213055ccadfccf0930ae9e999ba104a1530",
+        "failure_captures": null,
+        "failure_line": null,
+        "time": "2023-09-19T21:06:37.015307Z"
+      }
+    ],
+    "UNSTABLE": []
+  },
+  "105312 pytorch": {
+    "FAILED": [],
+    "FLAKY": [],
+    "BROKEN_TRUNK": [
+      {
+        "workflow_id": 5573012268,
+        "id": 15091097850,
+        "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench_dynamic, 1, 1, linux.g5.4xlarge.nvidia.gpu)",
+        "conclusion": "failure",
+        "completed_at": "2023-07-17T09:28:11Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5573012268/jobs/10180897824",
+        "head_branch": "ciflow/inductor/105312",
+        "pr_number": 105312,
+        "head_sha": "63e7ebc3f22e0016f2c8dfdf2b43b4ff8d82cab7",
+        "failure_captures": [
+          "",
+          "fail_accuracy"
+        ],
+        "failure_line": "fail_accuracy",
+        "time": "2023-07-17T08:38:06.490291Z"
+      }
+    ],
+    "UNSTABLE": [
+      {
+        "workflow_id": 5573012268,
+        "id": 15091097115,
+        "name": "cuda11.8-py3.10-gcc7-sm86 / test (inductor_torchbench, 1, 1, linux.g5.4xlarge.nvidia.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-07-17T09:44:33Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5573012268/jobs/10180897283",
+        "head_branch": "ciflow/inductor/105312",
+        "pr_number": 105312,
+        "head_sha": "63e7ebc3f22e0016f2c8dfdf2b43b4ff8d82cab7",
+        "failure_captures": [
+          "",
+          "fail_to_run"
+        ],
+        "failure_line": "fail_to_run",
+        "time": "2023-07-17T08:38:03.597806Z"
+      },
+      {
+        "workflow_id": 5573011165,
+        "id": 15090345245,
+        "name": "linux-focal-rocm5.6-py3.8 / test (default, 3, 3, linux.rocm.gpu, unstable)",
+        "conclusion": "failure",
+        "completed_at": "2023-07-17T09:56:51Z",
+        "html_url": "https://github.com/pytorch/pytorch/actions/runs/5573011165/jobs/10180312467",
+        "head_branch": "ciflow/trunk/105312",
+        "pr_number": 105312,
+        "head_sha": "63e7ebc3f22e0016f2c8dfdf2b43b4ff8d82cab7",
+        "failure_captures": [
+          "test_nn.py::TestNNDeviceTypeCUDA::test_cross_entropy_large_tensor_reduction_none_cuda"
+        ],
+        "failure_line": "FAILED [0.8205s] test_nn.py::TestNNDeviceTypeCUDA::test_cross_entropy_large_tensor_reduction_none_cuda - torch.cuda.OutOfMemoryError: HIP out of memory. Tried to allocate 16.00 GiB. GPU 0 has a total capacty of 31.98 GiB of which 131062.24 GiB is free. Of the allocated memory 16.00 GiB is allocated by PyTorch, and 3.25 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_HIP_ALLOC_CONF",
+        "time": "2023-07-17T08:10:21.226444Z"
+      }
+    ]
   }
 }
