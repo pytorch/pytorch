@@ -91,6 +91,31 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
     }
 
+    def _quantize(self, m, quantizer, example_inputs):
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+        return m
+
+    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=is_per_channel)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        return self._quantize(m, quantizer, example_inputs)
 
     def _test_quantizer(
         self,
@@ -118,7 +143,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         pt2_quant_output = m(*example_inputs)
         node_occurrence = {
@@ -209,7 +234,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
         }
         node_list = [
@@ -277,18 +302,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = torch.nn.Conv2d(2, 2, 1)
         x = torch.rand(1, 2, 14, 14)
         example_inputs = (x,)
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         # Ensure the conv has no observer inserted at output
         node_occurrence = {
             # two for input of conv
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 1,
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
         }
         node_list = [
@@ -369,19 +387,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvMaxPool2d()
         x = torch.rand(1, 2, 14, 14)
         example_inputs = (x,)
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         node_occurrence = {
             # two for input of conv
             # one for input of maxpool
             # one for output of maxpool
-            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 4,
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 3,
             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 4,
         }
         node_list = [
@@ -469,19 +480,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=False, bn=False).eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         node_occurrence = {
             # input, weight, bias, output for the conv
+            # note: quantize op for weight and bias are const propagated
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 4,
+            ): 2,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 4,
@@ -575,15 +580,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = TestHelperModules.ConvWithBNRelu(relu=False, bn=False).eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
-        m(*example_inputs)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
 
         node_occurrence = {
             # input, output for the conv
@@ -594,9 +591,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 2,
             # weight and bias for conv
+            # note: quantize op for weight and bias are const propagated
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_channel.default
-            ): 2,
+            ): 0,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_channel.default
             ): 2,
@@ -653,14 +651,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        # program capture
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, BackendAQuantizer())
-        m(*example_inputs)
-        m = convert_pt2e(m)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs)
         fixed_scale = 1.0 / 256.0
         fixed_zero_point = 0
         for n in m.graph.nodes:
@@ -805,13 +796,13 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         assert conv_output_obs[0] == conv_output_obs[1]
 
         m(*example_inputs)
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
 
         node_occurrence = {
             # two for input of the first conv, one for output for the first conv
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
-            ): 7,
+            ): 5,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 7,
@@ -873,8 +864,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         quantizer = Int16ActQuantizer()
         node_occurrence = {
-            # two for input of the first conv, one for output for the first conv
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+            # one for input of the first conv, one for output for the first conv
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
         }
         node_list = [
@@ -891,6 +882,127 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
+
+    def test_fold_quantize(self):
+        """Test to make sure the quantized model gets quantized weight (quantize_per_tensor op is folded)
+        """
+        m = self._get_pt2e_quantized_linear()
+        node_occurrence = {
+            # quantize op for weight node is folded
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 3,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_fold_quantize_per_channel(self):
+        """Test to make sure the quantized model gets quantized weight (quantize_per_channel op is folded)
+        """
+        m = self._get_pt2e_quantized_linear(is_per_channel=True)
+        node_occurrence = {
+            # quantize op for weight node is folded
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel.default): 1,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 2,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_dont_fold_other_constant(self):
+        """Make sure the constant propagation does not apply to things unrelated to
+        quantization
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+                self.dont_fold_me = torch.nn.Parameter(torch.randn(2, 2))
+
+            def forward(self, x):
+                t = self.dont_fold_me.t()
+                return self.linear(x) + t
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False)
+        # only quantize linear, so add is not quantized and the constant Tensor
+        # should not be folded
+        quantizer.set_module_type(torch.nn.Linear, operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = self._quantize(m, quantizer, example_inputs)
+        node_occurrence = {
+            # quantize op for weight node is folded
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 3,
+            # transpose op not folded
+            ns.call_function(torch.ops.aten.t.default): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_fold_all_ops_before_quantize(self):
+        """Test folding all ops that's before quantized operator:
+        Before:
+            get_attr(weight) -> transpose -> quantize -> dequantize
+        After:
+            get_attr(folded_weight) -> dequantize
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(2, 2)
+
+            def forward(self, x):
+                t = self.weight.t()
+                return torch.nn.functional.linear(x, t)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config(is_per_channel=False)
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = self._quantize(m, quantizer, example_inputs)
+        node_occurrence = {
+            # quantize op for weight node is folded
+            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 2,
+            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 3,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
+    def test_constant_prop_preserve_metadata(self):
+        """Test to make sure the get_attr node for const propagated weight Tensor gets the correct
+        metadata (from original get_attr node from weight)
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        quantizer = XNNPACKQuantizer()
+        operator_config = get_symmetric_quantization_config()
+        quantizer.set_global(operator_config)
+        example_inputs = (torch.randn(2, 2),)
+        m = M().eval()
+        m = capture_pre_autograd_graph(
+            m,
+            example_inputs,
+        )
+        weight_meta = None
+        for n in m.graph.nodes:
+            if n.op == "get_attr" and list(n.users)[0].target == torch.ops.aten.linear.default:
+                weight_meta = n.meta
+                break
+        assert weight_meta is not None, "Expect to find metadata for weight node"
+
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m, fold_quantize=True)
+
+        for n in m.graph.nodes:
+            if n.op == "get_attr" and "frozen_param" in n.target:
+                self.assertIn("stack_trace", n.meta)
+                for key in n.meta:
+                    self.assertEqual(n.meta[key], weight_meta[key])
 
     def test_add_and_inplace_add(self):
         quantizer = XNNPACKQuantizer()
@@ -922,27 +1034,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_save_load(self):
         """Test save/load a quantized model
         """
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(is_per_channel=False)
-        quantizer.set_global(operator_config)
+        m = self._get_pt2e_quantized_linear()
         example_inputs = (torch.randn(2, 2),)
-        m = M().eval()
-        m = capture_pre_autograd_graph(
-            m,
-            example_inputs,
-        )
-        m = prepare_pt2e(m, quantizer)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m)
         ref_res = m(*example_inputs)
 
         with TemporaryFileName() as fname:
@@ -991,7 +1084,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
@@ -1021,7 +1115,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
@@ -1045,7 +1140,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
         }
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
@@ -1072,7 +1168,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
         }
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
@@ -1099,7 +1196,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         qconfig = default_per_channel_symmetric_qnnpack_qconfig
@@ -1125,7 +1223,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 5,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            # quantize_per_channel for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
@@ -1252,7 +1351,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertEqual(
             id(m.activation_post_process_3), id(m.activation_post_process_4)
         )
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         node_occurrence = {
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             ns.call_function(
@@ -1261,9 +1360,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ): 5,
+            # note: quantize op for weights are const propagated
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_channel.default
-            ): 2,
+            ): 0,
             ns.call_function(
                 torch.ops.quantized_decomposed.dequantize_per_channel.default
             ): 2,
@@ -1282,7 +1382,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 2,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 2,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 2,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 2,
         }
         act_affine_quant_obs = observer.PlaceholderObserver.with_args(
@@ -1324,7 +1425,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             # input and output are using quantize_per_tensor and weight is using quantize_per_channel
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
         }
         act_affine_quant_obs = observer.PlaceholderObserver.with_args(
@@ -1372,9 +1474,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         node_occurrence = {
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-            torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         act_affine_quant_obs = observer.PlaceholderObserver.with_args(
@@ -1473,11 +1577,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         quantizer = EmbeddingQuantizer()
         node_occurrence = {
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 1,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
         }
         node_list = [
-            torch.ops.quantized_decomposed.quantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.aten.embedding.default,
         ]
@@ -1577,7 +1681,8 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 4,
             torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 1,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 1,
-            torch.ops.quantized_decomposed.quantize_per_channel.default: 3,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
         }
         self._test_quantizer(
@@ -1644,7 +1749,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m.train()
 
         # After convert: still not OK
-        m = convert_pt2e(m)
+        m = convert_pt2e(m, fold_quantize=True)
         with self.assertRaises(NotImplementedError):
             m.eval()
         with self.assertRaises(NotImplementedError):
@@ -1705,7 +1810,7 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
+            model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
 
@@ -1767,7 +1872,7 @@ class TestQuantizePT2EOps(QuantizationTestCase):
             quantizer.set_global(quantization_config)
             model_graph = prepare_pt2e(model_graph, quantizer)
             model_graph(*example_inputs)
-            model_graph = convert_pt2e(model_graph)
+            model_graph = convert_pt2e(model_graph, fold_quantize=True)
             self.assertEqual(model_fx(*example_inputs), model_graph(*example_inputs))
 
 
@@ -1798,7 +1903,7 @@ class TestQuantizePT2EModels(PT2EQuantizationTestCase):
                 id(m.activation_post_process_3), id(m.activation_post_process_2)
             )
             after_prepare_result = m(*example_inputs)
-            m = convert_pt2e(m)
+            m = convert_pt2e(m, fold_quantize=True)
 
             after_quant_result = m(*example_inputs)
 

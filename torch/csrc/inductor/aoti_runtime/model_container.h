@@ -9,8 +9,8 @@
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
-// applies to other files under torch/csrc/inductor/aot_runtime/.
-#include <torch/csrc/inductor/aot_runtime/model.h>
+// applies to other files under torch/csrc/inductor/aoti_runtime/.
+#include <torch/csrc/inductor/aoti_runtime/model.h>
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
@@ -138,8 +138,9 @@ class AOTInductorModelContainer {
       }
 
       AtenTensorHandle tensor_handle;
+      int device_idx; // should be the same as was used for constant_blob_
+      AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx));
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
-          &tensor_handle,
           internal_ptr,
           ndim,
           size,
@@ -147,32 +148,31 @@ class AOTInductorModelContainer {
           offset,
           dtype,
           device_type,
-          0 // device index, should read it from cudaStream_t?
-          ));
+          device_idx,
+          &tensor_handle));
       constants_->emplace(
           std::move(name), std::move(RAIIAtenTensorHandle(tensor_handle)));
     }
   }
 
   void run(
-      std::vector<RAIIAtenTensorHandle>& inputs,
-      std::vector<RAIIAtenTensorHandle>& outputs,
-      std::vector<std::vector<int64_t>>** output_shapes,
+      AtenTensorHandle*
+          input_handles, // array of input AtenTensorHandle; handles
+                         // are stolen; the array itself is borrowed
+      AtenTensorHandle*
+          output_handles, // array for writing output AtenTensorHandle; handles
+                          // will be stolen by the caller; the array itself is
+                          // borrowed
       cudaStream_t stream,
       AOTIProxyExecutorHandle proxy_executor) {
     auto* model = get_available_model();
     try {
-      model->run(inputs, outputs, stream, proxy_executor);
+      model->run(input_handles, output_handles, stream, proxy_executor);
     } catch (...) {
       std::lock_guard lk(models_mutex_);
       available_models_.push_back(model);
       throw;
     }
-
-    for (size_t i = 0; i < num_outputs(); i++) {
-      output_shapes_[i] = model->output_shape(i);
-    }
-    *output_shapes = &output_shapes_;
 
     {
       std::lock_guard lk(models_mutex_);

@@ -6,7 +6,7 @@
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
-// applies to other files under torch/csrc/inductor/aot_runtime/.
+// applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #ifdef __GNUC__
@@ -53,16 +53,16 @@ AOTIRuntimeError AOTInductorModelContainerDelete(
 // Runs the inference.
 AOTIRuntimeError AOTInductorModelContainerRun(
     AOTInductorModelContainerHandle container_handle,
-    // Array of raw AtenTensorHandle for input tensors. Handles will be stolen
-    AtenTensorHandle* input_handles,
+    AtenTensorHandle* input_handles, // array of input AtenTensorHandle; handles
+                                     // are stolen; the array itself is borrowed
     size_t num_inputs,
-    // Array of raw AtenTensorHandle for output tensors. Handles will be stolen
-    AtenTensorHandle* output_handles,
+    AtenTensorHandle*
+        output_handles, // array for writing output AtenTensorHandle; handles
+                        // will be stolen by the caller; the array itself is
+                        // borrowed
     size_t num_outputs,
     AOTInductorStreamHandle stream_handle,
-    AOTIProxyExecutorHandle proxy_executor_handle,
-    const int64_t** ret_output_sizes,
-    int64_t* ret_output_ndims);
+    AOTIProxyExecutorHandle proxy_executor_handle);
 
 // Retrieves the number of inputs for the model.
 AOTIRuntimeError AOTInductorModelContainerGetNumInputs(
