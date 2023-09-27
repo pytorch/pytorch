@@ -12,7 +12,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
+static Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
@@ -29,7 +29,7 @@ Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   return input;
 }
 
-Tensor hardtanh(
+static Tensor hardtanh(
     const Tensor& input,
     const Scalar& min_val,
     const Scalar& max_val) {
@@ -52,7 +52,7 @@ Tensor hardtanh(
   return output;
 }
 
-at::Tensor clamp(
+static at::Tensor clamp(
     const at::Tensor& input,
     const c10::optional<at::Scalar>& min,
     const c10::optional<at::Scalar>& max) {

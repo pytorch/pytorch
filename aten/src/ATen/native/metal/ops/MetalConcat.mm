@@ -16,7 +16,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-Tensor cat_batch(const Tensor& tensor, const ITensorListRef& tensors, MetalTensorImplStorage& mt) {
+static Tensor cat_batch(const Tensor& tensor, const ITensorListRef& tensors, MetalTensorImplStorage& mt) {
   MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort cat_dim4_pointer = 0;
@@ -53,7 +53,7 @@ Tensor cat_batch(const Tensor& tensor, const ITensorListRef& tensors, MetalTenso
   return output;
 }
 
-Tensor cat_feature(const Tensor& tensor, const ITensorListRef& tensors, MetalTensorImplStorage& mt) {
+static Tensor cat_feature(const Tensor& tensor, const ITensorListRef& tensors, MetalTensorImplStorage& mt) {
   MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort channel_offset = 0;
@@ -162,7 +162,7 @@ Tensor cat_feature(const Tensor& tensor, const ITensorListRef& tensors, MetalTen
   return output;
 }
 
-Tensor cat(const ITensorListRef& tensors, int64_t dim) {
+static Tensor cat(const ITensorListRef& tensors, int64_t dim) {
   TORCH_CHECK(
       dim == 0 || dim == 1,
       "Metal cat is implemented only for batch dimension");
