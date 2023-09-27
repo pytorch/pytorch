@@ -3631,7 +3631,15 @@ class FallbackKernel(ExternKernelAlloc):
         self.op_overload = kernel
 
         # TODO: Need to revisit schema matching to find the correct OpOverload
-        assert isinstance(kernel, (torch._ops.OpOverload, torch._ops.OpOverloadPacket))
+        assert isinstance(
+            kernel,
+            (
+                torch._ops.OpOverload,
+                torch._ops.OpOverloadPacket,
+                torch._ops.HigherOrderOperator,
+            ),
+        ), f"Fails to create FallbackKernel for {kernel}: {type(kernel)} not supported"
+
         if kernel.__module__ == "torch._ops.aten":
             op_base_name = (
                 kernel.__name__.split(".")[0]
