@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime
-from typing import Any, cast, Dict, List, NamedTuple, Optional, Union
+from typing import Any, cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import pkg_resources
 
@@ -40,10 +40,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # using tools/ to optimize test run.
 sys.path.insert(0, str(REPO_ROOT))
 from tools.stats.export_test_times import TEST_TIMES_FILE
-from tools.stats.upload_metrics import emit_metric
+from tools.stats.upload_metrics import add_global_metric, emit_metric
 from tools.testing.target_determination.determinator import (
+    AggregatedHeuristics,
     get_test_prioritizations,
-    TestPrioritizations,
 )
 from tools.testing.test_selections import (
     calculate_shards,
@@ -171,7 +171,6 @@ TESTS = discover_tests(
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
-        "_nvfuser",  # executed by test_jit_cuda_fuser.py, test_nvfuser_dynamo.py, and test_nvfuser_frontend.py
     ],
     blocklisted_tests=[
         "test_bundled_images",
@@ -322,7 +321,6 @@ CI_SERIAL_LIST = [
     "test_reductions",
     "test_cuda",
     "test_cuda_expandable_segments",
-    "test_jit_cuda_fuser",  # OOM on test_issue_1785, also profiling?
     "test_indexing",
     "test_fx_backends",
     "test_linalg",
@@ -343,7 +341,6 @@ CI_SERIAL_LIST = [
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
     "test_serialization",  # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
-    "_nvfuser/test_torchscript",  # OOM on test_issue_1785
     "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
@@ -353,6 +350,7 @@ CI_SERIAL_LIST = [
     "test_autocast",  # OOM
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
+    "inductor/test_max_autotune",  # Testing, probably revert later
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -603,8 +601,13 @@ def run_test(
         and not RERUN_DISABLED_TESTS
         and not options.continue_through_error
     )
+    is_slow = "slow" in os.environ.get("TEST_CONFIG", "") or "slow" in os.environ.get(
+        "BUILD_ENVRIONMENT", ""
+    )
     timeout = (
-        THRESHOLD * 3
+        THRESHOLD * 6
+        if is_slow
+        else THRESHOLD * 3
         if should_file_rerun
         and isinstance(test_module, ShardedTest)
         and test_module.time is not None
@@ -1289,7 +1292,7 @@ def can_run_in_pytest(test):
     return os.getenv("PYTORCH_TEST_DO_NOT_USE_PYTEST", "0") == "0"
 
 
-def get_selected_tests(options) -> List[ShardedTest]:
+def get_selected_tests(options) -> List[str]:
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -1435,12 +1438,7 @@ def download_test_times(file: str = TEST_TIMES_FILE) -> Dict[str, float]:
         return test_times_file["default"]["default"]
 
 
-def do_sharding(
-    options,
-    selected_tests: List[str],
-    test_file_times: Dict[str, float],
-    sort_by_time: bool = True,
-) -> List[ShardedTest]:
+def get_sharding_opts(options) -> Tuple[int, int]:
     which_shard, num_shards = 1, 1
     if options.shard:
         assert len(options.shard) == 2, "Unexpected shard format"
@@ -1449,6 +1447,17 @@ def do_sharding(
         assert (
             which_shard <= num_shards
         ), "Selected shard must be less than or equal to total number of shards"
+
+    return (which_shard, num_shards)
+
+
+def do_sharding(
+    options,
+    selected_tests: List[str],
+    test_file_times: Dict[str, float],
+    sort_by_time: bool = True,
+) -> List[ShardedTest]:
+    which_shard, num_shards = get_sharding_opts(options)
 
     # Do sharding
     shards = calculate_shards(
@@ -1474,11 +1483,11 @@ def run_test_module(
 ) -> Optional[TestFailure]:
     maybe_set_hip_visible_devies()
 
+    test_name = test.name if isinstance(test, ShardedTest) else test
+
     # Printing the date here can help diagnose which tests are slow
     print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
-    handler = CUSTOM_HANDLERS.get(
-        test.name if isinstance(test, ShardedTest) else test, run_test
-    )
+    handler = CUSTOM_HANDLERS.get(test_name, run_test)
     return_code = handler(test, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
@@ -1492,7 +1501,7 @@ def run_test_module(
         # return code -N, where N is the signal number.
         signal_name = SIGNALS_TO_NAMES_DICT[-return_code]
         message += f" Received signal: {signal_name}"
-    return TestFailure(test, message)
+    return TestFailure(test_name, message)
 
 
 def run_tests(
@@ -1613,25 +1622,33 @@ def main():
 
     options = parse_args()
 
+    # Include sharding info in all metrics
+    which_shard, num_shards = get_sharding_opts(options)
+    add_global_metric("shard", which_shard)
+    add_global_metric("num_shards", num_shards)
+
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    test_prioritization: TestPrioritizations = TestPrioritizations(
-        tests_being_ranked=selected_tests
+    aggregated_heuristics: AggregatedHeuristics = AggregatedHeuristics(
+        unranked_tests=selected_tests
     )
     metrics_dict = {}
     if IS_CI:
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
-        test_prioritization = get_test_prioritizations(selected_tests)
+        aggregated_heuristics = get_test_prioritizations(selected_tests)
 
+    test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
+
+    if IS_CI:
         metrics_dict = {
-            "high_relevance_tests": test_prioritization.get_high_relevance_tests(),
-            "probable_relevance_tests": test_prioritization.get_probable_relevance_tests(),
-            "unranked_relevance_tests": test_prioritization.get_unranked_relevance_tests(),
+            "high_relevance_tests": test_prioritizations.get_high_relevance_tests(),
+            "probable_relevance_tests": test_prioritizations.get_probable_relevance_tests(),
+            "unranked_relevance_tests": test_prioritizations.get_unranked_relevance_tests(),
             "cpp": options.cpp,
         }
 
@@ -1649,25 +1666,40 @@ def main():
                 options, raw_tests, test_times_dict, sort_by_time=should_sort_shard
             )
 
+        def __str__(self):
+            s = f"Name: {self.name}\n"
+            s += "  Parallel tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if not must_serial(test)
+            )
+            s += "  Serial tests:\n"
+            s += "".join(
+                f"    {test}\n" for test in self.sharded_tests if must_serial(test)
+            )
+            return s.strip()
+
     test_times_dict = download_test_times(TEST_TIMES_FILE)
     test_batches: List[TestBatch] = []
 
     # Each batch will be run sequentially
     test_batches = [
         TestBatch(
-            "high_relevance", test_prioritization.get_high_relevance_tests(), False
+            "high_relevance", test_prioritizations.get_high_relevance_tests(), False
         ),
         TestBatch(
             "probable_relevance",
-            test_prioritization.get_probable_relevance_tests(),
+            test_prioritizations.get_probable_relevance_tests(),
             False,
         ),
         TestBatch(
             "unranked_relevance",
-            test_prioritization.get_unranked_relevance_tests(),
+            test_prioritizations.get_unranked_relevance_tests(),
             True,
         ),
     ]
+
+    for test_batch in test_batches:
+        print(test_batch)
 
     if options.dry_run:
         return
@@ -1686,8 +1718,14 @@ def main():
         # Actually run the tests
         start_time = time.time()
         for test_batch in test_batches:
-            print(f"Starting test batch '{test_batch.name}'")
-            metrics_dict[f"{test_batch.name}_start_time"] = time.time() - start_time
+            elapsed_time = time.time() - start_time
+            print(
+                f"Starting test batch '{test_batch.name}' {elapsed_time} seconds after initiating testing"
+            )
+            print(
+                f"With sharding, this batch will run {len(test_batch.sharded_tests)} tests"
+            )
+            metrics_dict[f"{test_batch.name}_start_time"] = elapsed_time
             run_tests(
                 test_batch.sharded_tests, test_directory, options, test_batch.failures
             )
@@ -1708,12 +1746,20 @@ def main():
                 if not PYTORCH_COLLECT_COVERAGE:
                     cov.html_report()
 
+        all_failures = [failure for batch in test_batches for failure in batch.failures]
+
         if IS_CI:
             emit_metric("td_experiment_1", metrics_dict)
 
-    all_failures = [failure for batch in test_batches for failure in batch.failures]
+            num_tests = len(selected_tests)
+            for test, _ in all_failures:
+                test_stats = aggregated_heuristics.get_test_stats(test)
+                test_stats["num_total_tests"] = num_tests
 
-    if len(all_failures) != 0:
+                print("Emiting td_test_failure_stats")
+                emit_metric("td_test_failure_stats", test_stats)
+
+    if len(all_failures):
         for _, err in all_failures:
             print_to_stderr(err)
 

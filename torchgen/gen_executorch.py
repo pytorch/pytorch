@@ -234,6 +234,7 @@ Kernel(
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
+        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
         {ret_prefix}{kernel_call}(context, {args_str});
 
