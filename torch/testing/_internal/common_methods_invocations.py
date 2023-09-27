@@ -13691,8 +13691,7 @@ op_db: List[OpInfo] = [
         op=lambda *args, **kwargs:
                wrapper_set_seed(torch.nn.functional.scaled_dot_product_attention, *args, **kwargs),
         sample_inputs_func=sample_inputs_scaled_dot_product_attention,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
@@ -17976,8 +17975,7 @@ op_db: List[OpInfo] = [
         "nn.functional.multi_head_attention_forward",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.multi_head_attention_forward, input, *args, **kwargs),
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
             # Tensor-likes are not close

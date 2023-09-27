@@ -161,9 +161,6 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementatio
 }
 
 if IS_MACOS and IS_X86:
@@ -200,6 +197,9 @@ if TEST_WITH_ROCM:
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "bernoulli": {f16, f32, f64},
     "cauchy": {f16},
