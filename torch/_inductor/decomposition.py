@@ -118,13 +118,6 @@ def full(size, fill_value, **kwargs):
     return NotImplemented
 
 
-# TorchInductor-only decomposition. It should not be taken to core.
-# See https://github.com/pytorch/torchdynamo/pull/1120
-@register_decomposition([aten.floor_divide.default])
-def floordiv(a, b):
-    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
-
-
 # Not really sure how to put this into the main library.  PrimTorch wants
 # empty_permuted to go to the prim, and typically users don't really want
 # to decompose to empty_strided (but inductor is OK with it, because we are
