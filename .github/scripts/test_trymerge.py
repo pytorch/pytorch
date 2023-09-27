@@ -865,10 +865,11 @@ class TestGitHubPRGhstackDependencies2(TestCase):
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)
-        self.assertEqual(msg,
+        self.assertEqual(
+            msg,
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
             "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
-            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
+            "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n",
         )
 
     def test_pr_dependencies_ghstack(self, *args: Any) -> None:
@@ -878,11 +879,12 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 106068)
 
         msg = pr.gen_commit_message(filter_ghstack=True, ghstack_deps=[pr0, pr1, pr2])
-        self.assertEqual(msg,
+        self.assertEqual(
+            msg,
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
             "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
             "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
-            "ghstack dependencies: #106032, #106033, #106034\n"
+            "ghstack dependencies: #106032, #106033, #106034\n",
         )
 
     @skip(
