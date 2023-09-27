@@ -207,14 +207,14 @@ same_two_models_use_fp64 = True
 # Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
-capture_scalar_outputs = False
+capture_scalar_outputs = True
 
 # Not all backends support operators that have dynamic output shape (e.g.,
 # nonzero, unique).  When this flag is set to False, we introduce a graph
 # break instead of capturing.  This requires dynamic_shapes to be True.
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
-capture_dynamic_output_shape_ops = False
+capture_dynamic_output_shape_ops = True
 
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
