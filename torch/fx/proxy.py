@@ -1,3 +1,4 @@
+import enum
 import dis
 import copy
 import sys
@@ -286,7 +287,7 @@ class TracerBase:
             kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
             return self.create_node("call_function", a.__class__, (), kwargs)
 
-        elif isinstance(a, base_types) or a is None or a is ...:
+        elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
 

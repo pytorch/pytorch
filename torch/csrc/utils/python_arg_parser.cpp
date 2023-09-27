@@ -50,6 +50,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Dimname", ParameterType::DIMNAME},
     {"DimnameList", ParameterType::DIMNAME_LIST},
     {"ScalarList", ParameterType::SCALAR_LIST},
+    {"DispatchKeySet", ParameterType::DISPATCH_KEY_SET},
 };
 
 // Default arg name translations for compatibility with NumPy.
@@ -989,6 +990,8 @@ auto FunctionParameter::check(
       return is_int_or_symint(obj);
     case ParameterType::SYM_INT_LIST:
       return is_int_or_symint_list(obj, size, failed_idx);
+    case ParameterType::DISPATCH_KEY_SET:
+      return py::isinstance<c10::DispatchKeySet>(py::handle(obj));
     default:
       throw std::runtime_error("unknown parameter type");
   }
@@ -1044,6 +1047,8 @@ std::string FunctionParameter::type_name() const {
       return "tuple of Scalars";
     case ParameterType::SYM_INT_LIST:
       return "tuple of ints";
+    case ParameterType::DISPATCH_KEY_SET:
+      return "DispatchKeySet";
     default:
       throw std::runtime_error("unknown parameter type");
   }
@@ -1165,7 +1170,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
   if (str == "None") {
     allow_none = true;
   }
-  if (type_ == ParameterType::TENSOR) {
+  if (type_ == ParameterType::TENSOR ||
+      type_ == ParameterType::DISPATCH_KEY_SET) {
     if (str != "None") {
       throw std::runtime_error(
           "default value for Tensor must be none, got: " + str);
