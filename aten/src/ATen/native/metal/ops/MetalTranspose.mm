@@ -24,7 +24,7 @@ id<MTLBuffer> _makeMTLBuffer(const std::vector<T>& src) {
     return buffer;
 }
 
-Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
+static Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   TORCH_CHECK(input.is_metal());
   auto ndims = input.dim();
   // Support maximum eight channels on mobile
@@ -87,7 +87,7 @@ Tensor transpose(const Tensor& input, int64_t dim0, int64_t dim1) {
   }
 }
 
-Tensor t(const Tensor& input) {
+static Tensor t(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   TORCH_CHECK(input.dim() == 2);
   return metal::transpose(input, 0, input.dim() < 2 ? 0 : 1);
