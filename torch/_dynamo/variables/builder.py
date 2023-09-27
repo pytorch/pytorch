@@ -820,7 +820,7 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
-        result = BaseListVariable.cls_for(type(value))(
+        result = BaseListVariable.cls_for_instance(value)(
             output, mutable_local=MutableLocal(), guards=guards
         )
         if istype(value, list):

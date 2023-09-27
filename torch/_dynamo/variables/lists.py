@@ -13,7 +13,13 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import make_dupe_guard
 from ..source import GetItemSource
-from ..utils import get_fake_value, guard_if_dyn, namedtuple_fields, odict_values
+from ..utils import (
+    get_fake_value,
+    guard_if_dyn,
+    is_namedtuple,
+    namedtuple_fields,
+    odict_values,
+)
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
@@ -43,6 +49,12 @@ def _listlike_contains_helper(items, search, tx, options):
 
 
 class BaseListVariable(VariableTracker):
+    @staticmethod
+    def cls_for_instance(obj):
+        if is_namedtuple(obj):
+            return functools.partial(NamedTupleVariable, tuple_cls=type(obj))
+        return BaseListVariable.cls_for(type(obj))
+
     @staticmethod
     def cls_for(obj):
         return {
