@@ -1,6 +1,8 @@
 #include <ATen/cpu/FlushDenormal.h>
 #include <ATen/cpu/vec/intrinsics.h>
+#if !defined(__s390x__)
 #include <cpuinfo.h>
+#endif
 
 namespace at { namespace cpu {
 
