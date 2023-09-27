@@ -7,6 +7,7 @@
 # GraphQL queries in trymerge.py, please make sure to delete `gql_mocks.json`
 # And re-run the test locally with ones PAT
 
+import gzip
 import json
 import os
 import warnings
@@ -39,6 +40,10 @@ from trymerge import (
 
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
+
+GQL_MOCKS = "gql_mocks.json"
+ROCKSET_MOCKS = "rockset_mocks.json"
+DRCI_MOCKS = "drci_mocks.json"
 
 
 def mock_query(
@@ -102,13 +107,13 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
         return gh_graphql(query, **kwargs)
 
-    return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
+    return mock_query(gh_graphql_wrapper, GQL_MOCKS, key_function, query, kwargs)
 
 
 def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_rockset_results,
-        "rockset_mocks.json",
+        ROCKSET_MOCKS,
         lambda x, y: f"{x} {y}",
         head_sha,
         merge_base,
@@ -118,11 +123,30 @@ def mocked_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3)
 def mocked_drci_classifications(pr_num: int, project: str, num_retries: int = 3) -> Any:
     return mock_query(
         get_drci_classifications,
-        "drci_mocks.json",
+        DRCI_MOCKS,
         lambda x, y: f"{x} {y}",
         pr_num,
         project,
     )
+
+
+def load_mocks(mocks_file: str) -> None:
+    with gzip.open(f"{mocks_file}.gz", "rb") as f:
+        mocks = f.read()
+
+    with open(mocks_file, "wb") as f:
+        f.write(mocks)
+
+
+def save_mocks(mocks_file: str, unlink: bool = True) -> None:
+    with open(mocks_file, "rb") as f:
+        mocks = f.read()
+
+    with gzip.open(f"{mocks_file}.gz", "wb") as f:
+        f.write(mocks)
+
+    if unlink:
+        os.remove(mocks_file)
 
 
 def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
@@ -257,6 +281,24 @@ class DummyGitRepo(GitRepo):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestTryMerge(TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Load gzipped mocks files. This is to keep them smaller than the file size
+        limit enforced by fbcode
+        """
+        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
+            load_mocks(mocks)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Save mocks file in gzip format. This is to keep them smaller than the file
+        size limit enforced by fbcode
+        """
+        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
+            save_mocks(mocks)
+
     def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
@@ -656,6 +698,24 @@ class TestTryMerge(TestCase):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestBypassFailures(TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Load gzipped mocks files. This is to keep them smaller than the file size
+        limit enforced by fbcode
+        """
+        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
+            load_mocks(mocks)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Save mocks file in gzip format. This is to keep them smaller than the file
+        size limit enforced by fbcode
+        """
+        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
+            save_mocks(mocks)
+
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
             # Try a regex rule
@@ -932,6 +992,24 @@ class TestBypassFailures(TestCase):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestGitHubPRGhstackDependencies2(TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        """
+        Load gzipped mocks files. This is to keep them smaller than the file size
+        limit enforced by fbcode
+        """
+        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
+            load_mocks(mocks)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        """
+        Save mocks file in gzip format. This is to keep them smaller than the file
+        size limit enforced by fbcode
+        """
+        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
+            save_mocks(mocks)
+
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)
