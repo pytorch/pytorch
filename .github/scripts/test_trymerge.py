@@ -41,9 +41,9 @@ from trymerge import (
 if "GIT_REMOTE_URL" not in os.environ:
     os.environ["GIT_REMOTE_URL"] = "https://github.com/pytorch/pytorch"
 
-GQL_MOCKS = "gql_mocks.json"
-ROCKSET_MOCKS = "rockset_mocks.json"
-DRCI_MOCKS = "drci_mocks.json"
+GQL_MOCKS = "gql_mocks.json.gz"
+ROCKSET_MOCKS = "rockset_mocks.json.gz"
+DRCI_MOCKS = "drci_mocks.json.gz"
 
 
 def mock_query(
