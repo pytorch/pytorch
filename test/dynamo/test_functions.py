@@ -20,6 +20,11 @@ import torch._dynamo.testing
 from torch import sub
 from torch._dynamo.testing import expectedFailureDynamic
 from torch._dynamo.utils import same
+
+from torch._higher_order_ops.triton_kernel_wrap import (
+    triton_kernel_wrapper_functional,
+    triton_kernel_wrapper_mutation,
+)
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
@@ -1448,6 +1453,74 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out.size(), compiled_out.size())
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 1)
+
+    @requires_cuda()
+    @requires_triton()
+    def test_triton_kernel_with_kernel_param(self):
+        @triton.jit
+        def test_kernel(kernel):
+            pass
+
+        @torch.compile(backend="eager")
+        def f(x):
+            grid = (x.numel(),)
+            test_kernel[grid](kernel=x)
+
+        t1 = torch.rand(5, device="cuda")
+        f(t1)
+        # No need to assert anything, the goal is to make sure dynamo does
+        # not crash
+
+    @requires_cuda()
+    @requires_triton()
+    def test_triton_kernel_higher_order_func(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        t1 = torch.rand(5, device="cuda")
+        t2 = torch.rand(5, device="cuda")
+
+        torch_add = t1 + t2
+
+        # Test higher order function with mutation
+        output = torch.zeros_like(t1)
+        n_elements = output.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+        triton_kernel_wrapper_mutation(
+            kernel=add_kernel,
+            grid=grid,
+            args=(t1, t2, output, n_elements),
+            kwargs={"BLOCK_SIZE": 16},
+        )
+        self.assertEqual(output, torch_add)
+        # Make sure it is modified
+        self.assertNotEqual(output, torch.zeros_like(t1))
+
+        # Test higher order function without mutation
+        output = torch.zeros_like(t1)
+        ((_, _, o, _), _) = triton_kernel_wrapper_functional(
+            kernel=add_kernel,
+            grid=grid,
+            args=(t1, t2, output, n_elements),
+            kwargs={"BLOCK_SIZE": 16},
+        )
+        self.assertEqual(o, torch_add)
+        # Make sure it is NOT modified
+        self.assertEqual(output, torch.zeros_like(t1))
 
     @requires_cuda()
     @requires_triton()
