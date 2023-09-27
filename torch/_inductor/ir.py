@@ -3133,7 +3133,7 @@ class ExternKernel(InputsKernel):
 
         # TODO: Unconditionally do this, not just when example_output has
         # unbacked symbols
-        if free_unbacked_symbols(example_output):
+        if maybe_free_unbacked_symbols(example_output):
             example_output = V.graph.current_node.meta["val"]
 
         return example_output, tensor_args, non_tensor_args, unflatten_args, schema
@@ -3384,21 +3384,6 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_uses(self):
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
-
-        # NB: recursive structure here reflects val_to_arg_str, avoid
-        # calling free_unbacked_symbols on "exotic" types that don't get pexpr
-        # treatment
-        def maybe_free_unbacked_symbols(s):
-            if isinstance(s, (SymTypes, sympy.Expr)):
-                return free_unbacked_symbols(s)
-            elif isinstance(s, (tuple, list)):
-                r = set()
-                for t in s:
-                    r |= maybe_free_unbacked_symbols(t)
-                return r
-            else:
-                return set()
-
         r = set()
         for arg in self.constant_args:
             r |= maybe_free_unbacked_symbols(arg)
@@ -6191,3 +6176,22 @@ class ReduceScatterTensorCoalesced(OutOfPlaceCollectiveKernel):
             f"group={output_name}_pg, "
             "async_op=True)"
         )
+
+
+# NB: recursive structure here reflects val_to_arg_str, avoid
+# calling free_unbacked_symbols on "exotic" types that don't get pexpr
+# treatment
+def maybe_free_unbacked_symbols(s):
+    if isinstance(s, (SymTypes, sympy.Expr)):
+        # This branch should be impossible in return position
+        return free_unbacked_symbols(s)
+    elif isinstance(s, (tuple, list)):
+        r = set()
+        for t in s:
+            r |= maybe_free_unbacked_symbols(t)
+        return r
+    elif isinstance(s, torch.Tensor):
+        # This branch is impossible in constant-args position
+        return free_unbacked_symbols(s)
+    else:
+        return set()
