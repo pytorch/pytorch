@@ -75,11 +75,6 @@ class UniqueVoidPtr {
     return true;
   }
 
-  /// Casts the context to the requested type, contingent on the
-  /// deleter matching.
-  ///
-  /// Returns null without attempting a cast if the deleter does not
-  /// match.
   template <typename T>
   T* cast_context(DeleterFnPtr expected_deleter) const {
     if (get_deleter() != expected_deleter)
