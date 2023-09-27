@@ -612,7 +612,7 @@ def run_test(
     print_to_stderr(f"Executing {command} ... [{datetime.now()}]")
 
     with open(log_path, "w") as f:
-        ret_code = retry_shell(
+        ret_code, was_rerun = retry_shell(
             command,
             test_directory,
             stdout=f,
@@ -631,7 +631,7 @@ def run_test(
         # comes up in the future.
         ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
 
-    handle_log_file(test_module, log_path, failed=(ret_code != 0))
+    handle_log_file(test_module, log_path, failed=(ret_code != 0), was_rerun=was_rerun)
     return ret_code
 
 
@@ -924,25 +924,27 @@ def sanitize_file_name(file: str):
     return file.replace("\\", ".").replace("/", ".").replace(" ", "_")
 
 
-def handle_log_file(test: ShardedTest, file_path: str, failed: bool) -> None:
+def handle_log_file(test: ShardedTest, file_path: str, failed: bool, was_rerun: bool) -> None:
     verbose = "VERBOSE_LOGS=1" in os.environ.get("PR_BODY", "")
     test = str(test)
-    if not failed and not verbose:
-        # If not verbose + success, print only what tests ran, rename the log
-        # file so it doesn't get printed later, and do not remove logs.
+    if not failed and not was_rerun and not verbose:
+        # If not verbose + success + no file level retries, print only what
+        # tests ran, rename the log file so it doesn't get printed later, and do
+        # not remove logs.
         new_file = "test/test-reports/" + sanitize_file_name(
             f"{test}_{os.urandom(8).hex()}_.log"
         )
         os.rename(file_path, REPO_ROOT / new_file)
         print(
-            f"{test} was successful, full logs can be found in artifacts with path {new_file}"
+            f"\n{test} was successful, full logs can be found in artifacts with path {new_file}"
         )
         with open(REPO_ROOT / new_file, "rb") as f:
             for line in f.readlines():
                 if re.search(b"Running .* items in this shard:", line):
-                    print_to_stderr(line.strip())
+                    print_to_stderr(line.decode("utf-8", errors="ignore").strip())
+        print()
         return
-    # Test failure or verbose logs: print entire file and then remove it
+    # otherwise: print entire file and then remove it
     with open(file_path, "rb") as f:
         print_to_stderr("")
         print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
