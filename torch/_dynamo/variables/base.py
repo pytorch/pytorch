@@ -198,7 +198,7 @@ class VariableTracker(metaclass=HasPostInit):
         return self.clone(guards=set.union(self.guards, {guard}))
 
     def add_guards(self, guards):
-        if not guards:
+        if guards is None:
             return self
         assert isinstance(guards, set)
         return self.clone(guards=set.union(self.guards, guards))
@@ -269,7 +269,7 @@ class VariableTracker(metaclass=HasPostInit):
             raise NotImplementedError()
         if self.source:
             options["source"] = AttrSource(self.source, name)
-        return variables.ConstantVariable(value, **options)
+        return variables.ConstantVariable.create(value, **options)
 
     def is_proxy(self):
         try:
@@ -314,7 +314,7 @@ class VariableTracker(metaclass=HasPostInit):
     ) -> "VariableTracker":
         if name == "__len__" and self.has_unpack_var_sequence(tx):
             assert not (args or kwargs)
-            return variables.ConstantVariable(
+            return variables.ConstantVariable.create(
                 len(self.unpack_var_sequence(tx)), **VariableTracker.propagate(self)
             )
         elif (

@@ -28,7 +28,7 @@ static inline MPSNNReduceUnary* kernelForReducedDim(int dim) {
   return nil;
 }
 
-Tensor wrapper_mean_dim(
+static Tensor wrapper_mean_dim(
     const Tensor& input,
     OptionalIntArrayRef opt_dims,
     bool keepdim,
