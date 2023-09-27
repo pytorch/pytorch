@@ -188,6 +188,18 @@ def bmm(self, batch2):
     return NotImplemented
 
 
+@register_decomposition([aten.addmm])
+@pw_cast_for_opmath
+def addmm(self, mat1, mat2, beta=1, alpha=1):
+    if self.device.type == "cpu":
+        if mat1.size(0) == 1 and mat2.size(-1) == 1:
+            out = torch.sum(
+                mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
+            ).unsqueeze(0)
+            return alpha * out + beta * self
+    return NotImplemented
+
+
 @register_decomposition([aten.mm])
 def mm(self, input2):
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
