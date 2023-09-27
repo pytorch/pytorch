@@ -15,7 +15,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-Tensor upsample_nearest2d_vec(
+static Tensor upsample_nearest2d_vec(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {

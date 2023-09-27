@@ -57,11 +57,11 @@ def mock_query(
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
             return {}
-        with open(gql_db_fname, encoding="utf-8") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="rt") as f:
             return json.load(f)
 
     def save_mocked_queries(obj: Any) -> None:
-        with open(gql_db_fname, encoding="utf-8", mode="w") as f:
+        with gzip.open(gql_db_fname, encoding="utf-8", mode="wt") as f:
             json.dump(obj, f, indent=2)
             f.write("\n")
 
@@ -128,25 +128,6 @@ def mocked_drci_classifications(pr_num: int, project: str, num_retries: int = 3)
         pr_num,
         project,
     )
-
-
-def load_mocks(mocks_file: str) -> None:
-    with gzip.open(f"{mocks_file}.gz", "rb") as f:
-        mocks = f.read()
-
-    with open(mocks_file, "wb") as f:
-        f.write(mocks)
-
-
-def save_mocks(mocks_file: str, unlink: bool = True) -> None:
-    with open(mocks_file, "rb") as f:
-        mocks = f.read()
-
-    with gzip.open(f"{mocks_file}.gz", "wb") as f:
-        f.write(mocks)
-
-    if unlink:
-        os.remove(mocks_file)
 
 
 def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
@@ -281,24 +262,6 @@ class DummyGitRepo(GitRepo):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestTryMerge(TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        """
-        Load gzipped mocks files. This is to keep them smaller than the file size
-        limit enforced by fbcode
-        """
-        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
-            load_mocks(mocks)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """
-        Save mocks file in gzip format. This is to keep them smaller than the file
-        size limit enforced by fbcode
-        """
-        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
-            save_mocks(mocks)
-
     def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
@@ -698,24 +661,6 @@ class TestTryMerge(TestCase):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestBypassFailures(TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        """
-        Load gzipped mocks files. This is to keep them smaller than the file size
-        limit enforced by fbcode
-        """
-        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
-            load_mocks(mocks)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """
-        Save mocks file in gzip format. This is to keep them smaller than the file
-        size limit enforced by fbcode
-        """
-        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
-            save_mocks(mocks)
-
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [
             # Try a regex rule
@@ -992,24 +937,6 @@ class TestBypassFailures(TestCase):
     "trymerge.get_drci_classifications", side_effect=mocked_drci_classifications
 )
 class TestGitHubPRGhstackDependencies2(TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        """
-        Load gzipped mocks files. This is to keep them smaller than the file size
-        limit enforced by fbcode
-        """
-        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
-            load_mocks(mocks)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        """
-        Save mocks file in gzip format. This is to keep them smaller than the file
-        size limit enforced by fbcode
-        """
-        for mocks in [GQL_MOCKS, ROCKSET_MOCKS, DRCI_MOCKS]:
-            save_mocks(mocks)
-
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)
