@@ -3630,7 +3630,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.op_overload = kernel
 
-        # TODO: Need to revisit schema matching to find the correct OpOverload
+        # TODO: Need to revisit schema matching to find the correct OpOverload from OpOverloadPacket
         assert isinstance(
             kernel,
             (
