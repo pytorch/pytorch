@@ -754,67 +754,67 @@ void initJITBindings(PyObject* module) {
           "_jit_set_nvfuser_skip_node_kind",
           [](const std::string& op_name, bool flip = true) {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_skip_node_kind is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_skip_node_kind is deprecated and a no-op");
           })
       .def(
           "_jit_set_nvfuser_enabled",
           [](bool) {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_enabled is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_enabled is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_can_be_enabled",
           []() {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_nvfuser_can_be_enabled is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_can_be_enabled is deprecated and a no-op");
           })
       .def(
           "_jit_set_nvfuser_single_node_mode",
           [](bool) {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_single_node_mode is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_single_node_mode is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_single_node_mode",
           []() {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_nvfuser_single_node_mode is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_single_node_mode is deprecated and a no-op");
           })
       .def(
           "_jit_set_nvfuser_horizontal_mode",
           [](bool) {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_horizontal_mode is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_horizontal_mode is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_horizontal_mode",
           []() {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_nvfuser_horizontal_mode is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_horizontal_mode is deprecated and a no-op");
           })
       .def(
           "_jit_set_nvfuser_guard_mode",
           [](bool) {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_guard_mode is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_set_nvfuser_guard_mode is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_enabled",
           []() {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_nvfuser_enabled is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_enabled is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_set_comparison_callback",
           [](bool, py::function) {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_set_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_nvfuser_clear_comparison_callback",
           []() {
             TORCH_WARN(
-                "nvfuser is no longer supported in torch script, use _jit_nvfuser_clear_comparison_callback is deprecated and a no-op"),
+                "nvfuser is no longer supported in torch script, use _jit_nvfuser_clear_comparison_callback is deprecated and a no-op");
           })
       .def(
           "_jit_set_profiling_mode",
