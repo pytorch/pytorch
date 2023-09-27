@@ -2226,20 +2226,21 @@ py_all = all
 @out_wrapper()
 def all(
     a: TensorLikeType,
-    dim: Optional[DimsType] = None,
+    dim: Optional[int] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    # Computes nelem
-    if isinstance(dim, Dim):
-        dim = (dim,)  # type: ignore[assignment]
+    # torch.any and torch.all both do not currently support torch.any(x, keepdim=True), thus the dim=None
+    # case must be handled separately.
+    if dim is None:
+        assert not keepdim
+        result = torch.logical_not(torch.any(torch.logical_not(a)))
+    else:
+        result = torch.logical_not(
+            torch.any(torch.logical_not(a), dim, keepdim=keepdim)
+        )
 
-    a_ = _maybe_convert_to_dtype(a, torch.bool)
-    # avoid comparison with symbolic number of elements to make this op symint friendly
-    result = eq(sum(logical_not(a_), dim=dim, keepdim=keepdim), 0)
-
-    # Preserves uint8 -- probably a legacy mask thing
-    if a.dtype is torch.uint8:
-        return prims.convert_element_type(result, torch.uint8)
+    if a.dtype == torch.uint8:
+        result = result.to(dtype=torch.uint8)
 
     return result
 
