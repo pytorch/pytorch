@@ -501,6 +501,8 @@ lazy_tensor_core_python_sources = [
 ]
 
 inductor_core_resources = [
+    "torch/csrc/inductor/aoti_torch/shim_common.cpp",
+    "torch/csrc/inductor/aoti_torch/tensor_converter.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
 ]
 
@@ -684,6 +686,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/cuda/memory_snapshot.cpp",
+    "torch/csrc/inductor/aoti_torch/shim_cuda.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/stubs/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -896,6 +899,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/python_dispatch.cpp",
     "torch/csrc/utils/python_symnode.cpp",
     "torch/csrc/utils/pybind.cpp",
+    "torch/csrc/utils/pyobject_preservation.cpp",
     "torch/csrc/utils/structseq.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",
@@ -1027,6 +1031,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/Formatting.cpp",
     "aten/src/ATen/core/function_schema.cpp",
     "aten/src/ATen/core/Generator.cpp",
+    "aten/src/ATen/core/PythonOpRegistrationTrampoline.cpp",
     "aten/src/ATen/core/List.cpp",
     "aten/src/ATen/core/NamedTensor.cpp",
     "aten/src/ATen/core/Tensor.cpp",
@@ -1138,6 +1143,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/NativeMultiheadAttnKernel.cpp",
     "aten/src/ATen/native/cpu/PaddingKernel.cpp",
     "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
@@ -1438,7 +1444,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/fmha_api.cpp",
+    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.cpp",
 ]
 
 # Files using thrust::sort_by_key need to be linked last
