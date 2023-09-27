@@ -564,6 +564,12 @@ _SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
 
 
 def treespec_dumps(treespec: TreeSpec, protocol: Optional[int] = None) -> str:
+    if not isinstance(treespec, TreeSpec):
+        raise TypeError(
+            f"treespec_dumps(treespec, protocol): Expected `treespec` to be instance of "
+            f"TreeSpec but got item of type {type(treespec)}.",
+        )
+
     if protocol is None:
         protocol = DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL
 

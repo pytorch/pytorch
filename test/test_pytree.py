@@ -1,6 +1,5 @@
 # Owner(s): ["module: pytree"]
 
-import pickle
 import unittest
 from collections import namedtuple, OrderedDict
 
@@ -320,6 +319,11 @@ class TestGenericPytree(TestCase):
             self.assertEqual(result, expected, msg=str([pytree, to_spec, expected]))
 
 
+    @parametrize("pytree_impl", [py_pytree, cxx_pytree])
+    def test_pytree_serialize_bad_input(self, pytree_impl):
+        with self.assertRaises(TypeError):
+            pytree_impl.treespec_dumps("random_blurb")
+
 class TestPythonPytree(TestCase):
     def test_treespec_equality(self):
         self.assertTrue(
@@ -507,10 +511,6 @@ TreeSpec(tuple, None, [*,
         ):
             py_pytree.treespec_dumps(spec)
 
-    def test_pytree_serialize_bad_input(self):
-        with self.assertRaises(AttributeError):
-            py_pytree.treespec_dumps("random_blurb")
-
     def test_pytree_serialize_bad_protocol(self):
         import json
 
@@ -608,20 +608,20 @@ class TestCxxPytree(TestCase):
     )
     def test_pytree_serialize(self, spec):
         serialized_spec = cxx_pytree.treespec_dumps(spec)
-        self.assertTrue(isinstance(serialized_spec, bytes))
+        self.assertTrue(isinstance(serialized_spec, str))
         self.assertTrue(spec == cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
         spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
-        self.assertEqual(roundtrip_spec, spec)
+        self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
         LocalPoint = namedtuple("LocalPoint", ["x", "y"])
         spec = cxx_pytree.tree_structure(LocalPoint(0, 1))
 
-        with self.assertRaises(pickle.PicklingError):
-            cxx_pytree.treespec_dumps(spec)
+        roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
+        self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     def test_pytree_custom_type_serialize(self):
         cxx_pytree.register_pytree_node(
@@ -645,12 +645,10 @@ class TestCxxPytree(TestCase):
             lambda xs, _: LocalDummyType(*xs),
         )
         spec = cxx_pytree.tree_structure(LocalDummyType(0, 1))
-        with self.assertRaises(AttributeError):
-            serialized_spec = cxx_pytree.treespec_dumps(spec)
+        serialized_spec = cxx_pytree.treespec_dumps(spec)
+        roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
+        self.assertEqual(roundtrip_spec, spec)
 
-    def test_pytree_serialize_bad_input(self):
-        with self.assertRaises(TypeError):
-            cxx_pytree.treespec_dumps("random_blurb")
 
 
 instantiate_parametrized_tests(TestGenericPytree)
