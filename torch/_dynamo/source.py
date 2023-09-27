@@ -9,7 +9,6 @@ from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .decorators import disable
 from .utils import enum_repr
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
@@ -111,23 +110,6 @@ class RandomValueSource(Source):
 
     def name(self):
         return f"random_value_{self.random_call_index}"
-
-
-@dataclasses.dataclass(frozen=True)
-class GeneratorStateSource(Source):
-    device: str
-    initial_seed: int
-
-    def guard_source(self):
-        return GuardSource.RANDOM_VALUE
-
-    def reconstruct(self, codegen):
-        # generator state is a torch.ByteTensor, so we reuse TensorVariable reconstruction in codegen.py
-        raise NotImplementedError()
-
-    def name(self):
-        name = f"generator_state_{self.device}_{self.initial_seed}"
-        return f"L[{name}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -269,6 +251,10 @@ class ConvertIntSource(ChainedSource):
     def reconstruct(self, codegen):
         cast_fn_name = "__cast_symbool_to_symint_guardless"
         if cast_fn_name not in codegen.tx.output.global_scope:
+            from .decorators import disable
+
+            # We cannot use the disable decorator to decorate the fucntion at where it's defined
+            # due to circular dependency.
             disabled_cast_fn = disable(
                 torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless
             )
