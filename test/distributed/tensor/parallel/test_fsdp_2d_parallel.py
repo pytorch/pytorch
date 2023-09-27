@@ -8,20 +8,15 @@ import torch.distributed as dist
 
 import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._tensor import (
-    DTensor as DT,
-    init_device_mesh,
-    Replicate,
-)
+from torch.distributed._tensor import DTensor as DT, init_device_mesh, Replicate
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_WRAPPED_MODULE,
     checkpoint_wrapper,
     CheckpointImpl,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
-    FSDP_WRAPPED_MODULE,
+    clean_tensor_name,
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.optim import _apply_optimizer_in_backward
@@ -98,9 +93,7 @@ def init_model(
     # 2-D mesh is [dp, tp]
     mesh_shape = (world_size // model_parallel_size, model_parallel_size)
     mesh_dim_names = ("DP", "TP")
-    mesh_2d = init_device_mesh(
-        "cuda", mesh_shape, mesh_dim_names=mesh_dim_names
-    )
+    mesh_2d = init_device_mesh("cuda", mesh_shape, mesh_dim_names=mesh_dim_names)
 
     # Create Input
     model = _wrap_module(
@@ -132,15 +125,6 @@ def _apply_optim_in_backward(param_group):
         optimizer_class=torch.optim.Adam,
         params=param_group["params"],
         optimizer_kwargs={"lr": param_group["lr"]},
-    )
-
-
-def _clean_up_fsdp_param_name(name):
-    return ".".join(
-        filter(
-            lambda name: name not in [FSDP_WRAPPED_MODULE, _CHECKPOINT_WRAPPED_MODULE],
-            name.split("."),
-        )
     )
 
 
@@ -215,10 +199,10 @@ class Test2dParallelIntegration(DTensorTestBase):
             model_2d = input_reshard(model_2d, mesh_2d["TP"], 0)
         # Check named parameters are returning the same name at least.
         param_names_2d = [
-            _clean_up_fsdp_param_name(name) for name, _ in model_2d.named_parameters()
+            clean_tensor_name(name) for name, _ in model_2d.named_parameters()
         ]
         for name, _ in model.named_parameters():
-            name = self._clean_up_fsdp_param_name(name)
+            name = clean_tensor_name(name)
             self.assertTrue(name in param_names_2d)
         self._compare_params(model, model_2d)
         if multi_param_group and use_orig_params:
@@ -272,7 +256,9 @@ class Test2dParallelIntegration(DTensorTestBase):
                 optim.step()
                 optim_2d.step()
             self._compare_params(model, model_2d)
-            self.assertEqual(model(input), model_2d(input), f"results different at iter {i}")
+            self.assertEqual(
+                model(input), model_2d(input), f"results different at iter {i}"
+            )
 
         # Ensure all params are still the same after optimizer update.
         self._compare_params(model, model_2d)
@@ -372,10 +358,10 @@ class TestNew2dParallelIntegration(DTensorTestBase):
 
         # Check named parameters are returning the same name at least.
         param_names_2d = [
-            _clean_up_fsdp_param_name(name) for name, _ in model_2d.named_parameters()
+            clean_tensor_name(name) for name, _ in model_2d.named_parameters()
         ]
         for name, _ in model.named_parameters():
-            name = _clean_up_fsdp_param_name(name)
+            name = clean_tensor_name(name)
             if name not in param_names_2d:
                 print(name, param_names_2d)
             self.assertTrue(name in param_names_2d)

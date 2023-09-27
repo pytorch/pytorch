@@ -12,7 +12,9 @@ namespace ops {
 
 using namespace api::utils;
 
-Tensor& uniform_(
+#ifdef USE_VULKAN_API
+
+static Tensor& uniform_(
     Tensor& self,
     const double from,
     const double to,
@@ -57,7 +59,7 @@ Tensor& uniform_(
   return self;
 }
 
-Tensor rand_like(
+static Tensor rand_like(
     const at::Tensor& input_arg,
     const c10::optional<c10::ScalarType> /* not implemented */,
     const c10::optional<c10::Layout> /* not implemented */,
@@ -71,7 +73,7 @@ Tensor rand_like(
   return input_arg.clone().detach().uniform_(0.0, 1.0);
 }
 
-Tensor& normal_(
+static Tensor& normal_(
     Tensor& self,
     const double mean,
     const double std,
@@ -118,7 +120,7 @@ Tensor& normal_(
   return self;
 }
 
-Tensor randn_like(
+static Tensor randn_like(
     const at::Tensor& input_arg,
     const c10::optional<c10::ScalarType> /* not implemented */,
     const c10::optional<c10::Layout> /* not implemented */,
@@ -129,8 +131,6 @@ Tensor randn_like(
   // numbers from a normal distribution with mean 0 and standard deviation 1.
   return input_arg.clone().detach().normal_(0.0, 1.0);
 }
-
-#ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::uniform_"), TORCH_FN(uniform_));

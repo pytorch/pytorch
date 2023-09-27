@@ -10,8 +10,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_nested_from_padded_native.h>
-#include <ATen/ops/narrow_native.h>
+#include <ATen/ops/_nested_from_padded.h>
 #endif
 
 #include <ATen/native/NonSymbolicBC.h>
