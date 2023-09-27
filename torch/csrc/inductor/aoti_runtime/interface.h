@@ -31,11 +31,17 @@ using AOTIRuntimeError = int32_t;
   }
 
 extern "C" {
+struct AOTInductorModelOpaque;
+using AOTInductorModelHandle = AOTInductorModelOpaque*;
+
 struct AOTInductorModelContainerOpaque;
 using AOTInductorModelContainerHandle = AOTInductorModelContainerOpaque*;
 
 struct AOTInductorStreamOpaque;
 using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
+
+struct AOTInductorConstantMap;
+using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
 // Creates an AOTInductor model container. The parameter num_models
 // specifies the number of model instances that may be run concurrently for
@@ -111,5 +117,16 @@ AOTIRuntimeError AOTInductorModelContainerGetMaxOutputShape(
     size_t output_idx,
     const int64_t** ret_output_sizes,
     int64_t* ret_output_ndim);
+
+AOTIRuntimeError AOTInductorModelCreate(
+    AOTInductorModelHandle* model_handle,
+    AOTInductorConstantMapHandle constant_map_handle);
+
+AOTIRuntimeError AOTInductorModelRun(
+    AOTInductorModelHandle model_handle,
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles);
+
+AOTIRuntimeError AOTInductorModelDelete(AOTInductorModelHandle model_handle);
 
 } // extern "C"
