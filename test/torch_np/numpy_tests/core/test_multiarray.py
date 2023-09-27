@@ -915,7 +915,7 @@ class TestScalarIndexing(TestCase):
         assert_equal(a, [0, 1, 0, 1, 2])
 
 
-@xfail  # (reason="TODO")
+@skip(reason="object, void, structured dtypes")
 @instantiate_parametrized_tests
 class TestCreation(TestCase):
     """

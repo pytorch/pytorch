@@ -822,7 +822,7 @@ if(BUILD_CAFFE2 AND NOT MSVC)
   target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
@@ -841,25 +841,6 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS
       set_source_files_properties(${source_file} PROPERTIES COMPILE_OPTIONS "-Wno-missing-prototypes;-Wno-error=missing-prototypes")
     endif()
   endforeach()
-endif()
-
-option(TORCH_USE_IWYU "Use include-what-you-use to clean up header inclusion" OFF)
-if(TORCH_USE_IWYU)
-  find_program(iwyu NAMES include-what-you-use)
-  if(iwyu)
-    set(iwyu_cmd
-        "include-what-you-use"
-        "-Xiwyu"
-        "--transitive_includes_only"
-        "-Xiwyu"
-        "--no_fwd_decls"
-        "-Xiwyu"
-        "--prefix_header_includes=keep"
-        "-Xiwyu"
-        "--mapping_file=${CMAKE_CURRENT_LIST_DIR}/../tools/iwyu/all.imp"
-        )
-    set_property(TARGET torch_cpu PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${iwyu_cmd})
-  endif()
 endif()
 
 set_property(SOURCE ${ATen_CORE_SRCS} APPEND
