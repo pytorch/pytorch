@@ -46,13 +46,13 @@ if(USE_CUDA)
     # A helper variable recording the list of Caffe2 dependent libraries
     # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
     # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-      caffe2::cufft caffe2::curand caffe2::cublas)
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS )
     if(CAFFE2_USE_NVRTC)
       list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
     else()
       caffe2_update_option(USE_NVRTC OFF)
     endif()
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS caffe2::curand caffe2::cufft caffe2::cublas)
     if(CAFFE2_USE_CUDNN)
       list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
     else()
@@ -433,43 +433,46 @@ else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
-# ---[ Caffe2 uses cpuinfo library in the thread pool
-if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
-  add_library(cpuinfo SHARED IMPORTED)
-  find_library(CPUINFO_LIBRARY cpuinfo)
-  if(NOT CPUINFO_LIBRARY)
-    message(FATAL_ERROR "Cannot find cpuinfo")
-  endif()
-  message("Found cpuinfo: ${CPUINFO_LIBRARY}")
-  set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
-elseif(NOT TARGET cpuinfo)
-  if(NOT DEFINED CPUINFO_SOURCE_DIR)
-    set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
-  endif()
-
-  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
-  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
-  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
-  set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
-  if(MSVC)
-    if(CAFFE2_USE_MSVC_STATIC_RUNTIME)
-      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
-    else()
-      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "s390x")
+  # ---[ Caffe2 uses cpuinfo library in the thread pool
+  # ---[ But it doesn't support s390x and thus not used on s390x
+  if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)
+    add_library(cpuinfo SHARED IMPORTED)
+    find_library(CPUINFO_LIBRARY cpuinfo)
+    if(NOT CPUINFO_LIBRARY)
+      message(FATAL_ERROR "Cannot find cpuinfo")
     endif()
+    message("Found cpuinfo: ${CPUINFO_LIBRARY}")
+    set_target_properties(cpuinfo PROPERTIES IMPORTED_LOCATION "${CPUINFO_LIBRARY}")
+  elseif(NOT TARGET cpuinfo)
+    if(NOT DEFINED CPUINFO_SOURCE_DIR)
+      set(CPUINFO_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
+    endif()
+
+    set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+    set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+    set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+    set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+    set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CPUINFO_LOG_LEVEL "error" CACHE STRING "")
+    if(MSVC)
+      if(CAFFE2_USE_MSVC_STATIC_RUNTIME)
+        set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
+      else()
+        set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+      endif()
+    endif()
+    add_subdirectory(
+      "${CPUINFO_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+    # We build static version of cpuinfo but link
+    # them into a shared library for Caffe2, so they need PIC.
+    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Need to set this to avoid conflict with XNNPACK's clog external project
+    set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
   endif()
-  add_subdirectory(
-    "${CPUINFO_SOURCE_DIR}"
-    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
-  # We build static version of cpuinfo but link
-  # them into a shared library for Caffe2, so they need PIC.
-  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-  # Need to set this to avoid conflict with XNNPACK's clog external project
-  set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
+  list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
-list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
 # ---[ QNNPACK
 if(USE_QNNPACK)
@@ -881,10 +884,7 @@ endif()
 if(USE_NUMA)
   if(LINUX)
     find_package(Numa)
-    if(NUMA_FOUND)
-      include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-      list(APPEND Caffe2_DEPENDENCY_LIBS ${Numa_LIBRARIES})
-    else()
+    if(NOT NUMA_FOUND)
       message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
       caffe2_update_option(USE_NUMA OFF)
     endif()
@@ -1150,9 +1150,6 @@ if(USE_MPI)
     message(STATUS "MPI include path: " ${MPI_CXX_INCLUDE_PATH})
     message(STATUS "MPI LINK flags path: " ${MPI_CXX_LINK_FLAGS})
     message(STATUS "MPI libraries: " ${MPI_CXX_LIBRARIES})
-    include_directories(SYSTEM ${MPI_CXX_INCLUDE_PATH})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${MPI_CXX_LIBRARIES})
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${MPI_CXX_LINK_FLAGS}")
     find_program(OMPI_INFO
       NAMES ompi_info
       HINTS ${MPI_CXX_LIBRARIES}/../bin)
