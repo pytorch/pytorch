@@ -100,7 +100,6 @@ from .functions import (
 from .higher_order_ops import TorchHigherOrderOperatorVariable
 from .lists import (
     BaseListVariable,
-    DequeVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -259,20 +258,6 @@ class VariableBuilder:
             # DON'T specialize ints by default.  This all only matters with
             # dynamic_shapes
         }
-
-    @staticmethod
-    def list_type(value):
-        if is_namedtuple(value):
-            return functools.partial(NamedTupleVariable, tuple_cls=type(value))
-        # TODO(voz): Why do we have both this and `BaseListVariable`'s `cls_for`?
-        return {
-            tuple: TupleVariable,
-            list: ListVariable,
-            odict_values: ListVariable,
-            torch.nn.ParameterList: ListVariable,
-            torch.nn.ModuleList: ListVariable,
-            collections.deque: DequeVariable,
-        }[type(value)]
 
     def get_source(self):
         return self.source
