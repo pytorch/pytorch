@@ -249,6 +249,13 @@ class ConvertIntSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
+        # Note: reconstruct(codegen) is used when dynamo generates the opimized python byte code.
+        # To re-use all the infra we've built for SymInt, when dynamo sees a SymBool inputs,
+        # we make dynamo create graphs that take SymInt inputs instead.
+        #
+        # To provide the correct SymInt inputs for dynamo extracted graph, we additionally insert a
+        # cast_symbool_to_symint higher order operator call into the byte code.
+        # This is to ensure the conversion from SymBool to SymInt can be properly traced.
         cast_fn_name = "__cast_symbool_to_symint_guardless"
         if cast_fn_name not in codegen.tx.output.global_scope:
             codegen.tx.output.install_global(
@@ -270,7 +277,14 @@ class ConvertIntSource(ChainedSource):
         return self.base.guard_source()
 
     def name(self):
-        return f"cast_symbool_to_symint_guardless({self.base.name()})"
+        # Note: name() is used to create guard for the outer SymBool. Because we fakes the SymBool
+        # inputs with SymInts in dynamo, the guards produced are for the symints.
+        # But the guard must be checked against the outer SymBool. To do that, we need to cast the
+        # outer SymBool into an outer SymInt before the guard code generated for dynamo's SymInt is executed.
+        #
+        # Moreover, we don't want to create a proxy for the casting logic during guard checking.
+        # The proxy will be created when the optimized python byte code is executed.
+        return f"create_symint_guardless_no_proxy({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)

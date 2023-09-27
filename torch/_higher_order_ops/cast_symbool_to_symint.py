@@ -11,7 +11,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 cast_symbool_to_symint = HigherOrderOperator("cast_symbool_to_symint")
 
 
-def create_symbool_guardless(maybe_symbool):
+def create_symint_guardless_no_proxy(maybe_symbool):
     if isinstance(maybe_symbool, bool):
         return int(maybe_symbool)
 
@@ -24,7 +24,7 @@ def create_symbool_guardless(maybe_symbool):
 @cast_symbool_to_symint.py_impl(DispatchKey.CompositeExplicitAutograd)
 def cast_dense(maybe_symbool: bool):
     assert isinstance(maybe_symbool, (bool, torch.SymBool))
-    return create_symbool_guardless(maybe_symbool)
+    return create_symint_guardless_no_proxy(maybe_symbool)
 
 
 @cast_symbool_to_symint.py_impl(FakeTensorMode)
@@ -40,7 +40,7 @@ def cast_functionalize(ctx, symbool):
 
 @cast_symbool_to_symint.py_impl(ProxyTorchDispatchMode)
 def trace_cast(proxy_mode, maybe_symbool):
-    out = create_symbool_guardless(maybe_symbool)
+    out = create_symint_guardless_no_proxy(maybe_symbool)
 
     proxy_symbool = proxy_mode.tracer.unwrap_proxy(maybe_symbool)
 
