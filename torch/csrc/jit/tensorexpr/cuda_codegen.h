@@ -1,5 +1,6 @@
 #pragma once
 
+#include <unordered_map>
 #include <unordered_set>
 
 #include <ATen/ATen.h>
@@ -13,10 +14,8 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
-#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
-#ifdef TORCH_ENABLE_LLVM
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
-#endif
+#include <torch/csrc/jit/tensorexpr/unique_name_manager.h>
 
 namespace torch {
 namespace jit {
