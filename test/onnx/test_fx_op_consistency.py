@@ -342,6 +342,12 @@ EXPECTED_SKIPS_OR_FAILS: Tuple[onnx_test_common.DecorateMeta, ...] = (
         ),
     ),
     xfail(
+        "chunk", dtypes=onnx_test_common.BOOL_TYPES + onnx_test_common.INT_TYPES + onnx_test_common.FLOAT_TYPES,
+        reason="torch.onnx._internal.diagnostics.infra.context.RuntimeErrorWithDiagnostic: "
+               "Cannot find any perfect/nearest match of symbolic function for aten::split.Tensor,"
+               "which should be registered under aten.split.Tensor."
+    ),
+    xfail(
         "clamp",
         dtypes=(torch.uint8, torch.int8, torch.int16,),
         reason=onnx_test_common.reason_onnx_runtime_does_not_support(
