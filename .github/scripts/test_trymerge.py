@@ -865,7 +865,7 @@ class TestGitHubPRGhstackDependencies2(TestCase):
     def test_pr_dependencies(self, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 106068)
         msg = pr.gen_commit_message(filter_ghstack=True)
-        assert msg == (
+        self.assertEqual(msg,
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
             "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
             "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
@@ -878,7 +878,7 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 106068)
 
         msg = pr.gen_commit_message(filter_ghstack=True, ghstack_deps=[pr0, pr1, pr2])
-        assert msg == (
+        self.assertEqual(msg,
             "[FSDP] Break up `_post_backward_hook` into smaller funcs (#106068)\n\n\nDifferential Revision: ["
             "D47852461](https://our.internmc.facebook.com/intern/diff/D47852461)\nPull Request resolved: "
             "https://github.com/pytorch/pytorch/pull/106068\nApproved by: \n"
@@ -931,7 +931,7 @@ class TestGitHubPRGhstackDependencies2(TestCase):
         mock_repo.cherry_pick.assert_any_call("rev2")
         mock_repo.cherry_pick.assert_any_call("rev123")
 
-        assert mock.call("rev1") not in mock_repo.cherry_pick.call_args_list
+        self.assertTrue(mock.call("rev1") not in mock_repo.cherry_pick.call_args_list)
 
         # Verify the first call
         message = mock_repo.amend_commit_message.call_args_list[0].args[0]
@@ -944,8 +944,8 @@ class TestGitHubPRGhstackDependencies2(TestCase):
             "dependencies: #106032, #106033\n"
         )
 
-        assert message.startswith(prefix)
-        assert message.endswith(suffix)
+        self.assertTrue(message.startswith(prefix))
+        self.assertTrue(message.endswith(suffix))
 
         # Verify the second call
         mock_repo.amend_commit_message.assert_any_call(
