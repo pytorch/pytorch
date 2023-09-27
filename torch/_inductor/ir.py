@@ -3644,11 +3644,13 @@ class FallbackKernel(ExternKernelAlloc):
                     and kernel._overloadname != "default"
                 ):
                     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
-                    # In theory, we should be able to do this for all aten fallback ops, but more plumbing needs to
-                    # be done in order to make that happen. TODO: follow up on this
                     # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
                     # repeat_interleave(const at::Tensor & self, int64_t repeats,
                     #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
+                    #
+                    # In theory, we should be able to do the following codegen for all aten fallback ops, but more
+                    # plumbing needs to be done in order to make that happen.
+                    # TODO: follow up on this
                     self.kernel = f"at::_ops::{kernel.__name__.replace('.', '_')}::call"
                     schema = kernel._schema
                 else:
