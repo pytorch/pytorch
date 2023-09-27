@@ -3,15 +3,12 @@
 from functools import partial
 import torch
 
-from torch.testing._internal.common_utils import TestGradients, run_tests
+from torch.testing._internal.common_utils import TestGradients, run_tests, TestCase
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, OpDTypes)
-
-# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
-torch.set_default_dtype(torch.float32)
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -90,4 +87,5 @@ class TestBwdGradients(TestGradients):
 instantiate_device_type_tests(TestBwdGradients, globals())
 
 if __name__ == '__main__':
+    TestCase._default_dtype_check_enabled = True
     run_tests()

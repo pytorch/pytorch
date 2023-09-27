@@ -195,7 +195,7 @@ TEST(TCPStoreTest, testCleanShutdown) {
   clientTCPStore->get("key");
 
   auto clientThread = std::thread([&clientTCPStore] {
-    EXPECT_THROW(clientTCPStore->get("invalid_key"), std::system_error);
+    EXPECT_THROW(clientTCPStore->get("invalid_key"), c10::DistNetworkError);
   });
 
   // start server shutdown during a client request

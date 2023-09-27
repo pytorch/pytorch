@@ -44,6 +44,7 @@ class FSDPExtensions(ABC):
         world_size: int,
         num_devices_per_node: int,
         pg: dist.ProcessGroup,
+        device: Optional[torch.device] = None,
     ) -> torch.Tensor:
         """Shards a tensor to chunks and returns the local chunk."""
         ...
@@ -116,7 +117,7 @@ def _ext_chunk_dtensor(
     # TODO: Address composability issue and remove the assertion.
     assert (
         _extensions is None
-    ), "Currently does not support composability when use_dtensor = True"
+    ), "Currently does not support composability when _use_dtensor = True"
     return _create_chunk_dtensor(
         tensor,
         rank,
