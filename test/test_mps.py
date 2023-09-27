@@ -390,7 +390,6 @@ def mps_ops_modifier(ops):
 
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
-        'nn.functional.upsample_bilinear': [torch.uint8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -440,7 +439,6 @@ def mps_ops_modifier(ops):
         'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
-        # 'nn.functional.upsample_bilinear': [torch.uint8],    
     }
 
     MACOS_13_3_XFAILLIST = {
