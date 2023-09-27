@@ -569,7 +569,6 @@ aten::_upsample_bicubic2d_aa
 aten::_upsample_bicubic2d_aa.out
 aten::_upsample_bicubic2d_aa_backward
 aten::_upsample_bicubic2d_aa_backward.grad_input
-aten::_upsample_bilinear2d_aa
 aten::_upsample_bilinear2d_aa.out
 aten::_upsample_bilinear2d_aa_backward
 aten::_upsample_bilinear2d_aa_backward.grad_input

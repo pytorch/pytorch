@@ -3514,7 +3514,8 @@ symbolic_aot_autograd_failures = {
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
+    # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('nn.functional.interpolate', 'bicubic'),
     decorate('linalg.householder_product', decorator=unittest.skipIf(IS_MACOS and IS_X86, 'flaky')),
 
     # many complex operators incorrect striding, metadata

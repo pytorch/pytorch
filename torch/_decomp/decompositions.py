@@ -1,4 +1,5 @@
 import functools
+import math
 import numbers
 import operator
 import sys
@@ -3150,13 +3151,130 @@ def gru_impl(
 @register_decomposition(aten._upsample_bilinear2d_aa.vec)
 @aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_bilinear2d_aa.vec.py_impl(DispatchKey.Autograd)
-def upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors):
+def _upsample_bilinear2d_aa_vec(input, output_size, align_corners, scale_factors):
     osize = upsample_compute_output_size(input.size(), output_size, scale_factors)
     scale_h = get_scale_value(scale_factors, 0)
     scale_w = get_scale_value(scale_factors, 1)
-    return torch.ops.aten._upsample_bilinear2d_aa(
-        input, osize, align_corners, scale_h, scale_w
+    return _upsample_bilinear2d_aa(input, osize, align_corners, scale_h, scale_w)
+
+
+def _compute_scale(in_size, out_size, align_corners, scale=None):
+    if align_corners:
+        return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
+    else:
+        return 1 / scale if scale is not None and scale > 0 else in_size / out_size
+
+
+def aa_linear_filter(x):
+    x = torch.abs(x)
+    return 1.0 - torch.clamp(x, max=1.0)
+
+
+def _compute_indices_weights_aa(
+    out_size, in_size, scale, interp_size, align_corners, device
+):
+    scale = _compute_scale(in_size, out_size, align_corners, scale=scale)
+
+    support = (interp_size * 0.5) * scale if scale >= 1.0 else interp_size * 0.5
+    max_interp_size = int(math.ceil(support)) * 2 + 1
+
+    i = torch.arange(out_size, dtype=torch.long, device=device)
+
+    center = scale * (i + 0.5)
+    invscale = 1.0 / scale if scale >= 1.0 else 1.0
+
+    # compute source indices as [xmin, xmin+1, ..., xmin+xsize-1]
+    xmin = torch.clamp((center - support + 0.5).to(torch.long), min=0)
+    xsize = torch.clamp((center + support + 0.5).to(torch.long), max=in_size) - xmin
+    xsize = torch.clamp(xsize, max=max_interp_size)
+
+    # compute weights
+    j = torch.arange(max_interp_size, dtype=torch.long, device=device).view(-1, 1)
+    # TODO: use a generic function aa_filter defined for bilinear and bicubic
+    weights = aa_linear_filter((j + xmin - center + 0.5) * invscale)
+    weights = torch.where(j < xsize, weights, 0.0)
+    total_weights = weights.sum(dim=0)
+    weights = weights / total_weights
+
+    return xmin, weights
+
+
+def _separable_upsample_bilinear2d_aa_single_dim(
+    in_tensor, out_size, interp_dim, align_corners, scale=None
+):
+    # Assume that in_tensor dtype is float32
+    assert interp_dim % 4 in (2, 3)
+
+    n, c, in_h, in_w = in_tensor.shape
+    interp_size = 2  # bilinear
+    in_size = in_tensor.shape[interp_dim]
+
+    n_idx = torch.arange(n, device=in_tensor.device).view(n, 1, 1, 1)
+    c_idx = torch.arange(c, device=in_tensor.device).view(1, c, 1, 1)
+
+    src_idx_min, weights = _compute_indices_weights_aa(
+        out_size,
+        in_size,
+        scale,
+        interp_size,
+        align_corners,
+        device=in_tensor.device,
     )
+    max_interp_size = len(weights)
+
+    if interp_dim % 4 == 3:
+        # horizontal pass
+        in_y = torch.arange(in_h, device=in_tensor.device).view((1, 1, in_h, 1))
+        src_idx_min = src_idx_min.view(1, 1, 1, out_size)
+
+        in_tensor_list = [
+            in_tensor[n_idx, c_idx, in_y, torch.clamp(src_idx_min + k, max=in_w - 1)]
+            for k in range(max_interp_size)
+        ]
+    else:
+        # vertical pass
+        assert interp_dim % 4 == 2
+        in_x = torch.arange(in_w, device=in_tensor.device).view((1, 1, 1, in_w))
+        src_idx_min = src_idx_min.view(1, 1, out_size, 1)
+
+        in_tensor_list = [
+            in_tensor[n_idx, c_idx, torch.clamp(src_idx_min + k, max=in_h - 1), in_x]
+            for k in range(max_interp_size)
+        ]
+        weights = weights.unsqueeze(-1)
+
+    w_tensor_list = weights.unbind(dim=0)
+    return _sum_tensors(in_t * w_t for in_t, w_t in zip(in_tensor_list, w_tensor_list))
+
+
+@register_decomposition(aten._upsample_bilinear2d_aa.default)
+@aten._upsample_bilinear2d_aa.default.py_impl(DispatchKey.Autograd)
+@pw_cast_for_opmath
+def _upsample_bilinear2d_aa(
+    input: Tensor,
+    output_size: List[int],
+    align_corners: bool,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    # horizontal pass
+    if output_size[1] != input.shape[-1]:
+        output = _separable_upsample_bilinear2d_aa_single_dim(
+            input, output_size[1], -1, align_corners=align_corners, scale=scales_w
+        )
+    else:
+        output = input
+
+    # vertical pass
+    if output_size[0] != input.shape[-2]:
+        output = _separable_upsample_bilinear2d_aa_single_dim(
+            output, output_size[0], -2, align_corners=align_corners, scale=scales_h
+        )
+
+    if not input.is_floating_point():
+        output = output.round()
+
+    return output
 
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
@@ -3846,20 +3964,14 @@ def upsample_bicubic2d_default(
     N, C, iH, iW = a.shape
     oH, oW = output_size
 
-    def compute_scale(in_size, out_size, align_corners, scale=None):
-        if align_corners:
-            return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
-        else:
-            return 1 / scale if scale is not None and scale > 0 else in_size / out_size
-
     def compute_source_index(scale, dst_index, align_corners):
         if align_corners:
             return scale * dst_index
         else:
             return scale * (dst_index + 0.5) - 0.5
 
-    height_scale = compute_scale(iH, oH, align_corners, scale_h)
-    width_scale = compute_scale(iW, oW, align_corners, scale_w)
+    height_scale = _compute_scale(iH, oH, align_corners, scale_h)
+    width_scale = _compute_scale(iW, oW, align_corners, scale_w)
 
     N_idx = torch.arange(N, device=a.device).view(N, 1, 1, 1)
     C_idx = torch.arange(C, device=a.device).view(1, C, 1, 1)
