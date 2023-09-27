@@ -94,8 +94,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_8-clang9-xla / build
-  - pull / linux-bionic-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull / linux-focal-py3_8-clang9-xla / build
+  - pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:

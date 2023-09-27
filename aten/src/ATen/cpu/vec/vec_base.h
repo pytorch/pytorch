@@ -368,6 +368,9 @@ public:
   Vectorized<T> atan() const {
     return map(std::atan);
   }
+  Vectorized<T> atanh() const {
+    return map(std::atanh);
+  }
   Vectorized<T> atan2(const Vectorized<T> &exp) const {
     Vectorized<T> ret;
     for (const auto i : c10::irange(size())) {
