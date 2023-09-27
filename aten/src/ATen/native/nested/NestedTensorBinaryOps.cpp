@@ -311,6 +311,14 @@ Tensor ge_scalar_nested(const Tensor& self, const Scalar& other) {
       });
 }
 
+Tensor gt_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "gt", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.gt(b2);
+      });
+}
+
 Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
   return NestedTensor_elementwise_Tensor(
       self, wrapped_scalar_tensor(other), "eq", false /*supports_striding*/,
