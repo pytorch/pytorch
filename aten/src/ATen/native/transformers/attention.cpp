@@ -590,6 +590,32 @@ at::Tensor post_process_flash_output(
   return out;
 }
 
+// Used to put 3d tensors on the 4d happy path
+std::tuple<at::Tensor, at::Tensor, at::Tensor, bool> preprocess_inputs(const at::Tensor& query, const at::Tensor& key, const at::Tensor& value){
+  // All ensured to be equal size after validate_sdpa_input
+  at::Tensor maybe_query_4d, maybe_key_4d, maybe_value_4d;
+  bool is_3d = false;
+  if (query.dim() == 3){
+    maybe_query_4d = query.unsqueeze(0);
+    maybe_key_4d = key.unsqueeze(0);
+    maybe_value_4d = value.unsqueeze(0);
+    is_3d = true;
+  }
+  else{
+    maybe_query_4d = query;
+    maybe_key_4d = key;
+    maybe_value_4d = value;
+  }
+  return std::make_tuple(std::move(maybe_query_4d), std::move(maybe_key_4d), std::move(maybe_value_4d), is_3d);
+}
+
+at::Tensor postprocess_output(const at::Tensor& out, bool is_3d){
+  if(is_3d){
+    return out.squeeze(0);
+  }
+  return out;
+}
+
 } // namespace
 
 // Computes scaled dot product attention on query, key and value tensors, using
@@ -629,53 +655,57 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     c10::optional<double> scale) {
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+  auto [query_processed, key_processed, value_processed, is_3d] = preprocess_inputs(query_, key, value);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
-  if (query_.device().type() == DeviceType::CUDA
-      || query_.device().type() == DeviceType::CPU){
-    choice_int = _fused_sdp_choice_stub(query_.device().type(),
-      query_, key, value, attn_mask_, dropout_p, is_causal, scale);
+  if (query_processed.device().type() == DeviceType::CUDA
+      || query_processed.device().type() == DeviceType::CPU){
+    choice_int = _fused_sdp_choice_stub(query_processed.device().type(),
+      query_processed, key_processed, value_processed, attn_mask_, dropout_p, is_causal, scale);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
-  c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
+  c10::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_processed.dtype());
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
-      if(query_.device().type() == DeviceType::CUDA){
-        c10::SymInt og_size = query_.sym_size(-1);
-        Tensor query_padded = pad_last_dim<8, false>(query_);
-        Tensor key_padded = pad_last_dim<8, false>(key);
-        Tensor value_padded = pad_last_dim<8, false>(value);
+      if(query_processed.device().type() == DeviceType::CUDA){
+        c10::SymInt og_size = query_processed.sym_size(-1);
+        Tensor query_padded = pad_last_dim<8, false>(query_processed);
+        Tensor key_padded = pad_last_dim<8, false>(key_processed);
+        Tensor value_padded = pad_last_dim<8, false>(value_processed);
         // We need to calculate the scale based off the OG head dim size
-        auto og_scale = sdp::calculate_scale(query_, scale);
+        auto og_scale = sdp::calculate_scale(query_processed, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
-        return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
+        Tensor out = postprocess_output(std::get<0>(out_lse_softmax), is_3d);
+        return post_process_flash_output(out, og_size);
       }
       // For the CPU case we do not need to pad the last dim
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-          query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-      return std::get<0>(out_lse_softmax);
+          query_processed, key_processed, value_processed, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+      return postprocess_output(std::get<0>(out_lse_softmax), is_3d);
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp =
-          (query_.requires_grad() || key.requires_grad() ||
-           value.requires_grad());
+          (query_processed.requires_grad() || key_processed.requires_grad() ||
+           value_processed.requires_grad());
       if (attn_mask.has_value()) {
-        attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
+        attn_mask.value() = preprocess_mask(attn_mask.value(), query_processed, key_processed, value_processed);
       }
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
-      return std::get<0>(out_and_lse);
+          query_processed, key_processed, value_processed, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
+      return postprocess_output(std::get<0>(out_and_lse), is_3d);
     }
-    case sdp::SDPBackend::math:
-      return std::get<0>(at::_scaled_dot_product_attention_math(
-          query_,
-          key,
-          value,
+    case sdp::SDPBackend::math: {
+      auto out_mask = at::_scaled_dot_product_attention_math(
+          query_processed,
+          key_processed,
+          value_processed,
           attn_mask,
           dropout_p,
           is_causal,
           c10::nullopt, /*dropout_mask*/
-          scale));
+          scale);
+      return postprocess_output(std::get<0>(out_mask), is_3d);
+    }
     default:
       TORCH_CHECK(
           false,
