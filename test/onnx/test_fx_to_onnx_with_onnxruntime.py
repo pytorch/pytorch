@@ -562,9 +562,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        "torch.onnx._internal.diagnostics.infra.context.RuntimeErrorWithDiagnostic: "
-        "Cannot find any perfect/nearest match of symbolic function for aten::split.Tensor,"
-        "which should be registered under aten.split.Tensor."
+        "https://github.com/pytorch/pytorch/issues/110131"
     )
     def test_gpt2_tiny_from_config(self):
         # Model
