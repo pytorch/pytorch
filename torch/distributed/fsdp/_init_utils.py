@@ -36,6 +36,12 @@ from torch.distributed.fsdp._common_utils import (
     clean_tensor_name,
     TrainingState,
 )
+from torch.distributed.fsdp._flat_param import (
+    _FSDP_USE_FULL_PREC_IN_EVAL,
+    FlatParameter,
+    FlatParamHandle,
+    HandleShardingStrategy,
+)
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp.api import (
     BackwardPrefetch,
@@ -46,12 +52,6 @@ from torch.distributed.fsdp.api import (
     ShardingStrategy,
     StateDictConfig,
     StateDictType,
-)
-from torch.distributed.fsdp.flat_param import (
-    _FSDP_USE_FULL_PREC_IN_EVAL,
-    FlatParameter,
-    FlatParamHandle,
-    HandleShardingStrategy,
 )
 from torch.distributed.fsdp.wrap import _Policy
 from torch.distributed.utils import _sync_params_and_buffers

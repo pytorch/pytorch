@@ -79,6 +79,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
+from ._flat_param import FlatParameter
 
 from ._optim_utils import (
     _flatten_optim_state_dict,
@@ -97,7 +98,6 @@ from ._unshard_param_utils import (
     _unshard_params,
     _unshard_params_recurse,
 )
-from .flat_param import FlatParameter
 from .wrap import ModuleWrapPolicy
 
 
