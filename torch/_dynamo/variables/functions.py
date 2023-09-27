@@ -8,7 +8,7 @@ import torch
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..source import (
     AttrSource,
     ConstantSource,
@@ -655,7 +655,8 @@ class TritonKernelVariable(VariableTracker):
 
         grid = self.grid
 
-        assert grid is not None
+        if grid is None:
+            raise Unsupported("Triton kernels should always be called with a grid")
 
         # If the grid is a function, then lets execute it and convert it to
         # a list
@@ -711,14 +712,16 @@ class TritonKernelVariable(VariableTracker):
     ) -> "VariableTracker":
         if name == "__getitem__":
             # __getitem__ should only be called if we don't already have a grid
-            assert self.grid is None
-
             # Only grid needs to be passed
-            assert len(args) == 1
+            if self.grid is not None or len(args) != 1:
+                raise Unsupported(
+                    "Triton kernels should be called with only a single grid"
+                )
+
             grid = args[0]
             return TritonKernelVariable(
                 self.kernel, grid, **VariableTracker.propagate(self)
             )
 
-        # Bail out to parents implementation
+        # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
