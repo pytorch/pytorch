@@ -343,6 +343,7 @@ class TensorVariable(VariableTracker):
 
         kwargs = dict(kwargs)
         options = VariableTracker.propagate(self, args, kwargs.values())
+
         if name in ("stride", "size"):
             dim_var = None
             if len(args) == 1:
