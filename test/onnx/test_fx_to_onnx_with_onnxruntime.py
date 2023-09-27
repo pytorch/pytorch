@@ -561,9 +561,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.xfail(
-        "https://github.com/pytorch/pytorch/issues/110131"
-    )
+    @pytorch_test_common.xfail("https://github.com/pytorch/pytorch/issues/110131")
     def test_gpt2_tiny_from_config(self):
         # Model
         config = transformers.GPT2Config(
