@@ -9,8 +9,8 @@
 // WARNING: Be careful when adding new includes here. This header will be used
 // in model.so, and should not refer to any aten/c10 headers except the stable
 // C ABI defined in torch/csrc/inductor/aoti_torch/c/shim.h. The same rule
-// applies to other files under torch/csrc/inductor/aot_runtime/.
-#include <torch/csrc/inductor/aot_runtime/model.h>
+// applies to other files under torch/csrc/inductor/aoti_runtime/.
+#include <torch/csrc/inductor/aoti_runtime/model.h>
 
 // At codegen time, we write out a binary file called constants.bin.
 // We then turn the raw binary to an object file that exposes this
@@ -138,6 +138,8 @@ class AOTInductorModelContainer {
       }
 
       AtenTensorHandle tensor_handle;
+      int device_idx; // should be the same as was used for constant_blob_
+      AOTI_RUNTIME_CUDA_CHECK(cudaGetDevice(&device_idx));
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
           internal_ptr,
           ndim,
@@ -146,7 +148,7 @@ class AOTInductorModelContainer {
           offset,
           dtype,
           device_type,
-          0, // device index, should read it from cudaStream_t?
+          device_idx,
           &tensor_handle));
       constants_->emplace(
           std::move(name), std::move(RAIIAtenTensorHandle(tensor_handle)));
