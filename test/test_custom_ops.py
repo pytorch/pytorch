@@ -1785,7 +1785,6 @@ class MiniOpTestOther(CustomOpTestCaseBase):
         self.assertEqual(y, torch.tensor([[1], [2]]))
 
 
-
 mini_op_test_checks = [
     "test_schema",
     "test_autograd_registration",
