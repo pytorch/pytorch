@@ -499,11 +499,12 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
 
 def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
-    if x.get_dtype() == dtype:
+    src_dtype = x.get_dtype()
+    if src_dtype == dtype:
         return clone(x) if copy else x
 
     def _to_dtype(x):
-        return ops.to_dtype(x, dtype)
+        return ops.to_dtype(x, dtype, src_dtype=src_dtype)
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
@@ -1486,23 +1487,12 @@ def _warn_complex_not_supported():
     )
 
 
-@functools.lru_cache(None)
-def _warn_float8_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for float8 operators. Performance may be worse than eager."
-    )
-
-
 # There are some types (CPU) which we accept as input but not as
 # output.
 def unsupported_input_tensor(t: torch._subclasses.FakeTensor):
     "Do not support reading or writing to this tensor"
     if t.is_complex():
         _warn_complex_not_supported()
-        return True
-    # FP8 Tensors are currently not supported
-    if t.dtype in {torch.float8_e4m3fn, torch.float8_e5m2}:
-        _warn_float8_not_supported()
         return True
     return False
 
@@ -1992,7 +1982,6 @@ make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten.take)
 make_fallback(aten._trilinear)
 make_fallback(aten.uniform, warn=False)
-make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -2751,6 +2740,42 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if x_ndim == 0:
         self = view(self, [])
     return self
+
+
+@register_lowering(
+    inductor_prims.masked_scatter_with_index, type_promotion_kind=None, broadcast=False
+)
+def masked_scatter_with_index(self, mask, source_idx, source):
+    self_flat, mask_flat, source_flat = (view(x, (-1,)) for x in (self, mask, source))
+
+    assert self.get_size() == mask.get_size()
+    assert mask.get_dtype() in {torch.bool, torch.uint8}
+
+    self_loader = self_flat.make_loader()
+    mask_loader = mask_flat.make_loader()
+    source_idx_loader = source_idx.make_loader()
+    source_loader = source_flat.make_loader()
+    source_numel = source.get_numel()
+
+    def inner_fn(idx):
+        self_val = self_loader(idx)
+        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+
+        def load_source_val():
+            source_idx_val = source_idx_loader(idx)
+            i = ops.indirect_indexing(source_idx_val, source_numel)
+            return source_loader([i])
+
+        source_val = ops.masked(mask_val, load_source_val, 0)
+        return ops.where(mask_val, source_val, self_val)
+
+    result_flat = Pointwise.create(
+        device=self.get_device(),
+        dtype=self.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=self_flat.get_size(),
+    )
+    return view(result_flat, self.get_size())
 
 
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
@@ -4501,7 +4526,7 @@ def reduce_any(x, dim=None, keepdim=False):
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
 
 
-@register_lowering(aten.max)
+@register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
         return (
@@ -4512,7 +4537,7 @@ def reduce_max(x, dim=None, keepdim=False):
     return reduce_amax(x, axis=None, keepdims=keepdim)
 
 
-@register_lowering(aten.min)
+@register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
         return (

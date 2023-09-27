@@ -592,7 +592,7 @@ namespace std {
 template <class CharT>
 struct hash<::c10::basic_string_view<CharT>> {
   size_t operator()(::c10::basic_string_view<CharT> x) const {
-    // The standard says that std""string_view hashing must do the same as
+    // The standard says that std::string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
     // up to the implementer. So, to be conformant, we need to re-use and
     // existing STL type's hash function. The std::string fallback is probably
