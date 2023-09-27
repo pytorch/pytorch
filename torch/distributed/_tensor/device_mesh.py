@@ -278,14 +278,12 @@ class DeviceMesh:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash((self.mesh, id(self)))
+        return hash(id(self.mesh))
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):
             return False
-        if id(self) == id(other):
-            return True
-        return self.mesh.equal(other.mesh)
+        return id(self.mesh) == id(other.mesh)
 
     def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
         """
