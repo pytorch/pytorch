@@ -3,6 +3,7 @@ import dataclasses
 import io
 import pathlib
 import re
+import warnings
 
 import types
 import weakref
@@ -727,7 +728,9 @@ def aot_compile(
     f: Callable,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
+    *,
     constraints: Optional[List[Constraint]] = None,
+    dynamic_shapes: Optional[Dict[str, Any]] = None,
     options: Optional[Dict[str, Any]] = None,
 ) -> Tuple[str, ExportedProgram]:
     """
@@ -747,16 +750,31 @@ def aot_compile(
         constraints: A optional list of constraints on the dynamic arguments specifying
             their possible range of their shapes
 
+        dynamic_shapes: An experimental new feature designed to subsume ``constraints``.
+            A dict mapping argument names of ``f`` to their dynamic shape
+            specifications, as follows. Dynamic shape specifications can be a
+            dict from dynamic dimensions to ``Dim`` types, or a tuple/list of
+            ``Optional[Dim]`` corresponding to each input dimension.
+
         options: A dictionary of options to control inductor
 
     Returns:
         Path to the generated shared library, and the exported program
     """
+    if constraints is not None:
+        warnings.warn(
+            "The constraints field is deprecated. "
+            "Please use dynamic_shapes instead."
+        )
+
     from torch._inductor.decomposition import select_decomp_table
 
     global DECOMP_TABLE
     DECOMP_TABLE = select_decomp_table()
-    ep = export(f, args, kwargs, constraints)
+    if constraints is not None:
+        ep = export(f, args, kwargs, constraints)
+    else:
+        ep = export__RC__(f, args, kwargs, dynamic_shapes=dynamic_shapes)
     # Reset the global value
     DECOMP_TABLE = core_aten_decompositions()
 
