@@ -595,7 +595,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, bool> preprocess_inputs(const at:
   // All ensured to be equal size after validate_sdpa_input
   at::Tensor maybe_query_4d, maybe_key_4d, maybe_value_4d;
   bool is_3d = false;
-  if (query.dim() == 3){
+  if (query.dim() == 3 && !query.is_nested()){
     maybe_query_4d = query.unsqueeze(0);
     maybe_key_4d = key.unsqueeze(0);
     maybe_value_4d = value.unsqueeze(0);
