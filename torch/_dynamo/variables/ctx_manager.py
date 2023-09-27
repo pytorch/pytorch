@@ -6,10 +6,10 @@ from torch._guards import Guard
 
 from .. import variables
 from ..bytecode_transformation import create_call_function, create_instruction
+from ..device_interface import get_interface_for_device
 from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..source import AttrSource, GlobalStateSource
-from ..stream import StreamInterfaceObject
 from .base import VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
@@ -389,9 +389,9 @@ class StreamContextVariable(ContextWrappingVariable):
     def create(tx, target_value, **kwargs):
         from .builder import wrap_fx_proxy_cls
 
-        current_stream_method = StreamInterfaceObject.get_method_by_device(
-            "current_stream", target_value.device
-        )
+        current_stream_method = get_interface_for_device(
+            target_value.device
+        ).current_stream
         current_stream = wrap_fx_proxy_cls(
             StreamVariable,
             tx,
@@ -414,16 +414,15 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_func = StreamInterfaceObject.get_method_by_device(
-            "set_stream", self.device
-        )
+        self.set_stream = get_interface_for_device(self.device).set_stream
+        self.set_stream_id = get_interface_for_device(self.device).set_stream_by_id
 
     def enter(self, tx):
         # stream generated inside of traced function
         if self.target_values[0].as_proxy() is not None:
             tx.output.create_proxy(
                 "call_function",
-                self.set_stream_func,
+                self.set_stream,
                 (self.target_values[0].as_proxy(),),
                 {},
             )
@@ -432,24 +431,20 @@ class StreamContextVariable(ContextWrappingVariable):
             stream = self.target_values[0].value
             tx.output.create_proxy(
                 "call_function",
-                StreamInterfaceObject.get_method_by_device(
-                    "set_stream_by_id", self.device
-                ),
+                self.set_stream_id,
                 (stream.stream_id, stream.device_index, stream.device_type),
                 {},
             )
-        StreamInterfaceObject.get_method_by_device("set_stream", self.device)(
-            self.target_values[0].value
-        )
+        self.set_stream(self.target_values[0].value)
 
     def exit(self, tx, *args):
         tx.output.create_proxy(
             "call_function",
-            self.set_stream_func,
+            self.set_stream,
             (self.initial_values[0].as_proxy(),),
             {},
         )
-        self.set_stream_func(self.initial_values[0].value)
+        self.set_stream(self.initial_values[0].value)
 
     def module_name(self):
         return "torch." + str(self.device)

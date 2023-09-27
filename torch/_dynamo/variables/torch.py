@@ -23,8 +23,8 @@ from torch._dynamo.variables import UserFunctionVariable
 
 from .. import config, variables
 from ..allowed_functions import torch_get_name
+from ..device_interface import device_interfaces, get_interface_for_device
 from ..exc import unimplemented
-from ..stream import StreamInterfaceObject
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
@@ -354,14 +354,12 @@ class TorchVariable(VariableTracker):
             return TorchFunctionDisableVariable.create(tx, **options)
         elif any(
             self.value is method
-            for method in StreamInterfaceObject.get_all_methods("create_stream_context")
+            for method in [
+                interface_elem.stream for interface_elem in device_interfaces.values()
+            ]
         ):
             log.warning(
-                str(
-                    StreamInterfaceObject.get_method_by_device(
-                        "create_stream_context", args[0].device
-                    )
-                ),
+                str(get_interface_for_device(args[0].device).stream),
                 "not fully supported, streams may be ignored",
             )
             assert len(args) == 1

@@ -28,6 +28,10 @@ class DeviceInterface:
         def __new__(cls, device: _device_t):
             raise NotImplementedError()
 
+    class Stream:
+        def __new__(cls, device=None, priority=0, **kwargs):
+            raise NotImplementedError()
+
     class Worker:
         """
         Worker API to query device properties that will work in multi processing
@@ -65,11 +69,19 @@ class DeviceInterface:
         raise NotImplementedError()
 
     @staticmethod
+    def stream(stream: torch.Stream):
+        raise NotImplementedError()
+
+    @staticmethod
     def current_stream():
         raise NotImplementedError()
 
     @staticmethod
     def set_stream(stream: torch.Stream):
+        raise NotImplementedError()
+
+    @staticmethod
+    def set_stream_by_id(stream_id: int, device_index: int, device_type: int):
         raise NotImplementedError()
 
     @staticmethod
@@ -92,6 +104,7 @@ class DeviceInterface:
 class CudaInterface(DeviceInterface):
     Event = torch.cuda.Event
     device = torch.cuda.device
+    Stream = torch.cuda.Stream
 
     class Worker:
         @staticmethod
@@ -127,8 +140,10 @@ class CudaInterface(DeviceInterface):
     current_device = staticmethod(torch.cuda.current_device)
     set_device = staticmethod(torch.cuda.set_device)
     device_count = staticmethod(torch.cuda.device_count)
+    stream = staticmethod(torch.cuda.stream)
     current_stream = staticmethod(torch.cuda.current_stream)
     set_stream = staticmethod(torch.cuda.set_stream)
+    set_stream_by_id = staticmethod(torch.cuda.set_stream_by_id)
     synchronize = staticmethod(torch.cuda.synchronize)
     get_device_properties = staticmethod(torch.cuda.get_device_properties)
     get_raw_stream = staticmethod(get_cuda_stream)
