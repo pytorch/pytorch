@@ -3145,6 +3145,12 @@ def parse_args(args=None):
         help="Measure speedup with Dynamo ONNX, i.e. `torch.onnx.dynamo_export`",
     )
     group.add_argument(
+        "--dynamo-onnx-aot-inline",
+        "--dynamo_onnx_aot_inline",
+        action="store_true",
+        help="Measure speedup with Dynamo ONNX AOT Inline, i.e. `torch.onnx.dynamo_export`",
+    )
+    group.add_argument(
         "--backend",
         choices=torch._dynamo.list_backends(exclude_tags=None),
         help="measure speedup with a given backend",
