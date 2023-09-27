@@ -637,10 +637,6 @@ class FxOnnxInterpreter:
             fx_name_to_onnxscript_value[node.name] = output
             return
 
-        default_and_custom_functions = onnxfunction_dispatcher.get_function_overloads(
-            node, self.diagnostic_context
-        )
-
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         fx_args, fx_kwargs, default_set_kwargs = _fill_in_default_kwargs(node)
