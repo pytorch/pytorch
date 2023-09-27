@@ -48,6 +48,41 @@ if [[ "$SHARD_NUMBER" == "2" ]]; then
   xdoctest torch.onnx --style=google --options="+IGNORE_WHITESPACE"
 fi
 
+if [[ "$SHARD_NUMBER" == "2" ]]; then
+  # Sanity check on torchbench w/ onnx
+  pip install pandas
+  log_folder="test/.torchbench_logs"
+  device="cpu"
+
+  mkdir -p "${log_folder}"
+  for mode in "accuracy" "performance"; do
+    for compiler in "dynamo-onnx" "torchscript-onnx"; do
+      for suite in "huggingface" "timm_models"; do
+        output_file="${log_folder}/${compiler}_${suite}_float32_inference_${device}_${mode}.csv"
+        bench_file="benchmarks/dynamo/${suite}.py"
+        # Run only selected model for each suite to quickly validate the benchmark suite works as expected.
+        case "$suite" in
+            "torchbench")
+                bench_args+=(-k resnet18)
+                ;;
+            "huggingface")
+                bench_args+=(-k ElectraForQuestionAnswering)
+                ;;
+            "timm_models")
+                bench_args+=(-k lcnet_050)
+                ;;
+            *)
+                echo "Unknown suite: ${suite}"
+                exit 1
+                ;;
+        esac
+        bench_args=("--${mode}" --float32 "-d${device}" "--output=${output_file}" "--output-directory=${top_dir}" --inference -n5 "--${compiler}" --no-skip --dashboard --batch-size 1)
+        python "${top_dir}/${bench_file}" "${bench_args[@]}"
+      done
+    done
+  done
+fi
+
 # Our CI expects both coverage.xml and .coverage to be within test/
 if [ -d .coverage ]; then
   mv .coverage test/.coverage
