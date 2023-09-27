@@ -2456,11 +2456,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
             requires_grad=requires_grad,
         )
         oned_tensor = partial(
-            make_tensor,
-            (31,),
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
+            make_tensor, (31,), device=device, dtype=dtype, requires_grad=requires_grad
         )
     else:
         # cuFFT supports powers of 2 for half and complex half precision
