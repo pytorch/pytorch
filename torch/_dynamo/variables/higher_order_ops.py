@@ -255,9 +255,14 @@ def speculate_subgraph(
                 )
 
     except Unsupported as ex:
+        from . import UserFunctionVariable
+
+        f_name = f"{type(f).__name__}"
+        if isinstance(f, UserFunctionVariable):
+            f_name = f.get_name()
         msg = (
             f"speculate_subgraph: while introspecting {description}, we were unable "
-            f"to trace function `{f.get_name()}` into a single graph. This means "
+            f"to trace function `{f_name}` into a single graph. This means "
             f"that Dynamo was unable to prove safety for this API and will "
             f"fall back to eager-mode PyTorch, which could lead to a slowdown."
         )
