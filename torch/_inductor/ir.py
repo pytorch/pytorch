@@ -3829,6 +3829,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overlad_name,
                 self.op_overload,
                 exported_args,
+                self.outputs,
             )
         else:
             super().codegen(wrapper)
