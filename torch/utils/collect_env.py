@@ -109,6 +109,7 @@ def get_conda_packages(run_lambda):
                 "mkl",
                 "magma",
                 "triton",
+                "optree",
             }
         )
     )
@@ -389,6 +390,7 @@ def get_pip_packages(run_lambda):
                     "mypy",
                     "flake8",
                     "triton",
+                    "optree",
                 }
             )
         )

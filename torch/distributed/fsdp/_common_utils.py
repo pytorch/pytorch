@@ -142,6 +142,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
+        self._enable_extension: bool = False
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:

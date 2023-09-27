@@ -12,11 +12,12 @@ import sympy
 
 import torch
 from torch._dynamo.utils import dynamo_timed
+from torch.utils._triton import has_triton
 
 from . import config, dependencies, ir, metrics
-from .codegen.common import get_scheduling_for_device
+from .codegen.common import get_scheduling_for_device, Kernel
 from .dependencies import StarDep, WeakDep
-from .ir import ComputedBuffer
+from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
@@ -25,7 +26,6 @@ from .utils import (
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
-    has_triton,
     sympy_product,
 )
 from .virtualized import V
@@ -262,14 +262,17 @@ class BaseSchedulerNode:
     def has_side_effects(self):
         return False
 
-    def allocate(self):
+    def decide_inplace_update(self):
+        """
+        Decide if there should be inplace updates for the node
+        and record the decision in the active kernel.
+        """
         if not self.node.should_allocate():
             return
 
         if isinstance(self, (SchedulerNode,)) and (
             self.node.get_alias_names() or self.node.get_mutation_names()
         ):
-            V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
         if (
@@ -317,9 +320,6 @@ class BaseSchedulerNode:
                         and buffer_reuse_key(input_node.node)
                         == buffer_reuse_key(self.node)
                     ):
-                        V.graph.wrapper_code.codegen_inplace_reuse(
-                            input_node.node, self.node
-                        )
                         # hacky check for if V.kernel is a real kernel or NullHandler
                         if hasattr(V.kernel, "args"):
                             # if there isn't a triton kernel, then we don't need to call triton-specific things.
@@ -338,8 +338,34 @@ class BaseSchedulerNode:
                             # update last usage of reused node
                             self.last_usage.discard(input_node.get_name())
 
-                        return
-        V.graph.wrapper_code.codegen_allocation(self.node)
+                            V.kernel.inplace_update_buffers[
+                                self.get_name()
+                            ] = input_node.get_name()
+                        break
+
+    def allocate(self):
+        if not self.node.should_allocate():
+            return
+
+        if isinstance(self, (SchedulerNode,)) and (
+            self.node.get_alias_names() or self.node.get_mutation_names()
+        ):
+            V.graph.wrapper_code.codegen_allocation(self.node)
+            return
+
+        # hacky check for if V.kernel is a real kernel or NullHandler
+        if (
+            hasattr(V.kernel, "args")
+            and self.get_name() in V.kernel.inplace_update_buffers
+        ):
+            V.graph.wrapper_code.codegen_inplace_reuse(
+                self.scheduler.name_to_node[
+                    V.kernel.inplace_update_buffers[self.get_name()]
+                ].node,
+                self.node,
+            )
+        else:
+            V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
         for use in self.users:
@@ -389,8 +415,45 @@ class BaseSchedulerNode:
         self.written = True
 
     def get_read_write_buffers_sizes(self) -> int:
+        """
+        Counting the number of bytes accessed for a kernel is
+        surprisingly tricky. In particular, there is a differentiation
+        between 'theoretical' memory accesses and practical memory
+        accesses. For example, a layernorm kernel may actually access an
+        input 3 times, but in theory, it only needs to access its input
+        once (and may be optimized to do so through say, persistent
+        reductions)
+
+        Another example is that even though a buffer is passed in, we may
+        not access the entire buffer. This may occur if we are accessing
+        a slice of the buffer. Another tricky case is for indirect
+        indexing, where the amount of bytes accessed depends on the
+        values of the input.
+
+        What this function aims to compute is the memory accesses for
+        worst-case inputs, best-case optimization. What this means is
+        that for each buffer we compute the amount of potential accesses in two ways and take the minimum.
+
+        1. Numel in ranges multiplied by number of deps the buffer has
+        2. The buffer size
+        """
         if isinstance(self, NopKernelSchedulerNode):
             return 0
+        if isinstance(self, ExternKernelSchedulerNode) and isinstance(
+            self.node, MultiOutput
+        ):
+            return 0
+
+        if isinstance(self, SchedulerNode):
+            node_numel = sympy_product(self.get_ranges()[0]) * sympy_product(
+                self.get_ranges()[1]
+            )
+        else:
+            node_numel = int(1e9)
+        buf_accesses = collections.defaultdict(list)
+        for dep in self.read_writes.reads | self.read_writes.writes:
+            buf_accesses[dep.name].append(dep)
+
         reads = {dep.name for dep in self.read_writes.reads}
         writes = {dep.name for dep in self.read_writes.writes}
 
@@ -403,7 +466,9 @@ class BaseSchedulerNode:
             writes = writes - removed_buffers
             reads = reads - removed_buffers
         node_bytes = 0
+
         for buf in reads | writes:
+            buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf]])
             if buf in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf]
             elif buf in V.graph.graph_inputs:
@@ -411,9 +476,23 @@ class BaseSchedulerNode:
             else:
                 continue
 
-            node_bytes += V.graph.sizevars.size_hint(
-                sympy_product(buf.get_size())
-            ) * get_dtype_size(buf.get_dtype())
+            def get_buf_elems(buf):
+                return V.graph.sizevars.size_hint(sympy_product(buf.get_size()))
+
+            # Kind of a lazy way to get the MultiOutput nodes corresponding to
+            # a MultiOutputLayout
+            if isinstance(buf.layout, MultiOutputLayout):
+                buf_elems = sum(
+                    get_buf_elems(user.node.node)
+                    for user in self.scheduler.name_to_node[buf.name].users
+                )
+            else:
+                buf_elems = get_buf_elems(buf)
+
+            node_bytes += min(buf_elems, buf_accessed_elems) * get_dtype_size(
+                buf.get_dtype()
+            )
+
         return node_bytes
 
     def get_estimated_runtime(self) -> float:
@@ -552,6 +631,7 @@ class SchedulerNode(BaseSchedulerNode):
         return isinstance(self.node, ir.TemplateBuffer)
 
     def run(self, *index_vars):
+        self.decide_inplace_update()
         self.mark_run()
         self.codegen(index_vars)
 
@@ -600,6 +680,28 @@ class SchedulerNode(BaseSchedulerNode):
             write_dep = next(iter(self.read_writes.writes))
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
+
+    @cache_on_self
+    def _get_atomic_add_buffers(self) -> Set[str]:
+        buffers_store_as_atomic_add = set()
+        for node in self._body.get_nodes():
+            if (
+                node.op == "call_method"
+                and node.target == "store"
+                and (
+                    ("mode" in node.kwargs and node.kwargs["mode"] == "atomic_add")
+                    or (len(node.args) == 5 and node.args[4] == "atomic_add")
+                )
+            ):
+                buffers_store_as_atomic_add.add(
+                    node.kwargs["name"]
+                    if "name" in node.kwargs
+                    else (node.args[1] if len(node.args) >= 2 else "")
+                )
+        return buffers_store_as_atomic_add
+
+    def has_atomic_add(self, check_buf):
+        return check_buf in self._get_atomic_add_buffers()
 
 
 class FusedSchedulerNode(BaseSchedulerNode):
@@ -691,9 +793,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def is_template(self):
         return any(x.is_template() for x in self.snodes)
 
-    def is_foreach(self):
-        return False
-
     def get_device(self):
         return self.group[0]
 
@@ -707,6 +806,15 @@ class FusedSchedulerNode(BaseSchedulerNode):
         for node in self.snodes:
             op_counts.update(node.op_counts())
         return op_counts
+
+    def has_atomic_add(self, check_buf):
+        return any(
+            (
+                isinstance(sub_schedule_node1, SchedulerNode)
+                and sub_schedule_node1.has_atomic_add(check_buf)
+            )
+            for sub_schedule_node1 in self.get_nodes()
+        )
 
     # None of these need to be implemented, as a FusedSchedulerNode is just an
     # abstraction for scheduling purposes
@@ -1408,6 +1516,25 @@ class Scheduler:
         if node2.get_names() & node1.recursive_predecessors:
             return False  # node2 must go before node1
 
+        if (
+            isinstance(node1, (FusedSchedulerNode, SchedulerNode))
+            and isinstance(node2, SchedulerNode)
+            and isinstance(node2._body, ir.LoopBody)
+        ):
+            # Fix issue: https://github.com/pytorch/pytorch/issues/108963
+            # Check:
+            #   If node2 reads a buf which is a mutation buf of node1(SchedulerNode) or among nodes in node1(FusedSchedulerNode),
+            #   we will get the corresponding mutation buf and check if this mutation buf is stored by atomic_add mode.
+            # If True, we will disable the fusion of node1 and node2.
+            if any(
+                (
+                    node2_used_buf in self.mutation_renames
+                    and node1.has_atomic_add(self.mutation_renames[node2_used_buf])
+                )
+                for node2_used_buf in node2._body.reads_name2expr.keys()
+            ):
+                return False
+
         if node2.is_template():
             return False  # only epilogues
         if node1.is_template() and (
@@ -1600,7 +1727,7 @@ class Scheduler:
         # generate unique arg name.
         log.debug("remove_buffer(%r)", name)
         V.kernel.args.output_buffers[name] = "REMOVED"
-        V.graph.removed_buffers.add(name)
+        V.kernel.removed_buffers.add(name)
 
     def remove_inplace_buffer(self, name):
         log.debug("removing_inplace_buffer(%r)", name)
@@ -1608,7 +1735,7 @@ class Scheduler:
         V.kernel.args.inplace_buffers[name] = inner_name.replace(
             "in_out_ptr", "REMOVED"
         )
-        V.graph.removed_buffers.add(name)
+        V.kernel.removed_buffers.add(name)
 
     def flush(self):
         for backend in self.backends.values():
@@ -1617,7 +1744,13 @@ class Scheduler:
 
     def codegen_extern_call(self, scheduler_node: ExternKernelSchedulerNode):
         assert isinstance(scheduler_node, ExternKernelSchedulerNode)
-        scheduler_node.allocate()
+        # 'decide_inplace_update' stores the inplace update decisions in
+        # the current kernel from where 'allocate' retrieve those decisions.
+        # We have to make sure there is a non-NULL kernel handler to store
+        # those inplace update decisions.
+        with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
+            scheduler_node.decide_inplace_update()
+            scheduler_node.allocate()
         node = scheduler_node.node
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
@@ -1689,7 +1822,12 @@ class Scheduler:
 
             if node.is_template():
                 node, *epilogue = node.get_nodes()
-                self.get_backend(device).codegen_template(node, epilogue)
+                if isinstance(node.node, ir.CUDATemplateBuffer):
+                    from .codegen.cuda.cuda_scheduling import CUDAScheduling
+
+                    CUDAScheduling(self).codegen_template(node, epilogue)
+                else:
+                    self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 self.codegen_extern_call(node)
             elif node.is_foreach():
@@ -1706,6 +1844,17 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
+
+    def is_unaligned_buffer(self, buf_name):
+        if buf_name in V.graph.graph_inputs or buf_name in V.graph.constants:
+            # all graph inputs or constants are assumed to be aligned
+            return False
+        node = self.name_to_node[buf_name]
+        layout = node.node.get_layout()
+        if isinstance(layout, ir.AliasedLayout):
+            return not layout.maybe_guard_aligned()
+        else:
+            return False
 
 
 class BaseScheduling:
