@@ -1013,8 +1013,8 @@ def _dispatch_should_fallback(op: Any) -> bool:
     )
 
 
-def _is_allowed_metadata(thing: Any) -> bool:
-    return not isinstance(thing, (SymTypes, torch.ScriptObject))
+def _is_notsupported_metadata(thing: Any) -> bool:
+    return isinstance(thing, (SymTypes, torch.ScriptObject)) or (isinstance(thing, torch.Tensor) and thing.is_sparse)
 
 
 def _apply(f: Callable, iterable) -> Any:
@@ -1091,13 +1091,13 @@ def _from_metadata(metadata: Any, fake_mode) -> Any:
 
 
 def _hash_key(func, args, kwargs):
-    flattened_args, _ = tree_flatten((args, kwargs))
+    flattened_args, _ = tree_flatten((args, list(kwargs.items())))
     tuple_args = []
 
     for a in flattened_args:
-        if not _is_allowed_metadata(a):
+        if _is_notsupported_metadata(a):
             return None
-        elif isinstance(a, FakeTensor):
+        elif isinstance(a, torch.Tensor):
             if any(
                 isinstance(s, SymTypes)
                 for s in itertools.chain(a.shape, a.stride(), [a.storage_offset()])
@@ -1122,7 +1122,7 @@ def cache_dispatch(dispatch: Callable) -> Callable:
         if key not in _DISPATCH_CACHE:
             output = dispatch(self, func, types, args, kwargs)
 
-            if not _is_allowed_metadata(output):
+            if _is_notsupported_metadata(output):
                 # Unsupported output types when caching.
                 return output
 
