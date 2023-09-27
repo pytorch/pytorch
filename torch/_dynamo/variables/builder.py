@@ -835,7 +835,7 @@ class VariableBuilder:
             ).add_guards(guards)
             for i, item in enumerate(value)
         ]
-        result = self.list_type(value)(
+        result = BaseListVariable.cls_for(type(value))(
             output, mutable_local=MutableLocal(), guards=guards
         )
         if istype(value, list):
