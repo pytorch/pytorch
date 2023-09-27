@@ -87,8 +87,6 @@ from .utils import (
     lazy_format_graph_code,
     lazy_format_graph_tabular,
     LazyString,
-    nnmodule_doc_url_msg,
-    nnmodule_has_hooks,
     same,
 )
 from .variables.base import VariableTracker
@@ -686,14 +684,6 @@ class OutputGraph(Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if nnmodule_has_hooks(
-                target, check_backward_hooks=True, check_state_dict_hooks=True
-            ):
-                torch._logging.warning_once(
-                    log,
-                    "nn.Module state_dict and backward hooks are not yet supported by torch.compile, "
-                    f"but were detected in your model and will be silently ignored. {nnmodule_doc_url_msg}",
-                )
 
             options["guards"].add(source.make_guard(GuardBuilder.NN_MODULE))
 

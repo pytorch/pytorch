@@ -85,6 +85,17 @@ SKIP = {
     "clip",
 }
 
+SKIP_DUE_TO_CONTROL_FLOW = {
+    "cm3leon_generate",
+    "detectron2_fcos_r_50_fpn",
+    "fastNLP_Bert",
+    "hf_Longformer",
+    "hf_Reformer",
+    "hf_T5_generate",
+    "opacus_cifar10",
+    "speech_transformer",
+}
+
 SKIP_FOR_CPU = {
     "hf_T5_generate",  # OOMs
     "cm3leon_generate",  # model is CUDA only
@@ -248,6 +259,7 @@ FORCE_AMP_FOR_FP16_BF16_MODELS = {
 # models in canary_models that we should run anyway
 CANARY_MODELS = {
     "torchrec_dlrm",
+    "clip",  # torchbench removed torchtext dependency
 }
 
 ONLY_MULTIPROCESS = {
@@ -313,6 +325,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_multiprocess_models(self):
         return ONLY_MULTIPROCESS
+
+    @property
+    def skip_models_due_to_control_flow(self):
+        return SKIP_DUE_TO_CONTROL_FLOW
 
     def load_model(
         self,

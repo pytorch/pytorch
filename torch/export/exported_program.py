@@ -346,10 +346,12 @@ class ExportedProgram:
         if self.call_spec.in_spec is not None:
             try:
                 user_args = combine_args_kwargs(args, kwargs)
-                args = fx_pytree.tree_flatten_spec(user_args, self.call_spec.in_spec)  # type: ignore[assignment]
+                args = fx_pytree.tree_flatten_spec(
+                    user_args, self.call_spec.in_spec, exact_structural_match=True
+                )  # type: ignore[assignment]
             except Exception:
                 _, received_spec = pytree.tree_flatten(user_args)
-                raise error.InternalError(
+                raise TypeError(
                     "Trying to flatten user inputs with exported input tree spec: \n"
                     f"{self.call_spec.in_spec}\n"
                     "but actually got inputs with tree spec of: \n"
@@ -551,11 +553,12 @@ class ExportedProgram:
         _assertion_graph(*args)
 
     def _validate(self):
-        # TODO(zhxchen17) check for get_attr
-        # TODO(zhxchen17) check for funcitonal ops
+        from torch._export.verifier import Verifier, verify_exported_program_signature
+
+        verify_exported_program_signature(self)
+
+        verifier = Verifier()
         for gm in self.graph_module.modules():
             if not isinstance(gm, torch.fx.GraphModule):
                 continue
-            for node in gm.graph.nodes:
-                if node.op == "call_function":
-                    assert node.target != torch.ops.higher_order._export_tracepoint
+            verifier.check_valid(self.graph_module)
