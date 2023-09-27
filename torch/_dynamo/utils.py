@@ -2123,3 +2123,17 @@ def get_static_address_type(t):
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
+
+
+def is_rng_state_getter_or_setter(value):
+    getters = (
+        torch.default_generator.get_state,
+        torch.get_rng_state,
+        torch.cuda.get_rng_state,
+    )
+    setters = (
+        torch.default_generator.set_state,
+        torch.set_rng_state,
+        torch.cuda.set_rng_state,
+    )
+    return value in (*setters, *getters)

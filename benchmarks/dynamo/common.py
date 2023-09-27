@@ -1767,6 +1767,10 @@ class BenchmarkRunner:
         return set()
 
     @property
+    def skip_models_due_to_control_flow(self):
+        return set()
+
+    @property
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         raise NotImplementedError()
 
@@ -2293,12 +2297,21 @@ class BenchmarkRunner:
             eager_latency, eager_peak_mem, _ = warmup(
                 self.model_iter_fn, model, example_inputs, "eager"
             )
-            optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+
+            if self.args.export_aot_inductor:
+                t_0 = time.perf_counter()
+                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                t_1 = time.perf_counter()
+                aot_compilation_time = t_1 - t_0
+            else:
+                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                aot_compilation_time = 0
+
             dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                 optimized_model_iter_fn, model, example_inputs, "dynamo"
             )
 
-            compilation_time = dynamo_latency - eager_latency
+            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3276,6 +3289,9 @@ def run(runner, args, original_dir=None):
             assert not args.training, "AOTInductor only supports inference"
             assert args.devices == ["cuda"], "AOTInductor only tested for CUDA"
             optimize_ctx = export_aot_inductor
+
+            # AOTInductor doesn't support control flow yet
+            runner.skip_models.update(runner.skip_models_due_to_control_flow)
         else:
             optimize_ctx = torch._dynamo.optimize(args.backend, nopython=args.nopython)
         experiment = speedup_experiment
