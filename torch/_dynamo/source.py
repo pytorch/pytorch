@@ -251,14 +251,10 @@ class ConvertIntSource(ChainedSource):
     def reconstruct(self, codegen):
         cast_fn_name = "__cast_symbool_to_symint_guardless"
         if cast_fn_name not in codegen.tx.output.global_scope:
-            from .decorators import disable
-
-            # We cannot use the disable decorator to decorate the fucntion at where it's defined
-            # due to circular dependency.
-            disabled_cast_fn = disable(
-                torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless
+            codegen.tx.output.install_global(
+                cast_fn_name,
+                torch._higher_order_ops.cast_symbool_to_symint.cast_symbool_to_symint,
             )
-            codegen.tx.output.install_global(cast_fn_name, disabled_cast_fn)
 
         def _create_cast_instructions():
             instructions = [

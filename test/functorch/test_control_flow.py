@@ -1267,10 +1267,10 @@ class TestControlFlowTraced(TestCase):
 def forward(self, x_1):
     sym_size = torch.ops.aten.sym_size(x_1, 0)
     eq = sym_size == 4;  sym_size = None
-    cast_symbool_to_symint_guardless = torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless(eq);  eq = None
+    cast_symbool_to_symint = torch.ops.higher_order.cast_symbool_to_symint(eq);  eq = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint_guardless, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint_guardless = true_graph_0 = false_graph_0 = x_1 = None
+    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint = true_graph_0 = false_graph_0 = x_1 = None
     return conditional""")  # noqa: B950
 
         # We expect the traced graph module to work even if input size changes.
@@ -1556,10 +1556,10 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, x_1):
     sym_size = torch.ops.aten.sym_size(x_1, 0)
     eq = sym_size == 4;  sym_size = None
-    cast_symbool_to_symint_guardless = torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless(eq);  eq = None
+    cast_symbool_to_symint = torch.ops.higher_order.cast_symbool_to_symint(eq);  eq = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint_guardless, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint_guardless = true_graph_0 = false_graph_0 = x_1 = None
+    conditional = torch.ops.higher_order.cond(cast_symbool_to_symint, true_graph_0, false_graph_0, [x_1]);  cast_symbool_to_symint = true_graph_0 = false_graph_0 = x_1 = None
     return conditional""")  # noqa: B950
 
 if __name__ == '__main__':
