@@ -1,4 +1,3 @@
-from collections import defaultdict
 import contextlib
 import functools
 import itertools
@@ -9,7 +8,18 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
@@ -25,13 +35,13 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
 )
-from torch._subclasses.meta_utils import MetaConverter, assert_eq, assert_metadata_eq
+from torch._subclasses.meta_utils import MetaConverter
 from torch._utils import render_call
 from torch.fx.experimental.symbolic_shapes import (
     DimConstraint,
     DimDynamic,
-    SymTypes,
     free_symbols,
+    SymTypes,
 )
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -998,10 +1008,13 @@ def _dispatch_should_fallback(op: Any) -> bool:
 
     # Return true if there's any alias information in any of the
     # return values.
-    return (
-        len(schema.returns) > 0
-        and any(r.alias_info is not None for r in schema.returns)
+    return len(schema.returns) > 0 and any(
+        r.alias_info is not None for r in schema.returns
     )
+
+
+def _is_allowed_metadata(thing: Any) -> bool:
+    return not isinstance(thing, (SymTypes, torch.ScriptObject))
 
 
 def _apply(f: Callable, iterable) -> Any:
@@ -1019,7 +1032,7 @@ def _apply(f: Callable, iterable) -> Any:
 
 def _to_metadata(output: Any, allow_views: bool = False) -> Any:
     if isinstance(output, (torch.Tensor, FakeTensor)):
-        assert allow_views or not output._is_view(), f"can't handle tensor views"
+        assert allow_views or not output._is_view(), "can't handle tensor views"
         return FakeTensorMetadata(
             size=output.size(),
             stride=output.stride(),
@@ -1032,7 +1045,21 @@ def _to_metadata(output: Any, allow_views: bool = False) -> Any:
         )
     elif isinstance(output, bool):
         return {True: _True, False: _False}[output]
-    elif isinstance(output, (bool, int, float, str, type(None), torch.dtype, torch.device, torch.layout, torch.memory_format)):
+    elif isinstance(
+        output,
+        (
+            bool,
+            int,
+            float,
+            complex,
+            str,
+            type(None),
+            torch.dtype,
+            torch.device,
+            torch.layout,
+            torch.memory_format,
+        ),
+    ):
         return output
     elif isinstance(output, (tuple, list)):
         return _apply(partial(_to_metadata, allow_views=allow_views), output)
@@ -1068,16 +1095,12 @@ def _hash_key(func, args, kwargs):
     tuple_args = []
 
     for a in flattened_args:
-        if isinstance(a, (SymTypes, torch.ScriptObject)):
-            # NYI: dynamic shapes support.
+        if not _is_allowed_metadata(a):
             return None
         elif isinstance(a, FakeTensor):
-            if (
-                    # a.constant is None
-                    any(
-                        isinstance(s, SymTypes)
-                        for s in itertools.chain(a.shape, a.stride(), [a.storage_offset()])
-                    )
+            if any(
+                isinstance(s, SymTypes)
+                for s in itertools.chain(a.shape, a.stride(), [a.storage_offset()])
             ):
                 return None
             tuple_args.append(_to_metadata(a, allow_views=True))
@@ -1099,7 +1122,7 @@ def cache_dispatch(dispatch: Callable) -> Callable:
         if key not in _DISPATCH_CACHE:
             output = dispatch(self, func, types, args, kwargs)
 
-            if isinstance(output, torch.ScriptObject):
+            if not _is_allowed_metadata(output):
                 # Unsupported output types when caching.
                 return output
 
@@ -1107,6 +1130,7 @@ def cache_dispatch(dispatch: Callable) -> Callable:
             return output
         else:
             return _from_metadata(_DISPATCH_CACHE[key], self)
+
     return dispatch_if_not_cached
 
 
