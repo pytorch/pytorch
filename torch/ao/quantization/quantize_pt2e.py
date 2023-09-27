@@ -220,11 +220,12 @@ def convert_pt2e(
         # prepared_model: the model produced by `prepare_pt2e`/`prepare_qat_pt2e` and calibration/training
         # `convert_pt2e` produces a quantized model that represents quantized computation with
         # quantize dequantize ops and fp32 ops by default.
-        # Please refer to https://pytorch.org/tutorials/prototype/pt2e_quant_ptq_static.html#convert-the-calibrated-model-to-a-quantized-model
+        # Please refer to
+        # https://pytorch.org/tutorials/prototype/pt2e_quant_ptq_static.html#convert-the-calibrated-model-to-a-quantized-model
         # for detailed explanation of output quantized model
         quantized_model = convert_pt2e(prepared_model)
 
-    """
+    """  # flake8: noqa
     torch._C._log_api_usage_once("quantization_api.quantize_pt2e.convert_pt2e")
     original_graph_meta = model.meta
     model = _convert_to_reference_decomposed_fx(model)
