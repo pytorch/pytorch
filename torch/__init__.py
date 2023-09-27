@@ -1534,10 +1534,6 @@ quantized_gru = torch.ops.aten.quantized_gru
 
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
-# Import experimental masked operations support. See
-# [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
-# information.
-from . import masked
 
 # Import removed ops with error message about removal
 from ._linalg_utils import (  # type: ignore[misc]
@@ -1844,6 +1840,7 @@ if TYPE_CHECKING:
     from torch import _dynamo as _dynamo
     from torch import _inductor as _inductor
     from torch import onnx as onnx
+    from torch import masked as masked
 
 else:
     _lazy_modules = {
@@ -1852,6 +1849,10 @@ else:
         "_export",
         # ONNX must be imported after _dynamo, _ops, _subclasses, fx, func and jit
         "onnx",
+        # Import experimental masked operations support. See
+        # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
+        # information.
+        "masked",
     }
 
     def __getattr__(name):
