@@ -968,15 +968,107 @@ def should_allow_numbers_as_tensors(func: OpOverload):
 
 
 _DISPATCH_CACHE = {}
-_COUNT = defaultdict(int)
 
 
-def hash_key(func, args, kwargs):
+class _Boolean(NamedTuple):
+    value: bool
+
+
+_True = _Boolean(True)
+_False = _Boolean(False)
+
+
+class FakeTensorMetadata(NamedTuple):
+    size: Tuple[int, ...]
+    stride: Tuple[int, ...]
+    dtype: torch.dtype
+    device: torch.device
+    requires_grad: bool
+    is_view: bool
+    is_inference: bool
+    constant: Any
+
+
+def _dispatch_should_fallback(op: Any) -> bool:
+    if op == torch.ops.prim.device.default:
+        return True
+
+    assert isinstance(op, OpOverload)
+    schema = op._schema
+
+    # Return true if there's any alias information in any of the
+    # return values.
+    return (
+        len(schema.returns) > 0
+        and any(r.alias_info is not None for r in schema.returns)
+    )
+
+
+def _apply(f: Callable, iterable) -> Any:
+    elems = (f(el) for el in iterable)
+    # Expect tuple_or_list to be either:
+    if isinstance(iterable, list) or type(iterable) is tuple:
+        # - a list
+        # - a tuple
+        return type(iterable)(elems)
+    elif hasattr(iterable, "_fields"):
+        # - a namedtuple
+        return type(iterable)(*elems)
+    raise ValueError(f"unsupported tuple/list-like type: {type(iterable)}")
+
+
+def _to_metadata(output: Any, allow_views: bool = False) -> Any:
+    if isinstance(output, (torch.Tensor, FakeTensor)):
+        assert allow_views or not output._is_view(), f"can't handle tensor views"
+        return FakeTensorMetadata(
+            size=output.size(),
+            stride=output.stride(),
+            dtype=output.dtype,
+            device=output.device,
+            is_view=output._is_view(),
+            is_inference=output.is_inference(),
+            requires_grad=output.requires_grad,
+            constant=getattr(output, "constant", None),
+        )
+    elif isinstance(output, bool):
+        return {True: _True, False: _False}[output]
+    elif isinstance(output, (bool, int, float, str, type(None), torch.dtype, torch.device, torch.layout, torch.memory_format)):
+        return output
+    elif isinstance(output, (tuple, list)):
+        return _apply(partial(_to_metadata, allow_views=allow_views), output)
+
+    raise ValueError(f"unsupported type to metadata: {type(output)}")
+
+
+def _from_metadata(metadata: Any, fake_mode) -> Any:
+    if isinstance(metadata, FakeTensorMetadata):
+        with torch.inference_mode(mode=metadata.is_inference):
+            return FakeTensor(
+                fake_mode,
+                torch.empty_strided(
+                    metadata.size,
+                    metadata.stride,
+                    dtype=metadata.dtype,
+                    device="meta",
+                    requires_grad=metadata.requires_grad,
+                ),
+                device=metadata.device,
+                constant=metadata.constant,
+            )
+    elif isinstance(metadata, _Boolean):
+        return metadata.value
+    elif isinstance(metadata, (tuple, list)):
+        return _apply(partial(_from_metadata, fake_mode=fake_mode), metadata)
+    else:
+        return metadata
+
+
+def _hash_key(func, args, kwargs):
     flattened_args, _ = tree_flatten((args, kwargs))
     tuple_args = []
 
     for a in flattened_args:
-        if isinstance(a, SymTypes):
+        if isinstance(a, (SymTypes, torch.ScriptObject)):
             # NYI: dynamic shapes support.
             return None
         elif isinstance(a, FakeTensor):
@@ -988,67 +1080,16 @@ def hash_key(func, args, kwargs):
                     )
             ):
                 return None
-            tuple_args.append(to_metadata(a, allow_views=True))
+            tuple_args.append(_to_metadata(a, allow_views=True))
         else:
-            tuple_args.append(a)
+            tuple_args.append(_to_metadata(a))
     return func, tuple(tuple_args)
-
-
-class FakeTensorMetadata(NamedTuple):
-    size: Tuple[int, ...]
-    stride: Tuple[int, ...]
-    dtype: torch.dtype
-    device: torch.device
-    requires_grad: bool
-    is_view: bool
-    constant: Any
-
-
-def to_metadata(output: Any, allow_views: bool = False) -> Any:
-    if isinstance(output, FakeTensor) and (allow_views or not output._is_view()):
-        return FakeTensorMetadata(
-            size=output.size(),
-            stride=output.stride(),
-            dtype=output.dtype,
-            device=output.device,
-            is_view=output._is_view(),
-            requires_grad=output.requires_grad,
-            constant=output.constant,
-        )
-    elif isinstance(output, (tuple, list)):
-        return type(output)(to_metadata(o) for o in output)
-    elif isinstance(output, (int, float, bool, type(None))):
-        return output
-    return None
-
-
-def from_metadata(fake_mode, metadata: Any) -> Any:
-    if isinstance(metadata, FakeTensorMetadata):
-        return FakeTensor(
-            fake_mode,
-            torch.empty_strided(
-                metadata.size,
-                metadata.stride,
-                dtype=metadata.dtype,
-                device="meta",
-                requires_grad=metadata.requires_grad,
-            ),
-            device=metadata.device,
-            constant=metadata.constant,
-        )
-    elif isinstance(metadata, (tuple, list)):
-        return type(metadata)(from_metadata(fake_mode, m) for m in metadata)
-    else:
-        return metadata
 
 
 def cache_dispatch(dispatch: Callable) -> Callable:
     def dispatch_if_not_cached(self, func, types, args=(), kwargs=None):
-        nonlocal _hash_key
-        if func == torch.ops.prim.device.default:
-            # Depends on the current context, i.e. whether we are currently in a
-            # kernel invocation or not.
-            return dispatch(self,func, types, args, kwargs)
+        if _dispatch_should_fallback(func):
+            return dispatch(self, func, types, args, kwargs)
 
         key = _hash_key(func, args, kwargs)
 
@@ -1056,28 +1097,18 @@ def cache_dispatch(dispatch: Callable) -> Callable:
             return dispatch(self, func, types, args, kwargs)
 
         if key not in _DISPATCH_CACHE:
-            _COUNT["miss"] += 1
             output = dispatch(self, func, types, args, kwargs)
-            metadata = to_metadata(output)
-            if metadata is not None:
-                _DISPATCH_CACHE[key] = metadata
+
+            if isinstance(output, torch.ScriptObject):
+                # Unsupported output types when caching.
+                return output
+
+            _DISPATCH_CACHE[key] = _to_metadata(output)
             return output
         else:
-            _COUNT["hit"] += 1
-            return from_metadata(self, _DISPATCH_CACHE[key])
+            return _from_metadata(_DISPATCH_CACHE[key], self)
+    return dispatch_if_not_cached
 
-    _hash_key = None
-    _fn = None
-    def timed(*args, **kwargs):
-        nonlocal _fn
-        nonlocal _hash_key
-        from torch._dynamo.utils import dynamo_timed
-        if _hash_key is None:
-            _hash_key = dynamo_timed(hash_key)
-        if _fn is None:
-            _fn = dynamo_timed(dispatch_if_not_cached)
-        return _fn(*args, **kwargs)
-    return timed
 
 class FakeTensorConfig:
     debug = os.environ.get("TORCH_FAKE_TENSOR_DEBUG", False)
