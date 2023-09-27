@@ -1503,6 +1503,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
 # Import the ops "namespace"
 from torch._ops import ops
 from torch._classes import classes
+import torch._library
 
 # quantization depends on torch.fx
 # Import quantization
