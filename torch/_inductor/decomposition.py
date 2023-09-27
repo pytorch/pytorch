@@ -69,7 +69,7 @@ decomps_to_exclude = [
     aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
     aten.clamp_max,
     aten.clamp_min,
-    aten.trunc,
+    aten.glu,  # has lowering in inductor
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -117,13 +117,6 @@ def full(size, fill_value, **kwargs):
         kwargs["dtype"] = type_to_dtype(type(fill_value))
         return aten.full(size, fill_value, **kwargs)
     return NotImplemented
-
-
-# TorchInductor-only decomposition. It should not be taken to core.
-# See https://github.com/pytorch/torchdynamo/pull/1120
-@register_decomposition([aten.floor_divide.default])
-def floordiv(a, b):
-    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -180,16 +173,6 @@ def log2(x):
 def round_dec(x, decimals=0):
     ten_pow_decimals = 10.0**decimals
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
-
-
-@register_decomposition([aten.all.default])
-def all(input):
-    return torch.logical_not(torch.any(torch.logical_not(input)))
-
-
-@register_decomposition([aten.all.dim])
-def all_dim(input, dim, keepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
 @register_decomposition([aten.bmm])

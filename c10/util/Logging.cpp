@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <numeric>
 
 // Common code that we use regardless of whether we use glog or not.
 
