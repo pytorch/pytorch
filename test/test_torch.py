@@ -5315,14 +5315,21 @@ else:
         # to cuda Tensors, because I don't want to do cuda things if device is not cuda.
         # In case 3, a and b are enabled and we may also try lazy-initing _scale to a cuda tensor.
         device = torch.device(device)
-        try_lazy_inits = (True, False) if device.type == "cuda" else (False,)
+        try_lazy_inits = (True, False)
+        GradScaler = torch.cuda.amp.GradScaler if device.type == "cuda" else torch.cpu.amp.GradScaler
         for lazy_init_scale in try_lazy_inits:
-            a = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
+            a = GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
+            if device.type == "cuda":
+                self.assertTrue(not a.is_enabled() if torch.cuda.amp.common.amp_definitely_not_available() else a.is_enabled())
+            else:
+                self.assertTrue(a.is_enabled())
             if lazy_init_scale:
                 # Dummy a.scale() call lazy-inits a._scale Tensor.
                 a.scale(torch.tensor([4.0], dtype=torch.float32, device=device))
-                self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
+                if device.type == "cuda":
+                    self.assertTrue(isinstance(a._scale, torch.cuda.FloatTensor))
+                else:
+                    self.assertTrue(isinstance(a._scale, torch.FloatTensor))
             # The following three lines should work whether or not cuda is available.
             serialized = pickle.dumps(a)
             b = pickle.loads(serialized)
@@ -5335,7 +5342,7 @@ else:
                 self.assertEqual(b._init_growth_tracker, 0)
                 # supplies a dummy key to test the defaultdict's default_factory
                 self.assertEqual(b._per_optimizer_states["fdsa"],
-                                 torch.cuda.amp.grad_scaler._refresh_per_optimizer_state())
+                                 torch.amp.grad_scaler._refresh_per_optimizer_state())
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
