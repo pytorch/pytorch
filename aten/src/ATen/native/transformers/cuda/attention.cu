@@ -34,7 +34,7 @@
 #include <ATen/ops/_fused_sdp_choice_native.h>
 #include <ATen/ops/_masked_softmax.h>
 #include <ATen/ops/_native_multi_head_attention_native.h>
-#include <ATen/ops/_scaled_dot_product_attention_native.h>
+#include <ATen/ops/scaled_dot_product_attention_native.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention.h>
 #include <ATen/ops/_scaled_dot_product_efficient_attention_native.h>
 #include <ATen/ops/_scaled_dot_product_flash_attention.h>
