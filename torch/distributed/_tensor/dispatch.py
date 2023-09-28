@@ -158,7 +158,6 @@ def _operator_dispatch(
             args_schema.append(arg)
             local_args.append(arg)
 
-    # for i, kwarg in enumerate(kwargs_list):
     for k, v in kwargs.items():
         if isinstance(v, dtensor.DTensor):
             kwargs_schema[k] = v._spec
