@@ -4351,6 +4351,10 @@ def sample_inputs_upsample_aten(mode, self, device, dtype, requires_grad, **kwar
     yield SampleInput(input_tensor, output_size=None, align_corners=False, scale_factors=[1.7, 0.9])
     yield SampleInput(input_tensor, output_size=None, align_corners=True, scale_factors=[0.8, 1.0])
 
+    yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scales_h=None, scales_w=None)
+    yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=False, scales_h=1.7, scales_w=0.9)
+    yield SampleInput(input_tensor, output_size=torch.Size([S, S]), align_corners=True, scales_h=1.7, scales_w=0.9)
+
 
 def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
     N = 5
@@ -12993,7 +12997,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive'),
                DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
            )),
     OpInfo(
         "nn.functional.soft_margin_loss",
