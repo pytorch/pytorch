@@ -924,7 +924,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
             timeout = None if RERUN_DISABLED_TESTS else 15 * 60
 
-            exitcode,_ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
+            exitcode, _ = retry_shell(cmd, timeout=timeout, retries=0 if RERUN_DISABLED_TESTS else 1)
 
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.

@@ -924,13 +924,13 @@ def sanitize_file_name(file: str):
     return file.replace("\\", ".").replace("/", ".").replace(" ", "_")
 
 
-def handle_log_file(test: ShardedTest, file_path: str, failed: bool, was_rerun: bool) -> None:
-    verbose = "VERBOSE_LOGS=1" in os.environ.get("PR_BODY", "")
+def handle_log_file(
+    test: ShardedTest, file_path: str, failed: bool, was_rerun: bool
+) -> None:
     test = str(test)
-    if not failed and not was_rerun and not verbose:
-        # If not verbose + success + no file level retries, print only what
-        # tests ran, rename the log file so it doesn't get printed later, and do
-        # not remove logs.
+    if not failed and not was_rerun:
+        # If success + no file level retries, print only what tests ran, rename
+        # the log file so it doesn't get printed later, and do not remove logs.
         new_file = "test/test-reports/" + sanitize_file_name(
             f"{test}_{os.urandom(8).hex()}_.log"
         )
