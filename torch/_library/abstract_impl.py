@@ -160,7 +160,7 @@ class AbstractImplCtx:
 
             >>> # Let's assume we've registered an operator,
             >>> # mylibrary::custom_nonzero, with data-dependent output shape
-            >>> @torch.library.impl_abstract("mylibrary::custom_nonzero"):
+            >>> @torch.library.impl_abstract("mylibrary::custom_nonzero")
             >>> def custom_nonzero_abstract(x):
             >>>     # Number of nonzero-elements is data-dependent
             >>>     ctx = torch.library.get_ctx()
