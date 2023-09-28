@@ -2238,17 +2238,16 @@ def forward(self, x):
                 return x + 2
 
         t = torch.zeros([8, 4])
-        constraints = [
-            dynamic_dim(t, 0) >= 3,
-            dynamic_dim(t, 0) <= 10,
-            dynamic_dim(t, 1),
-        ]
+        dim0 = torch.export.Dim("dim0", min=3, max=10)
+        dim1 = torch.export.Dim("dim1")
+        dynamic_shapes = {"x": (dim0, dim1)}
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Not all values.*valid.*inferred to be equal to.*\n.*need to be specialized.*too complex to specify",
+            "Not all values.*valid.*inferred to be equal to(.*\n)*.*"
+            "must be specialized.*guards generated.*too complex",
         ):
-            torch._export.export(foo, (t,), constraints=constraints)
+            torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
         def bar(x):
             if x.shape[0] == 5:
@@ -2257,12 +2256,13 @@ def forward(self, x):
                 return x + 2
 
         t = torch.zeros([5])
-        constraints = [dynamic_dim(t, 0) >= 3, dynamic_dim(t, 0) <= 8]
+        dim0 = torch.export.Dim("dim0", min=3, max=8)
+        dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             "Not all values.*valid.*inferred to be a constant",
         ):
-            torch._export.export(bar, (t,), constraints=constraints)
+            torch.export.export(bar, (t,), dynamic_shapes=dynamic_shapes)
 
         def qux(x):
             if x.shape[0] > 5 and x.shape[0] < 10:
@@ -2271,12 +2271,13 @@ def forward(self, x):
                 return x + 2
 
         t = torch.zeros([7])
-        constraints = [dynamic_dim(t, 0) >= 3, dynamic_dim(t, 0) <= 8]
+        dim0 = torch.export.Dim("dim0", min=3, max=8)
+        dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             "Not all values.*satisfy the generated guard",
         ):
-            torch._export.export(qux, (t,), constraints=constraints)
+            torch.export.export(qux, (t,), dynamic_shapes=dynamic_shapes)
 
     def test_untracked_inputs_in_constraints(self):
         from copy import copy
@@ -2289,9 +2290,16 @@ def forward(self, x):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0)]
 
         example_inputs = (copy(x), y)
-        ep = torch.export.export(foo, example_inputs, constraints=constraints)
+        ep = torch._export._export(foo, example_inputs, constraints=constraints)
         with self.assertRaisesRegex(RuntimeError, "Input.*shape.*specialized at 2"):
             ep(torch.randn(3), y)
+
+        dim0_x, dim0_y = torch.export.dims("dim0_x", "dim0_y")
+        dynamic_shapes = {"x": {0: dim0_x}, "y": {0: dim0_y}}
+
+        example_inputs = (copy(x), y)
+        ep = torch.export.export(foo, example_inputs, dynamic_shapes=dynamic_shapes)
+        ep(torch.randn(3), y)  # no specialization error
 
     def test_export_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -2392,42 +2400,37 @@ def forward(self, x):
 
         a = torch.randn(3)
         b = torch.randn(3)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "\\[\n.*\n.*dynamic_dim.*==.*dynamic_dim.*\n.*\\]",
-        ):
-            torch._export.export(
-                foo, (a, {"k": b}), constraints=[dynamic_dim(a, 0), dynamic_dim(b, 0)]
+        dim0_a, dim0_b = torch.export.dims("dim0_a", "dim0_b")
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "dim0_b = dim0_a"):
+            torch.export.export(
+                foo,
+                (a, {"k": b}),
+                dynamic_shapes={"x": {0: dim0_a}, "y": {"k": {0: dim0_b}}},
             )
 
     def test_enforce_equalities(self):
         def bar(x, y):
             return torch.matmul(x, y)
 
-        def specify_constraints(x, y):
-            return [
-                dynamic_dim(x, 0) == dynamic_dim(y, 0),
-                dynamic_dim(x, 1) == dynamic_dim(x, 2),
-                dynamic_dim(x, 2) == dynamic_dim(y, 1),
-                dynamic_dim(y, 1) == dynamic_dim(y, 2),
-            ]
+        batch, size = torch.export.dims("batch", "size")
+        dynamic_shapes = {"x": (batch, size, size), "y": (batch, size, size)}
 
         x = torch.randn(10, 3, 3)
         y = torch.randn(10, 3, 4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            ".*y.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
+            ".*x.*size.*1.* = 3 is not equal to .*y.*size.*2.* = 4",
         ):
-            torch._export.export(
+            torch.export.export(
                 bar,
                 (x, y),
-                constraints=specify_constraints(x, y),
+                dynamic_shapes=dynamic_shapes,
             )
         y = torch.randn(10, 3, 3)
-        ebar = torch._export.export(
+        ebar = torch.export.export(
             bar,
             (x, y),
-            constraints=specify_constraints(x, y),
+            dynamic_shapes=dynamic_shapes,
         )
         self.assertEqual(
             [
@@ -2602,14 +2605,15 @@ def forward(self, x):
                 return x - 1
 
         x = torch.randn(12)
-        constraints = [dynamic_dim(x, 0) <= 100]
+        dim0 = torch.export.Dim("dim0", max=100)
+        dynamic_shapes = {"x": (dim0,)}
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
-            "Some dynamic dimensions need to be specialized.*too complex to specify",
+            "must be specialized.*guards generated.*too complex",
         ):
-            torch._export.export(foo, (x,), constraints=constraints)
+            torch.export.export(foo, (x,), dynamic_shapes=dynamic_shapes)
 
-        torch._export.export(bar, (x,), constraints=constraints)
+        torch.export.export(bar, (x,), dynamic_shapes=dynamic_shapes)
 
     def test_list_contains(self):
         def func(x):
