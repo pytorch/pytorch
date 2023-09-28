@@ -160,6 +160,7 @@ FILENAME_INLINELIST = {
     _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
     _module_dir(torch) + "ao/quantization/pt2e/utils.py",
     _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
+    _module_dir(torch) + "_dynamo/_trace_wrapped_higher_order_op.py",
     _module_dir(torch) + "_export/constraints.py",
     _module_dir(torch) + "_higher_order_ops/cond.py",
     _module_dir(torch) + "_functorch/apis.py",
@@ -228,79 +229,6 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
 ] + [_module_dir(m) for m in BUILTIN_SKIPLIST]
-
-FILENAME_ALLOWLIST = {
-    torch.nn.Sequential.__init__.__code__.co_filename,
-    torch.set_rng_state.__code__.co_filename,
-    torch._inductor.test_operators.__file__,
-    torch.utils._content_store.__file__,
-    # These are dynamo files!
-    external_utils.__file__,
-    comptime.__file__,  # Want to inline these helpers
-}
-
-if torch.distributed.is_available():
-    # Inline the checkpoint code from distributed
-    import torch.distributed.algorithms._checkpoint.checkpoint_wrapper
-
-    FILENAME_ALLOWLIST |= {
-        torch.distributed.algorithms._checkpoint.checkpoint_wrapper.__file__
-    }
-
-# Include optimizer code for tracing
-FILENAME_ALLOWLIST |= {
-    inspect.getfile(obj)
-    for obj in torch.optim.__dict__.values()
-    if inspect.isclass(obj)
-}
-FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
-FILENAME_ALLOWLIST |= {torch.utils._foreach_utils.__file__}
-
-# Do trace through match and replace patterns used in PT2E QAT
-# Note: These patterns are comprised of torch ops and for internal use only.
-# They are exported to aten graphs before being passed to the FX subgraph rewriter.
-# TODO: find a better way to express this path without having to import
-# `torch.ao.quantization.pt2e`, which interferes with memory profiling
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "ao/quantization/pt2e/qat_utils.py",
-    _module_dir(torch) + "ao/quantization/quantizer/xnnpack_quantizer.py",
-    _module_dir(torch) + "ao/quantization/pt2e/representation/rewrite.py",
-    _module_dir(torch) + "ao/quantization/pt2e/utils.py",
-    _module_dir(torch) + "ao/quantization/pt2e/eval_utils.py",
-}
-
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_export/constraints.py",
-}
-
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_higher_order_ops/cond.py",
-}
-
-# TODO (zhxchen17) Make exportdb importable here.
-FILENAME_ALLOWLIST |= set(
-    glob.glob(_module_dir(torch) + "_export/db/examples/*.py"),
-) | {
-    _module_dir(torch) + "_export/wrappers.py",
-}
-
-# torch.func: need to allow this file to be able to look at functorch transforms
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_functorch/apis.py",
-    _module_dir(torch) + "_functorch/deprecated.py",
-}
-
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "distributed/tensor/parallel/_utils.py",
-    _module_dir(torch) + "distributed/tensor/parallel/style.py",
-    _module_dir(torch) + "distributed/tensor/parallel/_data_parallel_utils.py",
-    _module_dir(torch) + "distributed/_tensor/api.py",
-    _module_dir(torch) + "distributed/_tensor/device_mesh.py",
-}
-
-FILENAME_ALLOWLIST |= {
-    _module_dir(torch) + "_dynamo/_trace_wrapped_higher_order_op.py",
-}
 
 SKIP_DIRS_RE = None
 
