@@ -443,38 +443,35 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         )
 
 
-@register_graph_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.add,
         CallFunction(aten.mm, Arg(), Arg()),
         KeywordArg("inp"),
     ),
-    pass_dict=pass_patterns[2]
+    pass_number=2,
 )
-@register_graph_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.add,
         KeywordArg("inp"),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
-    pass_dict=pass_patterns[2]
+    pass_number=2,
 )
 def addmm(match, mat1, mat2, inp):
-    if not isinstance(inp, torch.Tensor):
-        return  # inp is a Number
-
-    matched = len(inp.shape) <= 2
-    mm_shape = mat1.shape[0], mat2.shape[1]
-    for i, m in zip(inp.shape, mm_shape):
-        matched &= i == 1 or i == m
-    if not matched:
-        return
-
-    def repl(inp, mat1, mat2):
-        return aten.addmm(inp, mat1, mat2)
-
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    if isinstance(inp, ir.TensorBox):
+        inp_shape = inp.get_size()
+        matched = len(inp_shape) <= 2
+        mm_shape = shape_of_mm(mat1, mat2)
+        for i, m in zip(inp_shape, mm_shape):
+            matched &= i == 1 or i == m
+    else:  # inp is a Number
+        matched = False
+    if matched:
+        return L[aten.addmm](inp, mat1, mat2)
+    else:
+        return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
 def is_valid_splitwithsizes_cat(match):
