@@ -3007,7 +3007,7 @@ graph(%x.1 : Tensor):
   return (%y))IR",
       &*graph);
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::PROFILING);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
@@ -3020,7 +3020,7 @@ graph(%x.1 : Tensor):
         ->run(*g);
   }
   {
-    auto func = torch::make_unique<GraphFunction>(
+    auto func = std::make_unique<GraphFunction>(
         "name", graph, [](GraphFunction&) {}, ExecutorExecutionMode::SIMPLE);
     auto a = at::rand({2, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     Stack stack = {a};
