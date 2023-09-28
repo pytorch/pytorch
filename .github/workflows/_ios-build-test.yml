@@ -167,6 +167,7 @@ jobs:
         shell: bash
         run: |
           set -eux
+
           # Run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
             echo 'Error: xcodebuild is not installed.'
@@ -179,6 +180,8 @@ jobs:
         shell: bash
         working-directory: ${{ github.workspace }}/ios/TestApp
         run: |
+          set -eux
+
           # Instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
