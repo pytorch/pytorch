@@ -34,39 +34,52 @@ bmm_template = TritonTemplate(
     stride_bk = {{stride("B", 1)}}
     stride_bn = {{stride("B", 2)}}
 
-    # based on triton.ops.matmul
-    pid = tl.program_id(0)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
     # re-order program ID for better L2 performance
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
+    pid = tl.program_id(0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
 
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    rk = tl.arange(0, BLOCK_K)
+    num_pid_in_group = GROUP_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    GROUP_M = min(num_pid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + (pid % GROUP_M)
+    pid_n = (pid % num_pid_in_group) // GROUP_M
+    block_offset_m = pid_m * BLOCK_M
+    block_offset_n = pid_n * BLOCK_N
 
     idx_q = tl.program_id(1)  # batch dimension for BMM
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
+
+    A_block_ptr = tl.make_block_ptr(
+        base=A + idx_q * stride_aq,
+        shape=(M, K),
+        strides=(stride_am, stride_ak),
+        offsets=(block_offset_m, 0),
+        block_shape=(BLOCK_M, BLOCK_K),
+        order=(1, 0),
+    )
+    B_block_ptr = tl.make_block_ptr(
+        base=B + idx_q * stride_bq,
+        shape=(K, N),
+        strides=(stride_bk, stride_bn),
+        offsets=(0, pid_n * BLOCK_N),
+        block_shape=(BLOCK_K, BLOCK_N),
+        order=(1, 0)
+    )
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
     for k in range(K, 0, -BLOCK_K):
         if EVEN_K:
-            a = tl.load(A)
-            b = tl.load(B)
+            a = tl.load(A_block_ptr, boundary_check=(0))
+            b = tl.load(B_block_ptr, boundary_check=(0))
         else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
+            a = tl.load(A_block_ptr, boundary_check=(0, 1), padding_option='zero')
+            b = tl.load(B_block_ptr, boundary_check=(0, 1), padding_option='zero')
+        if B_PROLOGUE_CAST_TYPE is not None:
+            b = b.to(B_PROLOGUE_CAST_TYPE)
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
+        A_block_ptr = tl.advance(A_block_ptr, (0, BLOCK_K))
+        B_block_ptr = tl.advance(B_block_ptr, (BLOCK_K, 0))
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)

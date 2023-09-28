@@ -26,7 +26,7 @@ mm_plus_mm_template = TritonTemplate(
 {{def_kernel("A", "B", "C", "D")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
-    K1 = {{size("A", 1)}}
+    K = {{size("A", 1)}}
     if M * N == 0:
         # early exit due to zero-size input(s)
         return
@@ -40,55 +40,82 @@ mm_plus_mm_template = TritonTemplate(
     stride_dk = {{stride("D", 0)}}
     stride_dn = {{stride("D", 1)}}
 
-    # based on triton.ops.matmul
-    pid = tl.program_id(0)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
     # re-order program ID for better L2 performance
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
+    pid = tl.program_id(0)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
 
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    rk = tl.arange(0, BLOCK_K)
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
-    C = C + (ram[:, None] * stride_cm + rk[None, :] * stride_ck)
-    D = D + (rk[:, None] * stride_dk + rbn[None, :] * stride_dn)
+    num_pid_in_group = GROUP_M * num_pid_n
+    group_id = pid // num_pid_in_group
+    first_pid_m = group_id * GROUP_M
+    GROUP_M = min(num_pid_m - first_pid_m, GROUP_M)
+    pid_m = first_pid_m + (pid % GROUP_M)
+    pid_n = (pid % num_pid_in_group) // GROUP_M
+
+    block_offset_m = pid_m * BLOCK_M
+    block_offset_n = pid_n * BLOCK_N
+
+    A_block_ptr = tl.make_block_ptr(
+        base=A,
+        shape=(M, K),
+        strides=(stride_am, stride_ak),
+        offsets=(block_offset_m, 0),
+        block_shape=(BLOCK_M, BLOCK_K),
+        order=(1, 0),
+    )
+    B_block_ptr = tl.make_block_ptr(
+        base=B,
+        shape=(K, N),
+        strides=(stride_bk, stride_bn),
+        offsets=(0, pid_n * BLOCK_N),
+        block_shape=(BLOCK_K, BLOCK_N),
+        order=(1, 0)
+    )
+    C_block_ptr = tl.make_block_ptr(
+        base=C,
+        shape=(M, K),
+        strides=(stride_cm, stride_ck),
+        offsets=(block_offset_m, 0),
+        block_shape=(BLOCK_M, BLOCK_K),
+        order=(1, 0),
+    )
+    D_block_ptr = tl.make_block_ptr(
+        base=D,
+        shape=(K, N),
+        strides=(stride_dk, stride_dn),
+        offsets=(0, pid_n * BLOCK_N),
+        block_shape=(BLOCK_K, BLOCK_N),
+        order=(1, 0)
+    )
 
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k1 in range(K1, 0, -BLOCK_K):
+    for k1 in range(K, 0, -BLOCK_K):
         # First matmul with A @ B
         if EVEN_K:
-            a = tl.load(A)
-            b = tl.load(B)
+            a = tl.load(A_block_ptr, boundary_check=(0))
+            b = tl.load(B_block_ptr, boundary_check=(0))
         else:
-            a = tl.load(A, mask=rk[None, :] < k1, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k1, other=0.)
+            a = tl.load(A_block_ptr, boundary_check=(0, 1), padding_option='zero')
+            b = tl.load(B_block_ptr, boundary_check=(0, 1), padding_option='zero')
         acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
+        A_block_ptr = tl.advance(A_block_ptr, (0, BLOCK_K))
+        B_block_ptr = tl.advance(B_block_ptr, (BLOCK_K, 0))
 
-    for k2 in range(K1, 0, -BLOCK_K):
+    for k2 in range(K, 0, -BLOCK_K):
 
         # Second matmul with C @ D
         if EVEN_K:
-            c = tl.load(C)
-            d = tl.load(D)
+            c = tl.load(C_block_ptr, boundary_check=(0))
+            d = tl.load(D_block_ptr, boundary_check=(0))
         else:
-            c = tl.load(C, mask=rk[None, :] < k2, other=0.)
-            d = tl.load(D, mask=rk[:, None] < k2, other=0.)
+            c = tl.load(C_block_ptr, boundary_check=(0, 1), padding_option='zero')
+            d = tl.load(D_block_ptr, boundary_check=(0, 1), padding_option='zero')
         acc += tl.dot(c, d, allow_tf32=ALLOW_TF32)
-        C += BLOCK_K * stride_ck
-        D += BLOCK_K * stride_dk
+        C_block_ptr = tl.advance(C_block_ptr, (0, BLOCK_K))
+        D_block_ptr = tl.advance(D_block_ptr, (BLOCK_K, 0))
 
-
+    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     idx_m = rm[:, None]
     idx_n = rn[None, :]
     mask = (idx_m < M) & (idx_n < N)

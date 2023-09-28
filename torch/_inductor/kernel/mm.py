@@ -44,10 +44,10 @@ mm_template = TritonTemplate(
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
 
-    pid = tl.program_id(0)
     # re-order program ID for better L2 performance
-    num_pid_n = tl.cdiv(N, BLOCK_N)
+    pid = tl.program_id(0)
     num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
 
     num_pid_in_group = GROUP_M * num_pid_n
     group_id = pid // num_pid_in_group
@@ -57,7 +57,7 @@ mm_template = TritonTemplate(
     pid_n = (pid % num_pid_in_group) // GROUP_M
     block_offset_m = pid_m * BLOCK_M
     block_offset_n = pid_n * BLOCK_N
-    
+
     A_block_ptr = tl.make_block_ptr(
         base=A,
         shape=(M, K),
@@ -89,8 +89,8 @@ mm_template = TritonTemplate(
         A_block_ptr = tl.advance(A_block_ptr, (0, BLOCK_K))
         B_block_ptr = tl.advance(B_block_ptr, (BLOCK_K, 0))
 
-    # TODO (jon-chuang): support `boundary_check` in `store_output` to 
-    # support `make_block_ptr` (cannot use mask for block_ptr)
+    # TODO (jon-chuang): support `boundary_check` in `store_output` to
+    # support `make_block_ptr` for output (cannot use mask for block_ptr)
 
     # rematerialize rm and rn to save registers
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
