@@ -13,6 +13,7 @@ from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
 from .pytree_hacks import tree_map_, treespec_pprint
 import torch.autograd.forward_ad as fwAD
+from torch._subclasses.functional_tensor import FunctionalTensor
 
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 from .apis import vmap
@@ -1291,21 +1292,29 @@ def grad_impl(func: Callable, argnums: argnums_t, has_aux: bool, args, kwargs):
     grad, _ = results
     return grad
 
-def _maybe_wrap_functional_tensor(maybe_tensor, level):
+def _maybe_wrap_functional_tensor(maybe_tensor, level, *, _python_functionalize: bool = False):
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
     wrapped = _wrap_functional_tensor(maybe_tensor, level)
     _assert_wrapped_functional(maybe_tensor, wrapped)
+    if _python_functionalize:
+        out = FunctionalTensor(wrapped)
+        torch._mirror_autograd_meta_to(maybe_tensor, out)
+        return out
     return wrapped
 
 
-def _wrap_all_tensors_to_functional(tensor_pytree, level):
-    return tree_map(partial(_maybe_wrap_functional_tensor, level=level), tensor_pytree)
+def _wrap_all_tensors_to_functional(tensor_pytree, level, *, _python_functionalize: bool = False):
+    return tree_map(partial(lambda x: _maybe_wrap_functional_tensor(
+        x, level, _python_functionalize=_python_functionalize)), tensor_pytree)
 
 
 def _maybe_unwrap_functional_tensor(maybe_tensor, *, reapply_views: bool):
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
+    if isinstance(maybe_tensor, FunctionalTensor):
+        maybe_tensor = maybe_tensor.elem
+
     if not torch._is_functional_tensor(maybe_tensor):
         # If it's not a functional tensor, just return it.
         # This can happen if we functionalize a fn that returns a global,

@@ -34,6 +34,7 @@ import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._prims_common import (
@@ -48,7 +49,6 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
 from .utils import (
     argsort,
@@ -640,7 +640,10 @@ class Reduction(Loops):
         if not should_split:
             return ReductionHint.DEFAULT, 1
 
-        num_sm = get_device_properties(device).multi_processor_count
+        device_interface = get_interface_for_device(get_device_type(device))
+        num_sm = device_interface.Worker.get_device_properties(
+            device
+        ).multi_processor_count
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -1910,7 +1913,7 @@ class SliceView(View):
         end = cls.handle_negative_index(end, new_size[dim])
 
         end = sizevars.evaluate_min(end, new_size[dim])
-        start = sizevars.evaluate_min(sizevars.evaluate_min(start, new_size[dim]), end)
+        start = sizevars.evaluate_min(start, end)
         if start == 0 and sizevars.size_hint(end - new_size[dim]) == 0 and step == 1:
             sizevars.guard_equals(end, new_size[dim])
             return x
@@ -2306,23 +2309,23 @@ class MutationLayout(Layout):
         if isinstance(src, TensorBox):
             src = src.data
 
-        if not isinstance(src, StorageBox) or src.is_user_of(dst.get_name()):
-            need_copy = True
-        else:
-            src.realize()
-            need_copy = not isinstance(src.data.layout, FlexibleLayout)
+        # We copy the contents of src into dst. In most cases this should
+        # be fused into a single kernel by the scheduler.
+        # NOTE: We cannot change src's layout to mutate dst directly as this
+        # would alias src to dst, which is not correct as further mutations to
+        # dst would effect users of src.
+        src.realize_hint()
 
-        if need_copy:
-            src = Pointwise.create(
-                device=src.get_device(),
-                dtype=src.get_dtype(),
-                inner_fn=src.make_loader(),
-                ranges=[
-                    V.graph.sizevars.guard_equals(a, b)
-                    for a, b in zip(src.get_size(), dst.get_size())
-                ],
-            ).data
-            src.realize()
+        src = Pointwise.create(
+            device=src.get_device(),
+            dtype=src.get_dtype(),
+            inner_fn=src.make_loader(),
+            ranges=[
+                V.graph.sizevars.guard_equals(a, b)
+                for a, b in zip(src.get_size(), dst.get_size())
+            ],
+        ).data
+        src.realize()
 
         assert isinstance(src.data.layout, FlexibleLayout)
         src.data.layout = MutationLayout(dst)
@@ -2411,11 +2414,7 @@ class Buffer(IRNode):
         return False
 
     def codegen_reference(self, writer=None):
-        return (
-            self.get_name() + ".get()"
-            if V.graph.cpp_wrapper and config.aot_inductor.abi_compatible
-            else self.get_name()
-        )
+        return self.get_name()
 
     def decide_layout(self):
         pass
@@ -3586,13 +3585,9 @@ class DeviceCopy(ExternKernelOut):
         args = self.codegen_args()
         assert len(args) == 1
         if self.output_view:
-            wrapper.writeline(
-                f"{self.output_view.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.output_view.codegen_reference())
         else:
-            wrapper.writeline(
-                f"{self.codegen_reference()}.copy_({args[0]}){V.graph.wrapper_code.ending}"
-            )
+            wrapper.codegen_device_copy(args[0], self.codegen_reference())
 
 
 class DynamicScalar(IRNode):
@@ -3631,6 +3626,10 @@ class FallbackKernel(ExternKernelAlloc):
             tuple(tensor_args),
             tuple(nontensor_args),
         )
+        # We need output buffers for generating kernel arguments in the
+        # abi-compatible mode, where we retrieve outputs by pass each individual
+        # output through the abi-compatible interface.
+        self.outputs = []
         self.use_cpp_op_schema = False
 
         self.op_overload = kernel
@@ -3815,10 +3814,12 @@ class FallbackKernel(ExternKernelAlloc):
     def codegen(self, wrapper):
         if self.use_cpp_op_schema:
             exported_args = None
+            args = None
             if config.is_fbcode():
                 exported_args = self.export_extern_kernel_node()
+            else:
+                args = [*self.codegen_args(), *self.codegen_kwargs()]
 
-            args = [*self.codegen_args(), *self.codegen_kwargs()]
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
                 self.kernel,
@@ -3828,6 +3829,7 @@ class FallbackKernel(ExternKernelAlloc):
                 self.cpp_kernel_overlad_name,
                 self.op_overload,
                 exported_args,
+                self.outputs,
             )
         else:
             super().codegen(wrapper)
@@ -3881,7 +3883,8 @@ class FallbackKernel(ExternKernelAlloc):
                 assert output is None, "FallbackKernel output type is not supported"
                 return None
 
-        return generate_output(example_output, [])
+        packed.outputs = generate_output(example_output, [])
+        return packed.outputs
 
     def apply_constraint(self):
         return super().apply_constraint()
@@ -3901,7 +3904,7 @@ class MultiOutput(ExternKernel):
             elif itype == tuple:
                 # cpp wrapper code needs to use std::get<> to access a tuple
                 tuple_access = V.graph.wrapper_code.codegen_tuple_access(
-                    basename, str(i)
+                    basename, self.get_name(), str(i)
                 )
                 return self.codegen_list_tuple_access(tuple_access, indices[1:])
             else:
@@ -3910,11 +3913,11 @@ class MultiOutput(ExternKernel):
             return basename
 
     def codegen(self, wrapper):
-        line = V.graph.wrapper_code.declare
-        line += f"{self.get_name()} = {self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices)}"
-        line += V.graph.wrapper_code.ending
-        V.graph.wrapper_code.writeline(line)
-        self.codegen_size_asserts(V.graph.wrapper_code)
+        wrapper.codegen_multi_output(
+            self.get_name(),
+            self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
+        )
+        self.codegen_size_asserts(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())

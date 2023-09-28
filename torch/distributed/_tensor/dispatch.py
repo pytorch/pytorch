@@ -83,9 +83,9 @@ def redistribute_local_args(
     # TODO: the op schema should probably just remain flattened so that we can avoid this tree flatten
     # Need to fix all the ops before doing this.
     if op_info.args_tree_spec is not None:
-        flatten_args_schema_to_reshard = tree_flatten(
-            suggested_input_schema.args_schema
-        )[0]
+        flatten_args_schema_to_reshard = tuple(
+            tree_flatten(suggested_input_schema.args_schema)[0]
+        )
     else:
         flatten_args_schema_to_reshard = suggested_input_schema.args_schema
 
@@ -127,7 +127,8 @@ def _operator_dispatch(
 
     if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
         # flatten args/kwargs when necessary
-        args_list, args_spec = tree_flatten(args)
+        tree_args, args_spec = tree_flatten(args)
+        args_list = tuple(tree_args)
     else:
         args_list, args_spec = args, None
 
@@ -251,9 +252,7 @@ def _operator_dispatch(
             redistribute_local_args(op_info, suggested_input_schema)
 
         local_tensor_args = (
-            tree_unflatten(op_info.local_args, op_info.args_tree_spec)
-            if args_spec
-            else op_info.local_args
+            tree_unflatten(local_args, args_spec) if args_spec else op_info.local_args
         )
 
         # run local op computation with potentially modified args/kwargs

@@ -278,7 +278,7 @@ class DeviceMesh:
         return f"DeviceMesh:({self.mesh.tolist()})"
 
     def __hash__(self):
-        return hash(id(self.mesh))
+        return hash(self.mesh)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DeviceMesh):

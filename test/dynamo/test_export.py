@@ -2815,7 +2815,9 @@ def forward(self, x):
             a = A()
             return x.sum() + type(a).func().sum()
 
-        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "Can't call type()"):
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UserError, r"Can't access members of type\(obj\)"
+        ):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.ones(6, 4))
 
         def f_correct(x):
@@ -3763,7 +3765,6 @@ def forward(self, l_x_, d_true_branch, b_true_branch, a_true_branch, a, b, c):
         self.assertTrue(torch.allclose(gm(inp_test)[1][0], gm2(inp_test)[1][0]))
         self.assertTrue(torch.allclose(gm(inp_test)[1][1], gm2(inp_test)[1][1]))
 
-    @unittest.expectedFailure
     def test_fx_pytree(self):
         def foo(args):
             flat_args, spec = torch.utils._pytree.tree_flatten(args)
@@ -4078,6 +4079,53 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         torch._dynamo.reset()
         opt_gm_edit = torch.compile(gm_edit, backend=test_backend)
         opt_gm_edit(torch.randn(3, 3))
+
+    def test_torch_inference_mode_ctx(self):
+        @torch.inference_mode()
+        def fn(x):
+            return x + 1
+
+        gm, _ = torch._dynamo.export(fn, torch.rand(2, 2))
+
+        inp = torch.randn(2, 2)
+        out = gm(inp)
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(True)
+    add = arg0 + 1;  arg0 = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+        self.assertEqual(out.requires_grad, False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Setting requires_grad=True on inference tensor outside InferenceMode is not allowed.",
+        ):
+            out.requires_grad = True
+
+        @torch.inference_mode(False)
+        def fn_no_inference(x):
+            return x + 1
+
+        gm_no_inference, _ = torch._dynamo.export(fn_no_inference, torch.rand(2, 2))
+        self.assertExpectedInline(
+            gm_no_inference.code.strip(),
+            """\
+def forward(self, x):
+    arg0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    _enter_inference_mode = torch.autograd.grad_mode._enter_inference_mode(False)
+    add = arg0 + 1;  arg0 = None
+    _exit_inference_mode = torch.autograd.grad_mode._exit_inference_mode(_enter_inference_mode);  _enter_inference_mode = None
+    return pytree.tree_unflatten([add], self._out_spec)""",
+        )
+
+        inp = torch.randn(2, 2)
+        out = gm_no_inference(inp)
+        self.assertEqual(out.requires_grad, False)
+        out.requires_grad = True
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
