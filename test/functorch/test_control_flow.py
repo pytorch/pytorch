@@ -1261,7 +1261,7 @@ class TestControlFlowTraced(TestCase):
 
         gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 2, 1))
         # The symbols in make_fx's shape_env should not be speciliazed.
-        self.assertEqual(len(gm.shape_env.guards), 0)
+        self.assertEqual(len(gm.shape_env.guards), 1)
 
         self.assertExpectedInline(gm.code.strip(), """\
 def forward(self, x_1):

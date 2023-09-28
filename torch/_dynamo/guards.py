@@ -42,7 +42,7 @@ from torch._guards import (
     Source,
 )
 from torch._higher_order_ops.cast_symbool_to_symint import (
-    create_symint_guardless_no_proxy,
+    convert_symbool_to_int_with_hint,
 )
 from torch.fx.experimental.symbolic_shapes import EqualityConstraint, SYMPY_INTERP
 
@@ -680,6 +680,27 @@ class GuardBuilder(GuardBuilderBase):
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
+        def _propagate_guard_to_outer_shape_env(guards):
+            out_shape_env_guard_exprs = [
+                guard_expr
+                for guard_expr in guards
+                if "convert_symbool_to_int_with_hint" in guard_expr
+            ]
+
+            def _convert_symbool_to_int_guarded(symbool):
+                return int(symbool)
+
+            overrided_interpreter = {
+                **SYMPY_INTERP,
+                "convert_symbool_to_int_with_hint": _convert_symbool_to_int_guarded,
+            }
+            assert all(
+                eval(guard_expr, self.scope, overrided_interpreter)
+                for guard_expr in out_shape_env_guard_exprs
+            )
+
+        _propagate_guard_to_outer_shape_env(guards)
+
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
@@ -1205,7 +1226,7 @@ class CheckFunctionManager:
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("___check_global_state", global_state.check),
                 ("tensor_check_names", tensor_check_names),
-                ("create_symint_guardless_no_proxy", create_symint_guardless_no_proxy),
+                ("convert_symbool_to_int_with_hint", convert_symbool_to_int_with_hint),
             ]
             + list(SYMPY_INTERP.items())
         )

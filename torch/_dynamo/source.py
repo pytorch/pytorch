@@ -284,7 +284,7 @@ class ConvertIntSource(ChainedSource):
         #
         # Moreover, we don't want to create a proxy for the casting logic during guard checking.
         # The proxy will be created when the optimized python byte code is executed.
-        return f"create_symint_guardless_no_proxy({self.base.name()})"
+        return f"convert_symbool_to_int_with_hint({self.base.name()})"
 
 
 @dataclasses.dataclass(frozen=True)

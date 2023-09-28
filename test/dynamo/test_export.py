@@ -3241,18 +3241,17 @@ class GraphModule(torch.nn.Module):
         cos = arg1.cos();  arg1 = None
         return pytree.tree_unflatten([cos], self._out_spec)
 """
-        true_guard_code = ["create_symint_guardless_no_proxy(L['pred']) == 1"]
+        true_guard_code = ["convert_symbool_to_int_with_hint(L['pred']) == 1"]
         false_guard_code = [
-            "Ne(create_symint_guardless_no_proxy(L['pred']), 1)",
-            "-9223372036854775808 <= create_symint_guardless_no_proxy(L['pred'])",
+            "Ne(convert_symbool_to_int_with_hint(L['pred']), 1)",
+            "-9223372036854775808 <= convert_symbool_to_int_with_hint(L['pred'])",
         ]
         test_symbool_guards(
             f,
             [3, 3, 4, 5],
             [true_graph, true_graph, false_graph, false_graph],
             [true_guard_code, true_guard_code, false_guard_code, false_guard_code],
-            # Outter shape env should have no guards in it because we never specialize on the outter symbool.
-            [[], [], [], []],
+            [["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"], ["Eq(s0, 3)"]],
         )
 
     def test_invalid_input_global(self) -> None:

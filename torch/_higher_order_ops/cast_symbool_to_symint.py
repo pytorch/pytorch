@@ -11,6 +11,13 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 cast_symbool_to_symint = HigherOrderOperator("cast_symbool_to_symint")
 
 
+def convert_symbool_to_int_with_hint(maybe_symbool):
+    if isinstance(maybe_symbool, bool):
+        return int(maybe_symbool)
+
+    return int(maybe_symbool.node.require_hint())
+
+
 def create_symint_guardless_no_proxy(maybe_symbool):
     if isinstance(maybe_symbool, bool):
         return int(maybe_symbool)
