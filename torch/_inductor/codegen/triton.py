@@ -1335,6 +1335,15 @@ class TritonKernel(Kernel):
 
         return sympy_symbol(str(var))
 
+    def get_strides_of_load(self, index: sympy.Expr):
+        index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
+        index_in_tile_vars = index.subs(index_to_tile_indexes)
+        strides = {}
+        for range_tree in self.range_trees:
+            s = sympy_symbol(range_tree.name)
+            strides[s] = index_in_tile_vars.subs({s: 1}) - index_in_tile_vars.subs({s: 0})
+        return strides
+
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         indirect_indexing = self.is_indirect_indexing(index)
@@ -1356,8 +1365,13 @@ class TritonKernel(Kernel):
                 names = {name}
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and ("rmask" in mask or indirect_indexing)
-            ep = ", eviction_policy='evict_last'" if evict_last else ", eviction_policy='evict_first'"
-            # ep = ", eviction_policy='evict_last'" if evict_last else ""
+            is_coalesced = any([i == 1 for i in self.get_strides_of_load(original_index).values()])
+            if evict_last:
+                ep = ", eviction_policy='evict_last'"
+            elif is_coalesced:
+                ep = ", eviction_policy='evict_first'"
+            else:
+                ep = ""
         else:
             ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
