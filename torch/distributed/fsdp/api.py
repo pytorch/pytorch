@@ -283,13 +283,9 @@ class StateDictConfig:
         offload_to_cpu (bool): If ``True``, then FSDP offloads the state dict
             values to CPU, and if ``False``, then FSDP keeps them on GPU.
             (Default: ``False``)
-        use_dtensor (bool): If ``True``, then FSDP saves the state dict values
-            as ``DTensor`` if the value is sharded, and if ``False``, then FSDP
-            saves them as ``ShardedTensor``. (Default: ``False``)
     """
 
     offload_to_cpu: bool = False
-    use_dtensor: bool = False
 
 
 @dataclass
@@ -336,7 +332,21 @@ class LocalStateDictConfig(StateDictConfig):
 
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
-    pass
+    """
+    ``ShardedStateDictConfig`` is a config class meant to be used with
+    ``StateDictType.SHARDED_STATE_DICT``.
+
+    Attributes:
+        _use_dtensor (bool): If ``True``, then FSDP saves the state dict values
+            as ``DTensor``, and if ``False``, then FSDP saves them as
+            ``ShardedTensor``. (Default: ``False``)
+
+    .. warning:: ``_use_dtensor`` is a private field of :class:`ShardedStateDictConfig`
+      and it is used by FSDP to determine the type of state dict values. Users should not
+      manually modify ``_use_dtensor``.
+    """
+
+    _use_dtensor: bool = False
 
 
 @dataclass
@@ -352,14 +362,10 @@ class OptimStateDictConfig:
             tensor values to CPU, and if ``False``, then FSDP keeps them on the
             original device (which is GPU unless parameter CPU offloading is
             enabled). (Default: ``True``)
-        use_dtensor (bool): If ``True``, then FSDP saves the state dict values
-            as ``DTensor`` if the value is sharded, and if ``False``, then FSDP
-            saves them as ``ShardedTensor``. (Default: ``False``)
     """
 
     # TODO: actually use this flag in the _optim_utils.py
     offload_to_cpu: bool = True
-    use_dtensor: bool = False
 
 
 @dataclass
@@ -381,7 +387,21 @@ class LocalOptimStateDictConfig(OptimStateDictConfig):
 
 @dataclass
 class ShardedOptimStateDictConfig(OptimStateDictConfig):
-    pass
+    """
+    ``ShardedOptimStateDictConfig`` is a config class meant to be used with
+    ``StateDictType.SHARDED_STATE_DICT``.
+
+    Attributes:
+        _use_dtensor (bool): If ``True``, then FSDP saves the state dict values
+            as ``DTensor``, and if ``False``, then FSDP saves them as
+            ``ShardedTensor``. (Default: ``False``)
+
+    .. warning:: ``_use_dtensor`` is a private field of :class:`ShardedOptimStateDictConfig`
+      and it is used by FSDP to determine the type of state dict values. Users should not
+      manually modify ``_use_dtensor``.
+    """
+
+    _use_dtensor: bool = False
 
 
 @dataclass

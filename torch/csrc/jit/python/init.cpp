@@ -1231,6 +1231,11 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
+          "expect_size",
+          [](c10::SymNode a, const char* file, int64_t line) {
+            return a->expect_size(file, line);
+          })
+      .def(
           "has_hint",
           [](c10::SymNode a) {
             return a->has_hint();
@@ -1253,9 +1258,25 @@ void initJITBindings(PyObject* module) {
       .def(
           "__str__",
           [](c10::SymNode a) { return a->str(); })
-      .def("__repr__", [](c10::SymNode a) {
-        return a->str();
-      });
+      .def(
+          "__repr__",
+          [](c10::SymNode a) { return a->str(); })
+      .def(
+          "is_constant",
+          [](const c10::SymNode& node){
+            return node->is_constant();
+          })
+      .def(
+          "is_symbolic",
+          [](const c10::SymNode& node) {
+            return node->is_symbolic();
+          })
+      .def(
+          "singleton_int",
+          [](const c10::SymNode& node) {
+            return node->singleton_int();
+          });
+
   // clang-format on
 
   // NOLINTNEXTLINE(bugprone-unused-raii)

@@ -1,14 +1,16 @@
-import collections
+from __future__ import annotations
+
 import itertools
 import logging
 
 import weakref
-from typing import Callable, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import dynamo_timed, lazy_format_graph_code
 from torch._functorch.compile_utils import fx_graph_cse
+from torch._inductor.constant_folding import constant_fold, replace_node_with_constant
 
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
@@ -23,34 +25,11 @@ prims = torch.ops.prims
 log = logging.getLogger(__name__)
 
 
-def replace_node_with_constant(gm, node, constant):
-    g = gm.graph
-
-    if not hasattr(gm, "_frozen_param_count"):
-        gm._frozen_param_count = 0
-
-    i = gm._frozen_param_count
-
-    while True:
-        qualname = f"_frozen_param{i}"
-        if not hasattr(gm, qualname):
-            break
-        i += 1
-
-    gm._frozen_param_count = i + 1
-
-    with g.inserting_before(node):
-        new_input_node = g.create_node("get_attr", qualname, (), {})
-        node.replace_all_uses_with(new_input_node)
-        new_input_node.meta.update(node.meta)
-        g.erase_node(node)
-
-    # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
-    gm.register_buffer(qualname, constant)
-    setattr(gm, qualname, constant)
-
-
-def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
+def replace_params_with_constants(
+    gm: torch.fx.GraphModule,
+    flat_params: list[Any],
+    fw_metadata: torch._functorch.aot_autograd.ViewAndMutationMeta,
+) -> List[int]:
     """
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
@@ -73,128 +52,6 @@ def replace_params_with_constants(gm, flat_params, fw_metadata) -> List[int]:
     # is this necessary ?
     gm.recompile()
     return preserved_arg_indices
-
-
-def return_true(*args, **kwargs):
-    return True
-
-
-class ConstantFolder(torch.fx.Interpreter):
-    def __init__(
-        self,
-        gm,
-        skip_constructors=False,
-        insertable_tensor_check: Optional[Callable[[torch.Tensor], bool]] = None,
-    ):
-        super().__init__(gm)
-        self.node_replacements = {}
-        self.replaced_uses = collections.Counter()
-        self.unknown_value = object()
-        self.skip_constructors = skip_constructors
-        self.insertable_tensor_check = (
-            insertable_tensor_check
-            if insertable_tensor_check is not None
-            else return_true
-        )
-
-    def is_impure(self, node: torch.fx.node.Node):
-        if node.target == torch.ops.quantized_decomposed.dequantize_per_channel.default:
-            # For the pattern fp32_weight -> quantized_decomposed.quantize_per_channel.default
-            # -> quantized_decomposed.dequantize_per_channel.default
-            # We only folding fp32_weight -> quantized_decomposed.quantize_per_channel.default into
-            # int8_weight and leave quantized_decomposed.dequantize_per_channel.default in graph to be fused
-            return True
-        return False
-
-    def run_node(self, node):
-        aten = torch.ops.aten
-        args, kwargs = self.fetch_args_kwargs_from_env(node)
-
-        if node.target == "output":
-            return super().run_node(node)
-
-        flattened_inputs = pytree.tree_flatten((args, kwargs))[0]
-
-        if self.unknown_value in flattened_inputs:
-            return self.unknown_value
-
-        # TODO - fix errors with this
-        if (
-            node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
-        ):
-            return self.unknown_value
-
-        # skip constructors, since inductor generates optimal code for them already
-        # and turning into tensor would result in an additional global memory read
-        # TODO - more complicated strategy
-        if (
-            self.skip_constructors
-            and node.op != "get_attr"
-            and not any(isinstance(e, torch.Tensor) for e in flattened_inputs)
-        ):
-            return self.unknown_value
-
-        # All mutations should either be removed or on inputs which we did not make constant
-        if (
-            isinstance(node.target, torch._ops.OpOverload)
-            and torch.Tag.nondeterministic_seeded in node.target.tags
-        ):
-            return self.unknown_value
-
-        out = super().run_node(node)
-
-        if node.op != "get_attr" and isinstance(out, torch.Tensor):
-            if not self.insertable_tensor_check(out):
-                return out
-
-            if self.is_impure(node):
-                return self.unknown_value
-
-            self.node_replacements[node] = out
-
-            flattened_node_inps = pytree.tree_flatten((node.args, node.kwargs))[0]
-
-            for n in flattened_node_inps:
-                if not isinstance(n, torch.fx.Node):
-                    continue
-
-                self.replaced_uses[n] += 1
-
-            for to_delete in self.user_to_last_uses.get(node, []):
-                if self.replaced_uses[to_delete] == len(to_delete.users):
-                    self.node_replacements.pop(to_delete, None)
-
-        return out
-
-    def run(self):
-        env = {}
-        for n in self.module.graph.nodes:
-            if n.op == "placeholder":
-                env[n] = self.unknown_value
-        return super().run(initial_env=env)
-
-
-@torch.utils._python_dispatch._disable_current_modes()
-def constant_fold(gm):
-    cf = ConstantFolder(gm, skip_constructors=True)
-    cf.run()
-
-    for node, constant in cf.node_replacements.items():
-        replace_node_with_constant(gm, node, constant)
-
-    erased_params = []
-    for node in gm.graph.nodes:
-        if node.op == "get_attr" and len(node.users) == 0:
-            delattr(gm, node.target)
-            erased_params.append(node)
-
-    for node in erased_params:
-        gm.graph.erase_node(node)
-
-    gm.graph.eliminate_dead_code()
-    gm.graph.lint()
-    gm.recompile()
 
 
 def freeze(
@@ -275,8 +132,8 @@ class ErasedTensor(torch.Tensor):
         e = erased_tensors[0]
 
         raise RuntimeError(
-            f"Trying to Run Pytorch Eager Module After Dynamo Freezing. "
-            "The original parameters have been discarded for memeory efficiency. "
+            f"Trying to run Pytorch Eager Module after Dynamo Freezing. "
+            "The original parameters have been discarded for memory efficiency. "
             f"Found in op {func} for erased parameter {e.erased_name} of {e.owning_mod_ref()}"
         )
 
@@ -301,7 +158,7 @@ def invalidate_eager_modules():
 
 
 @torch.utils._python_dispatch._disable_current_modes()
-def discard_traced_gm_params(mod):
+def discard_traced_gm_params(mod: torch.fx.GraphModule):
     for attr_name, tensor in list(
         itertools.chain(
             mod.named_parameters(recurse=False), mod.named_buffers(recurse=False)
@@ -315,7 +172,7 @@ def discard_traced_gm_params(mod):
         setattr(mod, attr_name, e_t)
 
 
-def enforce_output_layout(gm):
+def enforce_output_layout(gm: torch.fx.GraphModule):
     """
     Make sure the output node's layout does not change due to compiler optimizations
     by adding aten.as_strided nodes with the expected strides.
@@ -346,7 +203,7 @@ def enforce_output_layout(gm):
     gm.recompile()
 
 
-def enforce_as_strided_input_layout(gm):
+def enforce_as_strided_input_layout(gm: torch.fx.GraphModule):
     """
     Make sure the as_strided node's input's layout does not change due to compiler
     optimizations, because the as_strided strides info depends on input tensor stride info.
@@ -372,7 +229,7 @@ def enforce_as_strided_input_layout(gm):
 
 
 @dynamo_timed
-def convert_conv_weights_to_channels_last(gm):
+def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     """
     Convert 4d convolution weight tensor to channels last format.
 

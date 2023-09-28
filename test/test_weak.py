@@ -57,7 +57,7 @@ class WeakTest(TestCase):
         self.assertIsNot(
             value1,
             value2,
-            "invalid test" " -- value parameters must be distinct objects",
+            "invalid test -- value parameters must be distinct objects",
         )
         weakdict = klass()
         o = weakdict.setdefault(key, value1)

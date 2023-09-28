@@ -42,7 +42,7 @@ class _ExportPassBase(PassBase):
 
     @staticmethod
     def _create_dummy_node_metadata():
-        return NodeMetadata({"stack_trace": traceback.format_exc(-1)})
+        return NodeMetadata({"stack_trace": "".join(traceback.format_stack(limit=1))})
 
 
     class ExportTracer(PythonKeyTracer):

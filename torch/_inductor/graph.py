@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict, OrderedDict
 from contextlib import contextmanager
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple
 
 import sympy
 
@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
+from torch._logging import LazyString
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     magic_methods,
@@ -165,6 +166,7 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode=False,
         user_visible_outputs=frozenset(),
         layout_opt=None,
+        extern_node_serializer=None,
     ):
         super().__init__(gm)
 
@@ -194,14 +196,19 @@ class GraphLowering(torch.fx.Interpreter):
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
+        self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
         self.wrapper_code: Optional[WrapperCodeGen] = None
+        # See `ProxyExecutor Design Note` in ir.py for more details
+        self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
+        self.extern_node_serializer: Optional[
+            Callable[[List[ir.ExternKernelNode]], Any]
+        ] = extern_node_serializer
         self.current_node: Optional[torch.fx.Node] = None
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
-        self.unaligned_buffers: Set[str] = set()
         self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
@@ -224,6 +231,7 @@ class GraphLowering(torch.fx.Interpreter):
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
         self.disable_cudagraphs = False
+        self.orig_gm: torch.fx.GraphModule = gm.__copy__()
         self.init_backend_registration()
 
     @staticmethod
@@ -694,6 +702,7 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
+        log.debug("lowering %s", LazyString(lambda: n.format_node()))
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -916,6 +925,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.scheduler = Scheduler(self.buffers)
         assert self.scheduler is not None  # mypy can't figure this out
+        V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
@@ -952,9 +962,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
-        output_code_log.info("Output code written to: %s", mod.__file__)
+        assert mod.__file__ is not None
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -968,8 +979,24 @@ class GraphLowering(torch.fx.Interpreter):
             code, linemap = self.codegen()
             output_code_log.debug("Output code: \n%s", code)
 
+            serialized_extern_kernel_nodes = None
+            if (
+                config.is_fbcode()
+                and self.extern_kernel_nodes
+                and self.extern_node_serializer
+            ):
+                serialized_extern_kernel_nodes = self.extern_node_serializer(
+                    self.extern_kernel_nodes
+                )
+                output_code_log.debug(
+                    "Serialized Extern Kernel Nodes: \n%s",
+                    serialized_extern_kernel_nodes,
+                )
+
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(self, code, cuda=self.cuda)
+            return AotCodeCache.compile(
+                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
+            )
         else:
             return self.compile_to_module().call
 
