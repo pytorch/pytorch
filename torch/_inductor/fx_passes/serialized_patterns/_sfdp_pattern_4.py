@@ -16,6 +16,8 @@ from torch._inductor.pattern_matcher import (
    CallFunctionVarArgs,
    CallMethod,
    CallMethodVarArgs,
+   CallModule,
+   CallModuleVarArgs,
    ExclusiveKeywordArg,
    Ignored,
    KeywordArg,

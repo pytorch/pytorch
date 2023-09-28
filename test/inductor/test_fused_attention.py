@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import functools
 import itertools
 import math
 
@@ -491,7 +492,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(dot_prod_attention, contains=False, has_dropout=True)
 
     @skipIfRocm
-    def _test_sdpa_rewriter_13(self):
+    def _test_sdpa_prev_13(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -508,7 +509,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
     @skipIfRocm
-    def _test_sdpa_rewriter_14(self):
+    def _test_sdpa_prev_14(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -524,7 +525,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
         self._check_common(checkpoint_wrapper(dot_prod_attention), check_train=False)
 
     @skipIfRocm
-    def _test_sdpa_rewriter_15(self):
+    def _test_sdpa_prev_15(self):
         def dot_prod_attention(
             query: torch.Tensor, key: torch.Tensor, value: torch.Tensor
         ) -> torch.Tensor:
@@ -541,6 +542,38 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             )
 
         self._check_common(dot_prod_attention, check_train=False)
+
+    @skipIfRocm
+    def _test_sdpa_rewriter_13(self, dtype):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            training: bool,
+        ) -> torch.Tensor:
+            """Input tensors assumed to have shape (batch_size, seq_len, n_head, embed_dim)"""
+            attn_weight = torch.bmm(query, key.transpose(1, 2)).softmax(dim=-1)
+            attn_weight = torch.nn.functional.dropout(
+                attn_weight, p=0.5, training=training
+            )
+            return torch.bmm(attn_weight, value)
+
+        tensor_shape = (4, 8, 16)
+        args = [
+            torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            torch.randn(tensor_shape, device=self.device, dtype=dtype),
+            torch.randn(tensor_shape, device=self.device, dtype=dtype),
+        ]
+
+        self._check_common(
+            dot_prod_attention,
+            check_train=False,
+            args1=args,
+            has_dropout=True,
+            override_check_equal=True,
+            atol=1e-2,
+            rtol=1e-2,
+        )
 
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
@@ -592,14 +625,11 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_12_cuda = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
         )
-        test_sdpa_rewriter_13_cuda = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13
-        )
-        test_sdpa_rewriter_14_cuda = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
-        )
-        test_sdpa_rewriter_15_cuda = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
+        test_sdpa_prev_13_cuda = TestSDPAPatternRewriterTemplate._test_sdpa_prev_13
+        test_sdpa_prev_14_cuda = TestSDPAPatternRewriterTemplate._test_sdpa_prev_14
+        test_sdpa_prev_15_cuda = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
+        test_sdpa_rewriter_13_cuda = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.half
         )
 
 
@@ -625,14 +655,11 @@ if HAS_CPU:
         test_sdpa_rewriter_12_cpu = (
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_12
         )
-        test_sdpa_rewriter_13_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13
-        )
-        test_sdpa_rewriter_14_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_14
-        )
-        test_sdpa_rewriter_15_cpu = (
-            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_15
+        test_sdpa_prev_13_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_13
+        test_sdpa_prev_14_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_14
+        test_sdpa_prev_15_cpu = TestSDPAPatternRewriterTemplate._test_sdpa_prev_15
+        test_sdpa_rewriter_13_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_13, dtype=torch.float32
         )
 
 

@@ -763,6 +763,8 @@ aten::frexp.Tensor
 aten::frexp.Tensor_out
 aten::from_file
 aten::from_file.out
+aten::full.names
+aten::full.names_out
 aten::full_like
 aten::full_like.out
 aten::gather
@@ -1265,7 +1267,6 @@ aten::squeeze_copy.dims
 aten::squeeze_copy.dims_out
 aten::squeeze_copy.out
 aten::sspaddmm.out
-aten::std_mean.correction_out
 aten::t_
 aten::t_copy
 aten::t_copy.out
@@ -1291,6 +1292,7 @@ aten::unique_dim.out
 aten::unique_dim_consecutive
 aten::unique_dim_consecutive.out
 aten::unsafe_split.Tensor_out
+aten::unsafe_split_with_sizes.out
 aten::unsqueeze_
 aten::unsqueeze_copy
 aten::unsqueeze_copy.out
