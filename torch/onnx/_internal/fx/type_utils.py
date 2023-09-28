@@ -93,6 +93,11 @@ def from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
     return _SCALAR_TYPE_TO_TORCH_DTYPE.get(scalar_type)
 
 
+# NOTE: from https://github.com/onnx/onnx/blob/main/onnx/mapping.py
+def from_torch_dtype_to_np_dtype(dtype: torch.dtype) -> numpy.dtype:
+    return _TORCH_DTYPE_TO_ONNX_NP_DTYPE[dtype]
+
+
 # NOTE: this is a mapping from torch dtype to a set of compatible onnx types
 # It's used in dispatcher to find the best match overload for the input dtypes
 _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
@@ -163,7 +168,7 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
     torch.uint8: "u8",
 }
 
-_TORCH_DTYPE_TO_NUMPY_DTYPE = {
+_TORCH_DTYPE_TO_NUMPY_DTYPE: Dict[torch.dtype, type] = {
     torch.float16: numpy.float16,
     torch.float32: numpy.float32,
     torch.float64: numpy.float64,
@@ -173,6 +178,18 @@ _TORCH_DTYPE_TO_NUMPY_DTYPE = {
     torch.int32: numpy.int32,
     torch.int64: numpy.longlong,
     torch.bool: numpy.bool_,
+}
+
+_TORCH_DTYPE_TO_ONNX_NP_DTYPE: Dict[torch.dtype, numpy.dtype] = {
+    torch.float16: numpy.dtype("float16"),
+    torch.float32: numpy.dtype("float32"),
+    torch.float64: numpy.dtype("float64"),
+    torch.uint8: numpy.dtype("uint8"),
+    torch.int8: numpy.dtype("int8"),
+    torch.int16: numpy.dtype("int16"),
+    torch.int32: numpy.dtype("int32"),
+    torch.int64: numpy.dtype("int64"),
+    torch.bool: numpy.dtype("bool"),
 }
 
 _ONNX_TENSOR_ELEMENT_TYPE_TO_TORCH_DTYPE = {

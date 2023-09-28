@@ -979,9 +979,7 @@ class Exporter:
                 onnxscript_graph.initializers = initializers_with_real_tensors
 
             # Export TorchScript graph to ONNX ModelProto.
-            onnx_model = onnxscript_graph.to_model_proto(
-                self.options.onnx_registry.opset_version,
-            )
+            onnx_model = onnxscript_graph.to_onnx_model()
 
             return torch.onnx.ExportOutput(
                 onnx_model,
