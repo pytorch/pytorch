@@ -63,7 +63,7 @@ from . import config, convert_frame, external_utils, skipfiles, utils
 from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
-from .types import DynamoCallback
+from .types import CacheEntry, DynamoCallback
 from .utils import compile_times
 
 log = logging.getLogger(__name__)
@@ -147,11 +147,6 @@ DONT_WRAP_FILES = {
     inspect.getsourcefile(GraphModule),
     join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
 }
-
-
-# This class has a `check_fn` field for the guard,
-#  and a `code` field for the code object.
-CacheEntry = torch._C._dynamo.eval_frame._CacheEntry
 
 
 def _debug_get_cache_entry_list(
@@ -1225,14 +1220,10 @@ def export(
         ):
             dim_constraints.solve()
             dim_constraints.remove_redundant_dynamic_results()
-            msg = dim_constraints.prettify_results(original_signature)
             forced_specializations = dim_constraints.forced_specializations()
-            if forced_specializations:
-                msg = (
-                    "Some dynamic dimensions need to be specialized because "
-                    "the constraints inferred for them are too complex to specify.\n"
-                    f"{forced_specializations}\n{msg}"
-                )
+            msg = dim_constraints.prettify_results(
+                original_signature, constraint_violation_error, forced_specializations
+            )
             if constraint_violation_error:
                 constraint_violation_error.args = (
                     constraint_violation_error.args[0] + msg,
