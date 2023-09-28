@@ -31,9 +31,9 @@ if IS_WINDOWS and IS_CI:
 
 try:
     try:
-        from .test_torchinductor import copy_tests, requires_cuda
+        from .test_torchinductor import copy_tests, requires_cuda, TestFailure
     except ImportError:
-        from test_torchinductor import copy_tests, requires_cuda
+        from test_torchinductor import copy_tests, requires_cuda, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
         sys.exit(0)
@@ -52,7 +52,7 @@ class AOTInductorModelRunner:
         )
 
         launcher = aot_inductor_launcher
-        is_cpu = any(x.device.type == "cpu" for x in example_inputs)
+        is_cpu = all(x.device.type == "cpu" for x in example_inputs)
         if is_cpu:
             launcher = launcher.replace("false /*is_cpu*/", "true /*is_cpu*/")
 
@@ -61,7 +61,7 @@ class AOTInductorModelRunner:
             cpp_sources=[launcher],
             functions=["run"],
             extra_ldflags=[so_path],
-            with_cuda=True,
+            with_cuda=True,  # TODO: change this to not is_cpu
         ).run
 
         return optimized, exported
@@ -110,8 +110,10 @@ def check_model(
     options=None,
     constraints=None,
 ):
-    expected = model(*example_inputs)
-    with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+    with torch.no_grad(), config.patch(
+        "aot_inductor.abi_compatible", self.abi_compatible
+    ):
+        expected = model(*example_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
     self.assertTrue(same(actual, expected))
 
@@ -123,8 +125,12 @@ def check_model_with_multiple_inputs(
     options=None,
     constraints=None,
 ):
-    list_expected = [model(*example_inputs) for example_inputs in list_example_inputs]
-    with config.patch("aot_inductor.abi_compatible", self.abi_compatible):
+    with torch.no_grad(), config.patch(
+        "aot_inductor.abi_compatible", self.abi_compatible
+    ):
+        list_expected = [
+            model(*example_inputs) for example_inputs in list_example_inputs
+        ]
         list_actual = AOTInductorModelRunner.run_multiple(
             model, list_example_inputs, options, constraints
         )
@@ -134,54 +140,39 @@ def check_model_with_multiple_inputs(
 @unittest.skipIf(IS_FBCODE, "cpp extension doesn't work in fbcode CI")
 class AOTInductorTestsTemplate:
     def test_simple(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(10, 10, device="cuda")
+                self.linear = torch.nn.Linear(10, 10)
 
             def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
+                return x + self.linear(y)
 
         example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
-
-    def test_simple_cpu(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device="cpu")
-
-            def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
-
-        example_inputs = (
-            torch.randn(10, 10, device="cpu"),
-            torch.randn(10, 10, device="cpu"),
-        )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model().to(self.device), example_inputs)
 
     def test_output_path(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(10, 10, device="cuda")
+                self.linear = torch.nn.Linear(10, 10)
 
             def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
+                return x + self.linear(y)
 
         example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
         with config.patch("aot_inductor.output_path", "tmp_output_"):
-            self.check_model(Repro(), example_inputs)
+            self.check_model(Model().to(self.device), example_inputs)
 
     @requires_cuda()
     def test_multi_device(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def forward(self, x):
                 x = x + 1
                 x = x.cpu()
@@ -189,29 +180,29 @@ class AOTInductorTestsTemplate:
                 x = x.cuda()
                 return x
 
-        example_inputs = (torch.randn(32, 64, device="cuda"),)
-        self.check_model(Repro(), example_inputs)
+        example_inputs = (torch.randn(32, 64, device=self.device),)
+        self.check_model(Model(), example_inputs)
 
     def test_large(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = torch.randn(250112, 512, device="cuda")
+                self.linear = torch.nn.Linear(512, 250112)
 
             def forward(self, x, y):
-                return x + torch.nn.functional.linear(y, self.weight)
+                return x + self.linear(y)
 
         example_inputs = (
-            torch.randn(1, 250112, device="cuda"),
-            torch.randn(1, 512, device="cuda"),
+            torch.randn(1, 250112, device=self.device),
+            torch.randn(1, 512, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model().to(self.device), example_inputs)
 
     def test_with_offset(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
                 super().__init__()
-                self.orig_tensor = torch.randn(2, 15, 10, device="cuda")[0]
+                self.orig_tensor = torch.randn(2, 15, 10, device=device)[0]
                 self.tensor = self.orig_tensor[5:, :]
 
             def forward(self, x, y):
@@ -222,32 +213,32 @@ class AOTInductorTestsTemplate:
                 )
 
         example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
 
     def test_freezing(self):
-        class Repro(torch.nn.Module):
-            def __init__(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
                 super().__init__()
-                self.weight = torch.randn(9, 10, device="cuda")
-                self.padding = torch.randn(1, 10, device="cuda")
+                self.weight = torch.randn(9, 10, device=device)
+                self.padding = torch.randn(1, 10, device=device)
 
             def forward(self, x, y):
                 padded_weight = torch.cat((self.weight, self.padding), dim=0)
                 return x + torch.nn.functional.linear(y, padded_weight)
 
         example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
 
-        with torch.no_grad(), config.patch({"freezing": True}):
-            self.check_model(Repro(), example_inputs)
+        with config.patch({"freezing": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     def test_missing_output(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -258,13 +249,13 @@ class AOTInductorTestsTemplate:
                 return c
 
         example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_output_misaligned(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -278,23 +269,23 @@ class AOTInductorTestsTemplate:
                 return x_sigmoid, y_getitem
 
         example_inputs = (
-            torch.randn(10, 10, device="cuda"),
-            torch.randn(10, 10, device="cuda"),
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_dynamic_smem_above_default_limit(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def forward(self, x, y):
                 return x @ y
 
-        model = Repro()
+        model = Model().to(self.device)
         # on A100, the generated Triton kernel for this MM
         # requires 55296 bytes of dynamic SMEM which is above
         # the A100's default dynamic SMEM limit of 49152 bytes.
         example_inputs = (
-            torch.randn(10285, 96, device="cuda"),
-            torch.randn(96, 1, device="cuda"),
+            torch.randn(10285, 96, device=self.device),
+            torch.randn(96, 1, device=self.device),
         )
         self.check_model(
             model,
@@ -319,10 +310,10 @@ class AOTInductorTestsTemplate:
 
     def test_addmm(self):
         class Model(torch.nn.Module):
-            def __init__(self, n, k):
+            def __init__(self, n, k, device):
                 super().__init__()
-                self.weight = torch.randn(n, k, device="cuda")
-                self.bias = torch.randn(n, device="cuda")
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
 
             def forward(self, a):
                 return torch.nn.functional.linear(a, self.weight, self.bias)
@@ -330,14 +321,14 @@ class AOTInductorTestsTemplate:
         M = 8
         N = 6
         K = 16
-        model = Model(N, K)
+        model = Model(N, K, self.device)
         batch = 2
-        a = torch.randn(batch, M, K, device="cuda")
+        a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
         self.check_model(model, example_inputs)
 
     def test_aliased_buffer_reuse(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -350,13 +341,13 @@ class AOTInductorTestsTemplate:
                 return m[:, :2] + x
 
         example_inputs = (
-            torch.randn(4, 2, device="cuda"),
-            torch.randn(4, 2, device="cuda"),
+            torch.randn(4, 2, device=self.device),
+            torch.randn(4, 2, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_buffer_reuse(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -371,10 +362,10 @@ class AOTInductorTestsTemplate:
                 return g
 
         example_inputs = (
-            torch.randn(4, 4, device="cuda"),
-            torch.randn(4, 4, device="cuda"),
+            torch.randn(4, 4, device=self.device),
+            torch.randn(4, 4, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_duplicated_params(self):
         class Model(torch.nn.Module):
@@ -386,11 +377,8 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return self.p * x + self.q
 
-        model = Model()
         example_inputs = (torch.rand(6),)
-        expected = model(*example_inputs)
-        actual = torch._export.export(model, example_inputs)(*example_inputs)
-        self.assertTrue(same(actual, expected))
+        self.check_model(Model(), example_inputs)
 
     def test_simple_dynamic(self):
         class Model(torch.nn.Module):
@@ -401,8 +389,8 @@ class AOTInductorTestsTemplate:
                 add_0 = x + y
                 return torch.nn.functional.relu(input=add_0, inplace=False)
 
-        a = torch.randn(128, 2048, device="cuda")
-        b = torch.randn(128, 2048, device="cuda")
+        a = torch.randn(128, 2048, device=self.device)
+        b = torch.randn(128, 2048, device=self.device)
         constraints = [
             torch._export.dynamic_dim(a, 0) >= 1,
             torch._export.dynamic_dim(a, 0) <= 2048,
@@ -420,8 +408,8 @@ class AOTInductorTestsTemplate:
                 add_0 = x + y
                 return torch.nn.functional.relu(input=add_0, inplace=False)
 
-        a = torch.randn(128, 2048, device="cuda")
-        b = torch.randn(128, 2048, device="cuda")
+        a = torch.randn(128, 2048, device=self.device)
+        b = torch.randn(128, 2048, device=self.device)
         constraints = [
             torch._export.dynamic_dim(a, 0) >= 1,
             torch._export.dynamic_dim(a, 0) <= 2048,
@@ -430,14 +418,14 @@ class AOTInductorTestsTemplate:
         list_example_inputs = [(a, b)]
         list_example_inputs.append(
             (
-                torch.randn(64, 2048, device="cuda"),
-                torch.randn(64, 2048, device="cuda"),
+                torch.randn(64, 2048, device=self.device),
+                torch.randn(64, 2048, device=self.device),
             ),
         )
         list_example_inputs.append(
             (
-                torch.randn(211, 2048, device="cuda"),
-                torch.randn(211, 2048, device="cuda"),
+                torch.randn(211, 2048, device=self.device),
+                torch.randn(211, 2048, device=self.device),
             ),
         )
         self.check_model_with_multiple_inputs(
@@ -446,10 +434,10 @@ class AOTInductorTestsTemplate:
 
     def test_addmm_multiple_dynamic(self):
         class Model(torch.nn.Module):
-            def __init__(self, n, k):
+            def __init__(self, n, k, device):
                 super().__init__()
-                self.weight = torch.randn(n, k, device="cuda")
-                self.bias = torch.randn(n, device="cuda")
+                self.weight = torch.randn(n, k, device=device)
+                self.bias = torch.randn(n, device=device)
 
             def forward(self, a):
                 return torch.nn.functional.linear(a, self.weight, self.bias)
@@ -457,9 +445,9 @@ class AOTInductorTestsTemplate:
         M = 8
         N = 6
         K = 16
-        model = Model(N, K)
+        model = Model(N, K, self.device)
         batch = 2
-        a = torch.randn(batch, M, K, device="cuda")
+        a = torch.randn(batch, M, K, device=self.device)
         constraints = [
             torch._export.dynamic_dim(a, 0) >= 1,
             torch._export.dynamic_dim(a, 0) <= 2048,
@@ -467,11 +455,11 @@ class AOTInductorTestsTemplate:
         list_example_inputs = [(a,)]
         batch = 2048
         list_example_inputs.append(
-            (torch.randn(batch, M, K, device="cuda"),),
+            (torch.randn(batch, M, K, device=self.device),),
         )
         batch = 128
         list_example_inputs.append(
-            (torch.randn(batch, M, K, device="cuda"),),
+            (torch.randn(batch, M, K, device=self.device),),
         )
         self.check_model_with_multiple_inputs(
             model,
@@ -496,8 +484,8 @@ class AOTInductorTestsTemplate:
         K = 16
         model = Model()
         batch = 1024
-        a = torch.randn(batch, M, K, device="cuda")
-        b = torch.randn(batch, K, N, device="cuda")
+        a = torch.randn(batch, M, K, device=self.device)
+        b = torch.randn(batch, K, N, device=self.device)
         constraints = [
             torch._export.dynamic_dim(a, 0) >= 1,
             torch._export.dynamic_dim(a, 0) <= 2048,
@@ -507,15 +495,15 @@ class AOTInductorTestsTemplate:
         batch = 2048
         list_example_inputs.append(
             (
-                torch.randn(batch, M, K, device="cuda"),
-                torch.randn(batch, K, N, device="cuda"),
+                torch.randn(batch, M, K, device=self.device),
+                torch.randn(batch, K, N, device=self.device),
             ),
         )
         batch = 128
         list_example_inputs.append(
             (
-                torch.randn(batch, M, K, device="cuda"),
-                torch.randn(batch, K, N, device="cuda"),
+                torch.randn(batch, M, K, device=self.device),
+                torch.randn(batch, K, N, device=self.device),
             ),
         )
         self.check_model_with_multiple_inputs(
@@ -540,8 +528,8 @@ class AOTInductorTestsTemplate:
                 return cat
 
         model = Model()
-        a = torch.randn(128, 2048, device="cuda")
-        b = torch.randn(128, 2048, device="cuda")
+        a = torch.randn(128, 2048, device=self.device)
+        b = torch.randn(128, 2048, device=self.device)
         constraints = [
             torch._export.dynamic_dim(a, 0) >= 1,
             torch._export.dynamic_dim(a, 0) <= 2048,
@@ -550,14 +538,14 @@ class AOTInductorTestsTemplate:
         list_example_inputs = [(a, b)]
         list_example_inputs.append(
             (
-                torch.randn(64, 2048, device="cuda"),
-                torch.randn(64, 2048, device="cuda"),
+                torch.randn(64, 2048, device=self.device),
+                torch.randn(64, 2048, device=self.device),
             ),
         )
         list_example_inputs.append(
             (
-                torch.randn(211, 2048, device="cuda"),
-                torch.randn(211, 2048, device="cuda"),
+                torch.randn(211, 2048, device=self.device),
+                torch.randn(211, 2048, device=self.device),
             ),
         )
         self.check_model_with_multiple_inputs(
@@ -568,7 +556,7 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     def test_sdpa(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -576,14 +564,14 @@ class AOTInductorTestsTemplate:
                 return torch.nn.functional.scaled_dot_product_attention(q, k, v)[0]
 
         example_inputs = (
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(), example_inputs)
 
     def test_sdpa_2(self):
-        class Repro(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
@@ -594,33 +582,85 @@ class AOTInductorTestsTemplate:
                 return x + t
 
         example_inputs = (
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
-            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device="cuda"),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
+            torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
-        self.check_model(Repro(), example_inputs)
+        self.check_model(Model(), example_inputs)
 
 
-class AOTInductorTestABICompatible(TestCase):
+class AOTInductorTestABICompatibleCpu(TestCase):
+    device = "cpu"
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
-copy_tests(AOTInductorTestsTemplate, AOTInductorTestABICompatible, "abi_compatible")
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestABICompatibleCpu,
+    "abi_compatible_cpu",
+    # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_addmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_bmm_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_dynamic_smem_above_default_limit": TestFailure(("abi_compatible_cpu",)),
+        "test_foreach_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_poi_multiple_dynamic": TestFailure(("abi_compatible_cpu",)),
+        "test_sdpa": TestFailure(("abi_compatible_cpu",)),
+        "test_sdpa_2": TestFailure(("abi_compatible_cpu",)),
+        "test_simple_dynamic": TestFailure(("abi_compatible_cpu",)),
+    },
+)
 
 
-class AOTInductorTestNonABICompatible(TestCase):
+class AOTInductorTestABICompatibleCuda(TestCase):
+    device = "cuda"
+    abi_compatible = True
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+
+
+copy_tests(
+    AOTInductorTestsTemplate, AOTInductorTestABICompatibleCuda, "abi_compatible_cuda"
+)
+
+
+class AOTInductorTestNonABICompatibleCpu(TestCase):
+    device = "cpu"
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
 
 
 copy_tests(
-    AOTInductorTestsTemplate, AOTInductorTestNonABICompatible, "non_abi_compatible"
+    AOTInductorTestsTemplate,
+    AOTInductorTestNonABICompatibleCpu,
+    "non_abi_compatible_cpu",
+    # test_failures, xfail by default, set is_skip=True to skip
+    {
+        "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_dynamic_smem_above_default_limit": TestFailure(
+            ("non_abi_compatible_cpu",)
+        ),
+    },
 )
 
+
+class AOTInductorTestNonABICompatibleCuda(TestCase):
+    device = "cuda"
+    abi_compatible = False
+    check_model = check_model
+    check_model_with_multiple_inputs = check_model_with_multiple_inputs
+
+
+copy_tests(
+    AOTInductorTestsTemplate,
+    AOTInductorTestNonABICompatibleCuda,
+    "non_abi_compatible_cuda",
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
