@@ -366,6 +366,16 @@ class SizeVarAllocator:
         free_symbols = expr.free_symbols
         if not free_symbols:
             return int(expr)
+        # Replace unbacked symints with their size hints if exists.
+        # Inductor guarantees that the generated code remains correct even if the size hint
+        # doesn't exactly match the actual size, as size hint is just the best attempt at
+        # guessing the actual size. The closer the guess is, the more performant
+        # the generated code will be.
+        # However, if we don't resolve the unbacked symint to the concrete size hint here,
+        # we will immediately run into error when we try to convert the result of this function
+        # to int type.
+        if any(self.shape_env.is_unbacked_symint(s) for s in free_symbols):
+            expr = sympy_subs(expr, self.shape_env.var_to_size_hint)
         while any(s.name.startswith("ps") for s in free_symbols):
             expr = sympy_subs(expr, self.inv_precomputed_replacements)
             free_symbols = expr.free_symbols

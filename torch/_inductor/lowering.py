@@ -46,6 +46,7 @@ from .ir import (
 )
 from .utils import ceildiv, decode_device, pad_listlike, sympy_product
 from .virtualized import ops, V
+from torch.fx.experimental.symbolic_shapes import constrain_range
 
 log = logging.getLogger(__name__)
 lowerings = {}
@@ -749,7 +750,7 @@ def expand(x, sizes):
         return x
 
     x_size_product = V.graph.sizevars.size_hint(sympy_product(x.get_size()))
-    if x_size_product > 0:
+    if x_size_product > 0 and not any([V.graph.sizevars.shape_env.is_unbacked_symint(s) for s in sizes]):
         # maybe realize input before broadcasting it
         x.mark_reuse(V.graph.sizevars.size_hint(sympy_product(sizes)) // x_size_product)
     return TensorBox(ExpandView.create(x.data, tuple(sizes)))
@@ -4818,6 +4819,19 @@ try:
             self, reduceOp, tag, ranks, group_size
         )
         return list(map(TensorBox.create, result))
+
+    @register_lowering(c10d_functional.all_to_all_single)
+    def all_to_all_single(
+        self, output_split_sizes, input_split_sizes, tag, ranks, group_size
+    ):
+        return TensorBox.create(
+            ir.AllToAllSingle.create(
+                self,
+                output_split_sizes,
+                input_split_sizes,
+                tag, ranks, group_size
+            )
+        )
 
 except ImportError:
     log.info(

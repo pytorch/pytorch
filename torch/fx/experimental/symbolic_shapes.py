@@ -2329,6 +2329,8 @@ class ShapeEnv:
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
+        # Maps symbolic ints to their size hints. Only used for unbacked symints.
+        self.var_to_size_hint: Dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -2915,6 +2917,10 @@ class ShapeEnv:
 
     def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         # NB: keep synced with free_unbacked_symbols
+        return str(symbol).startswith("i")
+
+    @record_shapeenv_event()
+    def is_unbacked_symint(self, symbol: sympy.Symbol) -> bool:
         return str(symbol).startswith("i")
 
     @record_shapeenv_event()

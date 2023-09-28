@@ -3680,9 +3680,10 @@ class DynamicScalar(ExternKernel):
     """
     The result of a call to aten._local_scalar_dense.
     """
+    def __str__(self):
+        return self.get_name()
 
-    def get_reads(self):
-        return ()
+    __repr__ = __str__
 
     def should_allocate(self):
         return False
@@ -5776,6 +5777,12 @@ class CollectiveKernel(ExternKernel):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
 
+    def should_emit_register_tensor_work(self):
+        return True
+
+    def should_emit_find_or_create_pg(self):
+        return True
+
     def codegen_collective(self, wrapper, output_name, input_names):
         # factor so the boilerplate can be handled in CollectiveKernel.codegen
         raise NotImplementedError("Must implement")
@@ -5805,16 +5812,18 @@ class CollectiveKernel(ExternKernel):
         output_name = self.get_name()
         tag, ranks, group_size = self.constant_args
 
-        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
-        wrapper.writeline(
-            f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
-        )
+        if self.should_emit_find_or_create_pg():
+            # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+            wrapper.writeline(
+                f"{output_name}_pg = c10d._find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+            )
 
         self.codegen_output(wrapper, output_name, input_names)
         self.codegen_collective(wrapper, output_name, input_names)
-        wrapper.writeline(
-            f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
-        )
+        if self.should_emit_register_tensor_work():
+            wrapper.writeline(
+                f"fun_col_impl._register_tensor_work({output_name}, {output_name}_work)"
+            )
 
 
 class InPlaceCollectiveKernel(CollectiveKernel):
@@ -5955,6 +5964,9 @@ class MultiOutputNoSizeAssert(MultiOutput):
         wrapper.writeline(
             f"{self.get_name()} = {self.inputs[0].get_name()}{self.index}"
         )
+        for i, s in enumerate(self.get_size()):
+            if V.graph.sizevars.shape_env.is_unbacked_symint(s):
+                wrapper.writeline(f"{s} = {self.get_name()}.size({i})")
 
 
 class AllReduceCoalesced(InPlaceCollectiveKernel):
@@ -6200,3 +6212,93 @@ def maybe_free_unbacked_symbols(s):
         return free_unbacked_symbols(s)
     else:
         return set()
+
+
+class AllToAllSingle(OutOfPlaceCollectiveKernel):
+    """
+    NOTE: Difference of AllToAllSingle compared to other OutOfPlaceCollectiveKernel:
+
+    1. `create_output_buffers` is not called, because we rely on the underlying
+    `fun_col_impl._all_to_all_single` kernel to do the output buffer allocation.
+    2. `fun_col_impl._register_tensor_work` is not emitted, because the underlying
+    `fun_col_impl._all_to_all_single` kernel already calls it.
+    3. `c10d._find_or_create_pg_by_ranks_and_tag` is not emitted, because the underlying
+    `fun_col_impl._all_to_all_single` kernel already calls it.
+    """
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args,
+        output_split_sizes,
+        input_split_sizes,
+    ):
+        super().__init__(layout, inputs, [], constant_args)
+        self.output_split_sizes = output_split_sizes
+        self.input_split_sizes = input_split_sizes
+
+    def should_emit_register_tensor_work(self):
+        return False
+
+    def should_emit_find_or_create_pg(self):
+        return False
+
+    def codegen_output(self, wrapper, output_name, input_names):
+        input_names = [t.codegen_reference() for t in self.original_inputs]
+        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        output_split_sizes: Optional[List[Expr]],
+        input_split_sizes: Optional[List[Expr]],
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        x_realized = cls.realize_input(x)
+
+        new_size = x_realized.get_size()
+        output_shape_first_dim_s = None
+        if output_split_sizes is not None:
+            output_shape_first_dim_s = V.graph.current_node.meta['val'].size()[0].node.expr
+            new_size[0] = output_shape_first_dim_s
+        # In the average case, `output.shape[0]` equals to `input.shape[0]`, so we use that as size hint
+        V.graph.sizevars.shape_env.var_to_size_hint[output_shape_first_dim_s] = x_realized.get_size()[0]
+
+        layout = FlexibleLayout(
+            device=x_realized.get_device(),
+            dtype=x_realized.get_dtype(),
+            size=new_size,
+        )
+
+        coll = AllToAllSingle(
+            layout=layout,
+            inputs=[x_realized],
+            constant_args=[tag, ranks, group_size],
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
+        )
+
+        return MultiOutputNoSizeAssert(
+            layout,
+            coll,
+            f"",
+        )
+
+    def codegen_input(self, wrapper, output_name, input_names):
+        wrapper.writeline(f"{output_name}_inputs = [{','.join(input_names)}]")
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        tag, ranks, group_size = self.constant_args
+
+        wrapper.writeline(
+            f"{output_name} = fun_col_impl._all_to_all_single("
+            f"input={output_name}_inputs[0], "
+            f"output_split_sizes={self.output_split_sizes}, "
+            f"input_split_sizes={self.input_split_sizes}, "
+            f"tag='{tag}', "
+            f"ranks={ranks}, "
+            f"group_size={group_size})",
+        )
