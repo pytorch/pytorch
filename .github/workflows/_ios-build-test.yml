@@ -65,6 +65,10 @@ jobs:
       matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    # This is needed to provide the credential to run testing on AWS Device Farm. Once we are able to
+    # run this on our own MacOS M1 runner, this environment can be removed. The blocker here is that
+    # we don't have xcode setup on M1
+    environment: 'ios-upload'
     env:
       IOS_PLATFORM: ${{ matrix.ios_platform }}
       IOS_ARCH: ${{ matrix.ios_arch }}
@@ -75,7 +79,7 @@ jobs:
       # TODO: Bump it to 2.2.0 after cherry pick this or figure out a better way
       # to get this version instead of hard coding it here
       PYTORCH_VERSION: 2.1.0
-    timeout-minutes: 240
+    timeout-minutes: 300
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -130,19 +134,7 @@ jobs:
           export TCLLIBPATH="/usr/local/lib"
           ${CONDA_RUN} scripts/build_ios.sh
 
-      - name: Build TestApp
-        if: matrix.ios_platform == 'SIMULATOR'
-        timeout-minutes: 15
-        run: |
-          # Run the ruby build script
-          if ! [ -x "$(command -v xcodebuild)" ]; then
-            echo 'Error: xcodebuild is not installed.'
-            exit 1
-          fi
-          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
-
-      - name: Run simulator tests
-        if: matrix.ios_platform == 'SIMULATOR'
+      - name: Generate test models
         shell: bash
         run: |
           set -eux
@@ -150,7 +142,7 @@ jobs:
           # Use the pytorch nightly build to generate models
           ${CONDA_RUN} pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
 
-          # Generate models for differnet backends
+          # Generate models for different backends
           pushd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
           # NB: Both of the following scripts only export models with lite interpreter
@@ -174,7 +166,24 @@ jobs:
           fi
           popd
 
-          pushd "${GITHUB_WORKSPACE}/ios/TestApp"
+      - name: Build TestApp and TestAppTests
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          # Run the ruby build script
+          if ! [ -x "$(command -v xcodebuild)" ]; then
+            echo 'Error: xcodebuild is not installed.'
+            exit 1
+          fi
+          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
+
+      - name: Run simulator tests
+        if: matrix.ios_platform == 'SIMULATOR'
+        shell: bash
+        working-directory: ${{ github.workspace }}/ios/TestApp
+        run: |
+          set -eux
+
           # Instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
@@ -185,13 +194,50 @@ jobs:
           else
             bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
-          popd
 
       - name: Dump simulator tests on failure
         if: failure() && matrix.ios_platform == 'SIMULATOR'
         run: |
           echo "Simulator Tests Logs:"
           cat /Users/runner/Library/Logs/scan/*.log
+
+      - name: Prepare for testing on AWS Device Farm
+        if: matrix.ios_platform == 'OS'
+        shell: bash
+        working-directory: ${{ github.workspace }}/ios/TestApp/build/Release-iphoneos
+        run: |
+          set -eux
+
+          DEST_DIR="Payload"
+          mkdir "${DEST_DIR}"
+
+          cp -r TestApp.app "${DEST_DIR}"
+          # TestApp.ipa is just a zip file with a payload subdirectory
+          zip -vr TestApp.ipa "${DEST_DIR}"
+
+          # Also zip the TestAppTests.xctest test suite
+          zip -vr TestAppTests.xctest.zip TestAppTests.xctest
+
+      - name: Run AWS Device Farm test
+        if: matrix.ios_platform == 'OS'
+        shell: bash
+        env:
+          # AWS Device Farm is currently only available on us-west-2
+          AWS_DEFAULT_REGION: us-west-2
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_MOBILE_UPLOADER_SECRET_ACCESS_KEY }}
+        working-directory: ${{ github.workspace }}/ios/TestApp
+        run: |
+          set -eux
+
+          # The PyTorch project
+          ARN="arn:aws:devicefarm:us-west-2:308535385114:project:b531574a-fb82-40ae-b687-8f0b81341ae0"
+
+          ${CONDA_RUN} python run_on_aws_devicefarm.py \
+            --project-arn "${ARN}" \
+            --app-file build/Release-iphoneos/TestApp.ipa \
+            --xctest-file build/Release-iphoneos/TestAppTests.xctest.zip \
+            --name-prefix PyTorch
 
       - name: Prepare the build artifacts for upload
         shell: bash
