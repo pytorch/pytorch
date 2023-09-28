@@ -476,6 +476,9 @@ class TorchVariable(VariableTracker):
             # these setter or getter functions, producing an incorrect graph
             # when it comes to rng states.
             unimplemented(f"RNG state getter/setter function - {self.value}")
+        elif self.value is torch.manual_seed:
+            # https://github.com/pytorch/pytorch/issues/107187
+            unimplemented("torch.manual_seed not supported")
         elif (
             self.value == torch.numel
             and len(args) == 1
