@@ -410,6 +410,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     # NOTE: To all transformer models, config is preferred to pre-trained model for testing because:
     # 1. Pre-trained model is too big for CI
     # 2. Pre-trained model is has uint8/bool issue: https://github.com/huggingface/transformers/issues/21013
+    @pytorch_test_common.xfail("https://github.com/pytorch/pytorch/issues/110131")
     def test_fake_tensor_mode_huggingface_gpt2(self):
         config = transformers.GPT2Config(
             vocab_size=8096, n_positions=256, n_embd=256, n_layer=2, n_head=2
