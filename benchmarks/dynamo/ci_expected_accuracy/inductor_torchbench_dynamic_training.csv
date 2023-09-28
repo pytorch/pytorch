@@ -4,7 +4,6 @@ BERT_pytorch,pass,8
 LearningToPaint,pass,8
 Super_SloMo,pass,8
 alexnet,pass,8
-attention_is_all_you_need_pytorch,pass,8
 basic_gnn_edgecnn,pass,23
 basic_gnn_gcn,pass,14
 basic_gnn_gin,pass,8

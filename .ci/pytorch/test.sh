@@ -311,6 +311,8 @@ if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
 elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
+elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
@@ -465,6 +467,8 @@ test_dynamo_benchmark() {
   else
     if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+    elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
