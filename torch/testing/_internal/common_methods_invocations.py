@@ -3181,6 +3181,11 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(torch.tensor(1, **tensor_opt), 0)
     yield SampleInput(torch.tensor(1, **tensor_opt), 0, True)
 
+    # Test cases for empty tensor
+    yield SampleInput(torch.tensor((), **tensor_opt))
+    yield SampleInput(torch.tensor((), **tensor_opt), 0)
+    yield SampleInput(torch.tensor((), **tensor_opt), 0, True)
+
     # Test cases for stable sort
     yield SampleInput(small_3d_unique(), stable=True)
     yield SampleInput(small_3d_unique(), dim=0, stable=True)
@@ -8583,7 +8588,13 @@ class foreach_inputs_sample_func:
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         _foreach_inputs_kwargs["zero_size"] = False
 
-        for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
+        # add empty tensor interspersion to test fully fixing #100701
+        for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
+                num_input_tensors, self._rightmost_arg_types, (True, False)):
+            if intersperse_empty_tensors and (num_tensors != max(num_input_tensors) or str(device) == 'cpu'):
+                # generate interspersed empty tensors for only 1 N on non-cpu device to lessen redundancy
+                continue
+            _foreach_inputs_kwargs["intersperse_empty_tensors"] = intersperse_empty_tensors
             input = sample_inputs_foreach(
                 None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
             args = []
@@ -8758,10 +8769,11 @@ foreach_unary_op_db: List[OpInfo] = [
         foreach_inputs_sample_func(1, False, False),
         backward_requires_result=True,
         decorators=(
+            # due to https://github.com/pytorch/pytorch/pull/102427 enabling jiterator for complex
             DecorateInfo(
                 toleranceOverride(
                     {
-                        torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                        torch.complex64: tol(atol=3e-04, rtol=2e-05)
                     }
                 ),
                 'TestForeach',
@@ -12432,7 +12444,7 @@ op_db: List[OpInfo] = [
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose1d),
            aten_name='conv_transpose1d',
            aliases=('conv_transpose1d',),
-           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose1d,
@@ -12450,6 +12462,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float: tol(atol=1.5e-5, rtol=1.5e-5), }),
                    'TestCommon', 'test_numpy_ref_mps'),
+               DecorateInfo(
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=2e-3), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
            ),
            skips=(
                # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
@@ -12473,7 +12488,7 @@ op_db: List[OpInfo] = [
            # `ref` for this function is backward of
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
-           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose2d,
@@ -12492,7 +12507,10 @@ op_db: List[OpInfo] = [
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=8e-2, rtol=8e-2), }),
-                   'TestCommon', 'test_complex_half_reference_testing')],
+                   'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=2e-3), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -12518,7 +12536,7 @@ op_db: List[OpInfo] = [
            # `ref` for this function is backward of
            # corresponding `conv*d`
            ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose3d),
-           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(
                torch.float16, torch.chalf, torch.bfloat16),
            sample_inputs_func=sample_inputs_conv_transpose3d,
@@ -12552,7 +12570,10 @@ op_db: List[OpInfo] = [
                    "TestMathBits", "test_conj_view", device_type='cuda'),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=9e-2, rtol=9e-2), }),
-                   'TestCommon', 'test_complex_half_reference_testing')],
+                   'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(
+                   toleranceOverride({torch.half: tol(atol=1e-3, rtol=2e-1), }),
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -12572,7 +12593,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv1d',
            aliases=('conv1d',),
            aten_name='conv1d',
-           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=sample_inputs_conv1d,
@@ -12609,7 +12630,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv2d',
            aliases=('conv2d',),
            aten_name='conv2d',
-           dtypes=floating_and_complex_types_and(torch.int64, torch.bfloat16),
+           dtypes=floating_and_complex_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_conv2d),
@@ -21101,8 +21122,12 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        supports_multiple_dims=True,
+        supports_multiple_dims=False,
         skips=(
+            # FIXME: does not support passing keepdim without dim
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: does not support dim=None
+            DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: uint8 input returns uint8 instead of bool
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_result_dtype',
