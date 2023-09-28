@@ -40,6 +40,7 @@
 #include <ATen/ops/_scaled_dot_product_flash_attention_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_transform_bias_rescale_qkv.h>
+#include <ATen/ops/_transform_bias_rescale_qkv_native.h>
 #include <ATen/ops/_triton_multi_head_attention_native.h>
 #include <ATen/ops/_triton_scaled_dot_attention.h>
 #include <ATen/ops/bmm.h>
@@ -51,6 +52,7 @@
 #include <ATen/ops/matmul_native.h>
 #include <ATen/ops/ones.h>
 #include <ATen/ops/pad.h>
+#include <ATen/ops/scaled_dot_product_attention_native.h>
 #include <ATen/ops/softmax.h>
 #include <ATen/ops/split_native.h>
 #include <ATen/ops/split_with_sizes_native.h>
