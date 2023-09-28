@@ -70,8 +70,10 @@ pip install --pre torch torchvision torchaudio --index-url https://download.pyto
 pushd ios/TestApp/benchmark
 mkdir -p ../models
 
-echo "Setting up the TestApp for LiteInterpreter"
+# This requires numpy==1.23.1
 python coreml_backend.py
+
+echo "Setting up the TestApp for LiteInterpreter"
 ruby setup.rb --lite 1
 popd
 

@@ -6,6 +6,7 @@ import random
 import string
 import sys
 import time
+import warnings
 from typing import Any
 
 import boto3
@@ -118,7 +119,7 @@ def main() -> None:
         filename=args.app_file,
         filetype="IOS_APP",
     )
-    print("Uploaded app: {appfile_arn}")
+    print(f"Uploaded app: {appfile_arn}")
     # Upload the XCTest suite
     xctest_arn = upload_file(
         client=client,
@@ -127,7 +128,7 @@ def main() -> None:
         filename=args.xctest_file,
         filetype="XCTEST_TEST_PACKAGE",
     )
-    print("Uploaded XCTest: {xctest_arn}")
+    print(f"Uploaded XCTest: {xctest_arn}")
 
     # Schedule the test
     r = client.schedule_run(
@@ -160,9 +161,8 @@ def main() -> None:
             )
             time.sleep(10)
     except Exception as error:
+        warnings.warn(f"Failed to run {unique_prefix}: {error}")
         sys.exit(1)
-    finally:
-        client.stop_run(arn=run_arn)
 
 
 if __name__ == "__main__":
