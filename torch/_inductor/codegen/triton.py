@@ -1375,7 +1375,11 @@ class TritonKernel(Kernel):
         #   2.1) We are in a reduction loop
         #   2.2) Its not its last use
         #   2.3) This load will not be lifted to the body
+        #
+        is_coalesced = any([i == 1 for i in self.get_strides_of_load(original_index).values()])
         if self.is_broadcasted(original_index):
+            ep = ", eviction_policy='evict_last'"
+        elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and not self.persistent_reduction:
             if name in self.args.inplace_buffers:
@@ -1384,13 +1388,10 @@ class TritonKernel(Kernel):
                 names = {name}
             last_use = len(names & self.last_usage) > 0
             evict_last = not last_use and ("rmask" in mask or indirect_indexing)
-            is_coalesced = any([i == 1 for i in self.get_strides_of_load(original_index).values()])
             if evict_last:
                 ep = ", eviction_policy='evict_last'"
-            elif is_coalesced:
-                ep = ", eviction_policy='evict_first'"
             else:
-                ep = ""
+                ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
         # "other" below is a workaround for https://github.com/openai/triton/issues/737
