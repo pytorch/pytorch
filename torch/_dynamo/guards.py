@@ -1318,9 +1318,6 @@ def guard_fail_hook(
     """
     first = index == 0
     global stashed_first_fail_reason
-    # Don't waste time computing the fail reason for guards we aren't going to report out.
-    if not guard_fn.guard_fail_fn and not (first or last):
-        return
     scope = {"L": f_locals, "G": guard_fn.global_scope["G"]}
     scope.update(guard_fn.closure_vars)
     scope["___check_tensors"] = scope["___check_tensors_verbose"]

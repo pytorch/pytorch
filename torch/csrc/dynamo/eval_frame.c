@@ -630,15 +630,12 @@ static inline PyObject* call_callback(
   return res;
 }
 
-static PyObject* call_guard_fail_hook(
-    PyObject* hook,
+static PyObject* build_fail_hook_args(
     CacheEntry* e,
     size_t index,
     PyObject* f_locals) {
-  // call debugging logic when a guard fails
-  return PyObject_CallFunction(
-      hook,
-      "OOOnO",
+  return Py_BuildValue(
+      "(OOOnO)",
       e->check_fn,
       e->code,
       f_locals,
@@ -648,7 +645,9 @@ static PyObject* call_guard_fail_hook(
 
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
-static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev, size_t index) {
+static PyObject* lookup_impl(
+    CacheEntry* e, THP_EVAL_API_FRAME_OBJECT* frame, CacheEntry* prev,
+    size_t index, PyObject* fail_hook_args_list) {
   if (e == (CacheEntry*)Py_None) {
     // NB: intentionally not using Py_RETURN_NONE, to return borrowed ref
     return Py_None;
@@ -661,7 +660,12 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     if (guard_error_hook != NULL) {
       PyObject *type = NULL, *value = NULL, *traceback = NULL;
       PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, index, f_locals);
+      PyObject *error_hook_args = build_fail_hook_args(e, index, f_locals);
+      if (!error_hook_args) {
+        return NULL;
+      }
+      PyObject* r = PyObject_CallObject(guard_error_hook, error_hook_args);
+      Py_DECREF(error_hook_args);
       if (r == NULL) {
         return NULL;
       }
@@ -686,13 +690,47 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, index, f_locals);
-    if (r == NULL) {
+    PyObject *fail_hook_args = build_fail_hook_args(e, index, f_locals);
+    if (!fail_hook_args) {
       return NULL;
     }
-    Py_DECREF(r);
+    int result = PyList_Append(fail_hook_args_list, fail_hook_args);
+    Py_DECREF(fail_hook_args);
+    if (result) {
+      return NULL;
+    }
   }
-  return lookup(e->next, frame, e, index + 1);
+  return lookup_impl(e->next, frame, e, index + 1, fail_hook_args_list);
+}
+
+// Return value: borrowed reference
+// Is either Py_None or a PyCodeObject
+static PyObject* lookup(CacheEntry* begin, THP_EVAL_API_FRAME_OBJECT *frame) {
+  PyObject* fail_hook_args_list = PyList_New(0);
+  if (!fail_hook_args_list) {
+    return NULL;
+  }
+  PyObject* e = lookup_impl(begin, frame, NULL, 0, fail_hook_args_list);
+  if (!e) {
+    Py_DECREF(fail_hook_args_list);
+    return NULL;
+  }
+  if (e == Py_None) {
+    if (unlikely(guard_fail_hook != NULL)) {
+      Py_ssize_t num_fails = PyList_Size(fail_hook_args_list);
+      for (Py_ssize_t i = 0; i < num_fails; i++) {
+        PyObject* fail_hook_args = PyList_GET_ITEM(fail_hook_args_list, i);
+        PyObject* r = PyObject_CallObject(guard_fail_hook, fail_hook_args);
+        if (!r) {
+          Py_DECREF(fail_hook_args_list);
+          return NULL;
+        }
+        Py_DECREF(r);
+      }
+    }
+  }
+  Py_DECREF(fail_hook_args_list);
+  return e;
 }
 
 inline static PyObject* eval_custom_code_impl(
@@ -944,7 +982,7 @@ static PyObject* _custom_eval_frame(
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", get_frame_name(frame));
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
+    PyObject* maybe_cached_code = lookup(cache_entry, frame);
     _pytorch_record_function_exit(rf);
 
     if (maybe_cached_code == NULL) {
@@ -969,7 +1007,7 @@ static PyObject* _custom_eval_frame(
   eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-  PyObject* maybe_cached_code = lookup(cache_entry, frame, NULL, 0);
+  PyObject* maybe_cached_code = lookup(cache_entry, frame);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
