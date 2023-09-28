@@ -2474,13 +2474,19 @@ class Buffer(IRNode):
         # can't read off sizes directly from the layout itself
         if isinstance(self.layout, MultiOutputLayout):
             assert hasattr(self, "outputs")
-            if isinstance(self.outputs, (list, tuple)):
-                r = set()
-                for o in self.outputs:
-                    r |= o.get_unbacked_symbol_defs()
-                return r
-            else:
-                return self.outputs.get_unbacked_symbol_defs()
+
+            def get_defs(x):
+                if x is None:
+                    return set()
+                elif isinstance(x, (list, tuple)):
+                    r = set()
+                    for o in x:
+                        r |= get_defs(o)
+                    return r
+                else:
+                    return x.get_unbacked_symbol_defs()
+
+            return get_defs(self.outputs)
 
         # This kernel defines all unbacked symbols... that it didn't get in as
         # arguments!
