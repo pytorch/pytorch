@@ -2474,7 +2474,7 @@ class Buffer(IRNode):
         # can't read off sizes directly from the layout itself
         if isinstance(self.layout, MultiOutputLayout):
             assert hasattr(self, "outputs")
-            if isinstance(self.outputs, list):
+            if isinstance(self.outputs, (list, tuple)):
                 r = set()
                 for o in self.outputs:
                     r |= o.get_unbacked_symbol_defs()
