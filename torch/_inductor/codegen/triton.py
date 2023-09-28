@@ -1342,6 +1342,19 @@ class TritonKernel(Kernel):
         return sympy_symbol(str(var))
 
     def get_strides_of_load(self, index: sympy.Expr):
+        """
+        This gets the stride of the index for each of the tiling variables
+        (technically, it does it at index 0)
+
+        For example, if
+        xindex = x0 + 512*x1 + 1024*r0
+        x0 = (xindex//512)
+        x1 = (xindex % 512)
+        r0 = rindex // 1024
+
+        this function would return
+        {xindex: 512, rindex: 1024}
+        """
         index_to_tile_indexes = {k: v.expr for k, v in self.range_tree_nodes.items()}
         index_in_tile_vars = index.subs(index_to_tile_indexes)
         strides = {}
