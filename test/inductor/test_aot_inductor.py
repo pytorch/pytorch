@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import copy
 import sys
 import unittest
 
@@ -113,8 +114,12 @@ def check_model(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
-        expected = model(*example_inputs)
+        model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(example_inputs)
+        expected = ref_model(*ref_inputs)
         actual = AOTInductorModelRunner.run(model, example_inputs, options, constraints)
+
     self.assertTrue(same(actual, expected))
 
 
@@ -128,12 +133,14 @@ def check_model_with_multiple_inputs(
     with torch.no_grad(), config.patch(
         "aot_inductor.abi_compatible", self.abi_compatible
     ):
-        list_expected = [
-            model(*example_inputs) for example_inputs in list_example_inputs
-        ]
+        model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(list_example_inputs)
+        list_expected = [ref_model(*inputs) for inputs in ref_inputs]
         list_actual = AOTInductorModelRunner.run_multiple(
             model, list_example_inputs, options, constraints
         )
+
     self.assertTrue(same(list_actual, list_expected))
 
 
@@ -305,7 +312,7 @@ class AOTInductorTestsTemplate:
             torch.nn.ReLU(),
         )
 
-        example_inputs = (torch.randn(10),)
+        example_inputs = (torch.randn(10, device=self.device),)
         self.check_model(net.eval(), example_inputs)
 
     def test_addmm(self):
@@ -377,7 +384,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return self.p * x + self.q
 
-        example_inputs = (torch.rand(6),)
+        example_inputs = (torch.rand(6, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     def test_simple_dynamic(self):
