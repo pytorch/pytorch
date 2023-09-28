@@ -5,7 +5,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -125,4 +125,4 @@ static C10_UNUSED void scatter_shape_check(
 
 } // anonymous namespace
 
-}} // namespace at::native
+} // namespace at::native

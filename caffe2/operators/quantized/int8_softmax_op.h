@@ -21,7 +21,7 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
 #endif
       }
 
-  ~Int8SoftmaxOp() {
+  ~Int8SoftmaxOp() override {
     if (this->qnnpackOperator_ != nullptr) {
       qnnp_delete_operator(this->qnnpackOperator_);
       this->qnnpackOperator_ = nullptr;

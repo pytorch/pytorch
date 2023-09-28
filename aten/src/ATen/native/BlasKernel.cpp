@@ -211,9 +211,9 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
-    bool is_low_precision = !std::is_same<opmath_t, scalar_t>::value;
+    constexpr bool is_low_precision = !std::is_same_v<opmath_t, scalar_t>;
     std::vector<opmath_t> sum;
-    if (is_low_precision) {
+    if constexpr (is_low_precision) {
       sum.resize(m);
     }
     for (const auto j : c10::irange(n)) {
@@ -222,18 +222,18 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
       for (const auto i : c10::irange(m)) {
         //output values are ignored if beta is 0, and set to 0, nans and infs are not propagated
         if (j==0 && beta==scalar_t(0)) {
-          if (!is_low_precision) {
+          if constexpr (!is_low_precision) {
             y[i * incy] = 0;
           }
         }
-        if (is_low_precision) {
+        if constexpr (is_low_precision) {
           sum[i] += z * column_[i];
         } else {
           y[i * incy] += z * column_[i];
         }
       }
     }
-    if (is_low_precision) {
+    if constexpr (is_low_precision) {
       if (beta == scalar_t(0)) {
         for (const auto i : c10::irange(m)) {
           y[i * incy] = sum[i];

@@ -1,5 +1,4 @@
 class BasicHookState:
-
     def __init__(self, cref, process_group):
         r"""
         A class that holds state information that is needed by the communication hook

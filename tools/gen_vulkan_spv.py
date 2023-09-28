@@ -20,7 +20,7 @@ from yaml.nodes import MappingNode
 try:
     from yaml import CLoader as Loader
 except ImportError:
-    from yaml import Loader  # type: ignore[misc]
+    from yaml import Loader  # type: ignore[assignment, misc]
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
@@ -33,7 +33,7 @@ class UniqueKeyLoader(Loader):
             raise ConstructorError(
                 None,
                 None,
-                "expected a mapping node, but found %s" % node.id,
+                f"expected a mapping node, but found {node.id}",
                 node.start_mark,
             )
         mapping = {}
@@ -74,7 +74,7 @@ class VulkanShaderGenerator:
 
     def add_params_yaml(self, parameters_yaml_file):  # type: ignore[no-untyped-def]
         all_template_params = OrderedDict()
-        with open(parameters_yaml_file, "r") as f:
+        with open(parameters_yaml_file) as f:
             contents = yaml.load(f, Loader=UniqueKeyLoader)
             for key in contents:
                 all_template_params[key] = contents[key]
@@ -112,8 +112,7 @@ class VulkanShaderGenerator:
         code_template = CodeTemplate.from_file(glsl_template_in)
         for template_params in self.ops_template_params[op_name]:
             content = VulkanShaderGenerator.standard_header
-            param_vals_string = "x".join([str(i) for (k, i) in template_params.items() if k != "REGISTER_FOR"])
-            output_file_name = op_name + "_" + param_vals_string + ".glsl"
+            output_file_name = template_params["NAME"] + ".glsl"
             content += code_template.substitute(template_params)
             output_file = os.path.join(out_dir, output_file_name)
             with open(output_file, "w") as f:
@@ -205,7 +204,7 @@ def determineDescriptorType(lineStr: str) -> str:
 
 def getShaderInfo(srcFilePath: str) -> ShaderInfo:
     shader_info = ShaderInfo([], [], "")
-    with open(srcFilePath, 'r') as srcFile:
+    with open(srcFilePath) as srcFile:
         for line in srcFile:
             if isDescriptorLine(line):
                 shader_info.layouts.append(determineDescriptorType(line))
@@ -272,13 +271,13 @@ def genCppH(
         if len(f) > 1:
             templateSrcPaths.append(f)
             templateSrcPaths.sort()
-    print("templateSrcPaths:{}".format(templateSrcPaths))
+    print(f"templateSrcPaths:{templateSrcPaths}")
 
     spvPaths = {}
     for templateSrcPath in templateSrcPaths:
-        print("templateSrcPath {}".format(templateSrcPath))
+        print(f"templateSrcPath {templateSrcPath}")
         name = getName(templateSrcPath).replace("_glsl", "")
-        print("name {}".format(name))
+        print(f"name {name}")
 
         codeTemplate = CodeTemplate.from_file(templateSrcPath)
         srcPath = tmpDirPath + "/" + name + ".glsl"
@@ -287,7 +286,7 @@ def genCppH(
             fw.write(content)
 
         spvPath = tmpDirPath + "/" + name + ".spv"
-        print("spvPath {}".format(spvPath))
+        print(f"spvPath {spvPath}")
 
         cmd = [
             glslcPath, "-fshader-stage=compute",
@@ -328,7 +327,7 @@ def genCppH(
     h += nsend
 
     cpp = "#include <ATen/native/vulkan/api/Shader.h>\n"
-    cpp += "#include <ATen/native/vulkan/{}>\n".format(H_NAME)
+    cpp += f"#include <ATen/native/vulkan/{H_NAME}>\n"
     cpp += "#include <stdint.h>\n"
     cpp += "#include <vector>\n"
     cpp += nsbegin
@@ -340,7 +339,7 @@ def genCppH(
     for spvPath, srcPath in spvPaths.items():
         name = getName(spvPath).replace("_spv", "")
 
-        print("spvPath:{}".format(spvPath))
+        print(f"spvPath:{spvPath}")
         with open(spvPath, 'rb') as fr:
             next_bin = array.array('I', fr.read())
             sizeBytes = 4 * len(next_bin)
@@ -354,7 +353,7 @@ def genCppH(
         shader_info = getShaderInfo(srcPath)
 
         tile_size = (
-            "{{{}}}".format(", ".join(str(x) for x in shader_info.tile_size))
+            f"{{{', '.join(str(x) for x in shader_info.tile_size)}}}"
             if (len(shader_info.tile_size) > 0)
             else "std::vector<uint32_t>()"
         )
@@ -362,8 +361,8 @@ def genCppH(
         shader_info_layouts = "{{{}}}".format(",\n ".join(shader_info.layouts))
 
         shader_info_args = [
-            "\"vulkan.{}\"".format(name),
-            "{}_bin".format(name),
+            f"\"vulkan.{name}\"",
+            f"{name}_bin",
             str(sizeBytes),
             shader_info_layouts,
             tile_size,
@@ -386,11 +385,7 @@ def genCppH(
             for registry_key in registry_keys:
                 shader_info_registry_code.append(
                     textwrap.indent(
-                        "{{\"{}\", {{{{\"{}\", \"{}\"}}}}}}".format(
-                            op_name,
-                            registry_key,
-                            name,
-                        ),
+                        f"{{\"{op_name}\", {{{{\"{registry_key}\", \"{name}\"}}}}}}",
                         "        ",
                     ),
                 )

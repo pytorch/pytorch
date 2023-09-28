@@ -38,6 +38,7 @@ jobs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
       keep-going: ${{ steps.filter.outputs.keep-going }}
+      reenabled-issues: ${{ steps.filter.outputs.reenabled-issues }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -83,26 +84,6 @@ jobs:
           name: ${{ inputs.build-environment }}
           use-gha: true
 
-      - name: Disable XProtect and MDS
-        continue-on-error: true
-        run: |
-          # Like Windows Defender, XProtect could interfere with the test
-          set +e
-          set -x
-
-          SERVICES=(
-            "com.apple.XProtect.daemon.scan"
-            "com.apple.XprotectFramework.PluginService"
-            "com.apple.XprotectFramework.scan"
-            "com.apple.metadata.mds"
-            "com.apple.metadata.mds.index"
-          )
-          # 13.x calls it XProtect.daemon.scan while 12.x calls it XprotectFramework.scan
-          for SERVICE in "${SERVICES[@]}"; do
-            sudo launchctl stop "${SERVICE}"
-            sudo launchctl disable "system/${SERVICE}"
-          done
-
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
@@ -120,6 +101,7 @@ jobs:
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
           PIP_REQUIREMENTS_FILE: .github/requirements/pip-requirements-${{ runner.os }}.txt
+          REENABLED_ISSUES: ${{ needs.filter.outputs.reenabled-issues }}
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
@@ -174,18 +156,3 @@ jobs:
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-mps-1-1-macos-m1-12_${{ steps.get-job-id.outputs.job-id }}
-
-      - name: Archive conda environments
-        if: failure()
-        shell: bash
-        run: |
-          zip -1 -r runner_temp.zip "${RUNNER_TEMP}/"
-
-      - name: Store conda environments on GHA for debugging
-        uses: actions/upload-artifact@v3
-        if: failure()
-        with:
-          name: ${{ env.BUILD_ENVIRONMENT }}-${{ steps.get-job-id.outputs.job-id }}-temp
-          retention-days: 14
-          if-no-files-found: warn
-          path: runner_temp.zip

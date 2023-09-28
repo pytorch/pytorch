@@ -49,7 +49,6 @@ jobs:
       build_environment: linux-binary-libtorch-pre-cxx11
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-build

@@ -1,39 +1,33 @@
 #include <ATen/ATen.h>
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at {
 namespace native {
 
-TensorOptions verify_empty_parameters(
+static TensorOptions verify_empty_parameters(
     const at::Tensor& self,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  TensorOptions options_ =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
+  TensorOptions options_ = TensorOptions()
+                               .dtype(dtype)
+                               .layout(layout)
+                               .device(device)
+                               .pinned_memory(pin_memory)
+                               .memory_format(optional_memory_format);
 
-  TORCH_CHECK(
-      !(options_.has_memory_format() && optional_memory_format.has_value()),
-      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-      "the redundant setter.");
-  TensorOptions options = self.options().merge_in(options_).merge_memory_format(
-      optional_memory_format);
-
+  TensorOptions options = self.options().merge_in(options_);
   auto memory_format =
       options_.memory_format_opt().value_or(MemoryFormat::Preserve);
   TORCH_CHECK(
-      memory_format == MemoryFormat::Preserve,
-      "empty_like_nested only supports memory format Preserve, but got ",
+      memory_format == MemoryFormat::Preserve || memory_format == MemoryFormat::Contiguous,
+      "empty_like_nested only supports memory format Preserve or Contiguous, but got ",
       memory_format,
       " instead.");
-
-  TORCH_CHECK(
-      self.is_contiguous(),
-      "empty_like only supports contiguous memory format for Nested Tensors");
 
   TORCH_CHECK(
       !(options.layout() != kStrided && optional_memory_format.has_value()),
@@ -51,12 +45,26 @@ Tensor empty_like_nested(
   auto options = verify_empty_parameters(
       self, dtype, layout, device, pin_memory, optional_memory_format);
   auto self_nt = get_nested_tensor_impl(self);
-  Tensor new_buffer = at::empty_like(self_nt->get_buffer(), options);
+  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
+  if (memory_format == MemoryFormat::Contiguous) {
+    auto nested_size = self_nt->get_nested_sizes().clone();
+    int64_t buffer_size = get_numel_from_nested_size_tensor(nested_size);
+    Tensor new_buffer = at::empty({buffer_size}, options);
+    auto tensor = wrap_buffer(new_buffer, nested_size);
+    return tensor;
+  }
+  // The fall through path must be Preserve
+  TORCH_CHECK(
+      memory_format == MemoryFormat::Preserve,
+      "memory format option is only supported by strided tensors");
+  // Since we clone sizes, strides, and offsets it should be safe to use
+  // get_unsafe_storage_as_tensor for the call to empty_like.
+  Tensor new_buffer =
+      at::empty_like(self_nt->get_unsafe_storage_as_tensor(), options);
   auto nested_size = self_nt->get_nested_sizes().clone();
   auto nested_strides = self_nt->get_nested_strides().clone();
   auto offsets = self_nt->get_storage_offsets().clone();
-  auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      new_buffer, nested_size, nested_strides, offsets);
+  auto tensor = wrap_buffer(new_buffer, nested_size, nested_strides, offsets);
   return tensor;
 }
 
@@ -183,6 +191,43 @@ std::vector<at::Tensor> NestedTensor_unbind(
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets_ptr[i]);
   }
   return result_tensors;
+}
+
+Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  TORCH_CHECK(dim == 0, "narrow(): only dim=0 supported for nested tensors, but got: ", dim);
+  TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative");
+  auto cur_size = self.sym_size(dim);
+  TORCH_CHECK_INDEX(
+      ((-cur_size).sym_le(start).sym_and(start.sym_le(cur_size))).expect_true(__FILE__, __LINE__),
+      "start out of range (expected to be in range of [", -cur_size, ", ", cur_size, "], but got ",
+      start, ")");
+  if (start < 0) {
+    start = start + cur_size;
+  }
+  TORCH_SYM_CHECK(start.sym_le(cur_size - length),
+      "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  auto *nt_impl = get_nested_tensor_impl(self);
+  TORCH_CHECK(self.is_contiguous(), "narrow(): only contiguous nested tensors supported");
+  auto buffer = nt_impl->get_unsafe_storage_as_tensor();
+  auto nested_sizes = nt_impl->get_nested_sizes();
+  auto nested_strides = nt_impl->get_nested_strides();
+  auto storage_offsets = nt_impl->get_storage_offsets();
+  auto storage_offsets_ptr = storage_offsets.data_ptr<int64_t>();
+
+  auto start_int = start.expect_int();
+  auto length_int = length.expect_int();
+  auto buffer_offset = storage_offsets_ptr[start_int];
+
+  nested_sizes = nested_sizes.narrow(0, start_int, length_int);
+  nested_strides = nested_strides.narrow(0, start_int, length_int);
+  storage_offsets = storage_offsets.narrow(0, start_int, length_int);
+
+  return at::detail::make_tensor<NestedTensorImpl>(
+      c10::TensorImpl::VIEW,
+      buffer.narrow(0, buffer_offset, buffer.numel() - buffer_offset),
+      nested_sizes,
+      nested_strides,
+      storage_offsets);
 }
 
 } // namespace native

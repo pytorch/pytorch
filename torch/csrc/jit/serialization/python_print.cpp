@@ -362,7 +362,7 @@ struct PythonPrintImpl {
     std::string name = candidate;
     while (used.count(name) || reserved_names.count(name)) {
       // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
-      name = candidate + c10::to_string(next_id[name]++);
+      name = candidate + std::to_string(next_id[name]++);
     }
     used.insert(name);
     return name;
@@ -1679,7 +1679,7 @@ uint64_t PythonPrint::minVersion() const {
 
 PythonPrint::~PythonPrint() = default;
 
-std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
+static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   std::vector<IValue> result;
   std::vector<IValue> stack;
   stack.emplace_back(ivalue);
@@ -1716,7 +1716,7 @@ std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   return result;
 }
 
-c10::optional<std::string> printType(
+static c10::optional<std::string> printType(
     const c10::Type& type,
     torch::jit::TypeNameUniquer& type_name_uniquer) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {

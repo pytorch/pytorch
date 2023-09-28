@@ -214,7 +214,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
       [&]() {
         auto* output_data = output_contig.data_ptr<scalar_t>();
         auto* grad_data = grad_contig.data_ptr<scalar_t>();
-        auto* grad_input_data = grad_input.data_ptr<scalar_t>();
+        auto* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
         const auto* values_data = data_contig.data_ptr<scalar_t>();
         // Used to calculate exclusive prod
         scalar_t initial_prod_value;

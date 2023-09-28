@@ -97,7 +97,7 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
 } // namespace onednn
 } // namespace fuser
 
-Operation createLlgaKernel(const Node* node) {
+static Operation createLlgaKernel(const Node* node) {
   auto kernel = std::make_shared<fuser::onednn::LlgaKernel>(node);
   return [kernel](Stack& stack) {
     RECORD_FUNCTION(kernel->debugName(), std::vector<c10::IValue>());
@@ -117,7 +117,7 @@ RegisterOperators oneDNNFusionGroupOp({
 // binary ops to a 1D tensor. Other scalar inputs are prim::Constant nodes.
 // But if we have any scalar inputs to guard in the future, some logic here
 // would have to be changed.
-Operation createLlgaGuardKernel(const Node* node) {
+static Operation createLlgaGuardKernel(const Node* node) {
   return [node](Stack& stack) {
 #ifdef GRAPH_DEBUG_ENABLED
     GRAPH_DEBUG("Guarding node: ", node->kind().toQualString());

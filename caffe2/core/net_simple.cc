@@ -7,7 +7,7 @@
 #include <unordered_set>
 
 #include "caffe2/core/operator.h"
-#include "caffe2/core/static_tracepoint.h"
+#include "c10/util/static_tracepoint.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2_pb.h"
 #include "caffe2/utils/proto_utils.h"
@@ -62,11 +62,11 @@ bool SimpleNet::Run() {
     const auto& op_type = op->debug_def().type().c_str();
     auto* op_ptr = op.get();
     const auto& net_name = name_.c_str();
-    CAFFE_SDT(operator_start, net_name, op_name, op_type, op_ptr);
+    TORCH_SDT(operator_start, net_name, op_name, op_type, op_ptr);
 #endif
     bool res = op->Run();
 #ifdef CAFFE2_ENABLE_SDT
-    CAFFE_SDT(operator_done, net_name, op_name, op_type, op_ptr);
+    TORCH_SDT(operator_done, net_name, op_name, op_type, op_ptr);
 #endif
     // workaround for async cpu ops, we need to explicitly wait for them
     if (res && op->HasAsyncPart() &&

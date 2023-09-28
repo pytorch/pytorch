@@ -1,11 +1,9 @@
-#include <c10/core/LargeNegativeIntSymNodeImpl.h>
+#include <c10/core/ConstantSymNodeImpl.h>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
-#include <array>
 #include <functional>
-#include <utility>
 
 namespace c10 {
 
@@ -15,7 +13,7 @@ namespace c10 {
 // Postcondition: invariants on SymInt are fixed
 void SymInt::promote_to_negative() {
   auto s =
-      SymInt(SymNode(c10::make_intrusive<LargeNegativeIntSymNodeImpl>(data_)));
+      SymInt(SymNode(c10::make_intrusive<ConstantSymNodeImpl<int64_t>>(data_)));
   // Similar to move operator=, but do NOT release data_
   data_ = s.data_;
   s.data_ = 0;

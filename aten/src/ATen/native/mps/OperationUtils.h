@@ -10,6 +10,7 @@
 #include <c10/util/Optional.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
+#include <exception>
 #include <unordered_map>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,15 +23,13 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-#ifdef __OBJC__
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
 
 using namespace at::mps;
 
-namespace at {
-namespace native {
-namespace mps {
+namespace at::native::mps {
+
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
 
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
@@ -69,7 +68,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type);
 NSArray<NSNumber*>* getTensorAxes(const Tensor& t);
 NSArray<NSNumber*>* getTensorAxes(const IntArrayRef& sizes, at::OptionalIntArrayRef dim);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = false);
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype = true);
 std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
@@ -132,7 +131,7 @@ string get_mem_format_string(c10::MemoryFormat memory_format);
 
 using MPSCacheKey = uint64_t;
 
-// derive this class to cache a graph and its inputs/ouputs
+// derive this class to cache a graph and its inputs/outputs
 // can be used to store any NSObject
 struct MPSCachedGraph
 {
@@ -194,9 +193,9 @@ struct MPSGraphCache
   typedef MPSCachedGraph * (^CreateCachedGraphBlock)();
 
   struct CacheEntry {
-    CacheEntry(std::string key, MPSCachedGraph *cachedGraph) : cachedGraph_(cachedGraph), key_(key) {}
+    CacheEntry(const std::string& key, MPSCachedGraph *cachedGraph) : cachedGraph_(cachedGraph), key_(key) {}
     MPSCachedGraph* cachedGraph_ = nullptr;
-    std::string key_ = nullptr;
+    std::string key_;
   };
 
  public:
@@ -211,7 +210,7 @@ struct MPSGraphCache
   ~MPSGraphCache() {
     dispatch_release(serialQueue_);
 
-    for (auto i : cache_) {
+    for (const auto& i : cache_) {
       delete i.second.cachedGraph_;
     }
   }
@@ -222,25 +221,24 @@ struct MPSGraphCache
 
   MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
 
-    __block MPSCachedGraph * result = nil;
+    __block MPSCachedGraph* cachedGraph = nil;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
-
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
       // verify the cached entry doesn't already exist
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
-        result = entry.cachedGraph_;
-      }
-      else {
-        result = createCacheBlock();
-        CacheEntry entry(key, result);
+        cachedGraph = entry.cachedGraph_;
+      } else {
+        cachedGraph = createCacheBlock();
+        CacheEntry entry(key, cachedGraph);
         cache_.emplace(hash, entry);
+        profileCachedGraph(entry);
       }
     });
-    return result;
+    return cachedGraph;
   }
 
   template<typename T>
@@ -250,7 +248,7 @@ struct MPSGraphCache
 
   MPSCachedGraph* LookUp(const std::string& key) const {
 
-    __block MPSCachedGraph* result = nullptr;
+    __block MPSCachedGraph* cachedGraph = nullptr;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
@@ -259,10 +257,11 @@ struct MPSGraphCache
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
-        result = entry.cachedGraph_;
+        cachedGraph = entry.cachedGraph_;
+        profileCachedGraph(entry);
       }
     });
-    return result;
+    return cachedGraph;
   }
 
   template<typename T>
@@ -274,6 +273,9 @@ struct MPSGraphCache
   MPSGraphCache() {
     serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
   }
+  // this is defined in OperationUtils.mm to not include
+  // MPSProfiler.h in header OperationUtils.h
+  void profileCachedGraph(const CacheEntry& cacheEntry) const;
 
   static MPSGraphCache* _instance_cache;
   std::unordered_map<MPSCacheKey, CacheEntry> cache_;
@@ -309,6 +311,16 @@ MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
      ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3.");   \
   }
 
-} // namespace mps
-} // namespace native
-} // namespace at
+/**
+ * Returns distance from lowest to highest element offset in given tensor.
+ */
+size_t compute_storage_numel_distance(const at::Tensor& t);
+
+/**
+ * Checks whether tensor is mapped to a contiguous area in the storage.
+ */
+inline bool is_dense_in_storage(const at::Tensor& t) {
+  return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
+}
+
+} // namespace at::native::mps

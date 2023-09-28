@@ -66,7 +66,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
    * @brief Gets the const reference of the stored object. The code checks if
    * the stored object is of the desired type.
    */
-  // TODO(jerryzh): add a Get(DeviceType) function?
+  // TODO(jerryzh): add a Get(c10::DeviceType) function?
   template <class T>
   const T& Get() const {
     TORCH_INTERNAL_ASSERT(
@@ -75,7 +75,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
         meta_.name(),
         " while caller expects ",
         TypeMeta::TypeName<T>());
-    // TODO: after we add Get<Tensor>(DeviceType)
+    // TODO: after we add Get<Tensor>(c10::DeviceType)
     // and changed all the callsites, we can add
     // a static assert here to enforce T != Tensor
     // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.UndefReturn)

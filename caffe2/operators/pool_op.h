@@ -33,7 +33,7 @@ class PoolOp final : public ConvPoolOpBase<Context> {
     }
   }
 
-  ~PoolOp() = default;
+  ~PoolOp() override = default;
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(0);
@@ -112,7 +112,7 @@ class PoolGradientOp final : public ConvPoolOpBase<Context> {
   explicit PoolGradientOp(Args&&... args)
       : ConvPoolOpBase<Context>(std::forward<Args>(args)...), functor_(*this) {}
 
-  ~PoolGradientOp() = default;
+  ~PoolGradientOp() override = default;
 
   bool RunOnDeviceWithOrderNCHW() override {
     const auto& X = Input(0);

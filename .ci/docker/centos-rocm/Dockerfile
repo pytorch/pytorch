@@ -64,9 +64,9 @@ ENV INSTALLED_DB ${DB}
 
 # (optional) Install vision packages like OpenCV and ffmpeg
 ARG VISION
-COPY ./common/install_vision.sh install_vision.sh
+COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
-RUN rm install_vision.sh
+RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
 # Install rocm

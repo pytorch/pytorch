@@ -10,6 +10,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/bucketize_native.h>
+#include <ATen/ops/searchsorted_native.h>
 #endif
 
 /* Implement a numpy like searchsorted and a TF like bucketize function running on cpu
@@ -185,6 +187,18 @@ Tensor& searchsorted_out_cpu(
     result.copy_(out);
   }
   return result;
+}
+
+Tensor& searchsorted_out_cpu(
+    const Tensor& sorted_sequence,
+    const Scalar& self,
+    bool out_int32,
+    bool right,
+    const c10::optional<c10::string_view> side_opt,
+    const c10::optional<Tensor>& sorter_opt,
+    Tensor& result) {
+  const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
+  return searchsorted_out_cpu(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
 }
 
 Tensor searchsorted_cpu(

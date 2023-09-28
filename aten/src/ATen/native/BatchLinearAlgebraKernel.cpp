@@ -16,7 +16,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #endif
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 /*
@@ -1102,15 +1102,14 @@ void svd_kernel(const Tensor& A,
 }
 
 void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
-  if (iter.numel() == 0) {
+  if (iter.numel() == 0 || dim_size == 0) {
     return;
   }
   auto loop = [&](char* const* const  data, const int64_t* const strides, const int64_t nelems) {
     auto* perm_ptr = data[0];
     const auto* pivots_ptr = data[1];
 
-    for (const auto elem : c10::irange(nelems)) {
-      (void)elem; //Suppress unused variable warning
+    for (C10_UNUSED const auto elem : c10::irange(nelems)) {
       // WARNING: linalg.lu_factor returns int32 pivots,
       // this behavior could change in the future.
       const auto perm_data = reinterpret_cast<int64_t*>(perm_ptr);
@@ -1224,4 +1223,4 @@ REGISTER_AVX512_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 REGISTER_AVX2_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 REGISTER_VSX_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 REGISTER_ZVECTOR_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
-}} // namespace at::native
+} // namespace at::native

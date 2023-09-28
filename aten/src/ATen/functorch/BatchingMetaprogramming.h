@@ -16,8 +16,7 @@
 // of a batching rule from the signature of the operator, many of which use the
 // helper functions in this file.
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // Metaprogramming things
 template <class... Items> using typelist = c10::guts::typelist::typelist<Items...>;
@@ -124,5 +123,4 @@ template <typename batch_rule_t> struct ToOperatorType {
 };
 template <typename batch_rule_t> using to_operator_t = typename ToOperatorType<batch_rule_t>::type;
 
-}
-} // namespace at
+} // namespace at::functorch

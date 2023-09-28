@@ -1,4 +1,5 @@
-from typing import Iterable, List, Optional, Set, Tuple
+import weakref
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -6,6 +7,8 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 
 from .contract import _get_registry, contract
+
+_ROOT_MODULE_PREFIX = ""
 
 
 @contract()
@@ -25,6 +28,11 @@ def replicate(
         >>> replicate(module)
     """
     torch._C._log_api_usage_once("torch.distributed.replicate")
+    if "device_id" in kwargs:
+        if not isinstance(kwargs["device_id"], (int, torch.device)):
+            raise RuntimeError(
+                f"Expected device_id to be int or torch.device, but got {type(kwargs['device_id'])}"
+            )
     _ReplicateState(ignored_modules=ignored_modules).mark_module(module, **kwargs)
     return module
 
@@ -47,7 +55,7 @@ class _ReplicateState:
             p for m in self.ignored_modules for p in m.parameters()
         }
         # Only used for testing
-        self._names: List[str] = []
+        self._param_names: List[str] = []
 
     def mark_module(self, module: nn.Module, **kwargs) -> None:
         if _is_fully_sharded(module):
@@ -56,12 +64,14 @@ class _ReplicateState:
             )
         self.module = module
         replicate.state(module)._params_collected = False
-        module.register_forward_pre_hook(self.forward_pre_hook)
+        module.register_forward_pre_hook(self.forward_pre_hook, with_kwargs=True)
         # TODO(@yhcharles): fix type error
         module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
         self.kwargs = kwargs
 
-    def _collect_params(self, module: nn.Module) -> None:
+    def _collect_params(
+        self, module: nn.Module, prefix: str = _ROOT_MODULE_PREFIX
+    ) -> None:
         # skip if managed by fully_sharded API
         if _is_fully_sharded(module):
             return
@@ -69,12 +79,17 @@ class _ReplicateState:
         if module in self.ignored_modules:
             return  # if module A is ignored, all of A's children are also ignored.
 
-        self._param_list.extend(
-            p for p in module.parameters(recurse=False) if p not in self.ignored_params
+        recurse_prefix = (
+            f"{prefix}." if prefix != _ROOT_MODULE_PREFIX else _ROOT_MODULE_PREFIX
         )
 
-        for child_module in module.children():
-            self._collect_params(child_module)
+        for n, p in module.named_parameters(recurse=False):
+            if p not in self.ignored_params:
+                self._param_list.append(p)
+                self._param_names.append(f"{recurse_prefix}{n}")
+
+        for name, child_module in module.named_children():
+            self._collect_params(module=child_module, prefix=f"{recurse_prefix}{name}")
 
     def init_helper(self) -> None:
         if self.has_initialized:
@@ -84,15 +99,35 @@ class _ReplicateState:
 
         self._collect_params(self.module)  # type: ignore[arg-type]
         # Only saved for testing
-        replicate.state(self.module)._names = self._names
+        replicate.state(self.module)._replicate_param_names = self._param_names
+        if "device_id" in self.kwargs:
+            # replicate() supports a small usability enhancement where
+            # user can pass in device_id as a Union[int, torch.device] even for
+            # CPU devices so users don't have to change code for CPU/GPU runs.
+            # We derive the right device_ids to feed into DDP to support this.
+            if self.kwargs["device_id"] is not None:
+                device_id = self.kwargs["device_id"]
+                # Convert to device_ids that DDP expects.
+                if isinstance(device_id, torch.device) and device_id.type == "cpu":
+                    # CPU modules receive device_ids None
+                    self.kwargs["device_ids"] = None
+                else:
+                    # GPU modules expect device_ids=[cuda_device]
+                    self.kwargs["device_ids"] = [device_id]
+            else:
+                self.kwargs["device_ids"] = None
+            self.kwargs.pop("device_id")
 
         self._ddp = DistributedDataParallel(self._param_list, **self.kwargs)
+        # Weakref to the DDP instance is currently only used for testing.
+        replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
     def forward_pre_hook(
-        self, module: nn.Module, input: Tuple[torch.Tensor, ...]
-    ) -> None:
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Any:
         self.init_helper()
-        self._ddp._pre_forward()
+        args, kwargs = self._ddp._pre_forward(*args, **kwargs)
+        return args, kwargs
 
     def forward_post_hook(
         self,

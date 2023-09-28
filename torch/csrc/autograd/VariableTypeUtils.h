@@ -425,21 +425,24 @@ inline void check_no_requires_grad(
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    at::ITensorListRef tensors) {
-  return fmap(tensors, [](const at::Tensor& tensor) -> SavedVariable {
-    return SavedVariable{tensor, false /* is output */};
+    at::ITensorListRef tensors,
+    const bool is_output = false) {
+  return fmap(tensors, [&is_output](const at::Tensor& tensor) -> SavedVariable {
+    return SavedVariable{tensor, is_output /* is output */};
   });
 }
 
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(
-    const c10::List<c10::optional<at::Tensor>>& tensors) {
+    const c10::List<c10::optional<at::Tensor>>& tensors,
+    const bool is_output = false) {
   return fmap(
-      tensors, [](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
+      tensors,
+      [&is_output](const c10::optional<at::Tensor>& tensor) -> SavedVariable {
         if (tensor.has_value()) {
-          return SavedVariable{*tensor, false /* is output */};
+          return SavedVariable{*tensor, is_output /* is output */};
         } else {
-          return SavedVariable{at::Tensor(), false /* is output */};
+          return SavedVariable{at::Tensor(), is_output /* is output */};
         }
       });
 }

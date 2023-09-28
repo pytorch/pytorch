@@ -1,4 +1,4 @@
-def define_targets(rules):
+def define_targets(rules, extra_defines=[]):
     rules.cc_library(
         name = "cuda",
         srcs = rules.glob(
@@ -19,7 +19,7 @@ def define_targets(rules):
                 "CUDAMacros.h",
             ],
         ),
-        defines = ["USE_CUDA"],
+        defines = ["USE_CUDA"] + extra_defines,
         linkstatic = True,
         local_defines = ["C10_BUILD_MAIN_LIB"],
         target_compatible_with = rules.requires_cuda_enabled(),

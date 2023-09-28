@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 
 import warnings
 
@@ -1302,7 +1301,7 @@ def amin(
 @_apply_docstring_templates
 def argmax(
     input: Union[Tensor, MaskedTensor],
-    dim: int = None,
+    dim: Optional[int] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
@@ -1328,7 +1327,7 @@ def argmax(
 @_apply_docstring_templates
 def argmin(
     input: Union[Tensor, MaskedTensor],
-    dim: int = None,
+    dim: Optional[int] = None,
     *,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/impl/PyObjectSlot.h>
 
@@ -56,7 +55,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   StorageImpl(
       use_byte_size_t /*use_byte_size*/,
-      SymInt size_bytes,
+      const SymInt& size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
@@ -215,4 +214,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
 };
+
+// Declare StorageImpl create function pointer types.
+using StorageImplCreateHelper = intrusive_ptr<StorageImpl> (*)(
+    StorageImpl::use_byte_size_t,
+    SymInt size_bytes,
+    Allocator* allocator,
+    bool resizable);
+
+C10_API void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr);
+
+C10_API StorageImplCreateHelper GetStorageImplCreate(DeviceType t);
+
 } // namespace c10

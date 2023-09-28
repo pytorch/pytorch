@@ -40,9 +40,7 @@ def get_test_stat_aggregates(date: datetime.date) -> Any:
     rockset_api_key = os.environ["ROCKSET_API_KEY"]
     rockset_api_server = "api.rs2.usw2.rockset.com"
     iso_date = date.isoformat()
-    rs = rockset.RocksetClient(
-        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
+    rs = rockset.RocksetClient(host="api.usw2a1.rockset.com", api_key=rockset_api_key)
 
     # Define the name of the Rockset collection and lambda function
     collection_name = "commons"
@@ -52,7 +50,7 @@ def get_test_stat_aggregates(date: datetime.date) -> Any:
     ]
     api_response = rs.QueryLambdas.execute_query_lambda(
         query_lambda=lambda_function_name,
-        version="3825b0797b6e49bc",
+        version="692684fa5b37177f",
         parameters=query_parameters,
     )
     for i in range(len(api_response["results"])):

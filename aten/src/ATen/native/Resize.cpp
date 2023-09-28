@@ -11,6 +11,8 @@
 #include <ATen/ops/resize_as_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
+#include <ATen/ops/_resize_output.h>
+#include <ATen/ops/_resize_output_native.h>
 #endif
 
 namespace at { namespace native {
@@ -43,11 +45,11 @@ bool resize_output_check_symint(const Tensor& output, SymIntArrayRef shape) {
   return _resize_output_check(output, shape);
 }
 
-void native_resize_(const Tensor& output, IntArrayRef shape) {
+static void native_resize_(const Tensor& output, IntArrayRef shape) {
   native::resize_(output, shape);
 }
 
-void native_resize_(const Tensor& output, SymIntArrayRef shape) {
+static void native_resize_(const Tensor& output, SymIntArrayRef shape) {
   native::resize__symint(output, shape);
 }
 
@@ -223,7 +225,7 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
-TensorImpl* resize_impl_meta_(
+static TensorImpl* resize_impl_meta_(
     TensorImpl* self,
     c10::SymIntArrayRef size,
     at::OptionalSymIntArrayRef stride,
@@ -237,6 +239,7 @@ const Tensor& _resize_(
     ArrayRef<T> size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
+  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
   // NOLINTNEXTLINE(bugprone-argument-comment)
   _resize_impl_<T>(self_, size, /*strides=*/c10::nullopt, true);
   if (optional_memory_format.has_value()) {
@@ -247,6 +250,10 @@ const Tensor& _resize_(
         "Unsupported memory format",
         memory_format);
     self_->empty_tensor_restride(memory_format);
+  }
+  // See Note [Enabling Deterministic Operations]
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
+    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
   }
   return self;
 }

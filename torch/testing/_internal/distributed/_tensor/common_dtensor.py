@@ -37,7 +37,7 @@ from torch.distributed._tensor import (
     redistribute,
 )
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed._tensor.placement_types import Placement, DTensorSpec
 
 DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 NUM_DEVICES = 4
@@ -48,6 +48,22 @@ if torch.cuda.is_available() and torch.cuda.device_count() > 1:
     NUM_DEVICES = min(NUM_DEVICES, torch.cuda.device_count())
 
 T = TypeVar("T")
+
+
+class MLPModule(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        torch.manual_seed(5)
+        self.net1 = torch.nn.Linear(10, 16, device=device)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(16, 10, device=device)
+
+    def forward(self, x):
+        return self.net2(self.relu(self.net1(x)))
+
+    def reset_parameters(self):
+        self.net1.reset_parameters()
+        self.net2.reset_parameters()
 
 
 def skip_unless_torch_gpu(method: T) -> T:
@@ -71,25 +87,25 @@ class RedistributeProfile:
 @contextmanager
 def redistribute_profiler() -> Generator[RedistributeProfile, None, None]:
 
-    orig_redistribute_dtensor = redistribute.redistribute_dtensor
+    orig_redistribute_local_tensor = redistribute.redistribute_local_tensor
     profile: RedistributeProfile = RedistributeProfile(num_calls=0)
 
     # pyre-ignore[53]
-    def patched_redistribute_dtensor(
-        input: DTensor,
-        device_mesh: DeviceMesh,
-        placements: Sequence[Placement],
+    def patched_redistribute_local_tensor(
+        local_tensor: torch.Tensor,
+        current_spec: DTensorSpec,
+        target_spec: DTensorSpec,
     ) -> DTensor:
-        result = orig_redistribute_dtensor(input, device_mesh, placements)
+        result = orig_redistribute_local_tensor(local_tensor, current_spec, target_spec)
         profile.num_calls += 1
         return result
 
     try:
         # pyre-ignore[9]
-        redistribute.redistribute_dtensor = patched_redistribute_dtensor
+        redistribute.redistribute_local_tensor = patched_redistribute_local_tensor
         yield profile
     finally:
-        redistribute.redistribute_dtensor = orig_redistribute_dtensor
+        redistribute.redistribute_local_tensor = orig_redistribute_local_tensor
 
 
 class DTensorTestBase(MultiProcessTestCase):
@@ -171,7 +187,7 @@ def with_comms(func: TestFunc) -> TestFunc:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         self.init_pg(backend=pg_backend)
-        func(self)  # type: ignore[misc]
+        func(self, *args, **kwargs)  # type: ignore[misc]
         self.destroy_pg()
 
     return wrapper
@@ -328,7 +344,7 @@ class DTensorConverter:
                     r = DTensor(
                         t,
                         mesh,
-                        placements,
+                        tuple(placements),
                         size=t.size(),
                         dtype=torch.bool,
                         requires_grad=t.requires_grad,

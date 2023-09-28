@@ -10,6 +10,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like_ops.h>
@@ -282,10 +283,33 @@ static void histogramdd_linear_kernel_impl(const Tensor& self, const c10::option
     }
 }
 
+template<typename scalar_t>
+void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
+        std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
+    // Calls aminmax on input with dim=0, reducing all but the innermost dimension of input.
+    Tensor min, max;
+    std::tie(min, max) = aminmax(input, 0);
+
+    TORCH_INTERNAL_ASSERT(min.is_contiguous() && max.is_contiguous());
+
+    const scalar_t *min_data = min.data_ptr<scalar_t>();
+    std::copy(min_data, min_data + N, leftmost_edges.begin());
+
+    const scalar_t *max_data = max.data_ptr<scalar_t>();
+    std::copy(max_data, max_data + N, rightmost_edges.begin());
+}
+
+static void histogram_select_outer_bin_edges_impl(const Tensor& input, const int64_t N,
+        std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
+        infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
+    });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel_impl);
-
 REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel_impl);
+REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_impl);
 
 } // namespace at::native

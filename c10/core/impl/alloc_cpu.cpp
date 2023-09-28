@@ -6,6 +6,10 @@
 #include <c10/util/irange.h>
 #include <c10/util/numa.h>
 
+#ifdef USE_MIMALLOC
+#include <mimalloc.h>
+#endif
+
 // TODO: rename flags to C10
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
@@ -64,7 +68,11 @@ void* alloc_cpu(size_t nbytes) {
       nbytes,
       " bytes.");
 #elif defined(_MSC_VER)
+#ifdef USE_MIMALLOC
+  data = mi_malloc_aligned(nbytes, gAlignment);
+#else
   data = _aligned_malloc(nbytes, gAlignment);
+#endif
   CAFFE_ENFORCE(
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
@@ -100,7 +108,11 @@ void* alloc_cpu(size_t nbytes) {
 
 void free_cpu(void* data) {
 #ifdef _MSC_VER
+#ifdef USE_MIMALLOC
+  mi_free(data);
+#else
   _aligned_free(data);
+#endif
 #else
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(data);

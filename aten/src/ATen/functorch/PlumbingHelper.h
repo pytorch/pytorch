@@ -24,7 +24,7 @@
 // The plumbing is responsible for wrapping a batching rule into a form that may
 // be registered as the kernel for the batched key.
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 void vmap_check_escaped(const optional<DynamicLayer> &layer, const char* what);
 
@@ -60,4 +60,4 @@ inline bool ivalueParticipatesInCurrentLevel(const IValue& ivalue) {
   return false;
 }
 
-}}
+} // namespace at::functorch

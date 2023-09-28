@@ -13,11 +13,33 @@ class TCPServer;
 
 class TCPClient;
 
-class TCPCallbackClient;
-
 struct SocketAddress {
   std::string host{};
   std::uint16_t port{};
+};
+
+class Counter {
+ public:
+  void update(double val);
+  std::unordered_map<std::string, double> observe() const;
+
+  double mean() const noexcept {
+    return mean_;
+  }
+  int64_t count() const noexcept {
+    return count_;
+  }
+  double variance() const noexcept {
+    return m2_ / count_;
+  }
+  double sample_variance() const noexcept {
+    return m2_ / (count_ - 1);
+  }
+
+ private:
+  int64_t count_ = 0;
+  double mean_ = 0;
+  double m2_ = 0;
 };
 
 } // namespace detail
@@ -34,6 +56,14 @@ struct TCPStoreOptions {
   // A boolean value indicating whether multiple store instances can be
   // initialized with the same host:port pair.
   bool multiTenant = false;
+
+  // If specified, and if isServer is true, the underlying TCPServer will take
+  // over the bound socket associated to this fd. This option is useful to avoid
+  // port assignment races in certain scenarios.
+  c10::optional<int> masterListenFd = c10::nullopt;
+
+  // A boolean value indicating whether to use the experimental libUV backend.
+  bool useLibUV = false;
 };
 
 class TORCH_API TCPStore : public Store {
@@ -63,13 +93,6 @@ class TORCH_API TCPStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  // NOTE: calling other TCPStore APIs inside the callback is NOT threadsafe
-  // watchKey() is a blocking operation. It will register the socket on
-  // TCPStoreMasterDaemon and the callback on TCPStoreWorkerDaemon. It will
-  // return once it has verified the callback is registered on both background
-  // threads. Only one thread can call watchKey() at a time.
-  void watchKey(const std::string& key, WatchKeyCallback callback) override;
-
   bool check(const std::vector<std::string>& keys) override;
 
   int64_t getNumKeys() override;
@@ -79,6 +102,18 @@ class TORCH_API TCPStore : public Store {
   void wait(
       const std::vector<std::string>& keys,
       const std::chrono::milliseconds& timeout) override;
+
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
+
+  void multiSet(
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
+
+  bool hasExtendedApi() const override;
 
   // Waits for all workers to join.
   void waitForWorkers();
@@ -93,6 +128,13 @@ class TORCH_API TCPStore : public Store {
     return addr_.port;
   }
 
+  std::unordered_map<std::string, std::unordered_map<std::string, double>>
+  collectClientCounters() const noexcept;
+
+  bool isLibUvBackend() const noexcept {
+    return usingLibUv_;
+  }
+
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
@@ -105,12 +147,13 @@ class TORCH_API TCPStore : public Store {
   detail::SocketAddress addr_;
   std::shared_ptr<detail::TCPServer> server_;
   std::unique_ptr<detail::TCPClient> client_;
-  std::unique_ptr<detail::TCPCallbackClient> callbackClient_;
   c10::optional<std::size_t> numWorkers_;
 
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
+  std::unordered_map<std::string, detail::Counter> clientCounters_;
+  bool usingLibUv_ = false;
 };
 
 } // namespace c10d

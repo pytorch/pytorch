@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/functorch/Interpreter.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // This is the interpreter that handles the functionalize() transform.
 // See NOTE: [functorch interpreter stack] for more details.
@@ -12,7 +12,7 @@ struct VmapInterpreterPtr {
   int64_t level() const { return base_->level(); }
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
   void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
-  int64_t batchSize() const {
+  c10::SymInt batchSize() const {
     return c10::get<VmapInterpreterMeta>(base_->meta()).batchSize_;
   }
   RandomnessType randomness() const {
@@ -22,4 +22,4 @@ struct VmapInterpreterPtr {
   const Interpreter* base_;
 };
 
-}} // namespace at::functorch
+} // namespace at::functorch

@@ -10,8 +10,7 @@
 #include <ATen/ops/result_type.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // original values given by raw_*. If an original value is not contiguous, will make a contiguous copy to
 // the corresponding trimmed_* value. Additionally, if the dtypes of the boundary and input tensor do not
@@ -171,4 +170,4 @@ inline void searchsorted_pre_check(
   }
 }
 
-}}
+} // namespace at::native

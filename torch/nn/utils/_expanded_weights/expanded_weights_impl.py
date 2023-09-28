@@ -1,11 +1,10 @@
 from contextlib import contextmanager
 
-from torch._C import _TensorBase
 import torch
 import functools
 from torch._decomp import decomposition_table
 
-from typing import Callable, Dict, cast
+from typing import Callable, Dict
 
 from torch.utils._pytree import tree_map_only
 
@@ -96,7 +95,7 @@ class ExpandedWeight(torch.Tensor):
             raise RuntimeError(f"Can only make Expanded Weights of Tensors, got {type(orig_weight).__name__}")
         if not orig_weight.requires_grad:
             raise RuntimeError("Can only build ExpandedWeights objects of tensors that require_grad")
-        ret = torch.Tensor._make_subclass(cast(_TensorBase, cls), orig_weight, True)
+        ret = torch.Tensor._make_subclass(cls, orig_weight, True)
         return ret
 
     @classmethod

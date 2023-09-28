@@ -120,7 +120,7 @@ THManagedMapAllocator::THManagedMapAllocator(
     const char* manager_handle,
     const char* filename,
     int flags,
-    ptrdiff_t size)
+    size_t size)
     : THManagedMapAllocatorInit(manager_handle, filename),
       at::RefcountedMapAllocator(filename, flags, size) {}
 
@@ -142,7 +142,7 @@ at::DataPtr THManagedMapAllocator::makeDataPtr(
     const char* manager_handle,
     const char* filename,
     int flags,
-    ptrdiff_t size) {
+    size_t size) {
   auto* context =
       new THManagedMapAllocator(manager_handle, filename, flags, size);
   return {

@@ -108,7 +108,7 @@ get_operator_version_map() {
 
 void test_only_add_entry(const std::string& op_name, UpgraderEntry entry) {
   test_only_reset_flag();
-  operatorVersionMap[op_name].push_back(entry);
+  operatorVersionMap[op_name].emplace_back(std::move(entry));
 }
 
 void test_only_remove_entry(const std::string& op_name) {

@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
+
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -8,10 +10,12 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/triangular_solve_native.h>
 #endif
@@ -61,13 +65,13 @@ static Tensor prepare_batch_matrix_by_transposing(const Tensor& tensor,
  * Helper functions to be used for mm/addmm for detecting the Transpositions
  * when doing GEMM operations.
  */
-void prepare_matrices_for_broadcasting(const Tensor* bias,
-                                       const Tensor& self,
-                                       const Tensor& other,
-                                       const Scalar* beta,
-                                       bool* transpose_mat1_times_mat2,
-                                       bool& transpose_mat1,
-                                       bool& transpose_mat2) {
+static void prepare_matrices_for_broadcasting(const Tensor* bias,
+                                              const Tensor& self,
+                                              const Tensor& other,
+                                              const Scalar* beta,
+                                              bool* transpose_mat1_times_mat2,
+                                              bool& transpose_mat1,
+                                              bool& transpose_mat2) {
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
   if (bias && beta->toDouble() != 0.0f) {
     TORCH_CHECK(bias->dim() == 2, "tensors must be 2-D");
@@ -91,7 +95,7 @@ void prepare_matrices_for_broadcasting(const Tensor* bias,
 
 enum LinearAlgebraOpType { ADDBMM_OP_TYPE, BADDBMM_OP_TYPE };
 
-Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
+static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
@@ -159,13 +163,13 @@ Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output)
   return output;
 }
 
-Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
-                                       const Tensor& batch1,
-                                       const Tensor& batch2,
-                                       const Scalar& beta,
-                                       const Scalar& alpha,
-                                       Tensor& result,
-                                       LinearAlgebraOpType opType) {
+static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
+                                              const Tensor& batch1,
+                                              const Tensor& batch2,
+                                              const Scalar& beta,
+                                              const Scalar& alpha,
+                                              Tensor& result,
+                                              LinearAlgebraOpType opType) {
   using namespace mps;
 
   TORCH_CHECK(input.is_mps());
@@ -279,12 +283,12 @@ Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   return result;
 }
 
-Tensor& addmm_out_mps_impl(const Tensor& bias,
-                           const Tensor& self, // input
-                           const Tensor& other, // weight
-                           const Scalar& beta,
-                           const Scalar& alpha,
-                           Tensor& output) {
+static Tensor& addmm_out_mps_impl(const Tensor& bias,
+                                  const Tensor& self, // input
+                                  const Tensor& other, // weight
+                                  const Scalar& beta,
+                                  const Scalar& alpha,
+                                  Tensor& output) {
   using namespace mps;
 
   TORCH_CHECK(output.is_mps());
@@ -420,7 +424,7 @@ Tensor& addmm_out_mps_impl(const Tensor& bias,
   return output;
 }
 
-Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
+static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
   TORCH_CHECK(batch1.scalar_type() == ScalarType::Double || batch1.scalar_type() == ScalarType::Float ||
@@ -474,13 +478,13 @@ Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& res
   return result;
 }
 
-Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
-                                         const Tensor& B,
-                                         bool upper,
-                                         bool transpose,
-                                         bool left,
-                                         bool unitriangular,
-                                         Tensor& out) {
+static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
+                                                const Tensor& B,
+                                                bool upper,
+                                                bool transpose,
+                                                bool left,
+                                                bool unitriangular,
+                                                Tensor& out) {
   using namespace mps;
 
   checkInputsSolver(A, B, left, "linalg.solve_triangular");
@@ -507,7 +511,7 @@ Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   MPSStream* mpsStream = getCurrentMPSStream();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
@@ -527,6 +531,8 @@ Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                                                                                      order:left ? bRows : bCols
                                                                     numberOfRightHandSides:left ? bCols : bRows
                                                                                      alpha:1.0f] autorelease];
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(filter, " solve_triangular_mps", {A_, B_});
 
       MPSMatrixDescriptor* sourceMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:aRows
                                                                                     columns:aCols
@@ -560,7 +566,7 @@ Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
                   rightHandSideMatrix:rightHandSideMatrix
                        solutionMatrix:solutionMatrix];
       }
-      mpsStream->commit(true);
+      getMPSProfiler().endProfileKernel(filter);
     }
   });
   return out;

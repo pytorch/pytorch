@@ -1,6 +1,6 @@
 from typing import (
     Any,
-    List,
+    Iterable,
     NamedTuple,
     Optional,
     overload,
@@ -59,7 +59,7 @@ class PackedSequence(PackedSequence_):
     ) -> T: ...
     @overload
     def to(
-        self,
+        self: T,
         other: Tensor,
         non_blocking: bool = False,
         copy: bool = False,
@@ -82,7 +82,7 @@ def pad_packed_sequence(
     total_length: Optional[int] = ...,
 ) -> Tuple[Tensor, ...]: ...
 def pad_sequence(
-    sequences: List[Tensor],
+    sequences: Union[Tensor, Iterable[Tensor]],
     batch_first: bool = False,
     padding_value: float = ...,
 ) -> Tensor: ...

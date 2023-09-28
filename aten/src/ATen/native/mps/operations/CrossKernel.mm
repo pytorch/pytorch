@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
+#include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Cross.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -135,9 +136,8 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      NSError* error = nil;
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
       const IntArrayRef& iterShape = iter.shape();
@@ -156,11 +156,9 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       }
 
       id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
                                                              options:0] autorelease];
-      TORCH_CHECK(
-          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
@@ -176,6 +174,10 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
 
       id<MTLComputePipelineState> crossPSO = crossPipelineState(device, out.scalar_type());
+
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(crossPSO, "cross", {input, other});
+
       [computeEncoder setComputePipelineState:crossPSO];
       [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
       [computeEncoder setBuffer:otherBuffer offset:other.storage_offset() * other.element_size() atIndex:1];
@@ -192,6 +194,8 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+
+      getMPSProfiler().endProfileKernel(crossPSO);
     }
   });
 }

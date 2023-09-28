@@ -447,8 +447,9 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
         size_t smem = sizeof(T) * post * multiple;
 
         // calling cuda kernel with ExactBlock = true, Average = false
-        sparse_length_sum_kernel<InType, T, IndexType, true, false>
-            <<<len_length, block, smem, context_.cuda_stream()>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+        (sparse_length_sum_kernel<InType, T, IndexType, true, false>)
+            ,len_length, block, smem, context_.stream(),
                 in_data,
                 out_data,
                 prefix_sum_length_data,
@@ -457,11 +458,11 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 post,
                 len_length,
                 dataToReduceSize);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         // calling cuda kernel with ExactBlock = false, Average = false
-        sparse_length_sum_kernel<InType, T, IndexType, false, false>
-            <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+        (sparse_length_sum_kernel<InType, T, IndexType, false, false>)
+            ,len_length, maxThreads, 0, context_.stream(),
                 in_data,
                 out_data,
                 prefix_sum_length_data,
@@ -470,7 +471,6 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
                 post,
                 len_length,
                 dataToReduceSize);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       const T* in_data = dataInput.template data<T>();
@@ -584,8 +584,9 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
         dim3 block(post, multiple);
         size_t smem = sizeof(T) * post * multiple;
         // calling cuda kernel with ExactBlock = true, Average = true
-        sparse_length_sum_kernel<InType, T, IndexType, true, true>
-            <<<len_length, block, smem, context_.cuda_stream()>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+        (sparse_length_sum_kernel<InType, T, IndexType, true, true>)
+            ,len_length, block, smem, context_.stream(),
                 in_data,
                 out_data,
                 prefix_sum_length_data,
@@ -594,11 +595,11 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
                 post,
                 len_length,
                 dataToReduceSize);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         // calling cuda kernel with ExactBlock = false, Average = true
-        sparse_length_sum_kernel<InType, T, IndexType, false, true>
-            <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
+        TORCH_DSA_KERNEL_LAUNCH(
+        (sparse_length_sum_kernel<InType, T, IndexType, false, true>)
+            ,len_length, maxThreads, 0, context_.stream(),
                 in_data,
                 out_data,
                 prefix_sum_length_data,
@@ -607,7 +608,6 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
                 post,
                 len_length,
                 dataToReduceSize);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
       }
     } else {
       const T* in_data = dataInput.template data<T>();

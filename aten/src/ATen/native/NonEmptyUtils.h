@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at { namespace native {
+namespace at::native {
 
 inline int64_t ensure_nonempty_dim(int64_t dim) {
   return std::max<int64_t>(dim, 1);
@@ -24,4 +24,4 @@ inline IdxVec ensure_nonempty_vec(IdxVec vec) {
   return vec;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

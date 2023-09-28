@@ -547,15 +547,15 @@ py::object toPyObject(IValue ivalue) {
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:
-          return py::cast(*tensor.data_ptr<bool>());
+          return py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
-          return py::cast(*tensor.data_ptr<int64_t>());
+          return py::cast(*tensor.const_data_ptr<int64_t>());
         case at::ScalarType::Double:
-          return py::cast(*tensor.data_ptr<double>());
+          return py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
           return py::cast(static_cast<std::complex<double>>(
-              *tensor.data_ptr<c10::complex<double>>()));
+              *tensor.const_data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
@@ -609,8 +609,7 @@ py::object toPyObject(IValue ivalue) {
         !tuple->type()->schema()->name().empty()) {
       auto unqualName = tuple->type()->name()->name();
 
-      const std::vector<Argument>& tuple_args =
-          tuple->type()->schema()->arguments();
+      std::vector<Argument> tuple_args = tuple->type()->schema()->arguments();
 
       std::vector<pybind11::object> defaults;
       auto it = std::find_if(
@@ -776,7 +775,7 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     c10::optional<c10::DispatchKey> dk) {
-  std::vector<py::handle> overloaded_args;
+  std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
     is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);

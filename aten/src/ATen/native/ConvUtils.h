@@ -6,7 +6,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
@@ -343,6 +343,11 @@ static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor
   return at::MemoryFormat::Contiguous;
 }
 
+// controls whether emptyCache will be called following cudnn conv benchmarking
+TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
+TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
+
+
 static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
@@ -384,8 +389,9 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
       (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
       (weight_memory_format == at::MemoryFormat::ChannelsLast);
 
-  // TODO: add channels last 3d support
-  bool can_use_mkldnn_channels_last_3d = false;
+  bool can_use_mkldnn_channels_last_3d =
+      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
 
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }
@@ -402,4 +408,4 @@ static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at
   return can_use_thnn_channels_last_2d;
 }
 
-}} // namespace at::native
+} // namespace at::native

@@ -78,6 +78,10 @@ c10::optional<at::Tensor> ConstantValueMap::GetValue(
   return ConstantValueMap::getInstance().tensorValueMap[tensorName];
 }
 
+void ConstantValueMap::EraseValue(const std::string& tensorName) {
+  ConstantValueMap::getInstance().tensorValueMap.erase(tensorName);
+}
+
 std::vector<int64_t> ConstantValueMap::GetCompleteShapeInto1DInt64Vector(
     const c10::SymbolicShape& shape) {
   TORCH_INTERNAL_ASSERT(shape.isComplete());

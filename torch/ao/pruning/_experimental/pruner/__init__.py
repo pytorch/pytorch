@@ -5,3 +5,4 @@ from .parametrization import (
 )
 from .saliency_pruner import SaliencyPruner
 from .lstm_saliency_pruner import LSTMSaliencyPruner
+from .FPGM_pruner import FPGMPruner

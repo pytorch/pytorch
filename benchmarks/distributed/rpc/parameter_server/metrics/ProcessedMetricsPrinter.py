@@ -5,11 +5,14 @@ from tabulate import tabulate
 
 
 class ProcessedMetricsPrinter:
-
     def print_data_frame(self, name, processed_metrics):
         print(f"metrics for {name}")
         data_frame = self.get_data_frame(processed_metrics)
-        print(tabulate(data_frame, showindex=False, headers=data_frame.columns, tablefmt="grid"))
+        print(
+            tabulate(
+                data_frame, showindex=False, headers=data_frame.columns, tablefmt="grid"
+            )
+        )
 
     def combine_processed_metrics(self, processed_metrics_list):
         r"""
@@ -52,9 +55,7 @@ class ProcessedMetricsPrinter:
         return processed_metric_totals
 
     def get_data_frame(self, processed_metrics):
-        df = pd.DataFrame(
-            columns=['name', 'min', 'max', 'mean', 'variance', 'stdev']
-        )
+        df = pd.DataFrame(columns=["name", "min", "max", "mean", "variance", "stdev"])
         for metric_name in sorted(processed_metrics.keys()):
             values = processed_metrics[metric_name]
             row = {
@@ -63,7 +64,7 @@ class ProcessedMetricsPrinter:
                 "max": max(values),
                 "mean": statistics.mean(values),
                 "variance": statistics.variance(values),
-                "stdev": statistics.stdev(values)
+                "stdev": statistics.stdev(values),
             }
             df = df.append(row, ignore_index=True)
         return df
@@ -79,4 +80,4 @@ class ProcessedMetricsPrinter:
 
     def save_to_file(self, data_frame, file_name):
         file_name = f"data_frames/{file_name}.csv"
-        data_frame.to_csv(file_name, encoding='utf-8', index=False)
+        data_frame.to_csv(file_name, encoding="utf-8", index=False)

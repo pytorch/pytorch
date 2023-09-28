@@ -221,8 +221,9 @@ other workers, and calling the appropriate functions to retrieve or modify their
 parameters during training. See :ref:`remote-reference-protocol` for more
 details.
 
-.. autoclass:: RRef
+.. autoclass:: PyRRef(RRef)
     :members:
+    :inherited-members:
 
 
 .. toctree::
@@ -273,7 +274,7 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 Distributed Optimizer
 ---------------------
 
-See the `torch.distributed.optim <https://pytorch.org/docs/master/distributed.optim.html>`__ page for documentation on distributed optimizers.
+See the `torch.distributed.optim <https://pytorch.org/docs/main/distributed.optim.html>`__ page for documentation on distributed optimizers.
 
 Design Notes
 ------------

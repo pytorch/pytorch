@@ -70,6 +70,9 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
     int64_t starting_line_no_ = tup_elems[2].toInt();
     c10::optional<std::string> filename = c10::nullopt;
 
+    TORCH_CHECK(
+        (uint64_t)fnameIndex < text_table_.size(),
+        "Text table index is out of range")
     filename = *text_table_[fnameIndex];
 
     std::vector<c10::string_view> pieces;
@@ -206,6 +209,8 @@ void ConcreteSourceRangeUnpickler::unpickle() {
                           .toTuple();
 
   const auto& ivalues = ivaluesTuple->elements();
+  TORCH_CHECK(
+      ivalues.size(), "Invalid unpickle operation: empty ivalues tuple");
   unpickled_records = std::make_shared<SourceRangeRecords>();
   IValue lines;
   if (ivalues[0].isString() &&

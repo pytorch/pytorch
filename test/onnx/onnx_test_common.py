@@ -7,6 +7,7 @@ import contextlib
 import copy
 import dataclasses
 import io
+import logging
 import os
 import unittest
 import warnings
@@ -32,6 +33,7 @@ import pytorch_test_common
 import torch
 from torch.onnx import _constants, verification
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.fx import diagnostics
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
 
@@ -80,6 +82,36 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
         kwargs.pop(k)
 
     return verification.verify(*args, options=options, **kwargs)
+
+
+def assert_dynamic_shapes(export_output: torch.onnx.ExportOutput, dynamic_shapes: bool):
+    """Assert whether the exported model has dynamic shapes or not.
+
+    Args:
+        export_output (torch.onnx.ExportOutput): The output of torch.onnx.dynamo_export.
+        dynamic_shapes (bool): Whether the exported model has dynamic shapes or not.
+            When True, raises if graph inputs don't have at least one dynamic dimension
+            When False, raises if graph inputs have at least one dynamic dimension.
+
+    Raises:
+        AssertionError: If the exported model has dynamic shapes and dynamic_shapes is False and vice-versa.
+    """
+
+    if dynamic_shapes is None:
+        return
+
+    model_proto = export_output.model_proto
+    # Process graph inputs
+    dynamic_inputs = []
+    for inp in model_proto.graph.input:
+        dynamic_inputs += [
+            dim
+            for dim in inp.type.tensor_type.shape.dim
+            if dim.dim_value == 0 and dim.dim_param != ""
+        ]
+    assert dynamic_shapes == (
+        len(dynamic_inputs) > 0
+    ), "Dynamic shape check failed for graph inputs"
 
 
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
@@ -176,11 +208,12 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         self,
         model: _ModelType,
         input_args: Sequence[_InputArgsType],
+        *,
         input_kwargs: Optional[Mapping[str, _InputArgsType]] = None,
-        rtol: float = 1e-3,
-        atol: float = 1e-7,
-        opset_version: int = 18,
+        rtol: Optional[float] = 1e-3,
+        atol: Optional[float] = 1e-7,
         has_mutation: bool = False,
+        verbose: bool = False,
         additional_test_inputs: Optional[
             List[
                 Union[
@@ -189,6 +222,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 ]
             ]
         ] = None,
+        skip_dynamic_shapes_check: bool = False,
     ):
         """Compare the results of PyTorch model with exported ONNX model
 
@@ -198,10 +232,11 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             input_kwargs (Mapping[str, _InputArgsType]): torch input kwargs
             rtol (float, optional): relative tolerance. Defaults to 1e-3.
             atol (float, optional): absolute tolerance. Defaults to 1e-7.
-            opset_version (int, optional): ONNX opset version. Defaults to 18.
             has_mutation (bool, optional): Whether the model mutates its input or state.
                 `mutation` as `True` incurs extra overhead of cloning the inputs and model.
                 Defaults to False.
+            verbose (bool, optional): Whether to save diagnostics as Sarif log and print
+                verbose information. Defaults to False.
             additional_test_inputs: Test the models with another dataset input, which
                 is designed for dynamic axes testing. Defaults to None. It's a list of
                 different input sets in tuples. Inside tuple, the first element is a tuple
@@ -209,6 +244,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 even if the following element is not provided.
                 For example,
                 additional_test_inputs = [((args1, args2), {"kwargs":1}), ((args1,),), ((), {"kwargs":1})]
+            skip_dynamic_shapes_check: Whether to skip dynamic shape check. Defaults to False.
+                Must be used when tests do not produce dynamic shapes even when dynamic shape feature is enabled.
+                This is needed because Torch Dynamo uses the dynamic_shapes flag as a hint, only.
 
         """
 
@@ -229,16 +267,37 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         # Feed args and kwargs into exporter.
         # Note that exporter should flatten kwargs into positional args the exported model;
         # since ONNX doesn't represent kwargs.
-        export_output = torch.onnx.dynamo_export(
-            ref_model,
-            *ref_input_args,
-            **ref_input_kwargs,
-            export_options=torch.onnx.ExportOptions(
-                opset_version=opset_version,
-                op_level_debug=self.op_level_debug,
-                dynamic_shapes=self.dynamic_shapes,
-            ),
-        )
+        export_error: Optional[torch.onnx.OnnxExporterError] = None
+        try:
+            export_output = torch.onnx.dynamo_export(
+                ref_model,
+                *ref_input_args,
+                **ref_input_kwargs,
+                export_options=torch.onnx.ExportOptions(
+                    op_level_debug=self.op_level_debug,
+                    dynamic_shapes=self.dynamic_shapes,
+                    diagnostic_options=torch.onnx.DiagnosticOptions(
+                        verbosity_level=logging.DEBUG
+                    ),
+                ),
+            )
+        except torch.onnx.OnnxExporterError as e:
+            export_error = e
+            export_output = e.export_output
+
+        if verbose and diagnostics.is_onnx_diagnostics_log_artifact_enabled():
+            export_output.save_diagnostics(
+                f"test_report_{self._testMethodName}"
+                f"_op_level_debug_{self.op_level_debug}"
+                f"_dynamic_axes_{self.dynamic_shapes}"
+                ".sarif"
+            )
+
+        if export_error is not None:
+            raise export_error
+
+        if not skip_dynamic_shapes_check:
+            assert_dynamic_shapes(export_output, self.dynamic_shapes)
 
         _compare_pytorch_onnx_with_ort(
             export_output,
@@ -299,17 +358,22 @@ def run_ort(
         ort_model = buffer.getvalue()
     else:
         ort_model = onnx_model
+
+    # Suppress floods of warnings from ONNX Runtime
+    session_options = onnxruntime.SessionOptions()
+    session_options.log_severity_level = 3  # Error
     session = onnxruntime.InferenceSession(
-        ort_model, providers=["CPUExecutionProvider"]
+        ort_model, providers=["CPUExecutionProvider"], sess_options=session_options
     )
     input_names = [ort_input.name for ort_input in session.get_inputs()]
+
     if len(input_names) != len(pytorch_inputs):
         raise AssertionError(
             f"Expected {len(input_names)} inputs, got {len(pytorch_inputs)}"
         )
-    return session.run(
-        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
-    )
+
+    ort_input = {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    return session.run(None, ort_input)
 
 
 @_beartype.beartype
@@ -337,8 +401,8 @@ def _compare_pytorch_onnx_with_ort(
     model: _ModelType,
     input_args: Sequence[_InputArgsType],
     input_kwargs: Mapping[str, _InputArgsType],
-    atol: float,
-    rtol: float,
+    atol: Optional[float] = None,
+    rtol: Optional[float] = None,
     has_mutation: bool = False,
 ):
     if has_mutation:
@@ -358,6 +422,7 @@ def _compare_pytorch_onnx_with_ort(
         ref_model(*ref_input_args, **ref_input_kwargs)
     )
     ort_outputs = run_ort(export_output, onnx_format_args)
+
     if len(ref_outputs) != len(ort_outputs):
         raise AssertionError(
             f"Expected {len(ref_outputs)} outputs, got {len(ort_outputs)}"
@@ -371,7 +436,7 @@ def _compare_pytorch_onnx_with_ort(
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
 
 # TODO(titaiwang): Change this when more versions are supported
@@ -399,13 +464,13 @@ QINT_TYPES = (
 FLOAT_TYPES = (
     torch.float16,
     torch.float32,
-    torch.float64,
+    # torch.float64,  ORT doesn't support
 )
 
 COMPLEX_TYPES = (
-    torch.complex32,
+    # torch.complex32,  NOTE: torch.complex32 is experimental in torch
     torch.complex64,
-    torch.complex128,
+    # torch.complex128,  ORT doesn't support
 )
 
 TESTED_DTYPES = (
@@ -588,6 +653,13 @@ def opsets_after(opset: int) -> Callable[[int], bool]:
     return compare
 
 
+def reason_onnx_script_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: ONNX script doesn't support the given dtypes."""
+    return f"{operator} on {dtypes or 'dtypes'} not supported by ONNX script"
+
+
 def reason_onnx_runtime_does_not_support(
     operator: str, dtypes: Optional[Sequence[str]] = None
 ) -> str:
@@ -600,6 +672,15 @@ def reason_onnx_does_not_support(
 ) -> str:
     """Formats the reason: ONNX doesn't support the given dtypes."""
     return f"{operator} on {dtypes or 'certain dtypes'} not supported by the ONNX Spec"
+
+
+def reason_dynamo_does_not_support(
+    operator: str, dtypes: Optional[Sequence[str]] = None
+) -> str:
+    """Formats the reason: Dynamo doesn't support the given dtypes."""
+    return (
+        f"{operator} on {dtypes or 'certain dtypes'} not supported by the Dynamo Spec"
+    )
 
 
 def reason_jit_tracer_error(info: str) -> str:

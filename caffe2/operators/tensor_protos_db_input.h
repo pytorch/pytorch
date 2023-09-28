@@ -16,7 +16,7 @@ class TensorProtosDBInput final : public PrefetchOperator<Context> {
   using OperatorBase::OutputSize;
   using PrefetchOperator<Context>::prefetch_thread_;
   explicit TensorProtosDBInput(const OperatorDef& operator_def, Workspace* ws);
-  ~TensorProtosDBInput() {
+  ~TensorProtosDBInput() override {
     PrefetchOperator<Context>::Finalize();
   }
 

@@ -29,7 +29,7 @@ class ConvOp final : public ConvPoolOpBase<Context> {
       createSharedBuffer<Context>(ws_);
     }
   }
-  ~ConvOp() {}
+  ~ConvOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;
@@ -79,7 +79,7 @@ class ConvGradientOp final : public ConvPoolOpBase<Context> {
          std::is_same<Context, CPUContext>::value),
         "Group convolution only supports NCHW order or CPUContext right now.");
   }
-  ~ConvGradientOp() {}
+  ~ConvGradientOp() override {}
 
   bool RunOnDeviceWithOrderNCHW() override;
   bool RunOnDeviceWithOrderNHWC() override;

@@ -4,10 +4,9 @@ import logging
 from unittest.mock import patch
 
 import torch
-from torch._dynamo import eval_frame
-from torch._dynamo.utils import counters
+from torch._dynamo import disable
+from torch._dynamo.utils import counters, defake
 from torch._functorch.aot_autograd import aot_module_simplified
-from torch._subclasses import FakeTensor
 from torch.utils._python_dispatch import _disable_current_modes
 
 log = logging.getLogger(__name__)
@@ -31,7 +30,7 @@ def aot_autograd(**kwargs):
 
         def _wrapped_bw_compiler(*args, **kwargs):
             # stop TorchDynamo from trying to compile our generated backwards pass
-            return eval_frame.disable(eval_frame.disable(bw_compiler)(*args, **kwargs))
+            return disable(disable(bw_compiler)(*args, **kwargs))
 
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
@@ -55,7 +54,7 @@ def aot_autograd(**kwargs):
             with enable_aot_logging(), patch_config:
                 cg = aot_module_simplified(gm, example_inputs, **kwargs)
                 counters["aot_autograd"]["ok"] += 1
-                return eval_frame.disable(cg)
+                return disable(cg)
         except Exception:
             counters["aot_autograd"]["not_ok"] += 1
             raise
@@ -88,35 +87,6 @@ def fake_tensor_unsupported(fn):
     Decorator for backends that need real inputs.  We swap out fake
     tensors for zero tensors.
     """
-
-    def defake(x):
-        if not isinstance(x, FakeTensor):
-            return x
-        if x._has_symbolic_sizes_strides:
-            size = [
-                s.node.shape_env.size_hint(s.node.expr)
-                if isinstance(s, torch.SymInt)
-                else s
-                for s in x.size()
-            ]
-            stride = [
-                s.node.shape_env.size_hint(s.node.expr)
-                if isinstance(s, torch.SymInt)
-                else s
-                for s in x.stride()
-            ]
-        else:
-            size = x.size()
-            stride = x.stride()
-        y = torch.empty_strided(
-            size,
-            stride,
-            dtype=x.dtype,
-            device=x.device,
-            requires_grad=x.requires_grad,
-        )
-        y.zero_()
-        return y
 
     @functools.wraps(fn)
     def wrapper(model, inputs, **kwargs):

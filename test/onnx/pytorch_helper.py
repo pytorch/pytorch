@@ -68,9 +68,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
 
     if len(uninitialized_inputs) != len(caffe2_inputs):
         raise ValueError(
-            "Expected {} inputs but found {}".format(
-                len(uninitialized_inputs), len(caffe2_inputs)
-            )
+            f"Expected {len(uninitialized_inputs)} inputs but found {len(caffe2_inputs)}"
         )
 
     def remap_blob_name(name):

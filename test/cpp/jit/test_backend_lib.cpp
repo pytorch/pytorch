@@ -14,8 +14,7 @@ class TestBackend : public PyTorchBackendInterface {
   // Constructor.
   // NOLINTNEXTLINE(modernize-use-equals-default)
   explicit TestBackend() {}
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~TestBackend() = default;
+  virtual ~TestBackend() override = default;
 
   bool is_available() override {
     return isAvailable;

@@ -18,7 +18,7 @@ from torch.ao.quantization.utils import (
 )
 
 from abc import ABC
-from typing import Callable, Dict, List, Type
+from typing import Callable, Dict, List, Type, Optional
 
 __all__ = [
     "QuantizeHandler",
@@ -52,7 +52,7 @@ class QuantizeHandler(ABC):
             self,
             node_pattern: NodePattern,
             modules: Dict[str, torch.nn.Module],
-            root_node_getter: Callable = None,
+            root_node_getter: Optional[Callable] = None,
             is_custom_module=False,
             is_standalone_module=False):
         """ Records pattern information in __init__, which will be used
@@ -113,7 +113,7 @@ def _get_quantize_handler_cls(
                 self,
                 node_pattern: NodePattern,
                 modules: Dict[str, torch.nn.Module],
-                root_node_getter: Callable = None):
+                root_node_getter: Optional[Callable] = None):
             super().__init__(node_pattern, modules, root_node_getter)
             if num_tensor_args_to_observation_type:
                 assert self.num_tensor_args in num_tensor_args_to_observation_type, \

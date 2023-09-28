@@ -1,6 +1,8 @@
 #pragma once
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e5m2.h>
 #include <c10/util/Half.h>
 
 #include <type_traits>
@@ -73,6 +75,26 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::BFloat16> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::BFloat16 src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::Float8_e5m2 src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fn> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::Float8_e4m3fn src) {
     return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };

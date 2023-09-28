@@ -18,7 +18,7 @@ class NumpyTileOp : public Operator<Context> {
   template <class... Args>
   explicit NumpyTileOp(Args&&... args)
       : Operator<Context>(std::forward<Args>(args)...) {}
-  ~NumpyTileOp() {}
+  ~NumpyTileOp() override {}
 
   bool RunOnDevice() override {
     const auto& input = Input(0);

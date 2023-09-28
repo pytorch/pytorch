@@ -37,7 +37,7 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
         shape_(this->template GetRepeatedArgument<int64_t>("shape")) {}
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
-  virtual ~Float16ConstantFillOp() {}
+  ~Float16ConstantFillOp() override {}
 
   bool RunOnDevice() override;
 
@@ -68,7 +68,7 @@ class Float16UniformFillOp : public Operator<Context> {
   }
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
-  virtual ~Float16UniformFillOp() {}
+  ~Float16UniformFillOp() override {}
 
   bool RunOnDevice() override;
 

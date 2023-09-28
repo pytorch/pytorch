@@ -22,12 +22,12 @@ bool isStrictFusion(Value* value) {
 
 } // namespace
 
-bool fusionGuardCheck(Symbol k) {
+static bool fusionGuardCheck(Symbol k) {
   return k == Symbol::prim("TensorExprDynamicGuard") || k == prim::TypeCheck ||
       k == prim::CudaFusionGuard || k == prim::RequiresGradCheck;
 }
 
-std::unordered_set<Node*> collectValuesUsedInGuard(
+static std::unordered_set<Node*> collectValuesUsedInGuard(
     Node* guarding_if,
     Node* enter_node) {
   // DFS to collect
@@ -58,7 +58,7 @@ std::unordered_set<Node*> collectValuesUsedInGuard(
   return visited_nodes;
 }
 
-void checkForUnfusedOps(Node* enter_node) {
+static void checkForUnfusedOps(Node* enter_node) {
   std::vector<Node*> unsupported_nodes;
   std::vector<Node*> guarding_ifs; // if multiple, we will throw
   for (Node* node = enter_node->next(); node->kind() != prim::Exit;

@@ -12,7 +12,7 @@ class IDEEPConvPoolOpBase : public ConvPoolOpBase<IDEEPContext> {
  public:
   IDEEPConvPoolOpBase(const OperatorDef& operator_def, Workspace* ws)
      : ConvPoolOpBase<IDEEPContext>(operator_def, ws) {}
-  virtual ~IDEEPConvPoolOpBase() {}
+  ~IDEEPConvPoolOpBase() override {}
 
   inline const ideep::tensor& Input(int index) {
     return OperatorBase::template Input<ideep::tensor>(index);

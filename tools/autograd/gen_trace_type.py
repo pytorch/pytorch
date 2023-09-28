@@ -165,9 +165,8 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # *_out functions take the result as a separate argument, but we don't want to
         # trace that argument directly. Instead, we trace its TensorOptions.
         # So first, we need to remove the out argument from the list of arguments to trace.
-        # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
-        # there is only one output argument.
-        args = args[:-1]
+        num_out_args = len(f.func.arguments.out)
+        args = args[:-num_out_args]
 
     trace_inputs = itertools.chain.from_iterable(
         dispatch_trace_input(arg) for arg in args
@@ -176,8 +175,12 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.func.is_out_fn():
         # for *_out functions, handle the result argument differently for inplace/outplace.
         # For inplace: just add the input to the end to confirm with the JIT schema
-        name = f.func.arguments.out[0].name  # TODO: old codegen behavior - should fix
-        inplace = ADD_TRACE_INPUT.substitute(name=name, input=name)
+        inplace = [
+            ADD_TRACE_INPUT.substitute(
+                name=f.func.arguments.out[i].name, input=f.func.arguments.out[i].name
+            )
+            for i in range(num_out_args)
+        ]
 
         # for outplace: do nothing, except if the function is a factory.
         # Factories are a bit special because their out-of-place overloads
@@ -219,7 +222,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
                 SELECT.substitute(
                     cond="tracer_state->force_outplace",
                     true="\n".join(outplace),
-                    false=inplace,
+                    false="\n".join(inplace),
                 )
             ],
         )

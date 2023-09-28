@@ -12,6 +12,7 @@
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/ExclusivelyOwnedTensorTraits.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
@@ -441,6 +442,11 @@ class TORCH_API TensorBase {
   /// Returns if a `Tensor` has XLA backend.
   bool is_xla() const {
     return impl_->is_xla();
+  }
+
+  /// Returns if a `Tensor` has MTIA backend.
+  bool is_mtia() const {
+    return impl_->is_mtia();
   }
 
   /// Returns if a `Tensor` has HPU backend.

@@ -25,7 +25,8 @@ all_operators_with_namedtuple_return = {
 }
 
 all_operators_with_namedtuple_return_skip_list = {
-    '_scaled_dot_product_flash_attention'
+    '_scaled_dot_product_flash_attention',
+    '_scaled_dot_product_efficient_attention',
 }
 
 
@@ -38,7 +39,7 @@ class TestNamedTupleAPI(TestCase):
     def test_native_functions_yaml(self):
         operators_found = set()
         regex = re.compile(r"^(\w*)(\(|\.)")
-        with open(aten_native_yaml, 'r') as file:
+        with open(aten_native_yaml) as file:
             for f in yaml.safe_load(file.read()):
                 f = f['func']
                 ret = f.split('->')[1].strip()

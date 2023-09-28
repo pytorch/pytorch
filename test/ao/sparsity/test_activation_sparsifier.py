@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
 
 import copy
@@ -156,7 +155,7 @@ class TestActivationSparsifier(TestCase):
 
         assert torch.all(mask_model == mask_actual)
 
-        for _, config in activation_sparsifier.data_groups.items():
+        for config in activation_sparsifier.data_groups.values():
             assert 'data' not in config
 
 
@@ -221,7 +220,6 @@ class TestActivationSparsifier(TestCase):
 
         assert sparsifier2.defaults == sparsifier1.defaults
 
-        # import pdb; pdb.set_trace()
         for name, state in sparsifier2.state.items():
             assert name in sparsifier1.state
             mask1 = sparsifier1.state[name]['mask']
@@ -236,11 +234,10 @@ class TestActivationSparsifier(TestCase):
                     for idx in range(len(mask1)):
                         assert torch.all(mask1[idx] == mask2[idx])
                 else:
-                    # import pdb; pdb.set_trace()
                     assert torch.all(mask1 == mask2)
 
         # make sure that the state dict is stored as torch sparse
-        for _, state in state_dict['state'].items():
+        for state in state_dict['state'].values():
             mask = state['mask']
             if mask is not None:
                 if isinstance(mask, List):

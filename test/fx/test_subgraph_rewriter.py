@@ -938,3 +938,26 @@ def forward(self, x):
         matches = subgraph_rewriter.replace_pattern(traced, pattern, pattern)
 
         self.assertEqual(len(matches), 1)
+
+    def test_replaced_nodes(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.add(x, y)
+
+        def pattern(x, y):
+            return torch.add(x, y)
+
+        def replacement(x, y):
+            return torch.sub(torch.mul(x, y), y)
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern_with_filters(traced, pattern, replacement)
+
+        def check_replacement_nodes(self, traced, matches):
+            replacement_nodes_in_graph = [node for node in traced.graph.nodes if node.target in {torch.sub, torch.mul}]
+            replacement_nodes_in_res = [r for m in matches for r in m.replacements]
+            self.assertEqual(len(replacement_nodes_in_graph), len(replacement_nodes_in_res))
+            self.assertEqual(replacement_nodes_in_graph, replacement_nodes_in_res)
+            return len(replacement_nodes_in_graph)
+
+        self.assertEqual(check_replacement_nodes(self, traced, matches), 2)

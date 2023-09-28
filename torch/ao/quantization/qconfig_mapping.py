@@ -22,7 +22,8 @@ from .qconfig import (
     get_default_qconfig,
     get_default_qat_qconfig,
     QConfig,
-    QConfigAny
+    QConfigAny,
+    default_quint8_weight_qconfig
 )
 
 
@@ -92,6 +93,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
         .set_object_type(torch.nn.functional.conv_transpose3d, qconfig_transpose) \
         .set_object_type(torch.nn.functional.layer_norm, qconfig_layernorm) \
         .set_object_type(torch.nn.LayerNorm, qconfig_layernorm) \
+        .set_object_type(torch.nn.PReLU, default_quint8_weight_qconfig) \
 
     # Use special observers for ops with fixed qparams
     fixed_qparams_observer_to_qconfig: Dict[Any, QConfigAny] = {}

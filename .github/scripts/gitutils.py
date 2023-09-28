@@ -5,8 +5,21 @@ import re
 import tempfile
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, cast, Dict, Iterator, List, Optional, Tuple, Union
+from functools import wraps
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
+T = TypeVar("T")
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
 
@@ -25,7 +38,7 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
     """
     Converts list to dict preserving elements with duplicate keys
     """
-    rc: Dict[str, List[str]] = defaultdict(lambda: [])
+    rc: Dict[str, List[str]] = defaultdict(list)
     for key, val in items:
         rc[key].append(val)
     return dict(rc)
@@ -40,6 +53,9 @@ def _check_output(items: List[str], encoding: str = "utf-8") -> str:
         msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
         stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
         stderr = e.stderr.decode(encoding) if e.stderr is not None else ""
+        # These get swallowed up, so print them here for debugging
+        print(f"stdout: \n{stdout}")
+        print(f"stderr: \n{stderr}")
         if len(stderr) == 0:
             msg += f"\n```\n{stdout}```"
         else:
@@ -146,7 +162,7 @@ class GitRepo:
     def show_ref(self, name: str) -> str:
         refs = self._run_git("show-ref", "-s", name).strip().split("\n")
         if not all(refs[i] == refs[0] for i in range(1, len(refs))):
-            raise RuntimeError(f"referce {name} is ambigous")
+            raise RuntimeError(f"reference {name} is ambiguous")
         return refs[0]
 
     def rev_parse(self, name: str) -> str:
@@ -380,3 +396,24 @@ def are_ghstack_branches_in_sync(repo: GitRepo, head_ref: str) -> bool:
         repo.diff(f"{repo.remote}/{base_ref}", f"{repo.remote}/{head_ref}")
     )
     return orig_diff_sha == head_diff_sha
+
+
+def retries_decorator(
+    rc: Any = None, num_retries: int = 3
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    def decorator(f: Callable[..., T]) -> Callable[..., T]:
+        @wraps(f)
+        def wrapper(*args: List[Any], **kwargs: Dict[str, Any]) -> T:
+            for idx in range(num_retries):
+                try:
+                    return f(*args, **kwargs)
+                except Exception as e:
+                    print(
+                        f'Attempt {idx} of {num_retries} to call {f.__name__} failed with "{e}"'
+                    )
+                    pass
+            return cast(T, rc)
+
+        return wrapper
+
+    return decorator

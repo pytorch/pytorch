@@ -100,7 +100,6 @@ class PythonRefInfo(OpInfo):
         torch_opinfo_name,  # the string name of the corresponding torch opinfo
         torch_opinfo_variant_name="",  # the variant name for corresponding torch opinfo
         validate_view_consistency=True,
-        supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
         self.torch_opinfo_name = torch_opinfo_name
@@ -109,7 +108,6 @@ class PythonRefInfo(OpInfo):
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
         self.validate_view_consistency = validate_view_consistency
-        self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
 
         inherited = self.torch_opinfo._original_opinfo_args
@@ -130,7 +128,6 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         op_db=None,  # The database of opinfos to search for the parent opinfo
         torch_opinfo_name,  # the string name of the corresponding torch opinfo
         torch_opinfo_variant_name="",  # the variant name for corresponding torch opinfo
-        supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
         self.torch_opinfo_name = torch_opinfo_name
@@ -138,7 +135,6 @@ class ReductionPythonRefInfo(ReductionOpInfo):
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
-        self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, ReductionOpInfo)
 
         inherited = self.torch_opinfo._original_reduction_args
@@ -164,7 +160,6 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
         torch_opinfo_name,  # the string name of the corresponding torch opinfo
         torch_opinfo_variant_name="",  # the variant name for corresponding torch opinfo
         validate_view_consistency=True,
-        supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
         self.torch_opinfo_name = torch_opinfo_name
@@ -173,7 +168,6 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
         self.validate_view_consistency = validate_view_consistency
-        self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
         inherited = self.torch_opinfo._original_unary_ufunc_args
@@ -195,7 +189,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         op_db=None,  # The database of opinfos to search for the parent opinfo
         torch_opinfo_name,  # the string name of the corresponding torch opinfo
         torch_opinfo_variant_name="",  # the variant name for corresponding torch opinfo
-        supports_nvfuser=True,
         **kwargs,
     ):  # additional kwargs override kwargs inherited from the torch opinfo
         self.torch_opinfo_name = torch_opinfo_name
@@ -203,7 +196,6 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
         self.torch_opinfo = _find_referenced_opinfo(
             torch_opinfo_name, torch_opinfo_variant_name, op_db=op_db
         )
-        self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
 
         inherited = self.torch_opinfo._original_binary_ufunc_args

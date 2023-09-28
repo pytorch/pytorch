@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/functorch/Interpreter.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // These are the interpreters for our AD transforms
 // (grad, vjp and jvp).
@@ -35,4 +35,4 @@ struct TORCH_API JvpInterpreterPtr {
   const Interpreter* base_;
 };
 
-}} // namespace at::functorch
+} // namespace at::functorch

@@ -18,8 +18,8 @@ class IDEEPInt8DequantizeOp final : public IDEEPOperator {
                                               static_cast<int>(iformat::nchw)));
     }
   }
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~IDEEPInt8DequantizeOp() {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
+  ~IDEEPInt8DequantizeOp() override {}
 
   bool RunOnDevice() override {
     const auto& X = Input(0);

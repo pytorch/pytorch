@@ -8,9 +8,7 @@
 #include <limits>
 #include <memory>
 
-namespace at {
-namespace native {
-namespace xnnpack {
+namespace at::native::xnnpack {
 
 struct Deleter final {
   void operator()(const xnn_operator_t op) const {
@@ -65,8 +63,6 @@ struct ContextConv2D final {
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
 
-
-bool available();
 
 namespace internal {
 
@@ -123,8 +119,10 @@ struct Layout final {
   };
 };
 } // namespace internal
-} // namespace xnnpack
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnpack
 
 #endif /* USE_XNNPACK */
+
+namespace at::native::xnnpack {
+bool available();
+} // namespace at::native::xnnpack

@@ -52,7 +52,7 @@ class QuantWrapper(nn.Module):
 
     def __init__(self, module):
         super().__init__()
-        qconfig = module.qconfig if hasattr(module, 'qconfig') else None
+        qconfig = getattr(module, "qconfig", None)
         self.add_module('quant', QuantStub(qconfig))
         self.add_module('dequant', DeQuantStub(qconfig))
         self.add_module('module', module)

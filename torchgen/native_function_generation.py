@@ -73,6 +73,8 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "qscheme",  # returns a QScheme
     "record_stream",  # no return
     "sparse_dim",  # returns an int
+    "sym_constrain_range",  # no return
+    "sym_constrain_range_for_size",  # no return
     "_nested_tensor_storage_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
@@ -373,7 +375,7 @@ def add_generated_native_functions(
     # First we group of NaitveFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
-    for k, d in pre_grouped_native_functions.items():
+    for d in pre_grouped_native_functions.values():
         has_functional = SchemaKind.functional in d
         has_inplace = SchemaKind.inplace in d
         has_mutable = SchemaKind.mutable in d
@@ -494,7 +496,7 @@ def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
         return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
 
 
-# Given a function, and the name of a variable correponding to the output of that function,
+# Given a function, and the name of a variable corresponding to the output of that function,
 # gather up all of the individual returns that are not aliased
 def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str]:
     aliased_rets = func.aliased_return_names()

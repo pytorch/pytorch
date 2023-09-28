@@ -43,6 +43,23 @@
 #include <set>
 #include <stack>
 
+namespace {
+bool reportSourceLocation(size_t file_size) {
+  if (file_size < 512 * 1024) {
+    return true;
+  }
+  const char* enable_env =
+      std::getenv("PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION");
+  bool flag = true;
+  if (enable_env == nullptr || std::strcmp(enable_env, "0") == 0 ||
+      std::strcmp(enable_env, "FALSE") == 0 ||
+      std::strcmp(enable_env, "false") == 0) {
+    flag = false;
+  }
+  return flag;
+}
+} // namespace
+
 namespace torch::jit {
 
 using FunctionTable = std::unordered_map<std::string, Function&>;
@@ -187,7 +204,7 @@ struct CondValue {
 };
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
-NoneStatus canBeNone(Value* v) {
+static NoneStatus canBeNone(Value* v) {
   if (v->node()->mustBeNone()) {
     return ALWAYS;
   }
@@ -1987,11 +2004,22 @@ struct to_ir {
         if (save_false->findInAnyFrame(v) || false_exits) {
           mutated_variables.insert(v);
         } else {
-          ErrorReport error(loc);
-          environment_stack->setVariableTypeError(v, [=]() -> std::string {
-            error << v << " is not defined in the false branch";
-            return error.what();
-          });
+          if (reportSourceLocation(loc.source()->size())) {
+            ErrorReport error(loc);
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              error << v << " is not defined in the false branch";
+              return error.what();
+            });
+          } else {
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              std::stringstream ss;
+              ss << v << " is not defined in the false branch. "
+                 << "The source info is eliminated due to the source file is too large. "
+                 << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
+                 << "as env var";
+              return ss.str();
+            });
+          }
         }
       }
     }
@@ -2001,11 +2029,22 @@ struct to_ir {
         if (save_true->findInAnyFrame(v) || true_exits) {
           mutated_variables.insert(v);
         } else {
-          ErrorReport error(loc);
-          environment_stack->setVariableTypeError(v, [=]() -> std::string {
-            error << v << " is not defined in the true branch";
-            return error.what();
-          });
+          if (reportSourceLocation(loc.source()->size())) {
+            ErrorReport error(loc);
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              error << v << " is not defined in the true branch";
+              return error.what();
+            });
+          } else {
+            environment_stack->setVariableTypeError(v, [=]() -> std::string {
+              std::stringstream ss;
+              ss << v << " is not defined in the false branch. "
+                 << "The source info is eliminated due to the source file is too large. "
+                 << "To get it back, please set PYTORCH_JIT_ENABLE_LARGE_SOURCE_LOCATION=1 "
+                 << "as env var";
+              return ss.str();
+            });
+          }
         }
       }
     }
@@ -5605,7 +5644,7 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
-void eraseListLiterals(std::shared_ptr<Graph>& graph) {
+static void eraseListLiterals(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
 
   for (auto next_node = it.next(); next_node != nullptr;) {

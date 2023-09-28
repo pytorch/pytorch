@@ -13,7 +13,7 @@
 
 namespace at::native {
 
-std::pair<Tensor, Tensor> softmax_sparse_input_preprocessing(
+std::tuple<Tensor, Tensor, int64_t> softmax_sparse_input_preprocessing(
     const Tensor& input_,
     const int64_t dim_,
     const bool half_to_float,
@@ -26,13 +26,11 @@ std::pair<Tensor, Tensor> softmax_sparse_input_preprocessing(
           input_.device().str());
   auto input = input_.coalesce();
   Tensor output = at::native::empty_like_sparse_coo(input);
-  TORCH_CHECK(
-      dim_ >= 0 && dim_ < input.dim(),
-      ": dim must be non-negative and less than input dimensions");
-  return std::make_pair(input, output);
+  int64_t dim = c10::maybe_wrap_dim(dim_, input.dim());
+  return std::make_tuple(input, output, dim);
 }
 
-std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
+std::tuple<Tensor, Tensor, Tensor, int64_t> softmax_backward_sparse_input_preprocessing(
     const Tensor& grad_,
     const Tensor& output_,
     int64_t dim_,
@@ -48,12 +46,9 @@ std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
 
   Tensor grad_input = at::native::empty_like_sparse_coo(output);
   TORCH_CHECK(
-      dim >= 0 && dim < grad.dim(),
-      ": dim must be non-negative and less than input dimensions");
-  TORCH_CHECK(
       grad.sparse_dim() == output.sparse_dim(),
       ": grad and output sparse dimensions must be equal");
-  return std::make_tuple(grad_input, grad, output);
+  return std::make_tuple(grad_input, grad, output, dim);
 }
 
 } // namespace at::native

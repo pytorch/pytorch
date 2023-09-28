@@ -567,7 +567,5 @@ std::tuple<Tensor, Tensor, Tensor> LazyNativeFunctions::native_group_norm(
       input, weight, bias, N, C, HxW, group, eps);
 }
 
-void InitializeAtenBindings() {}
-
 } // namespace lazy
 } // namespace torch

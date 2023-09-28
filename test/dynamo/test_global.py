@@ -6,9 +6,9 @@ import torch._dynamo.testing
 from torch._dynamo.testing import same
 
 try:
-    from . import test_global_declaration
+    from . import utils
 except ImportError:
-    import test_global_declaration
+    import utils
 
 
 class Pair:  # noqa: B903
@@ -169,10 +169,8 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
 
     def test_store_global_cross_file(self):
         def fn(x):
-            val = x + test_global_declaration.g_tensor_export
-            test_global_declaration.g_tensor_export = (
-                test_global_declaration.g_tensor_export + 1
-            )
+            val = x + utils.g_tensor_export
+            utils.g_tensor_export = utils.g_tensor_export + 1
             return val
 
         x = torch.randn(10)
