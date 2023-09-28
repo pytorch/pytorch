@@ -242,7 +242,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "masked_scatter": {f16, f32, f64},
     "multinomial": {f16, f32, f64},
     "nn.functional.normalize": {f16},
-    "nn.functional.rrelu": {f16, f32, f64},
     "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
@@ -253,7 +252,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "randn_like": {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f16, f32, f64},
-    "uniform": {f16},
 }
 
 
@@ -306,15 +304,13 @@ test_skips_or_fails = (
 )
 
 
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    torch.manual_seed(42)
+def wrapper_noop_set_seed(op, *args, **kwargs):
     return op(*args, **kwargs)
 
 
-torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
+    wrapper_noop_set_seed
+)
 
 # This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
 torch._dynamo.variables.torch.tensor_dunder_fns.append(

@@ -5,6 +5,7 @@
 #include <structmember.h>
 
 #include <ATen/core/GeneratorForPrivateuseone.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -71,7 +72,9 @@ static PyObject* THPGenerator_pynew(
     self->cdata = make_generator<MPSGeneratorImpl>();
   }
 #endif
-  else if (device.type() == at::kPrivateUse1) {
+  else if (device.type() == at::kXPU) {
+    self->cdata = at::detail::getXPUHooks().getXPUGenerator(device.index());
+  } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
     AT_ERROR(
