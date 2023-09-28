@@ -11,7 +11,7 @@ import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
-from torch.testing._internal.common_utils import skipIfRocm, runOnRocm
+from torch.testing._internal.common_utils import skipIfRocm, runOnRocm, skipIfTorchDynamo
 import torch
 from torch import Tensor
 import functools
@@ -939,6 +939,7 @@ class TestOperators(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail('as_strided_scatter', ''),  # calls as_strided
         xfail('index_reduce', ''),  # .item() call
+        decorate('svd', decorator=skipIfTorchDynamo()),
         # ---------------------------------------------------------------------
     })
 
@@ -1396,6 +1397,7 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('_segment_reduce', 'lengths'),  # NYI: forward-AD for _segment_reduce
         xfail('native_dropout_backward'),  # NYI
+        decorate('addcdiv', decorator=skipIfTorchDynamo()),
 
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (

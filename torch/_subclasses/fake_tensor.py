@@ -593,6 +593,28 @@ def nonzero(fake_mode, func, arg):
     return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
 
 
+@register_op_impl(lambda func: func is torch.ops.aten.masked_select.default)
+def masked_select(fake_mode, func, self, mask):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    nnz = fake_mode.shape_env.create_unbacked_symint()
+
+    # see nonzero for commentary
+    maxval = sys.maxsize - 1
+    if not free_symbols(arg.numel()):
+        if arg.numel() >= 2:
+            maxval = int(arg.numel())
+
+    _constrain_range_for_size(nnz, max=maxval)
+
+    return self.new_empty((nnz,))
+
+
 # NB: this must be ordered after local_scalar_dense
 @register_op_impl(lambda func: torch.Tag.data_dependent_output in func.tags)
 def data_dep(fake_mode, func, *args, **kwargs):
